@@ -91,10 +91,14 @@ CREATE TABLE IF NOT EXISTS scans (
     started_at        TIMESTAMPTZ,
     completed_at      TIMESTAMPTZ,
     tickers_scanned   INT DEFAULT 0,
+    candidates        INT DEFAULT 0,
     signals_found     INT DEFAULT 0,
     gems_found        INT DEFAULT 0,
-    status            VARCHAR DEFAULT 'RUNNING',  -- RUNNING, COMPLETE, FAILED
+    status            VARCHAR DEFAULT 'RUNNING',  -- QUEUED, RUNNING, COMPLETE, FAILED
     error_message     TEXT,
+    progress_pct      INT DEFAULT 0,               -- 0-100 for frontend progress bar
+    phase             VARCHAR DEFAULT 'starting',  -- loading, screening, filtering, macro, analyzing, saving, alerting, monitoring, complete, failed
+    current_ticker    VARCHAR,                     -- ticker currently being processed
     created_at        TIMESTAMPTZ DEFAULT now()
 );
 

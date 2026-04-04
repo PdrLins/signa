@@ -24,7 +24,7 @@ from app.scanners.prefilter import prefilter_candidates
 from app.scanners.universe import get_all_tickers, get_exchange
 
 
-async def run_scan(scan_type: str) -> str:
+async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
     """Execute a full scan cycle.
 
     Steps:
@@ -36,6 +36,7 @@ async def run_scan(scan_type: str) -> str:
 
     Args:
         scan_type: PRE_MARKET, MORNING, PRE_CLOSE, AFTER_CLOSE
+        scan_id: Pre-created scan ID (from /trigger endpoint). If None, creates one.
 
     Returns:
         The scan_id.
@@ -43,72 +44,104 @@ async def run_scan(scan_type: str) -> str:
     start_time = time.time()
     logger.info(f"Starting {scan_type} scan...")
 
-    # Create scan record
-    scan = queries.insert_scan({
-        "scan_type": scan_type,
-        "status": "RUNNING",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-    })
-    scan_id = scan.get("id")
+    # Use pre-created scan or create new one
+    if scan_id:
+        queries.update_scan(scan_id, status="RUNNING", progress_pct=0, phase="loading")
+    else:
+        scan = queries.insert_scan({
+            "scan_type": scan_type,
+            "status": "RUNNING",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "progress_pct": 0,
+            "phase": "loading",
+        })
+        scan_id = scan.get("id")
+
+    def _update_progress(pct: int, phase: str, current_ticker: str = ""):
+        """Update scan progress in DB for frontend polling."""
+        queries.update_scan(scan_id, progress_pct=pct, phase=phase, current_ticker=current_ticker)
 
     try:
-        # 1. Load tickers and pre-filter
+        # Phase 1: Load tickers and pre-filter (0-15%)
+        _update_progress(5, "screening", "Loading universe...")
         all_tickers = get_all_tickers()
         logger.info(f"Universe: {len(all_tickers)} tickers")
 
         screening_data = await market_scanner.get_bulk_screening(all_tickers)
+        _update_progress(10, "filtering")
         candidates = prefilter_candidates(screening_data)
         logger.info(f"Candidates after pre-filter: {len(candidates)}")
 
-        # 2. Pull macro snapshot (once for the whole scan)
-        macro_data = await macro_scanner.get_macro_snapshot()
+        queries.update_scan(scan_id, candidates=len(candidates), tickers_scanned=len(all_tickers))
+        _update_progress(15, "macro", "Fetching macro data...")
 
-        # 3. Get previous signals for status comparison
+        # Phase 2: Macro snapshot (15-20%)
+        macro_data = await macro_scanner.get_macro_snapshot()
+        _update_progress(20, "analyzing")
+
+        # Phase 3: Get previous signals
         previous_signals = queries.get_latest_signals_map()
 
-        # 4. Process each candidate
+        # Phase 4: Process candidates with progress tracking (20-85%)
         semaphore = asyncio.Semaphore(settings.max_concurrent_api_calls)
-        signals = await asyncio.gather(
-            *[
-                _process_candidate(
+        valid_signals = []
+        errors_count = 0
+        total_candidates = len(candidates)
+
+        async def _process_with_progress(ticker: str, index: int) -> dict | None:
+            nonlocal errors_count
+            _update_progress(
+                20 + int((index / total_candidates) * 65),
+                "analyzing",
+                ticker,
+            )
+            try:
+                result = await _process_candidate(
                     ticker, macro_data, screening_data, previous_signals,
                     scan_id, semaphore,
                 )
-                for ticker in candidates
-            ],
-            return_exceptions=True,
-        )
+                return result
+            except Exception as e:
+                errors_count += 1
+                logger.debug(f"Failed {ticker}: {e}")
+                return None
 
-        # Filter out errors
-        valid_signals = [s for s in signals if isinstance(s, dict)]
-        errors = [s for s in signals if isinstance(s, Exception)]
-        if errors:
-            logger.warning(f"{len(errors)} candidates failed processing")
+        # Process with semaphore concurrency but track each completion
+        tasks = [
+            _process_with_progress(ticker, i)
+            for i, ticker in enumerate(candidates)
+        ]
+        results = await asyncio.gather(*tasks)
+        valid_signals = [s for s in results if isinstance(s, dict)]
 
-        # 5. Batch insert signals
+        if errors_count:
+            logger.warning(f"{errors_count} candidates failed processing")
+
+        # Phase 5: Persist signals (85-90%)
+        _update_progress(85, "saving", "Persisting signals...")
         if valid_signals:
             queries.insert_signals_batch(valid_signals)
 
-        # Count GEMs
         gems = [s for s in valid_signals if s.get("is_gem")]
         gems_count = len(gems)
 
-        # 6. Send Telegram alerts
+        # Phase 6: Send alerts (90-95%)
+        _update_progress(90, "alerting", "Sending alerts...")
         for gem_signal in gems:
             await send_gem_alert(gem_signal)
 
-        # Send scan digest for morning scan
         if scan_type in ("PRE_MARKET", "AFTER_CLOSE") and valid_signals:
             await send_scan_digest(scan_type, valid_signals)
 
-        # 7. Monitor open positions against new signals
+        # Phase 7: Monitor positions (95-100%)
+        _update_progress(95, "monitoring", "Checking positions...")
         if valid_signals:
             from app.services.position_service import monitor_positions
             position_alerts = await monitor_positions(valid_signals)
             if position_alerts:
                 logger.info(f"Position monitor: {position_alerts} alerts sent")
 
-        # Update scan record
+        # Done
         duration = round(time.time() - start_time, 2)
         queries.update_scan(
             scan_id,
@@ -117,6 +150,9 @@ async def run_scan(scan_type: str) -> str:
             tickers_scanned=len(all_tickers),
             signals_found=len(valid_signals),
             gems_found=gems_count,
+            progress_pct=100,
+            phase="complete",
+            current_ticker="",
         )
 
         logger.info(
@@ -134,6 +170,9 @@ async def run_scan(scan_type: str) -> str:
                 status="FAILED",
                 completed_at=datetime.now(timezone.utc),
                 error_message=str(e),
+                progress_pct=0,
+                phase="failed",
+                current_ticker="",
             )
         raise
 
@@ -196,9 +235,13 @@ async def _process_candidate(
         current_price = technical_data.get("current_price")
 
         # Build signal record
+        from app.scanners.universe import get_exchange
+        exchange = get_exchange(ticker)
         signal_data = {
             "scan_id": scan_id,
             "symbol": ticker,
+            "asset_type": "CRYPTO" if exchange == "CRYPTO" else "EQUITY",
+            "exchange": exchange,
             "action": action,
             "status": status,
             "score": score,

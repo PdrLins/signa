@@ -4,21 +4,26 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
+import { useI18nStore } from '@/store/i18nStore'
 import { ThemeSwitcher } from '@/components/ui/ThemeSwitcher'
-
-const NAV_ITEMS = [
-  { label: 'Overview', href: '/overview' },
-  { label: 'Signals', href: '/signals' },
-  { label: 'Watchlist', href: '/watchlist' },
-  { label: 'Portfolio', href: '/portfolio' },
-]
+import { LangSwitcher } from '@/components/ui/LangSwitcher'
 
 export function TopNav() {
   const theme = useTheme()
   const pathname = usePathname()
-  const [time, setTime] = useState(new Date())
+  const t = useI18nStore((s) => s.t)
+
+  const NAV_ITEMS = [
+    { label: t.nav.overview, href: '/overview' },
+    { label: t.nav.signals, href: '/signals' },
+    { label: t.nav.watchlist, href: '/watchlist' },
+    { label: t.nav.portfolio, href: '/portfolio' },
+    { label: t.nav.howItWorks, href: '/how-it-works' },
+  ]
+  const [time, setTime] = useState<Date | null>(null)
 
   useEffect(() => {
+    setTime(new Date())
     const interval = setInterval(() => setTime(new Date()), 1000)
     return () => clearInterval(interval)
   }, [])
@@ -32,7 +37,7 @@ export function TopNav() {
         backdropFilter: 'blur(20px)',
       }}
     >
-      <div className="max-w-[1080px] mx-auto flex items-center justify-between">
+      <div className="max-w-[1280px] mx-auto flex items-center justify-between">
         {/* Logo */}
         <div className="flex items-center gap-2">
           <div
@@ -73,8 +78,9 @@ export function TopNav() {
         {/* Right side */}
         <div className="hidden md:flex items-center gap-4">
           <span className="text-xs tabular-nums" style={{ color: theme.colors.textSub }}>
-            {time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/Toronto' })}
+            {time ? time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/Toronto' }) : '\u00A0'}
           </span>
+          <LangSwitcher />
           <ThemeSwitcher compact />
         </div>
       </div>

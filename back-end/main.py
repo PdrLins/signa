@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from app.api.v1 import auth, health, portfolio, positions, scans, signals, stats, watchlist
+from app.api.v1 import auth, health, portfolio, positions, scans, signals, stats, tickers, watchlist
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.middleware.audit import AuditMiddleware
@@ -61,6 +61,7 @@ register_exception_handlers(app)
 api_prefix = "/api/v1"
 app.include_router(auth.router, prefix=api_prefix)
 app.include_router(signals.router, prefix=api_prefix)
+app.include_router(tickers.router, prefix=api_prefix)
 app.include_router(positions.router, prefix=api_prefix)
 app.include_router(watchlist.router, prefix=api_prefix)
 app.include_router(portfolio.router, prefix=api_prefix)

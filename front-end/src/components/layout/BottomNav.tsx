@@ -3,18 +3,21 @@
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
-import { LayoutDashboard, TrendingUp, Star, Briefcase } from 'lucide-react'
-
-const TABS = [
-  { label: 'Overview', href: '/overview', icon: LayoutDashboard },
-  { label: 'Signals', href: '/signals', icon: TrendingUp },
-  { label: 'Watchlist', href: '/watchlist', icon: Star },
-  { label: 'Portfolio', href: '/portfolio', icon: Briefcase },
-]
+import { useI18nStore } from '@/store/i18nStore'
+import { LayoutDashboard, TrendingUp, Star, Briefcase, HelpCircle } from 'lucide-react'
 
 export function BottomNav() {
   const theme = useTheme()
   const pathname = usePathname()
+  const t = useI18nStore((s) => s.t)
+
+  const TABS = [
+    { label: t.nav.overview, href: '/overview', icon: LayoutDashboard },
+    { label: t.nav.signals, href: '/signals', icon: TrendingUp },
+    { label: t.nav.watchlist, href: '/watchlist', icon: Star },
+    { label: t.nav.portfolio, href: '/portfolio', icon: Briefcase },
+    { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle },
+  ]
 
   return (
     <nav

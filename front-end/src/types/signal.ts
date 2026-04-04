@@ -2,6 +2,8 @@ export interface Signal {
   id: string
   symbol: string
   name: string | null
+  asset_type: 'EQUITY' | 'CRYPTO' | null
+  exchange: 'TSX' | 'NYSE' | 'NASDAQ' | 'CRYPTO' | null
   action: 'BUY' | 'HOLD' | 'SELL' | 'AVOID'
   status: 'CONFIRMED' | 'WEAKENING' | 'CANCELLED' | 'UPGRADED'
   score: number
@@ -58,9 +60,10 @@ export interface ScanTodayRecord {
   scan_type: 'PRE_MARKET' | 'MORNING' | 'PRE_CLOSE' | 'AFTER_CLOSE'
   label: string
   scheduled_time: string
-  status: 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED'
+  status: 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED' | 'CLOSED'
   tickers_scanned: number
   signals_found: number
   gems_found: number
   completed_at: string | null
+  is_market_day: boolean
 }

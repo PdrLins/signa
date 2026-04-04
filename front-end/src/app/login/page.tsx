@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTheme } from '@/hooks/useTheme'
+import { useI18nStore } from '@/store/i18nStore'
 import { useThemeStore } from '@/store/themeStore'
 import { useAuthStore } from '@/store/authStore'
 import { authApi } from '@/lib/api'
@@ -11,6 +12,7 @@ import { User, Lock, Eye, EyeOff } from 'lucide-react'
 
 export default function LoginPage() {
   const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
   const router = useRouter()
   const initTheme = useThemeStore((s) => s.initialize)
   const setToken = useAuthStore((s) => s.setToken)
@@ -49,7 +51,7 @@ export default function LoginPage() {
       setCountdown(30)
       setAttempts(0)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid credentials')
+      setError(err instanceof Error ? err.message : t.login.invalidCredentials)
     } finally {
       setLoading(false)
     }
@@ -92,9 +94,9 @@ export default function LoginPage() {
         setStep(1)
         setOtp(['', '', '', '', '', ''])
         setSessionToken('')
-        setError('Too many failed attempts. Please log in again.')
+        setError(t.login.tooManyAttempts)
       } else {
-        setError(`Invalid code. ${3 - newAttempts} attempt${3 - newAttempts > 1 ? 's' : ''} remaining.`)
+        setError(t.login.invalidCode.replace('{remaining}', String(3 - newAttempts)).replace('{s}', 3 - newAttempts > 1 ? 's' : ''))
         setOtp(['', '', '', '', '', ''])
         otpRefs.current[0]?.focus()
       }
@@ -110,7 +112,7 @@ export default function LoginPage() {
       const res = await authApi.login({ username, password })
       setSessionToken(res.session_token)
     } catch {
-      setError('Failed to resend code')
+      setError(t.login.resendFailed)
     }
   }
 
@@ -140,10 +142,10 @@ export default function LoginPage() {
         {step === 1 ? (
           <>
             <h1 className="text-xl font-bold text-center mb-1" style={{ color: theme.colors.text }}>
-              Welcome back
+              {t.login.welcome}
             </h1>
             <p className="text-sm text-center mb-6" style={{ color: theme.colors.textSub }}>
-              Sign in to your Signa account
+              {t.login.subtitle}
             </p>
 
             <form onSubmit={handleLogin} className="space-y-3">
@@ -159,7 +161,7 @@ export default function LoginPage() {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Username"
+                  placeholder={t.login.username}
                   className="flex-1 bg-transparent outline-none text-sm"
                   style={{ color: theme.colors.text }}
                 />
@@ -177,7 +179,7 @@ export default function LoginPage() {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Password"
+                  placeholder={t.login.password}
                   className="flex-1 bg-transparent outline-none text-sm"
                   style={{ color: theme.colors.text }}
                 />
@@ -197,17 +199,17 @@ export default function LoginPage() {
               )}
 
               <Button type="submit" fullWidth disabled={!username.trim() || !password.trim() || loading}>
-                {loading ? 'Signing in...' : 'Continue'}
+                {loading ? t.login.signingIn : t.login.continue}
               </Button>
             </form>
           </>
         ) : (
           <>
             <h1 className="text-xl font-bold text-center mb-1" style={{ color: theme.colors.text }}>
-              Check your Telegram
+              {t.login.checkTelegram}
             </h1>
             <p className="text-sm text-center mb-6" style={{ color: theme.colors.textSub }}>
-              A 6-digit code was sent to your device
+              {t.login.otpSent}
             </p>
 
             <form onSubmit={handleVerify} className="space-y-4">
@@ -238,7 +240,7 @@ export default function LoginPage() {
                   color: countdown <= 10 ? theme.colors.down : theme.colors.textSub,
                 }}
               >
-                {countdown > 0 ? `${countdown}s remaining` : 'Code expired'}
+                {countdown > 0 ? t.login.remaining.replace('{seconds}', String(countdown)) : t.login.codeExpired}
               </p>
 
               {error && (
@@ -252,7 +254,7 @@ export default function LoginPage() {
                 fullWidth
                 disabled={otp.join('').length !== 6 || loading}
               >
-                {loading ? 'Verifying...' : 'Verify'}
+                {loading ? t.login.verifying : t.login.verify}
               </Button>
 
               <button
@@ -265,7 +267,7 @@ export default function LoginPage() {
                   opacity: countdown > 0 ? 0.5 : 1,
                 }}
               >
-                Resend code
+                {t.login.resend}
               </button>
             </form>
           </>

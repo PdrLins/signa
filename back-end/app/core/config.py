@@ -44,7 +44,7 @@ class Settings(BaseSettings):
 
     # --- Grok ---
     grok_base_url: str = "https://api.x.ai/v1"
-    grok_model: str = "grok-4.1-fast"
+    grok_model: str = "grok-2-latest"
 
     # --- Scoring Thresholds ---
     score_buy: int = 75

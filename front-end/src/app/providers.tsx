@@ -3,17 +3,21 @@
 import { useEffect } from 'react'
 import { useThemeStore } from '@/store/themeStore'
 import { useAuthStore } from '@/store/authStore'
+import { useI18nStore } from '@/store/i18nStore'
 import { QueryProvider } from '@/components/providers/QueryProvider'
 import { ErrorBoundary } from '@/components/providers/ErrorBoundary'
+import { ToastContainer } from '@/components/ui/ToastContainer'
 
 function StoreInitializer() {
   const initTheme = useThemeStore((s) => s.initialize)
   const initAuth = useAuthStore((s) => s.initialize)
+  const initI18n = useI18nStore((s) => s.initialize)
 
   useEffect(() => {
     initTheme()
     initAuth()
-  }, [initTheme, initAuth])
+    initI18n()
+  }, [initTheme, initAuth, initI18n])
 
   return null
 }
@@ -47,7 +51,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ErrorBoundary>
       <QueryProvider>
         <StoreInitializer />
-        <ThemeApplicator>{children}</ThemeApplicator>
+        <ThemeApplicator>
+          <ToastContainer />
+          {children}
+        </ThemeApplicator>
       </QueryProvider>
     </ErrorBoundary>
   )

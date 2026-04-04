@@ -1,16 +1,18 @@
 'use client'
 
 import { useTheme } from '@/hooks/useTheme'
+import { useI18nStore } from '@/store/i18nStore'
 import { Card } from '@/components/ui/Card'
 import { Briefcase } from 'lucide-react'
 
 export default function PortfolioPage() {
   const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
 
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>
-        Portfolio
+        {t.portfolio.title}
       </h1>
 
       <Card padding="32px">
@@ -22,11 +24,10 @@ export default function PortfolioPage() {
             <Briefcase size={24} style={{ color: theme.colors.primary }} />
           </div>
           <h2 className="text-lg font-bold mb-2" style={{ color: theme.colors.text }}>
-            Coming soon
+            {t.portfolio.comingSoon}
           </h2>
           <p className="text-sm max-w-sm leading-relaxed" style={{ color: theme.colors.textSub }}>
-            Manual position tracking coming soon. Wealthsimple does not offer a public API for
-            automated sync. You will be able to log positions manually in a future update.
+            {t.portfolio.comingSoonDesc}
           </p>
         </div>
       </Card>

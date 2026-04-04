@@ -12,6 +12,8 @@ class SignalResponse(BaseModel):
     id: str
     symbol: str
     name: Optional[str] = None
+    asset_type: Optional[str] = None   # EQUITY or CRYPTO
+    exchange: Optional[str] = None     # TSX, NYSE, NASDAQ, CRYPTO
     action: str              # BUY, HOLD, SELL, AVOID
     status: str              # CONFIRMED, WEAKENING, CANCELLED, UPGRADED
     score: int = Field(ge=0, le=100)
@@ -69,6 +71,7 @@ class ScanTodayRecord(BaseModel):
     signals_found: int = 0
     gems_found: int = 0
     completed_at: Optional[datetime] = None
+    is_market_day: bool = True
 
 
 class ScanTriggerResponse(BaseModel):

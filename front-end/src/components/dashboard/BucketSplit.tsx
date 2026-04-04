@@ -2,12 +2,14 @@
 
 import { useTheme } from '@/hooks/useTheme'
 import { useGemSignals } from '@/hooks/useSignals'
+import { useI18nStore } from '@/store/i18nStore'
 import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 
 export function BucketSplit() {
   const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
   const { data: signals, isLoading } = useGemSignals()
 
   if (isLoading) {
@@ -27,19 +29,19 @@ export function BucketSplit() {
   return (
     <Card>
       <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>
-        Bucket split
+        {t.bucket.title}
       </p>
       <div className="space-y-2.5">
         <div>
           <div className="flex justify-between mb-1">
-            <span className="text-xs" style={{ color: theme.colors.text }}>Safe income</span>
+            <span className="text-xs" style={{ color: theme.colors.text }}>{t.bucket.safeIncome}</span>
             <span className="text-xs font-bold" style={{ color: theme.colors.up }}>{safePct}%</span>
           </div>
           <ProgressBar value={safePct} color={theme.colors.up} />
         </div>
         <div>
           <div className="flex justify-between mb-1">
-            <span className="text-xs" style={{ color: theme.colors.text }}>High risk</span>
+            <span className="text-xs" style={{ color: theme.colors.text }}>{t.bucket.highRisk}</span>
             <span className="text-xs font-bold" style={{ color: theme.colors.primary }}>{riskPct}%</span>
           </div>
           <ProgressBar value={riskPct} color={theme.colors.primary} />

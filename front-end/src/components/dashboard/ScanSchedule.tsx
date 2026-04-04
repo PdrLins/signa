@@ -2,23 +2,29 @@
 
 import { useTheme } from '@/hooks/useTheme'
 import { useScansToday } from '@/hooks/useScans'
+import { useI18nStore } from '@/store/i18nStore'
 import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 
 export function ScanSchedule() {
   const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
   const { data: scans, isLoading } = useScansToday()
 
   const statusColor: Record<string, string> = {
     COMPLETE: theme.colors.up,
     RUNNING: theme.colors.primary,
     FAILED: theme.colors.down,
+    CLOSED: theme.colors.textHint,
+    PENDING: theme.colors.warning,
   }
+
+  const isWeekend = scans?.length ? scans[0].status === 'CLOSED' : false
 
   return (
     <Card>
       <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>
-        Scan schedule
+        {t.scans.title}
       </p>
 
       {isLoading ? (
@@ -27,8 +33,23 @@ export function ScanSchedule() {
             <Skeleton key={i} width="100%" height={20} />
           ))}
         </div>
+      ) : isWeekend ? (
+        <div className="space-y-2">
+          <p className="text-xs font-medium" style={{ color: theme.colors.textSub }}>
+            {t.scans.marketsClosed}
+          </p>
+          {scans?.map((scan) => (
+            <div key={scan.scan_type} className="flex items-center justify-between opacity-40">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: theme.colors.textHint }} />
+                <span className="text-xs" style={{ color: theme.colors.text }}>{scan.label}</span>
+              </div>
+              <span className="text-[11px]" style={{ color: theme.colors.textSub }}>{scan.scheduled_time}</span>
+            </div>
+          ))}
+        </div>
       ) : !scans?.length ? (
-        <p className="text-xs" style={{ color: theme.colors.textSub }}>No scans today yet.</p>
+        <p className="text-xs" style={{ color: theme.colors.textSub }}>{t.scans.noScans}</p>
       ) : (
         <div className="space-y-2">
           {scans.map((scan) => {

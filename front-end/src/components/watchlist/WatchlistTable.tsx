@@ -1,12 +1,14 @@
 'use client'
 
 import { useTheme } from '@/hooks/useTheme'
+import { useI18nStore } from '@/store/i18nStore'
 import { useWatchlist, useRemoveTicker } from '@/hooks/useWatchlist'
 import { WatchlistRow } from './WatchlistRow'
 import { Skeleton } from '@/components/ui/Skeleton'
 
 export function WatchlistTable() {
   const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
   const { data: items, isLoading, isError, error } = useWatchlist()
   const removeTicker = useRemoveTicker()
 
@@ -30,7 +32,7 @@ export function WatchlistTable() {
   if (isError) {
     return (
       <p className="text-sm py-4" style={{ color: theme.colors.down }}>
-        {error?.message || 'Failed to load watchlist'}
+        {error?.message || t.watchlist.loadFailed}
       </p>
     )
   }
@@ -39,7 +41,7 @@ export function WatchlistTable() {
     return (
       <div className="text-center py-8">
         <p className="text-sm" style={{ color: theme.colors.textSub }}>
-          Your watchlist is empty. Add tickers to track them.
+          {t.watchlist.empty}
         </p>
       </div>
     )

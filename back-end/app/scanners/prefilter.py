@@ -8,13 +8,17 @@ from app.core.config import settings
 def prefilter_candidates(screening_data: dict[str, dict]) -> list[str]:
     """Filter screening data down to the best candidates.
 
+    Reserves at least 5 slots for crypto tickers so they aren't
+    crowded out by higher-volume equities.
+
     Args:
         screening_data: Dict from market_scanner.get_bulk_screening().
 
     Returns:
         List of ticker symbols sorted by absolute day change.
     """
-    candidates = []
+    equity_candidates = []
+    crypto_candidates = []
 
     for ticker, data in screening_data.items():
         volume = data.get("avg_volume", 0)
@@ -28,14 +32,27 @@ def prefilter_candidates(screening_data: dict[str, dict]) -> list[str]:
         if price < 1.0:
             continue
 
-        candidates.append((ticker, day_change, volume))
+        entry = (ticker, day_change, volume)
+        if ticker.endswith("-USD"):
+            crypto_candidates.append(entry)
+        else:
+            equity_candidates.append(entry)
 
-    candidates.sort(key=lambda x: (-x[1], -x[2]))
-    top = candidates[: settings.max_candidates]
-    tickers = [t[0] for t in top]
+    equity_candidates.sort(key=lambda x: (-x[1], -x[2]))
+    crypto_candidates.sort(key=lambda x: (-x[1], -x[2]))
+
+    # Reserve up to 5 slots for crypto, rest for equities
+    max_crypto = min(5, len(crypto_candidates))
+    max_equity = settings.max_candidates - max_crypto
+
+    top_equity = equity_candidates[:max_equity]
+    top_crypto = crypto_candidates[:max_crypto]
+    combined = top_equity + top_crypto
+    tickers = [t[0] for t in combined]
 
     logger.info(
-        f"Pre-filter: {len(screening_data)} tickers → {len(tickers)} candidates"
+        f"Pre-filter: {len(screening_data)} tickers → "
+        f"{len(top_equity)} equity + {len(top_crypto)} crypto = {len(tickers)} candidates"
     )
 
     return tickers

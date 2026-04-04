@@ -308,6 +308,19 @@ def update_scan(scan_id: str, **kwargs) -> dict:
     return result.data[0] if result.data else {}
 
 
+def get_scan_by_id(scan_id: str) -> dict | None:
+    """Get a single scan by ID."""
+    client = get_client()
+    result = (
+        client.table("scans")
+        .select("*")
+        .eq("id", scan_id)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
 def get_scans(limit: int = 20) -> list[dict]:
     """Get recent scan history."""
     client = get_client()

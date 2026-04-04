@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
+import { useI18nStore } from '@/store/i18nStore'
 import { Badge } from '@/components/ui/Badge'
 import { ScoreRing } from '@/components/ui/ScoreRing'
 import { SparkLine } from '@/components/ui/SparkLine'
@@ -9,17 +11,13 @@ import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useAddTicker } from '@/hooks/useWatchlist'
+import { useToast } from '@/hooks/useToast'
+import { ChevronDown, Star, ExternalLink } from 'lucide-react'
 import type { Signal } from '@/types/signal'
 
 interface SignalCardProps {
   signal: Signal
   defaultExpanded?: boolean
-}
-
-function getBucketVariant(bucket: string | null): 'risk' | 'safe' | 'hold' {
-  if (bucket === 'HIGH_RISK') return 'risk'
-  if (bucket === 'SAFE_INCOME') return 'safe'
-  return 'hold'
 }
 
 function getStatusVariant(status: string) {
@@ -39,235 +37,250 @@ function formatPrice(value: number | null): string {
 
 export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps) {
   const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
   const [expanded, setExpanded] = useState(defaultExpanded)
   const addTicker = useAddTicker()
-
-  const stripe =
-    signal.bucket === 'HIGH_RISK' ? theme.colors.stripeRisk : theme.colors.stripeSafe
+  const toast = useToast()
 
   const handleToggle = () => setExpanded((prev) => !prev)
   const stopProp = (e: React.MouseEvent) => e.stopPropagation()
 
+  const price = signal.current_price ?? signal.price_at_signal
+  const isPositive = signal.change_pct !== null ? signal.change_pct >= 0 : signal.score >= 60
+  const changeColor = isPositive ? theme.colors.up : theme.colors.down
+
+  // Sentiment is real only if grok_data has confidence > 0
+  const grokConfidence = (signal.grok_data as Record<string, unknown>)?.confidence as number | undefined
+  const hasSentiment = signal.sentiment_score !== null && grokConfidence !== undefined && grokConfidence > 0
+
+  // Scoring weights for display
+  const isHighRisk = signal.bucket === 'HIGH_RISK'
+  const weights = isHighRisk
+    ? [
+        { label: 'Sentiment (X/Twitter)', pct: 35, color: theme.colors.primary },
+        { label: 'Catalyst', pct: 30, color: theme.colors.up },
+        { label: 'Technical momentum', pct: 25, color: theme.colors.warning },
+        { label: 'Fundamentals', pct: 10, color: theme.colors.textSub },
+      ]
+    : [
+        { label: 'Dividend reliability', pct: 35, color: theme.colors.up },
+        { label: 'Fundamental health', pct: 30, color: theme.colors.primary },
+        { label: 'Macro conditions', pct: 25, color: theme.colors.warning },
+        { label: 'Sentiment', pct: 10, color: theme.colors.textSub },
+      ]
+
   return (
     <div
-      className="rounded-[14px] overflow-hidden cursor-pointer transition-all"
+      className="rounded-2xl overflow-hidden cursor-pointer transition-all"
       style={{
         backgroundColor: theme.colors.surface,
-        border: `0.5px solid ${theme.colors.border}`,
-        boxShadow: theme.isDark ? '0 2px 10px rgba(0,0,0,0.3)' : '0 2px 10px rgba(0,0,0,0.06)',
+        border: `1px solid ${theme.colors.border}`,
+        boxShadow: theme.isDark ? '0 1px 4px rgba(0,0,0,0.2)' : '0 1px 4px rgba(0,0,0,0.04)',
       }}
       onClick={handleToggle}
     >
-      {/* Stripe */}
-      <div className="h-[3px] w-full" style={{ background: stripe }} />
-
-      <div className="p-4">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-3">
+      <div className="px-4 pt-4 pb-3">
+        {/* Row 1: Ticker + Watchlist star + Price */}
+        <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <div
-              className="w-11 h-11 rounded-[11px] flex items-center justify-center text-xs font-bold"
-              style={{
-                backgroundColor: theme.colors.primary + '18',
-                color: theme.colors.primary,
-              }}
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-[11px] font-bold tracking-tight"
+              style={{ backgroundColor: theme.colors.primary + '12', color: theme.colors.primary }}
             >
               {signal.symbol.slice(0, 4)}
             </div>
             <div>
-              <p className="text-base font-bold leading-tight" style={{ color: theme.colors.text }}>
-                {signal.symbol}
-              </p>
-              <p className="text-xs" style={{ color: theme.colors.textSub }}>
-                {signal.action} · {signal.bucket === 'HIGH_RISK' ? 'High Risk' : signal.bucket === 'SAFE_INCOME' ? 'Safe Income' : 'Unclassified'}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <SparkLine positive={signal.score >= 60} width={52} height={24} />
-            <div className="text-right">
-              <p className="text-[17px] font-bold" style={{ color: theme.colors.text }}>
-                {formatPrice(signal.current_price ?? signal.price_at_signal)}
-              </p>
-              {signal.change_pct !== null && signal.change_pct !== undefined ? (
-                <p
-                  className="text-[13px] font-bold"
-                  style={{ color: signal.change_pct >= 0 ? theme.colors.up : theme.colors.down }}
-                >
-                  {signal.change_pct >= 0 ? '+' : ''}{signal.change_pct.toFixed(2)}%
-                </p>
-              ) : (
-                <p
-                  className="text-[13px] font-bold"
-                  style={{ color: signal.score >= 60 ? theme.colors.up : theme.colors.down }}
-                >
-                  Score {signal.score}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Badges */}
-        <div className="flex flex-wrap gap-1.5 mb-3">
-          <Badge variant={getBucketVariant(signal.bucket)}>
-            {signal.bucket === 'HIGH_RISK' ? 'High risk' : signal.bucket === 'SAFE_INCOME' ? 'Safe income' : 'Unclassified'}
-          </Badge>
-          {signal.catalyst && <Badge variant="buy">{signal.catalyst}</Badge>}
-          <Badge variant={getStatusVariant(signal.status)}>{signal.status}</Badge>
-          {signal.is_gem && <Badge variant="gem">GEM</Badge>}
-        </div>
-
-        {/* Score + Mini Stats */}
-        <div className="flex items-center gap-3 mb-3">
-          <ScoreRing score={signal.score} size={50} />
-          <div className="flex-1 grid grid-cols-3 gap-1.5">
-            {[
-              { label: 'Target', value: formatPrice(signal.target_price), color: theme.colors.up },
-              { label: 'Stop Loss', value: formatPrice(signal.stop_loss), color: theme.colors.down },
-              { label: 'Risk/Rew.', value: signal.risk_reward ? `${signal.risk_reward.toFixed(1)}x` : '--', color: theme.colors.primary },
-            ].map((stat) => (
-              <div
-                key={stat.label}
-                className="rounded-lg px-2 py-1.5 text-center"
-                style={{ backgroundColor: theme.colors.surfaceAlt }}
-              >
-                <p className="text-[10px]" style={{ color: theme.colors.textSub }}>
-                  {stat.label}
-                </p>
-                <p className="text-xs font-bold" style={{ color: stat.color }}>
-                  {stat.value}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Sentiment */}
-        {signal.sentiment_score !== null && (
-          <div className="mb-3">
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-[11px]" style={{ color: theme.colors.textSub }}>
-                Sentiment
-              </span>
-              <span className="text-[11px] font-semibold" style={{ color: theme.colors.text }}>
-                {signal.sentiment_score}% bullish
-              </span>
-            </div>
-            <ProgressBar
-              value={signal.sentiment_score}
-              color={signal.bucket === 'HIGH_RISK' ? theme.colors.primary : theme.colors.up}
-            />
-          </div>
-        )}
-
-        {/* Reasoning */}
-        {signal.reasoning && (
-          <div
-            className="rounded-[9px] px-3 py-2.5 mb-2"
-            style={{ backgroundColor: theme.colors.surfaceAlt }}
-          >
-            <p
-              className="text-[13px] leading-[1.55]"
-              style={{ color: theme.colors.textSub }}
-            >
-              {signal.reasoning}
-            </p>
-          </div>
-        )}
-
-        {/* Expand hint */}
-        {!expanded && (
-          <p className="text-center text-[9px] mt-1" style={{ color: theme.colors.textHint }}>
-            More details ↓
-          </p>
-        )}
-
-        {/* Expanded section */}
-        {expanded && (
-          <div className="mt-3">
-            <div className="h-px w-full mb-3" style={{ backgroundColor: theme.colors.border }} />
-
-            {/* Confidence + extra data */}
-            <div className="grid grid-cols-2 gap-1.5 mb-3">
-              <div className="rounded-lg px-2 py-1.5 text-center" style={{ backgroundColor: theme.colors.surfaceAlt }}>
-                <p className="text-[10px]" style={{ color: theme.colors.textSub }}>Confidence</p>
-                <p className="text-xs font-bold" style={{ color: theme.colors.primary }}>{signal.confidence}%</p>
-              </div>
-              <div className="rounded-lg px-2 py-1.5 text-center" style={{ backgroundColor: theme.colors.surfaceAlt }}>
-                <p className="text-[10px]" style={{ color: theme.colors.textSub }}>Price at Signal</p>
-                <p className="text-xs font-bold" style={{ color: theme.colors.text }}>{formatPrice(signal.price_at_signal)}</p>
-              </div>
-              <div className="rounded-lg px-2 py-1.5 text-center" style={{ backgroundColor: theme.colors.surfaceAlt }}>
-                <p className="text-[10px]" style={{ color: theme.colors.textSub }}>Entry Window</p>
-                <p className="text-xs font-bold" style={{ color: theme.colors.text }}>{signal.entry_window ?? 'TBD'}</p>
-              </div>
-              {signal.gem_reason && (
-                <div className="rounded-lg px-2 py-1.5 text-center" style={{ backgroundColor: theme.colors.surfaceAlt }}>
-                  <p className="text-[10px]" style={{ color: theme.colors.textSub }}>GEM Reason</p>
-                  <p className="text-xs font-bold" style={{ color: theme.colors.up }}>{signal.gem_reason}</p>
-                </div>
-              )}
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-2" onClick={stopProp}>
-              <a
-                href="https://my.wealthsimple.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1"
-                onClick={stopProp}
-              >
-                <Button fullWidth>Open Wealthsimple</Button>
-              </a>
-              <div className="flex-1">
-                <Button
-                  variant="secondary"
-                  fullWidth
+              <div className="flex items-center gap-2">
+                <span className="text-[15px] font-semibold" style={{ color: theme.colors.text }}>
+                  {signal.symbol}
+                </span>
+                {signal.is_gem && (
+                  <span
+                    className="text-[9px] font-bold px-1.5 py-0.5 rounded-md"
+                    style={{ backgroundColor: theme.colors.up + '18', color: theme.colors.up }}
+                  >
+                    GEM
+                  </span>
+                )}
+                <button
                   onClick={(e) => {
                     stopProp(e)
-                    addTicker.mutate(signal.symbol)
+                    addTicker.mutate(signal.symbol, {
+                      onSuccess: () => toast.show(`${signal.symbol} added to watchlist`, 'success'),
+                      onError: (err) => toast.show(err?.message || 'Failed to add', 'error'),
+                    })
                   }}
                   disabled={addTicker.isPending}
+                  className="p-0.5 rounded transition-opacity hover:opacity-70"
+                  title={t.signal.addToWatchlist}
                 >
-                  {addTicker.isPending ? 'Adding...' : 'Add to watchlist'}
-                </Button>
+                  <Star size={14} style={{ color: theme.colors.textHint }} />
+                </button>
               </div>
+              <span className="text-[12px]" style={{ color: theme.colors.textSub }}>
+                {signal.exchange ?? (signal.asset_type === 'CRYPTO' ? t.signal.crypto : 'Equity')}
+              </span>
             </div>
           </div>
-        )}
+
+          <div className="text-right flex items-center gap-2.5">
+            <SparkLine positive={isPositive} width={48} height={22} />
+            <div>
+              <p className="text-[16px] font-semibold tabular-nums" style={{ color: theme.colors.text }}>
+                {formatPrice(price)}
+              </p>
+              <p className="text-[12px] font-semibold tabular-nums" style={{ color: changeColor }}>
+                {signal.change_pct !== null && signal.change_pct !== undefined
+                  ? `${signal.change_pct >= 0 ? '+' : ''}${signal.change_pct.toFixed(2)}%`
+                  : `Score ${signal.score}`}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Row 2: Metrics + Badges */}
+        <div className="flex items-center gap-4 mt-3">
+          <ScoreRing score={signal.score} size={38} />
+          <div className="flex items-center gap-4 flex-1 min-w-0">
+            <div>
+              <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.target}</p>
+              <p className="text-[13px] font-semibold tabular-nums" style={{ color: theme.colors.up }}>{formatPrice(signal.target_price)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.stopLoss}</p>
+              <p className="text-[13px] font-semibold tabular-nums" style={{ color: theme.colors.down }}>{formatPrice(signal.stop_loss)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.riskReward}</p>
+              <p className="text-[13px] font-semibold tabular-nums" style={{ color: theme.colors.primary }}>{signal.risk_reward ? `${signal.risk_reward.toFixed(1)}x` : '--'}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Badge variant={signal.action === 'BUY' ? 'buy' : signal.action === 'SELL' ? 'sell' : signal.action === 'AVOID' ? 'avoid' : 'hold'}>
+              {signal.action}
+            </Badge>
+            <Badge variant={getStatusVariant(signal.status)}>{signal.status}</Badge>
+          </div>
+        </div>
+
+        <div className="flex justify-center mt-2">
+          <ChevronDown
+            size={14}
+            className="transition-transform duration-200"
+            style={{ color: theme.colors.textHint, transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+          />
+        </div>
       </div>
+
+      {/* Expanded */}
+      {expanded && (
+        <div className="px-4 pb-4" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
+          <div className="pt-3 space-y-3">
+            {/* Reasoning */}
+            {signal.reasoning && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wide mb-1" style={{ color: theme.colors.textHint }}>Why this signal</p>
+                <p className="text-[13px] leading-relaxed" style={{ color: theme.colors.textSub }}>{signal.reasoning}</p>
+              </div>
+            )}
+
+            {/* Scoring breakdown */}
+            <div>
+              <p className="text-[10px] uppercase tracking-wide mb-2" style={{ color: theme.colors.textHint }}>
+                Score breakdown ({isHighRisk ? t.signal.highRisk : t.signal.safeIncome} model)
+              </p>
+              <div className="space-y-1.5">
+                {weights.map((w) => (
+                  <div key={w.label} className="flex items-center gap-2">
+                    <span className="text-[11px] w-[140px] shrink-0" style={{ color: theme.colors.textSub }}>{w.label}</span>
+                    <div className="flex-1"><ProgressBar value={w.pct} color={w.color} height={3} /></div>
+                    <span className="text-[11px] font-semibold w-8 text-right tabular-nums" style={{ color: w.color }}>{w.pct}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Sentiment — only real data */}
+            {hasSentiment && (
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
+                    X/Twitter {t.signal.sentiment}
+                  </span>
+                  <span className="text-[11px] font-semibold" style={{ color: theme.colors.text }}>
+                    {t.signal.bullish.replace('{score}', String(signal.sentiment_score))}
+                  </span>
+                </div>
+                <ProgressBar value={signal.sentiment_score!} color={isHighRisk ? theme.colors.primary : theme.colors.up} height={3} />
+              </div>
+            )}
+
+            {/* Catalyst + GEM reason */}
+            {(signal.catalyst || signal.gem_reason) && (
+              <div className="flex flex-wrap gap-1.5">
+                {signal.catalyst && <Badge variant="buy">{signal.catalyst}</Badge>}
+                {signal.gem_reason && <Badge variant="gem">{signal.gem_reason}</Badge>}
+              </div>
+            )}
+
+            {/* Extra metrics */}
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.confidence}</p>
+                <p className="text-[13px] font-semibold" style={{ color: theme.colors.primary }}>{signal.confidence}%</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.priceAtSignal}</p>
+                <p className="text-[13px] font-semibold" style={{ color: theme.colors.text }}>{formatPrice(signal.price_at_signal)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.entryWindow}</p>
+                <p className="text-[13px] font-semibold" style={{ color: theme.colors.text }}>{signal.entry_window ?? t.signal.tbd}</p>
+              </div>
+            </div>
+
+            {/* View full details */}
+            <div onClick={stopProp}>
+              <Link href={`/signals/${signal.symbol}`}>
+                <Button fullWidth variant="secondary">
+                  <span className="flex items-center gap-2 justify-center">
+                    <ExternalLink size={14} />
+                    View full analysis
+                  </span>
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 export function SignalCardSkeleton() {
   return (
-    <div className="space-y-3 p-4">
-      <Skeleton width="100%" height={3} borderRadius={0} />
-      <div className="flex items-center gap-3">
-        <Skeleton width={44} height={44} borderRadius={11} />
-        <div className="space-y-1.5 flex-1">
-          <Skeleton width={80} height={14} />
-          <Skeleton width={120} height={10} />
+    <div className="rounded-2xl overflow-hidden" style={{ padding: '16px' }}>
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <Skeleton width={40} height={40} borderRadius={12} />
+          <div className="space-y-1.5">
+            <Skeleton width={72} height={14} />
+            <Skeleton width={48} height={10} />
+          </div>
+        </div>
+        <div className="space-y-1.5 text-right">
+          <Skeleton width={64} height={14} />
+          <Skeleton width={48} height={10} />
         </div>
       </div>
-      <div className="flex gap-1.5">
-        <Skeleton width={70} height={20} borderRadius={10} />
-        <Skeleton width={60} height={20} borderRadius={10} />
-        <Skeleton width={80} height={20} borderRadius={10} />
-      </div>
-      <div className="flex gap-3">
-        <Skeleton width={50} height={50} borderRadius={25} />
-        <div className="flex-1 grid grid-cols-3 gap-1.5">
-          <Skeleton height={40} />
-          <Skeleton height={40} />
-          <Skeleton height={40} />
+      <div className="flex items-center gap-4 mt-3">
+        <Skeleton width={38} height={38} borderRadius={19} />
+        <Skeleton width={180} height={14} />
+        <div className="flex gap-1.5 ml-auto">
+          <Skeleton width={42} height={20} borderRadius={10} />
+          <Skeleton width={64} height={20} borderRadius={10} />
         </div>
       </div>
-      <Skeleton width="100%" height={3} />
-      <Skeleton width="100%" height={60} borderRadius={9} />
     </div>
   )
 }

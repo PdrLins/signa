@@ -2,12 +2,14 @@
 
 import { useTheme } from '@/hooks/useTheme'
 import { useScans } from '@/hooks/useScans'
+import { useI18nStore } from '@/store/i18nStore'
 import { Card } from '@/components/ui/Card'
 import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Skeleton } from '@/components/ui/Skeleton'
 
 export function AIUsage() {
   const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
   const { data: scans, isLoading } = useScans()
 
   if (isLoading) {
@@ -28,15 +30,15 @@ export function AIUsage() {
   return (
     <Card>
       <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>
-        Scan results
+        {t.scanResults.title}
       </p>
       <p className="text-lg font-bold mb-3" style={{ color: theme.colors.text }}>
-        {totalSignals} signals
+        {t.scanResults.signals.replace('{count}', String(totalSignals))}
       </p>
       <div className="space-y-2">
         <div>
           <div className="flex justify-between mb-1">
-            <span className="text-[11px]" style={{ color: theme.colors.textSub }}>Gems found</span>
+            <span className="text-[11px]" style={{ color: theme.colors.textSub }}>{t.scanResults.gemsFound}</span>
             <span className="text-[11px] font-semibold" style={{ color: theme.colors.up }}>
               {totalGems}
             </span>
@@ -45,7 +47,7 @@ export function AIUsage() {
         </div>
         <div>
           <div className="flex justify-between mb-1">
-            <span className="text-[11px]" style={{ color: theme.colors.textSub }}>Tickers scanned</span>
+            <span className="text-[11px]" style={{ color: theme.colors.textSub }}>{t.scanResults.tickersScanned}</span>
             <span className="text-[11px] font-semibold" style={{ color: theme.colors.primary }}>
               {totalScanned}
             </span>

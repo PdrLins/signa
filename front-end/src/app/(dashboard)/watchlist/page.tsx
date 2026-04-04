@@ -2,13 +2,17 @@
 
 import { useState } from 'react'
 import { useTheme } from '@/hooks/useTheme'
+import { useI18nStore } from '@/store/i18nStore'
 import { useAddTicker } from '@/hooks/useWatchlist'
+import { useToast } from '@/hooks/useToast'
 import { WatchlistTable } from '@/components/watchlist/WatchlistTable'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 
 export default function WatchlistPage() {
   const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
+  const toast = useToast()
   const [ticker, setTicker] = useState('')
   const addTicker = useAddTicker()
 
@@ -17,23 +21,28 @@ export default function WatchlistPage() {
     const value = ticker.trim().toUpperCase()
     if (!value) return
     addTicker.mutate(value, {
-      onSuccess: () => setTicker(''),
+      onSuccess: () => {
+        setTicker('')
+        toast.show(`${value} added to watchlist`, 'success')
+      },
+      onError: (err) => {
+        toast.show(err?.message || t.watchlist.addFailed, 'error')
+      },
     })
   }
 
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>
-        Watchlist
+        {t.watchlist.title}
       </h1>
 
-      {/* Add ticker */}
       <form onSubmit={handleAdd} className="flex gap-2">
         <input
           type="text"
           value={ticker}
           onChange={(e) => setTicker(e.target.value)}
-          placeholder="Enter ticker (e.g. AAPL)"
+          placeholder={t.watchlist.placeholder}
           className="flex-1 rounded-[11px] px-4 py-3 text-sm outline-none"
           style={{
             backgroundColor: theme.colors.surfaceAlt,
@@ -42,15 +51,9 @@ export default function WatchlistPage() {
           }}
         />
         <Button type="submit" disabled={!ticker.trim() || addTicker.isPending}>
-          {addTicker.isPending ? 'Adding...' : 'Add'}
+          {addTicker.isPending ? t.watchlist.adding : t.watchlist.add}
         </Button>
       </form>
-
-      {addTicker.isError && (
-        <p className="text-sm" style={{ color: theme.colors.down }}>
-          {addTicker.error?.message || 'Failed to add ticker'}
-        </p>
-      )}
 
       <Card padding="16px">
         <WatchlistTable />

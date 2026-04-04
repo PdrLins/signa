@@ -42,7 +42,7 @@ def get_price(symbol: str) -> tuple[Optional[float], Optional[float]]:
 
 
 def enrich_signals(signals: list[dict]) -> list[dict]:
-    """Add current_price and change_pct to each signal dict in-place."""
+    """Add current_price, change_pct, and asset_type to each signal dict in-place."""
     for sig in signals:
         symbol = sig.get("symbol")
         if not symbol:
@@ -50,4 +50,10 @@ def enrich_signals(signals: list[dict]) -> list[dict]:
         price, change = get_price(symbol)
         sig["current_price"] = price
         sig["change_pct"] = change
+        # Backfill asset_type/exchange for older signals that don't have it
+        if not sig.get("asset_type"):
+            from app.scanners.universe import get_exchange
+            exchange = get_exchange(symbol)
+            sig["asset_type"] = "CRYPTO" if exchange == "CRYPTO" else "EQUITY"
+            sig["exchange"] = exchange
     return signals
