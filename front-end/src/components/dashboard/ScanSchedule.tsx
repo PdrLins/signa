@@ -1,0 +1,61 @@
+'use client'
+
+import { useTheme } from '@/hooks/useTheme'
+import { useScansToday } from '@/hooks/useScans'
+import { Card } from '@/components/ui/Card'
+import { Skeleton } from '@/components/ui/Skeleton'
+
+export function ScanSchedule() {
+  const theme = useTheme()
+  const { data: scans, isLoading } = useScansToday()
+
+  const statusColor: Record<string, string> = {
+    COMPLETE: theme.colors.up,
+    RUNNING: theme.colors.primary,
+    FAILED: theme.colors.down,
+  }
+
+  return (
+    <Card>
+      <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>
+        Scan schedule
+      </p>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} width="100%" height={20} />
+          ))}
+        </div>
+      ) : !scans?.length ? (
+        <p className="text-xs" style={{ color: theme.colors.textSub }}>No scans today yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {scans.map((scan) => {
+            const dotColor = statusColor[scan.status] || theme.colors.textHint
+
+            return (
+              <div key={scan.scan_type} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{
+                      backgroundColor: dotColor,
+                      animation: scan.status === 'RUNNING' ? 'pulse 1.5s infinite' : 'none',
+                    }}
+                  />
+                  <span className="text-xs" style={{ color: theme.colors.text }}>
+                    {scan.label}
+                  </span>
+                </div>
+                <span className="text-[11px]" style={{ color: theme.colors.textSub }}>
+                  {scan.scheduled_time}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </Card>
+  )
+}

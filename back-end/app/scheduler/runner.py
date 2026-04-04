@@ -1,0 +1,79 @@
+"""APScheduler setup — initializes and configures the 4 daily scan jobs."""
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from loguru import logger
+
+from app.core.config import settings
+from app.scheduler.jobs import (
+    after_close_scan,
+    morning_scan,
+    pre_close_scan,
+    pre_market_scan,
+)
+
+scheduler = AsyncIOScheduler(timezone=settings.timezone)
+
+
+def init_scheduler() -> AsyncIOScheduler:
+    """Configure and return the scheduler with all jobs.
+
+    All scans run Monday-Friday only (day_of_week='mon-fri').
+    Times are in Eastern Time.
+    """
+    # 6:00 AM ET — Pre-market scan
+    scheduler.add_job(
+        pre_market_scan,
+        CronTrigger(hour=6, minute=0, day_of_week="mon-fri", timezone=settings.timezone),
+        id="pre_market_scan",
+        name="Pre-Market Scan (6:00 AM ET)",
+        replace_existing=True,
+    )
+
+    # 10:00 AM ET — Morning confirmation
+    scheduler.add_job(
+        morning_scan,
+        CronTrigger(hour=10, minute=0, day_of_week="mon-fri", timezone=settings.timezone),
+        id="morning_scan",
+        name="Morning Scan (10:00 AM ET)",
+        replace_existing=True,
+    )
+
+    # 3:00 PM ET — Pre-close check
+    scheduler.add_job(
+        pre_close_scan,
+        CronTrigger(hour=15, minute=0, day_of_week="mon-fri", timezone=settings.timezone),
+        id="pre_close_scan",
+        name="Pre-Close Scan (3:00 PM ET)",
+        replace_existing=True,
+    )
+
+    # 4:30 PM ET — After-close full scan
+    scheduler.add_job(
+        after_close_scan,
+        CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone=settings.timezone),
+        id="after_close_scan",
+        name="After-Close Scan (4:30 PM ET)",
+        replace_existing=True,
+    )
+
+    logger.info(
+        f"Scheduler configured with 4 daily scan jobs "
+        f"(timezone: {settings.timezone})"
+    )
+
+    return scheduler
+
+
+def start_scheduler():
+    """Start the scheduler."""
+    if not scheduler.running:
+        scheduler.start()
+        logger.info("Scheduler started")
+
+
+def stop_scheduler():
+    """Gracefully shut down the scheduler."""
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+        logger.info("Scheduler stopped")

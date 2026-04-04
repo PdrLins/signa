@@ -1,0 +1,37 @@
+# Core
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+pydantic>=2.10.0
+pydantic-settings>=2.7.0
+python-dotenv>=1.0.0
+
+# Auth
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.0
+
+# Scheduling
+apscheduler>=3.10.0,<4.0.0
+
+# Database
+supabase>=2.11.0
+
+# AI
+anthropic>=0.42.0
+openai>=1.60.0
+
+# Market Data
+yfinance>=0.2.50
+pandas>=2.2.0
+pandas-ta>=0.3.14b
+
+# HTTP
+httpx>=0.28.0
+
+# Logging
+loguru>=0.7.0
+
+# Backtest
+pyarrow>=18.0.0
+rich>=13.0.0
+pandas-datareader>=0.10.0

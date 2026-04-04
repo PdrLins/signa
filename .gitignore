@@ -82,6 +82,26 @@ target/
 profile_default/
 ipython_config.py
 
+# Python
+__pycache__/
+*.py[cod]
+*.env
+.env
+.env.local
+venv/
+.venv/
+
+# Supabase
+*.supabase
+
+# Backtest outputs and cache
+back-end/backtest/data/cache/
+back-end/backtest/reports/output/
+
+# Misc
+.DS_Store
+*.log
+
 # pyenv
 #   For a library or package, you might want to ignore these files since the code is
 #   intended to run in multiple environments; otherwise, check them in:
