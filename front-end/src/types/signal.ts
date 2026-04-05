@@ -25,6 +25,10 @@ export interface Signal {
   fundamental_data: Record<string, unknown> | null
   macro_data: Record<string, unknown> | null
   grok_data: Record<string, unknown> | null
+  account_recommendation: 'TFSA' | 'RRSP' | 'TAXABLE' | null
+  superficial_loss_warning: boolean
+  market_regime: 'TRENDING' | 'VOLATILE' | 'CRISIS' | null
+  catalyst_type: string | null
   scan_id: string | null
   created_at: string
   updated_at: string

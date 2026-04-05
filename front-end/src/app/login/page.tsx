@@ -76,6 +76,14 @@ export default function LoginPage() {
     }
   }
 
+  const handleOtpPaste = (e: React.ClipboardEvent) => {
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
+    if (pasted.length === 6) {
+      setOtp(pasted.split(''))
+      e.preventDefault()
+    }
+  }
+
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault()
     const code = otp.join('')
@@ -213,7 +221,7 @@ export default function LoginPage() {
             </p>
 
             <form onSubmit={handleVerify} className="space-y-4">
-              <div className="flex justify-center gap-2">
+              <div className="flex justify-center gap-2" onPaste={handleOtpPaste}>
                 {otp.map((digit, i) => (
                   <input
                     key={i}
@@ -224,7 +232,7 @@ export default function LoginPage() {
                     value={digit}
                     onChange={(e) => handleOtpChange(i, e.target.value)}
                     onKeyDown={(e) => handleOtpKeyDown(i, e)}
-                    className="w-11 h-12 text-center text-lg font-bold rounded-[9px] outline-none"
+                    className="w-10 sm:w-11 h-12 text-center text-lg font-bold rounded-[9px] outline-none"
                     style={{
                       backgroundColor: theme.colors.surfaceAlt,
                       color: theme.colors.text,

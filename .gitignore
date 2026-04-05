@@ -96,6 +96,7 @@ venv/
 
 # Backtest outputs and cache
 back-end/backtest/data/cache/
+back-end/data/substack/
 back-end/backtest/reports/output/
 
 # Misc

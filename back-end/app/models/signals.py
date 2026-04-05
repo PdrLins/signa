@@ -35,6 +35,11 @@ class SignalResponse(BaseModel):
     fundamental_data: Optional[dict] = None
     macro_data: Optional[dict] = None
     grok_data: Optional[dict] = None
+    account_recommendation: Optional[str] = None  # RRSP, TFSA, TAXABLE
+    superficial_loss_warning: bool = False
+    market_regime: Optional[str] = None  # TRENDING, VOLATILE, CRISIS
+    regime_adjustment_applied: bool = False
+    catalyst_type: Optional[str] = None  # PRE_EARNINGS, PEAD, DIVIDEND, OTHER
     scan_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

@@ -26,60 +26,141 @@ def compute_score(
     grok_data: dict,
     synthesis: dict,
     bucket: str,
+    market_regime: str = "TRENDING",
 ) -> tuple[int, dict]:
     """Compute the composite score using bucket-specific weights.
 
-    The live system has Grok + Claude, so it uses sentiment and catalyst
-    scores that the backtest doesn't have. The technical and fundamental
-    scoring is tuned from backtest data.
+    Includes:
+    - Dynamic sentiment weighting based on mention count
+    - Contrarian adjustment for extreme sentiment
+    - Regime score multiplier for VOLATILE/CRISIS
+    - Mutual exclusive PEAD vs PRE_EARNINGS catalyst detection
     """
+    # ── Null safety ──
+    technical_data = technical_data or {}
+    fundamental_data = fundamental_data or {}
+    macro_data = macro_data or {}
+    grok_data = grok_data or {}
+    synthesis = synthesis or {}
+
+    # ── Dynamic sentiment weight (Part 5) ──
+    grok_mention_count = 0
+    if isinstance(grok_data, dict):
+        grok_mention_count = grok_data.get("mention_count", 0) or 0
+
+    raw_sentiment_score = _score_sentiment(grok_data)
+
+    # Contrarian adjustment for extreme sentiment
+    if grok_mention_count >= 100:
+        if raw_sentiment_score > 85:
+            raw_sentiment_score = max(0, raw_sentiment_score - 10)
+        elif raw_sentiment_score < 15:
+            raw_sentiment_score = min(100, raw_sentiment_score + 10)
+
+    # ── Mutual exclusive earnings catalyst (Part 2) ──
+    catalyst_type = None
+    if fundamental_data:
+        days_since_earnings = fundamental_data.get("days_since_last_earnings", 999) or 999
+        eps_surprise = fundamental_data.get("last_eps_surprise_pct", 0) or 0
+        days_to_earnings = fundamental_data.get("days_to_next_earnings", 999) or 999
+        price_change_5d = (technical_data or {}).get("price_change_5d", 0) or 0
+
+        if (days_since_earnings <= 3 and eps_surprise > 0.03 and price_change_5d < 0.10):
+            catalyst_type = "PEAD"
+        elif days_to_earnings <= 30:
+            catalyst_type = "PRE_EARNINGS"
+
     if bucket == "SAFE_INCOME":
-        weights = settings.safe_income_weights
+        weights = {**settings.safe_income_weights}
         dividend_score = _score_dividend_reliability(fundamental_data)
         fundamental_score = _score_fundamentals(fundamental_data, bucket)
         macro_score = _score_macro(macro_data)
-        sentiment_score = _score_sentiment(grok_data)
+
+        # Dynamic sentiment weight for low-mention tickers
+        if grok_mention_count < 100:
+            effective_sent_w = 0.05
+            technical_boost = weights["sentiment"] - effective_sent_w
+            weights["sentiment"] = effective_sent_w
+            weights["macro"] = weights["macro"] + technical_boost
+        else:
+            effective_sent_w = weights["sentiment"]
 
         total = (
             dividend_score * weights["dividend_reliability"]
             + fundamental_score * weights["fundamental_health"]
             + macro_score * weights["macro"]
-            + sentiment_score * weights["sentiment"]
+            + raw_sentiment_score * weights["sentiment"]
         )
 
         breakdown = {
             "dividend_reliability": round(dividend_score * weights["dividend_reliability"], 1),
             "fundamental_health": round(fundamental_score * weights["fundamental_health"], 1),
             "macro": round(macro_score * weights["macro"], 1),
-            "sentiment": round(sentiment_score * weights["sentiment"], 1),
+            "sentiment": round(raw_sentiment_score * weights["sentiment"], 1),
         }
     else:
-        weights = settings.high_risk_weights
-        sentiment_score = _score_sentiment(grok_data)
+        weights = {**settings.high_risk_weights}
         catalyst_score = _score_catalyst(synthesis)
         technical_score = _score_technical_momentum(technical_data)
         fundamental_score = _score_fundamentals(fundamental_data, bucket)
 
+        # Dynamic sentiment weight for low-mention tickers
+        if grok_mention_count < 100:
+            effective_sent_w = 0.05
+            technical_boost = weights["sentiment"] - effective_sent_w
+            weights["sentiment"] = effective_sent_w
+            weights["technical_momentum"] = weights["technical_momentum"] + technical_boost
+        else:
+            effective_sent_w = weights["sentiment"]
+
         total = (
-            sentiment_score * weights["sentiment"]
+            raw_sentiment_score * weights["sentiment"]
             + catalyst_score * weights["catalyst"]
             + technical_score * weights["technical_momentum"]
             + fundamental_score * weights["fundamentals"]
         )
 
         breakdown = {
-            "sentiment": round(sentiment_score * weights["sentiment"], 1),
+            "sentiment": round(raw_sentiment_score * weights["sentiment"], 1),
             "catalyst": round(catalyst_score * weights["catalyst"], 1),
             "technical_momentum": round(technical_score * weights["technical_momentum"], 1),
             "fundamentals": round(fundamental_score * weights["fundamentals"], 1),
         }
 
-    score = int(round(max(0, min(100, total))))
+    score = max(0, min(100, total))
+
+    # ── Regime score multiplier (Part 6) ──
+    regime_adjustment_applied = False
+    regime_adjustment_note = None
+
+    if market_regime == "VOLATILE" and bucket == "HIGH_RISK":
+        score = score * 0.85
+        regime_adjustment_applied = True
+        regime_adjustment_note = "Score reduced 15%: volatile market regime"
+    elif market_regime == "CRISIS":
+        if bucket == "HIGH_RISK":
+            score = 0
+            regime_adjustment_applied = True
+            regime_adjustment_note = "CRISIS regime: HIGH_RISK signals paused"
+        elif bucket == "SAFE_INCOME":
+            if catalyst_type not in ("DIVIDEND", "PEAD", "DIV_EXDATE"):
+                score = score * 0.60
+                regime_adjustment_applied = True
+                regime_adjustment_note = "Score reduced 40%: crisis regime, non-dividend catalyst"
+
+    score = int(round(score))
     breakdown["total"] = score
+    breakdown["market_regime"] = market_regime
+    breakdown["regime_adjustment_applied"] = regime_adjustment_applied
+    breakdown["regime_adjustment_note"] = regime_adjustment_note
+    breakdown["catalyst_type"] = catalyst_type
+    breakdown["sentiment_weight_effective"] = round(effective_sent_w, 3)
+    breakdown["grok_mention_count"] = grok_mention_count
+
     return score, breakdown
 
 
-def score_to_action(score: int, bucket: str = "") -> str:
+def score_to_action(score: int) -> str:
     """Convert a composite score to a signal action.
 
     Backtest-validated: scores above 72 have inverted win rates

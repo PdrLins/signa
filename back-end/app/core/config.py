@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     grok_base_url: str = "https://api.x.ai/v1"
     grok_model: str = "grok-2-latest"
 
+    # --- Gemini ---
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
+
+    # --- AI Provider Preferences ---
+    # Ordered list of providers to try for each task. First available wins.
+    synthesis_providers: list[str] = ["claude", "gemini"]
+    sentiment_providers: list[str] = ["grok", "gemini"]
+
     # --- Scoring Thresholds ---
     score_buy: int = 75
     score_hold: int = 50
@@ -72,6 +81,10 @@ class Settings(BaseSettings):
     min_abs_change: float = 0.01
     max_candidates: int = 50
 
+    # --- Two-Pass Scanning ---
+    ai_candidate_limit: int = 15  # Top N candidates get AI analysis
+    ai_enabled: bool = True       # False = tech-only mode (zero AI cost)
+
     # --- Scheduler ---
     timezone: str = "America/New_York"
 
@@ -82,6 +95,16 @@ class Settings(BaseSettings):
     position_monitor_enabled: bool = True
     position_alert_profit_pct: float = 5.0
     position_alert_loss_pct: float = -5.0
+
+    # --- Brain Editor ---
+    brain_token_secret: str = ""  # Separate secret for brain tokens
+    brain_otp_expire_seconds: int = 60
+    brain_token_expire_minutes: int = 15
+    brain_max_challenges_per_window: int = 3
+    brain_max_otp_attempts: int = 3
+
+    # --- Language ---
+    language: str = "en"  # "en" or "pt"
 
     # --- App ---
     app_name: str = "Signa"
@@ -99,6 +122,16 @@ class Settings(BaseSettings):
         if not self.auth_enabled and not self.debug:
             raise ValueError(
                 "AUTH_ENABLED=false is only allowed when DEBUG=true"
+            )
+        if self.auth_enabled and self.brain_token_secret in ("", "generate-with-openssl-rand-hex-32"):
+            raise ValueError(
+                "BRAIN_TOKEN_SECRET must be set to a secure random value. "
+                "Generate one with: openssl rand -hex 32"
+            )
+        if not self.debug and "*" in self.cors_origins:
+            raise ValueError(
+                "CORS_ORIGINS cannot contain '*' in production (DEBUG=false). "
+                "Set specific origins like ['https://yourdomain.com']"
             )
         return self
 

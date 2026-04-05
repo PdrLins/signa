@@ -7,7 +7,7 @@ import { AIUsage } from '@/components/dashboard/AIUsage'
 
 export function Sidebar() {
   return (
-    <aside className="hidden lg:flex flex-col gap-3 w-[320px] shrink-0">
+    <aside className="hidden lg:flex flex-col gap-3 w-[300px] shrink-0">
       <BucketSplit />
       <ScanSchedule />
       <TelegramStatus />

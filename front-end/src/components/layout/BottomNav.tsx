@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
-import { LayoutDashboard, TrendingUp, Star, Briefcase, HelpCircle } from 'lucide-react'
+import { LayoutDashboard, TrendingUp, Star, Briefcase, Settings } from 'lucide-react'
 
 export function BottomNav() {
   const theme = useTheme()
@@ -16,7 +16,7 @@ export function BottomNav() {
     { label: t.nav.signals, href: '/signals', icon: TrendingUp },
     { label: t.nav.watchlist, href: '/watchlist', icon: Star },
     { label: t.nav.portfolio, href: '/portfolio', icon: Briefcase },
-    { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle },
+    { label: t.nav.settings, href: '/settings', icon: Settings },
   ]
 
   return (
@@ -38,7 +38,7 @@ export function BottomNav() {
             <Link
               key={tab.href}
               href={tab.href}
-              className="flex flex-col items-center gap-0.5 px-3 py-1"
+              className="flex flex-col items-center gap-0.5 px-3 py-2"
             >
               <tab.icon size={20} style={{ color }} />
               <span className="text-[10px] font-medium" style={{ color }}>

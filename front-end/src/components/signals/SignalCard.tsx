@@ -10,7 +10,7 @@ import { SparkLine } from '@/components/ui/SparkLine'
 import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { useAddTicker } from '@/hooks/useWatchlist'
+import { useWatchlist, useAddTicker, useRemoveTicker } from '@/hooks/useWatchlist'
 import { useToast } from '@/hooks/useToast'
 import { ChevronDown, Star, ExternalLink } from 'lucide-react'
 import type { Signal } from '@/types/signal'
@@ -39,8 +39,11 @@ export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps)
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const [expanded, setExpanded] = useState(defaultExpanded)
+  const { data: watchlist } = useWatchlist()
   const addTicker = useAddTicker()
+  const removeTicker = useRemoveTicker()
   const toast = useToast()
+  const isWatchlisted = watchlist?.some((w) => w.symbol === signal.symbol) ?? false
 
   const handleToggle = () => setExpanded((prev) => !prev)
   const stopProp = (e: React.MouseEvent) => e.stopPropagation()
@@ -105,16 +108,27 @@ export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps)
                 <button
                   onClick={(e) => {
                     stopProp(e)
-                    addTicker.mutate(signal.symbol, {
-                      onSuccess: () => toast.show(`${signal.symbol} added to watchlist`, 'success'),
-                      onError: (err) => toast.show(err?.message || 'Failed to add', 'error'),
-                    })
+                    if (isWatchlisted) {
+                      removeTicker.mutate(signal.symbol, {
+                        onSuccess: () => toast.show(`${signal.symbol} removed from watchlist`, 'info'),
+                        onError: (err) => toast.show(err?.message || 'Failed', 'error'),
+                      })
+                    } else {
+                      addTicker.mutate(signal.symbol, {
+                        onSuccess: () => toast.show(`${signal.symbol} added to watchlist`, 'success'),
+                        onError: (err) => toast.show(err?.message || 'Failed', 'error'),
+                      })
+                    }
                   }}
-                  disabled={addTicker.isPending}
+                  disabled={addTicker.isPending || removeTicker.isPending}
                   className="p-0.5 rounded transition-opacity hover:opacity-70"
-                  title={t.signal.addToWatchlist}
+                  title={isWatchlisted ? 'Remove from watchlist' : t.signal.addToWatchlist}
                 >
-                  <Star size={14} style={{ color: theme.colors.textHint }} />
+                  <Star
+                    size={14}
+                    fill={isWatchlisted ? theme.colors.warning : 'none'}
+                    style={{ color: isWatchlisted ? theme.colors.warning : theme.colors.textHint }}
+                  />
                 </button>
               </div>
               <span className="text-[12px]" style={{ color: theme.colors.textSub }}>
@@ -132,7 +146,7 @@ export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps)
               <p className="text-[12px] font-semibold tabular-nums" style={{ color: changeColor }}>
                 {signal.change_pct !== null && signal.change_pct !== undefined
                   ? `${signal.change_pct >= 0 ? '+' : ''}${signal.change_pct.toFixed(2)}%`
-                  : `Score ${signal.score}`}
+                  : `${signal.score}/100`}
               </p>
             </div>
           </div>
@@ -160,6 +174,11 @@ export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps)
               {signal.action}
             </Badge>
             <Badge variant={getStatusVariant(signal.status)}>{signal.status}</Badge>
+            {signal.account_recommendation && (
+              <Badge variant={signal.account_recommendation === 'TFSA' ? 'safe' : 'risk'}>
+                {signal.account_recommendation}
+              </Badge>
+            )}
           </div>
         </div>
 
@@ -245,7 +264,7 @@ export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps)
                 <Button fullWidth variant="secondary">
                   <span className="flex items-center gap-2 justify-center">
                     <ExternalLink size={14} />
-                    View full analysis
+                    {t.signal.viewFullAnalysis}
                   </span>
                 </Button>
               </Link>

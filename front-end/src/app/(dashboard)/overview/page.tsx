@@ -3,10 +3,9 @@
 import { useState } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
-import { useGemSignals } from '@/hooks/useSignals'
+import { useAllSignals } from '@/hooks/useSignals'
 import { StatsBar } from '@/components/dashboard/StatsBar'
 import { QuickActions } from '@/components/dashboard/QuickActions'
-import { AllocationChart } from '@/components/charts/AllocationChart'
 import { SignalList } from '@/components/signals/SignalList'
 import { WatchlistTable } from '@/components/watchlist/WatchlistTable'
 import { Card } from '@/components/ui/Card'
@@ -18,7 +17,7 @@ type BucketFilter = 'ALL' | 'HIGH_RISK' | 'SAFE_INCOME'
 export default function OverviewPage() {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
-  const { data: gems, isLoading, isError, error } = useGemSignals()
+  const { data: allSignals, isLoading, isError, error } = useAllSignals({ limit: 200 })
   const [filter, setFilter] = useState<BucketFilter>('ALL')
 
   const getGreeting = (): string => {
@@ -28,13 +27,18 @@ export default function OverviewPage() {
     return t.overview.evening
   }
 
-  const filtered = gems?.filter((s: Signal) => {
-    if (filter === 'ALL') return true
-    return s.bucket === filter
-  })
+  // Top signals = highest score, sorted desc
+  const topSignals = allSignals
+    ?.filter((s: Signal) => {
+      if (filter === 'ALL') return true
+      return s.bucket === filter
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10)
 
-  const safeCount = gems?.filter((s) => s.bucket === 'SAFE_INCOME').length ?? 0
-  const riskCount = gems?.filter((s) => s.bucket === 'HIGH_RISK').length ?? 0
+  const totalCount = allSignals?.length ?? 0
+  const buyCount = allSignals?.filter((s) => s.action === 'BUY').length ?? 0
+  const gemCount = allSignals?.filter((s) => s.is_gem).length ?? 0
 
   const filters: { label: string; value: BucketFilter }[] = [
     { label: t.overview.all, value: 'ALL' },
@@ -43,7 +47,7 @@ export default function OverviewPage() {
   ]
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Greeting */}
       <div>
         <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>
@@ -57,49 +61,46 @@ export default function OverviewPage() {
       {/* Stats */}
       <StatsBar />
 
-      {/* Safe to Buy / Must Sell */}
+      {/* Safe to Buy / Must Sell — hero section */}
       <QuickActions />
 
-      {/* Two-column: Allocation + Watchlist */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <AllocationChart
-          safeCount={safeCount}
-          riskCount={riskCount}
-          isLoading={isLoading}
-        />
-        <Card>
-          <h2 className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>
-            {t.overview.watchlist}
-          </h2>
-          <WatchlistTable />
-        </Card>
-      </div>
+      {/* Watchlist */}
+      <Card>
+        <h2 className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>
+          {t.overview.watchlist}
+        </h2>
+        <WatchlistTable />
+      </Card>
 
-      {/* Gems section */}
+      {/* Top signals by score */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-bold" style={{ color: theme.colors.text }}>
               {t.overview.topSignals}
             </h2>
-            {gems && <Badge variant="gem">{gems.length}</Badge>}
+            {totalCount > 0 && (
+              <div className="flex items-center gap-1.5">
+                <Badge variant="buy">{buyCount} BUY</Badge>
+                {gemCount > 0 && <Badge variant="gem">{gemCount} GEM</Badge>}
+              </div>
+            )}
           </div>
         </div>
 
         {/* Filter tabs */}
         <div
-          className="inline-flex items-center gap-1 rounded-xl px-1 py-1 mb-4"
+          className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5 mb-4"
           style={{ backgroundColor: theme.colors.nav }}
         >
           {filters.map((f) => (
             <button
               key={f.value}
               onClick={() => setFilter(f.value)}
-              className="px-3 py-1 rounded-lg text-xs font-medium transition-all"
+              className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all"
               style={{
                 backgroundColor: filter === f.value ? theme.colors.navActive : 'transparent',
                 color: filter === f.value ? theme.colors.text : theme.colors.textSub,
-                boxShadow: filter === f.value ? (theme.isDark ? '0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.08)') : 'none',
               }}
             >
               {f.label}
@@ -108,7 +109,7 @@ export default function OverviewPage() {
         </div>
 
         <SignalList
-          signals={filtered}
+          signals={topSignals}
           isLoading={isLoading}
           isError={isError}
           error={error}

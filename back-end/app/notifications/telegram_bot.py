@@ -41,56 +41,49 @@ async def send_message(chat_id: str, text: str, parse_mode: str = "HTML") -> boo
 
 async def send_otp_message(chat_id: str, otp_code: str) -> bool:
     """Send an OTP verification code via Telegram."""
-    message = (
-        "🔐 <b>Signa Verification Code</b>\n\n"
-        f"Your login code is: <code>{escape(otp_code)}</code>\n\n"
-        "⏱ Valid for 2 minutes only\n"
-        "Never share this code with anyone."
-    )
-    return await send_message(chat_id, message)
+    from app.notifications.messages import msg
+    return await send_message(chat_id, msg("otp", otp_code=escape(otp_code)))
 
 
 async def send_gem_alert(signal: dict) -> bool:
     """Send a GEM alert for a high-conviction signal."""
+    from app.notifications.messages import msg
     ticker = escape(str(signal.get("symbol", "?")))
-    score = signal.get("score", 0)
-    action = escape(str(signal.get("action", "?")))
-    reasoning = escape(str(signal.get("reasoning", "")))
     catalyst = escape(str(signal.get("catalyst", "")))
-    price = signal.get("price_at_signal", "?")
-    target = signal.get("target_price", "?")
-    stop = signal.get("stop_loss", "?")
-    rr = signal.get("risk_reward", "?")
+    catalyst_line = f"\n🚀 Catalyst: {catalyst}" if catalyst else ""
 
-    message = (
-        f"💎 <b>GEM ALERT — {ticker}</b>\n\n"
-        f"Signal: <b>{action}</b> | Score: <b>{score}/100</b>\n"
-        f"Price: ${price} | Target: ${target} | Stop: ${stop}\n"
-        f"Risk/Reward: {rr}x\n\n"
-        f"📋 {reasoning}\n"
+    message = msg("gem_alert",
+        ticker=ticker,
+        action=escape(str(signal.get("action", "?"))),
+        score=signal.get("score", 0),
+        price=signal.get("price_at_signal", "?"),
+        target=signal.get("target_price", "?"),
+        stop=signal.get("stop_loss", "?"),
+        rr=signal.get("risk_reward", "?"),
+        reasoning=escape(str(signal.get("reasoning", ""))),
+        catalyst_line=catalyst_line,
     )
-    if catalyst:
-        message += f"\n🚀 Catalyst: {catalyst}"
-    message += "\n\n⚡ All 5 GEM conditions met"
-
     return await send_message(settings.telegram_chat_id, message)
 
 
 async def send_scan_digest(scan_type: str, signals: list[dict]) -> bool:
     """Send a scan summary digest."""
+    from app.notifications.messages import msg
     sorted_signals = sorted(signals, key=lambda s: s.get("score", 0), reverse=True)
     top_3 = sorted_signals[:3]
     gems = [s for s in signals if s.get("is_gem")]
     buys = [s for s in signals if s.get("action") == "BUY"]
 
     scan_label = escape(scan_type.replace("_", " ").title())
-    message = (
-        f"📊 <b>Signa {scan_label} Digest</b>\n\n"
-        f"Signals: {len(signals)} | BUYs: {len(buys)} | GEMs: {len(gems)}\n\n"
+    message = msg("scan_digest_header",
+        scan_label=scan_label,
+        total=len(signals),
+        buys=len(buys),
+        gems=len(gems),
     )
 
     if top_3:
-        message += "<b>Top 3 Signals:</b>\n"
+        message += msg("scan_digest_top3")
         for i, s in enumerate(top_3, 1):
             sym = escape(str(s.get("symbol", "?")))
             act = escape(str(s.get("action", "?")))
@@ -98,8 +91,26 @@ async def send_scan_digest(scan_type: str, signals: list[dict]) -> bool:
             message += f"{i}. {emoji} <b>{sym}</b> — {act} ({s.get('score', 0)}/100)\n"
 
     if gems:
-        message += f"\n💎 <b>{len(gems)} GEM Alert(s)</b> — check /gem for details"
+        message += msg("scan_digest_gem_footer", count=len(gems))
 
+    return await send_message(settings.telegram_chat_id, message)
+
+
+async def send_watchlist_sell_alert(signal: dict) -> bool:
+    """Send an urgent alert when a watchlisted ticker gets a SELL or AVOID signal."""
+    from app.notifications.messages import msg
+    action = escape(str(signal.get("action", "?")))
+    emoji = "🚨" if action == "SELL" else "⚠️"
+
+    message = msg("watchlist_sell",
+        emoji=emoji,
+        ticker=escape(str(signal.get("symbol", "?"))),
+        action=action,
+        score=signal.get("score", 0),
+        status=escape(str(signal.get("status", "?"))),
+        price=signal.get("price_at_signal", "?"),
+        reasoning=escape(str(signal.get("reasoning", ""))),
+    )
     return await send_message(settings.telegram_chat_id, message)
 
 
@@ -223,17 +234,7 @@ async def handle_command(command: str, args: str = "") -> str:
         return f"Failed to close position for {escape(ticker)}"
 
     elif command in ("start", "help"):
-        return (
-            "<b>🤖 Signa Bot Commands:</b>\n\n"
-            "/signals — Latest signals\n"
-            "/gem — GEM alerts only\n"
-            "/watch — View watchlist\n"
-            "/watch TICKER — Add to watchlist\n"
-            "/remove TICKER — Remove from watchlist\n"
-            "/score TICKER — Get score for a ticker\n"
-            "/positions — Open positions with P&L\n"
-            "/close TICKER PRICE — Close a position\n"
-            "/status — Bot/scan status"
-        )
+        from app.notifications.messages import msg
+        return msg("bot_help")
 
     return "Unknown command. Try /help"

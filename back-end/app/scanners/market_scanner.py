@@ -70,6 +70,8 @@ async def get_fundamentals(ticker: str) -> dict:
             "industry": info.get("industry"),
             "earnings_date": earnings_date,
             "beta": info.get("beta"),
+            "profit_margin": info.get("profitMargins"),
+            "revenue_growth": info.get("revenueGrowth"),
             "52w_high": info.get("fiftyTwoWeekHigh"),
             "52w_low": info.get("fiftyTwoWeekLow"),
         }

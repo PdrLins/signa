@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { client } from '@/lib/api'
 import { useI18nStore } from '@/store/i18nStore'
 import { useToast } from '@/hooks/useToast'
-import { Database, Send, Brain, Zap, Clock } from 'lucide-react'
+import { Database, Send, Brain, Zap, Sparkles, Clock } from 'lucide-react'
 
 interface Integration {
   status: string
@@ -26,6 +26,7 @@ const LABELS: Record<string, { icon: typeof Send; pingable?: boolean }> = {
   supabase: { icon: Database },
   telegram: { icon: Send, pingable: true },
   claude: { icon: Brain },
+  gemini: { icon: Sparkles },
   grok: { icon: Zap },
   scheduler: { icon: Clock },
 }
@@ -55,6 +56,7 @@ export function TelegramStatus() {
       telegram: t.integrations.telegram,
       claude: t.integrations.claude,
       grok: t.integrations.grok,
+      gemini: t.integrations.gemini,
       scheduler: t.integrations.scheduler,
     }
     return names[key] || key

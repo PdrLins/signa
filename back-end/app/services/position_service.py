@@ -48,13 +48,48 @@ def close_position_by_id(position_id: str, exit_price: float) -> dict:
     pnl_amount = (exit_price - entry_price) * shares
     pnl_percent = ((exit_price - entry_price) / entry_price) * 100
 
-    return queries.close_position(
+    result = queries.close_position(
         position_id=position_id,
         exit_price=exit_price,
         exit_reason="USER_CLOSE",
         pnl_amount=pnl_amount,
         pnl_percent=pnl_percent,
     )
+
+    # Auto-record trade outcome for self-learning
+    try:
+        from app.services.learning_service import record_outcome
+        from datetime import datetime, timezone
+
+        entry_date = position.get("entry_date") or position.get("created_at", "")
+        if isinstance(entry_date, str) and entry_date:
+            signal_date = entry_date
+            try:
+                days_held = (datetime.now(timezone.utc) - datetime.fromisoformat(entry_date.replace("Z", "+00:00"))).days
+            except (ValueError, TypeError):
+                days_held = 0
+        else:
+            signal_date = datetime.now(timezone.utc).isoformat()
+            days_held = 0
+
+        record_outcome(
+            signal_id=position.get("signal_id") or position.get("id", ""),  # Use signal_id if available, fallback to position id
+            symbol=position.get("symbol", ""),
+            action="BUY",  # Positions are opened on BUY signals
+            score=position.get("last_signal_score") or 0,
+            bucket=position.get("bucket", "HIGH_RISK"),
+            signal_date=signal_date,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            days_held=days_held,
+            target_price=position.get("target_price"),
+            stop_loss=position.get("stop_loss"),
+            market_regime=position.get("market_regime"),
+        )
+    except Exception as e:
+        logger.debug(f"Failed to record trade outcome: {e}")
+
+    return result
 
 
 def get_open_positions() -> list[dict]:

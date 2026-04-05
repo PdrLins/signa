@@ -44,6 +44,16 @@ CLAUDE_SYNTHESIS_PROMPT = """You are an AI investment analyst. Analyze the follo
 ## X/Twitter Sentiment (from Grok)
 {sentiment}
 
+## Market Context
+Current regime: {market_regime}
+{regime_note}
+
+## Catalyst Context
+{catalyst_context}
+
+## Investment Knowledge (from Signa Brain)
+{knowledge_block}
+
 ## Your Task
 Based on ALL the data above, produce a JSON response with this exact structure:
 {{
@@ -57,7 +67,9 @@ Based on ALL the data above, produce a JSON response with this exact structure:
     "risk_reward_ratio": <estimated risk/reward ratio as float, e.g. 2.5>,
     "target_price": <estimated target price, or null>,
     "stop_loss": <suggested stop loss price, or null>,
-    "sentiment_weight": <0-100, how much sentiment influenced your decision>
+    "sentiment_weight": <0-100, how much sentiment influenced your decision>,
+    "account_recommendation": "<RRSP or TFSA or TAXABLE>",
+    "catalyst_type": "<PEAD or PRE_EARNINGS or DIVIDEND or OTHER or null>"
 }}
 
 ## Rules
@@ -69,6 +81,10 @@ Based on ALL the data above, produce a JSON response with this exact structure:
 - Factor in X/Twitter sentiment but don't let it dominate for safe income stocks
 - For high risk stocks, sentiment and catalysts should weigh more heavily
 - If you detect any red flags (fraud, SEC investigation, insider selling), bias toward AVOID
+- In VOLATILE regime: be more conservative, raise conviction bar for BUY
+- In CRISIS regime: only recommend BUY for dividend/income plays
+- PEAD (post-earnings drift) and PRE_EARNINGS are mutually exclusive — never both
+- For Canadian accounts: recommend RRSP for active trading, TFSA for dividend holds
 
 Return JSON only, no markdown formatting."""
 

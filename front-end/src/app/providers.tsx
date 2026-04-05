@@ -24,6 +24,7 @@ function StoreInitializer() {
 
 function ThemeApplicator({ children }: { children: React.ReactNode }) {
   const theme = useThemeStore((s) => s.theme)
+  const locale = useI18nStore((s) => s.locale)
 
   useEffect(() => {
     const html = document.documentElement
@@ -35,6 +36,10 @@ function ThemeApplicator({ children }: { children: React.ReactNode }) {
       html.style.colorScheme = 'light'
     }
   }, [theme.isDark])
+
+  useEffect(() => {
+    document.documentElement.lang = locale === 'pt' ? 'pt-BR' : 'en-CA'
+  }, [locale])
 
   return (
     <div

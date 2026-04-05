@@ -148,8 +148,8 @@ def test_protected_route_without_token():
 
 
 @patch("app.db.queries.get_signals")
-@patch("app.services.price_cache.get_price", return_value=(None, None))
-def test_signals_returns_list(mock_price, mock_get):
+@patch("app.services.price_cache.enrich_signals", side_effect=lambda s: s)
+def test_signals_returns_list(mock_enrich, mock_get):
     """GET /api/v1/signals → 200 + list (can be empty)."""
     mock_get.return_value = [SAMPLE_SIGNAL]
     resp = client.get("/api/v1/signals")
@@ -161,8 +161,8 @@ def test_signals_returns_list(mock_price, mock_get):
 
 
 @patch("app.db.queries.get_signals")
-@patch("app.services.price_cache.get_price", return_value=(None, None))
-def test_signals_gems_never_404(mock_price, mock_get):
+@patch("app.services.price_cache.enrich_signals", side_effect=lambda s: s)
+def test_signals_gems_never_404(mock_enrich, mock_get):
     """GET /api/v1/signals/gems → 200 + list (never 404)."""
     mock_get.return_value = []
     resp = client.get("/api/v1/signals/gems")

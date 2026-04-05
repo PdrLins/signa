@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from app.api.v1 import auth, health, portfolio, positions, scans, signals, stats, tickers, watchlist
+from app.api.v1 import auth, brain, health, learning, logs, portfolio, positions, scans, signals, stats, tickers, watchlist
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.middleware.audit import AuditMiddleware
@@ -18,6 +18,7 @@ from app.middleware.auth import AuthMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.notifications.telegram_bot import handle_command, send_message
 from app.scheduler.runner import init_scheduler, start_scheduler, stop_scheduler
+from app.services.log_service import init_log_capture
 
 
 @asynccontextmanager
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Auth enabled: {settings.auth_enabled}")
     logger.info(f"Debug mode: {settings.debug}")
 
+    init_log_capture()
     init_scheduler()
     start_scheduler()
 
@@ -41,6 +43,10 @@ app = FastAPI(
     description="AI Investment Signal Engine",
     version="1.0.0",
     lifespan=lifespan,
+    # Disable docs in production
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
+    openapi_url="/openapi.json" if settings.debug else None,
 )
 
 # Middleware (outermost first)
@@ -67,6 +73,9 @@ app.include_router(watchlist.router, prefix=api_prefix)
 app.include_router(portfolio.router, prefix=api_prefix)
 app.include_router(scans.router, prefix=api_prefix)
 app.include_router(stats.router, prefix=api_prefix)
+app.include_router(brain.router, prefix=api_prefix)
+app.include_router(learning.router, prefix=api_prefix)
+app.include_router(logs.router, prefix=api_prefix)
 app.include_router(health.router, prefix=api_prefix)
 
 

@@ -23,6 +23,11 @@ export const useI18nStore = create<I18nStore>((set) => ({
   setLocale: (locale: Locale) => {
     localStorage.setItem(LANG_KEY, locale)
     set({ locale, t: locales[locale] })
+    // Sync to backend so Telegram messages use the same language
+    // Import client dynamically to avoid circular deps
+    import('@/lib/api').then(({ client: apiClient }) => {
+      apiClient.put('/health/ai-config', { language: locale }).catch(() => {})
+    }).catch(() => {})
   },
 
   initialize: () => {

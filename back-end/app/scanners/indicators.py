@@ -89,6 +89,28 @@ def compute_indicators(df: pd.DataFrame) -> dict:
         if atr_series is not None and not atr_series.empty and pd.notna(atr_series.iloc[-1]):
             result["atr"] = round(float(atr_series.iloc[-1]), 4)
 
+        # vs SMA percentages
+        if "sma_50" in result and result["sma_50"] > 0:
+            result["vs_sma50"] = round(((current_price - result["sma_50"]) / result["sma_50"]) * 100, 2)
+        if "sma_200" in result and result["sma_200"] > 0:
+            result["vs_sma200"] = round(((current_price - result["sma_200"]) / result["sma_200"]) * 100, 2)
+
+        # Momentum (5-day and 20-day percentage change)
+        if len(close) >= 6:
+            result["momentum_5d"] = round(((current_price - float(close.iloc[-6])) / float(close.iloc[-6])) * 100, 2)
+        if len(close) >= 21:
+            result["momentum_20d"] = round(((current_price - float(close.iloc[-21])) / float(close.iloc[-21])) * 100, 2)
+
+        # Volume ratio (current vs 20-day average)
+        if not volume.empty and len(volume) >= 20:
+            vol_avg_20 = float(volume.iloc[-20:].mean())
+            if vol_avg_20 > 0:
+                result["volume_ratio"] = round(float(volume.iloc[-1]) / vol_avg_20, 2)
+
+        # Price change 5-day (for PEAD detection)
+        if len(close) >= 6:
+            result["price_change_5d"] = round(((current_price - float(close.iloc[-6])) / float(close.iloc[-6])), 4)
+
         return result
 
     except Exception as e:

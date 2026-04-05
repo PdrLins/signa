@@ -1,59 +1,159 @@
-"""In-memory price cache backed by yfinance (5-minute TTL)."""
+"""In-memory price cache backed by yfinance (5-minute TTL).
+
+Uses batch download for multiple symbols and asyncio.to_thread
+to avoid blocking the event loop.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Optional
 
 from loguru import logger
 
-_cache: dict[str, tuple[float, Optional[float], Optional[float]]] = {}  # symbol → (expires, price, change_pct)
+_cache: dict[str, tuple[float, Optional[float], Optional[float]]] = {}
 _TTL = 300  # 5 minutes
 
 
-def get_price(symbol: str) -> tuple[Optional[float], Optional[float]]:
-    """Return (current_price, change_pct) for a symbol. Cached for 5 minutes.
-
-    Returns (None, None) on any failure — never raises.
-    """
-    now = time.time()
+def _get_cached(symbol: str) -> tuple[bool, Optional[float], Optional[float]]:
+    """Check cache. Returns (hit, price, change_pct)."""
     entry = _cache.get(symbol)
-    if entry and entry[0] > now:
-        return entry[1], entry[2]
+    if entry and entry[0] > time.time():
+        return True, entry[1], entry[2]
+    return False, None, None
+
+
+def _fetch_prices_batch(symbols: list[str]) -> dict[str, tuple[Optional[float], Optional[float]]]:
+    """Fetch prices for multiple symbols in one yfinance call (synchronous).
+
+    Returns dict of symbol → (price, change_pct).
+    """
+    import yfinance as yf
+
+    result: dict[str, tuple[Optional[float], Optional[float]]] = {}
+    now = time.time()
+
+    if not symbols:
+        return result
 
     try:
-        import yfinance as yf
+        # Batch download — 1 network call instead of N
+        data = yf.download(symbols, period="2d", interval="1d", progress=False, threads=True)
 
-        ticker = yf.Ticker(symbol)
-        info = ticker.fast_info
-        price = float(info.last_price) if info.last_price else None
-        prev_close = float(info.previous_close) if info.previous_close else None
+        if data.empty:
+            for sym in symbols:
+                result[sym] = (None, None)
+                _cache[sym] = (now + _TTL, None, None)
+            return result
 
-        change_pct = None
-        if price is not None and prev_close and prev_close > 0:
-            change_pct = round(((price - prev_close) / prev_close) * 100, 2)
+        import pandas as pd
+        if isinstance(data.columns, pd.MultiIndex):
+            for sym in symbols:
+                try:
+                    close_col = data["Close"][sym] if sym in data["Close"].columns else None
+                    if close_col is not None and len(close_col.dropna()) >= 1:
+                        prices = close_col.dropna()
+                        price = float(prices.iloc[-1])
+                        prev = float(prices.iloc[-2]) if len(prices) >= 2 else None
+                        change = round(((price - prev) / prev) * 100, 2) if prev and prev > 0 else None
+                        result[sym] = (price, change)
+                        _cache[sym] = (now + _TTL, price, change)
+                    else:
+                        result[sym] = (None, None)
+                        _cache[sym] = (now + _TTL, None, None)
+                except Exception:
+                    result[sym] = (None, None)
+                    _cache[sym] = (now + _TTL, None, None)
+        else:
+            # Single symbol case
+            sym = symbols[0]
+            try:
+                prices = data["Close"].dropna()
+                if len(prices) >= 1:
+                    price = float(prices.iloc[-1])
+                    prev = float(prices.iloc[-2]) if len(prices) >= 2 else None
+                    change = round(((price - prev) / prev) * 100, 2) if prev and prev > 0 else None
+                    result[sym] = (price, change)
+                    _cache[sym] = (now + _TTL, price, change)
+                else:
+                    result[sym] = (None, None)
+                    _cache[sym] = (now + _TTL, None, None)
+            except Exception:
+                result[sym] = (None, None)
+                _cache[sym] = (now + _TTL, None, None)
 
-        _cache[symbol] = (now + _TTL, price, change_pct)
-        return price, change_pct
-    except Exception:
-        logger.debug(f"Price fetch failed for {symbol}")
-        _cache[symbol] = (now + _TTL, None, None)
-        return None, None
+    except Exception as e:
+        logger.debug(f"Batch price fetch failed: {e}")
+        for sym in symbols:
+            result[sym] = (None, None)
+            _cache[sym] = (now + _TTL, None, None)
+
+    return result
 
 
-def enrich_signals(signals: list[dict]) -> list[dict]:
-    """Add current_price, change_pct, and asset_type to each signal dict in-place."""
+async def enrich_signals_async(signals: list[dict]) -> list[dict]:
+    """Add current_price, change_pct, and asset_type to signals. Non-blocking."""
+    # Collect symbols that need fresh prices
+    symbols_to_fetch = []
     for sig in signals:
         symbol = sig.get("symbol")
         if not symbol:
             continue
-        price, change = get_price(symbol)
+        hit, _, _ = _get_cached(symbol)
+        if not hit:
+            symbols_to_fetch.append(symbol)
+
+    # Batch fetch uncached symbols in a thread (non-blocking)
+    if symbols_to_fetch:
+        unique = list(set(symbols_to_fetch))
+        await asyncio.to_thread(_fetch_prices_batch, unique)
+
+    # Now all prices are cached — apply to signals
+    for sig in signals:
+        symbol = sig.get("symbol")
+        if not symbol:
+            continue
+        _, price, change = _get_cached(symbol)
         sig["current_price"] = price
         sig["change_pct"] = change
-        # Backfill asset_type/exchange for older signals that don't have it
         if not sig.get("asset_type"):
             from app.scanners.universe import get_exchange
             exchange = get_exchange(symbol)
             sig["asset_type"] = "CRYPTO" if exchange == "CRYPTO" else "EQUITY"
             sig["exchange"] = exchange
+
+    return signals
+
+
+def enrich_signals(signals: list[dict]) -> list[dict]:
+    """Synchronous wrapper for backward compatibility.
+
+    Prefer enrich_signals_async in async contexts.
+    """
+    symbols_to_fetch = []
+    for sig in signals:
+        symbol = sig.get("symbol")
+        if not symbol:
+            continue
+        hit, _, _ = _get_cached(symbol)
+        if not hit:
+            symbols_to_fetch.append(symbol)
+
+    if symbols_to_fetch:
+        _fetch_prices_batch(list(set(symbols_to_fetch)))
+
+    for sig in signals:
+        symbol = sig.get("symbol")
+        if not symbol:
+            continue
+        _, price, change = _get_cached(symbol)
+        sig["current_price"] = price
+        sig["change_pct"] = change
+        if not sig.get("asset_type"):
+            from app.scanners.universe import get_exchange
+            exchange = get_exchange(symbol)
+            sig["asset_type"] = "CRYPTO" if exchange == "CRYPTO" else "EQUITY"
+            sig["exchange"] = exchange
+
     return signals

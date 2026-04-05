@@ -172,8 +172,9 @@ def get_active_tickers() -> list[dict]:
     client = get_client()
     result = (
         client.table("tickers")
-        .select("*")
+        .select("symbol, name, exchange, bucket, is_active")
         .eq("is_active", True)
+        .limit(500)
         .execute()
     )
     return result.data or []
@@ -222,7 +223,11 @@ def get_signals(
     limit: int = 50,
     gems_only: bool = False,
 ) -> list[dict]:
-    """Get latest signals with optional filters."""
+    """Get latest signals with optional filters.
+
+    Fetches all columns. Future optimization: exclude large JSON blobs
+    once all columns are confirmed in the schema.
+    """
     client = get_client()
     query = client.table("signals").select("*").order("created_at", desc=True).limit(limit)
     if bucket:
@@ -253,11 +258,15 @@ def get_signals(
 
 
 def get_signals_by_ticker(symbol: str, limit: int = 20) -> list[dict]:
-    """Get signal history for a specific ticker."""
+    """Get signal history for a specific ticker.
+
+    Uses select("*") intentionally — the detail page needs technical_data,
+    fundamental_data, and macro_data blobs for the full analysis view.
+    """
     client = get_client()
     result = (
         client.table("signals")
-        .select("*")
+        .select("*")  # All columns needed for ticker detail page
         .eq("symbol", symbol.upper())
         .order("created_at", desc=True)
         .limit(limit)
@@ -355,7 +364,7 @@ def get_last_completed_scan() -> dict | None:
 def get_portfolio() -> list[dict]:
     """Get all portfolio entries."""
     client = get_client()
-    result = client.table("portfolio").select("*").order("created_at", desc=True).execute()
+    result = client.table("portfolio").select("*").order("created_at", desc=True).limit(200).execute()
     return result.data or []
 
 
@@ -388,7 +397,7 @@ def delete_portfolio_item(item_id: str) -> bool:
 def get_watchlist() -> list[dict]:
     """Get all watchlist items."""
     client = get_client()
-    result = client.table("watchlist").select("*").order("added_at", desc=True).execute()
+    result = client.table("watchlist").select("*").order("added_at", desc=True).limit(200).execute()
     return result.data or []
 
 
@@ -439,6 +448,7 @@ def get_pending_alerts() -> list[dict]:
         .select("*")
         .eq("status", "PENDING")
         .order("created_at")
+        .limit(500)
         .execute()
     )
     return result.data or []
@@ -456,6 +466,7 @@ def get_open_positions() -> list[dict]:
         .select("*")
         .eq("status", "OPEN")
         .order("entry_date", desc=True)
+        .limit(100)
         .execute()
     )
     return result.data or []

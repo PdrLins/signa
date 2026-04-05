@@ -186,8 +186,8 @@ export default function HowItWorksPage() {
 
       {/* Risk Levels */}
       <Card>
-        <Section title={h.riskTitle}>
-          <P>{h.riskDesc}</P>
+        <Section title={h.riskLevelsTitle}>
+          <P>{h.riskLevelsDesc}</P>
           <ul className="space-y-1.5 mt-2">
             <Li>{h.riskLow}</Li>
             <Li>{h.riskMed}</Li>
@@ -223,10 +223,93 @@ export default function HowItWorksPage() {
         </Section>
       </Card>
 
+      {/* Price Display */}
+      <Card>
+        <Section title={h.priceDisplayTitle}>
+          <P>{h.priceDisplayDesc}</P>
+          <ul className="space-y-1.5 mt-2">
+            <Li>{h.priceDisplay1}</Li>
+            <Li>{h.priceDisplay2}</Li>
+          </ul>
+          <div className="mt-3">
+            <P>{h.priceDisplayNote}</P>
+          </div>
+        </Section>
+      </Card>
+
       {/* Ticker Detail Page */}
       <Card>
         <Section title={h.detailTitle}>
           <P>{h.detailDesc}</P>
+        </Section>
+      </Card>
+
+      {/* How to Read a Signal Card */}
+      <Card>
+        <Section title={h.readingCardTitle}>
+          <P>{h.readingCardDesc}</P>
+          <ul className="space-y-1.5 mt-2">
+            <Li>{h.readingCard1}</Li>
+            <Li>{h.readingCard2}</Li>
+            <Li>{h.readingCard3}</Li>
+            <Li>{h.readingCard4}</Li>
+            <Li>{h.readingCard5}</Li>
+            <Li>{h.readingCard6}</Li>
+          </ul>
+        </Section>
+      </Card>
+
+      {/* AI Providers */}
+      <Card>
+        <Section title={h.aiProvidersTitle}>
+          <P>{h.aiProvidersDesc}</P>
+          <ul className="space-y-1.5 mt-2">
+            <Li>{h.aiProvider1}</Li>
+            <Li>{h.aiProvider2}</Li>
+            <Li>{h.aiProvider3}</Li>
+          </ul>
+          <div className="mt-3">
+            <P>{h.aiProviderNote}</P>
+          </div>
+        </Section>
+      </Card>
+
+      {/* Crypto vs Equity */}
+      <Card>
+        <Section title={h.cryptoTitle}>
+          <P>{h.cryptoDesc}</P>
+          <ul className="space-y-1.5 mt-2">
+            <Li>{h.crypto1}</Li>
+            <Li>{h.crypto2}</Li>
+            <Li>{h.crypto3}</Li>
+            <Li>{h.crypto4}</Li>
+          </ul>
+        </Section>
+      </Card>
+
+      {/* Canadian Account Types */}
+      <Card>
+        <Section title={h.accountsTitle}>
+          <P>{h.accountsDesc}</P>
+          <ul className="space-y-1.5 mt-2">
+            <Li>{h.account1}</Li>
+            <Li>{h.account2}</Li>
+            <Li>{h.account3}</Li>
+          </ul>
+        </Section>
+      </Card>
+
+      {/* Watchlist Alerts */}
+      <Card>
+        <Section title={h.watchlistAlertsTitle}>
+          <P>{h.watchlistAlertsDesc}</P>
+        </Section>
+      </Card>
+
+      {/* Brain */}
+      <Card>
+        <Section title={h.brainTitle}>
+          <P>{h.brainDesc}</P>
         </Section>
       </Card>
 

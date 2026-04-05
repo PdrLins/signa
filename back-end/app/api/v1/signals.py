@@ -1,5 +1,9 @@
-"""Signal API routes — protected."""
+"""Signal API routes — protected.
 
+All sync service calls wrapped in asyncio.to_thread to avoid blocking the event loop.
+"""
+
+import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Path, Query
@@ -21,13 +25,10 @@ async def get_signals(
     user: dict = Depends(get_current_user),
 ):
     """Get today's signals with optional filters."""
-    signals = signal_service.get_signals(
-        bucket=bucket,
-        action=action,
-        status=status,
-        period=period,
-        min_score=min_score,
-        limit=limit,
+    signals = await asyncio.to_thread(
+        signal_service.get_signals,
+        bucket=bucket, action=action, status=status,
+        period=period, min_score=min_score, limit=limit,
     )
     return {"signals": signals, "count": len(signals)}
 
@@ -38,7 +39,7 @@ async def get_gem_signals(
     user: dict = Depends(get_current_user),
 ):
     """Get only GEM alerts."""
-    gems = signal_service.get_gem_signals(limit=limit)
+    gems = await asyncio.to_thread(signal_service.get_gem_signals, limit=limit)
     return {"signals": gems, "count": len(gems)}
 
 
@@ -49,5 +50,7 @@ async def get_ticker_signals(
     user: dict = Depends(get_current_user),
 ):
     """Get signal history for a specific ticker."""
-    signals = signal_service.get_signals_by_ticker(ticker.upper(), limit=limit)
+    signals = await asyncio.to_thread(
+        signal_service.get_signals_by_ticker, ticker.upper(), limit,
+    )
     return {"signals": signals, "count": len(signals)}
