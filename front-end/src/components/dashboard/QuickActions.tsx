@@ -87,7 +87,7 @@ export function QuickActions() {
 
   // Safe to buy: BUY signals sorted by score desc, prefer SAFE_INCOME
   const safeToBuy = signals
-    .filter((s) => s.action === 'BUY' && s.score >= 70)
+    .filter((s) => s.action === 'BUY' && s.score >= 65)
     .sort((a, b) => {
       const aRisk = getRiskLevel(a) === 'low' ? 0 : getRiskLevel(a) === 'medium' ? 1 : 2
       const bRisk = getRiskLevel(b) === 'low' ? 0 : getRiskLevel(b) === 'medium' ? 1 : 2

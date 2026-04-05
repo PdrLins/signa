@@ -58,6 +58,7 @@ async def get_fundamentals(ticker: str) -> dict:
                 pass
 
         return {
+            "company_name": info.get("longName") or info.get("shortName"),
             "pe_ratio": info.get("trailingPE"),
             "forward_pe": info.get("forwardPE"),
             "eps": info.get("trailingEps"),
@@ -74,6 +75,17 @@ async def get_fundamentals(ticker: str) -> dict:
             "revenue_growth": info.get("revenueGrowth"),
             "52w_high": info.get("fiftyTwoWeekHigh"),
             "52w_low": info.get("fiftyTwoWeekLow"),
+            # Market session prices
+            "regular_market_price": info.get("regularMarketPrice"),
+            "regular_market_change": info.get("regularMarketChange"),
+            "regular_market_change_pct": info.get("regularMarketChangePercent"),
+            "regular_market_time": info.get("regularMarketTime"),
+            "post_market_price": info.get("postMarketPrice"),
+            "post_market_change": info.get("postMarketChange"),
+            "post_market_change_pct": info.get("postMarketChangePercent"),
+            "pre_market_price": info.get("preMarketPrice"),
+            "pre_market_change": info.get("preMarketChange"),
+            "pre_market_change_pct": info.get("preMarketChangePercent"),
         }
     except Exception as e:
         logger.error(f"Failed to fetch fundamentals for {ticker}: {e}")

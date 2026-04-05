@@ -17,25 +17,24 @@ const ResponsiveContainer = dynamic(() => import('recharts').then((m) => m.Respo
 
 interface PriceChartProps {
   symbol: string
-  basePrice?: number
 }
 
 const TIME_RANGES: TimeRange[] = ['1D', '1W', '1M', '3M']
 
-export function PriceChart({ symbol, basePrice }: PriceChartProps) {
+export function PriceChart({ symbol }: PriceChartProps) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
-  const [range, setRange] = useState<TimeRange>('1M')
-  const { data: points, isLoading } = usePriceHistory(symbol, range, basePrice ?? undefined)
+  const [range, setRange] = useState<TimeRange>('1D')
+  const { data: points, isLoading, isError } = usePriceHistory(symbol, range)
 
   if (isLoading) {
     return <Skeleton width="100%" height={200} borderRadius={9} />
   }
 
-  if (!points?.length) {
+  if (isError || !points?.length) {
     return (
       <div className="text-center py-6">
-        <p className="text-xs" style={{ color: theme.colors.textSub }}>{t.charts.noData}</p>
+        <p className="text-xs" style={{ color: theme.colors.down }}>{t.charts.noData}</p>
       </div>
     )
   }
@@ -82,7 +81,7 @@ export function PriceChart({ symbol, basePrice }: PriceChartProps) {
 
       {/* Chart */}
       <div style={{ height: 200 }}>
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
           <AreaChart data={points} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
             <defs>
               <linearGradient id={`grad-${symbol}`} x1="0" y1="0" x2="0" y2="1">
@@ -117,7 +116,7 @@ export function PriceChart({ symbol, basePrice }: PriceChartProps) {
                 boxShadow: theme.isDark ? '0 4px 12px rgba(0,0,0,0.4)' : '0 4px 12px rgba(0,0,0,0.1)',
               }}
               labelFormatter={(label) => formatDate(String(label))}
-              formatter={(value) => [`$${Number(value).toFixed(2)}`, 'Price']}
+              formatter={(value) => [`$${Number(value).toFixed(2)}`, t.charts.price]}
             />
             <Area
               type="monotone"

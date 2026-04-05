@@ -18,6 +18,7 @@ import type { Signal } from '@/types/signal'
 interface SignalCardProps {
   signal: Signal
   defaultExpanded?: boolean
+  isTopPick?: boolean
 }
 
 function getStatusVariant(status: string) {
@@ -35,7 +36,7 @@ function formatPrice(value: number | null): string {
   return `$${value.toFixed(2)}`
 }
 
-export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps) {
+export function SignalCard({ signal, defaultExpanded = false, isTopPick = false }: SignalCardProps) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const [expanded, setExpanded] = useState(defaultExpanded)
@@ -60,16 +61,16 @@ export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps)
   const isHighRisk = signal.bucket === 'HIGH_RISK'
   const weights = isHighRisk
     ? [
-        { label: 'Sentiment (X/Twitter)', pct: 35, color: theme.colors.primary },
-        { label: 'Catalyst', pct: 30, color: theme.colors.up },
-        { label: 'Technical momentum', pct: 25, color: theme.colors.warning },
-        { label: 'Fundamentals', pct: 10, color: theme.colors.textSub },
+        { label: t.signal.sentimentXTwitter, pct: 35, color: theme.colors.primary },
+        { label: t.signal.catalyst, pct: 30, color: theme.colors.up },
+        { label: t.signal.technicalMomentum, pct: 25, color: theme.colors.warning },
+        { label: t.signal.fundamentals, pct: 10, color: theme.colors.textSub },
       ]
     : [
-        { label: 'Dividend reliability', pct: 35, color: theme.colors.up },
-        { label: 'Fundamental health', pct: 30, color: theme.colors.primary },
-        { label: 'Macro conditions', pct: 25, color: theme.colors.warning },
-        { label: 'Sentiment', pct: 10, color: theme.colors.textSub },
+        { label: t.signal.dividendReliability, pct: 35, color: theme.colors.up },
+        { label: t.signal.fundamentalHealth, pct: 30, color: theme.colors.primary },
+        { label: t.signal.macroConditions, pct: 25, color: theme.colors.warning },
+        { label: t.signal.sentiment, pct: 10, color: theme.colors.textSub },
       ]
 
   return (
@@ -105,24 +106,32 @@ export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps)
                     GEM
                   </span>
                 )}
+                {isTopPick && (
+                  <span
+                    className="text-[9px] font-bold px-1.5 py-0.5 rounded-md"
+                    style={{ backgroundColor: '#f59e0b18', color: '#f59e0b' }}
+                  >
+                    {t.signals.topPick}
+                  </span>
+                )}
                 <button
                   onClick={(e) => {
                     stopProp(e)
                     if (isWatchlisted) {
                       removeTicker.mutate(signal.symbol, {
-                        onSuccess: () => toast.show(`${signal.symbol} removed from watchlist`, 'info'),
-                        onError: (err) => toast.show(err?.message || 'Failed', 'error'),
+                        onSuccess: () => toast.show(`${signal.symbol} ${t.signal.removedFromWatchlist}`, 'info'),
+                        onError: (err) => toast.show(err?.message || t.signal.failed, 'error'),
                       })
                     } else {
                       addTicker.mutate(signal.symbol, {
-                        onSuccess: () => toast.show(`${signal.symbol} added to watchlist`, 'success'),
-                        onError: (err) => toast.show(err?.message || 'Failed', 'error'),
+                        onSuccess: () => toast.show(`${signal.symbol} ${t.signal.addedToWatchlist}`, 'success'),
+                        onError: (err) => toast.show(err?.message || t.signal.failed, 'error'),
                       })
                     }
                   }}
                   disabled={addTicker.isPending || removeTicker.isPending}
                   className="p-0.5 rounded transition-opacity hover:opacity-70"
-                  title={isWatchlisted ? 'Remove from watchlist' : t.signal.addToWatchlist}
+                  title={isWatchlisted ? t.signal.removeFromWatchlist : t.signal.addToWatchlist}
                 >
                   <Star
                     size={14}
@@ -131,9 +140,16 @@ export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps)
                   />
                 </button>
               </div>
-              <span className="text-[12px]" style={{ color: theme.colors.textSub }}>
-                {signal.exchange ?? (signal.asset_type === 'CRYPTO' ? t.signal.crypto : 'Equity')}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[12px]" style={{ color: theme.colors.textSub }}>
+                  {signal.exchange ?? (signal.asset_type === 'CRYPTO' ? t.signal.crypto : t.signal.equity)}
+                </span>
+                {(signal.fundamental_data?.company_name as string) && (
+                  <span className="text-[11px] truncate max-w-[160px]" style={{ color: theme.colors.textHint }}>
+                    · {(signal.fundamental_data?.company_name as string).slice(0, 30)}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -173,6 +189,12 @@ export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps)
             <Badge variant={signal.action === 'BUY' ? 'buy' : signal.action === 'SELL' ? 'sell' : signal.action === 'AVOID' ? 'avoid' : 'hold'}>
               {signal.action}
             </Badge>
+            {signal.signal_style === 'CONTRARIAN' && (
+              <Badge variant="upgraded">CONTRARIAN</Badge>
+            )}
+            {signal.signal_style === 'MOMENTUM' && (
+              <Badge variant="confirmed">MOMENTUM</Badge>
+            )}
             <Badge variant={getStatusVariant(signal.status)}>{signal.status}</Badge>
             {signal.account_recommendation && (
               <Badge variant={signal.account_recommendation === 'TFSA' ? 'safe' : 'risk'}>
@@ -195,10 +217,52 @@ export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps)
       {expanded && (
         <div className="px-4 pb-4" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
           <div className="pt-3 space-y-3">
+            {/* Price Outlook — the key "why buy/sell" visual */}
+            {price && (signal.target_price || signal.stop_loss) && (
+              <div
+                className="rounded-lg px-3 py-2.5"
+                style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}` }}
+              >
+                <p className="text-[10px] uppercase tracking-wide mb-2" style={{ color: theme.colors.textHint }}>
+                  {t.signal.priceOutlook}
+                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-center flex-1">
+                    <p className="text-[10px]" style={{ color: theme.colors.down }}>{t.signal.stopLoss}</p>
+                    <p className="text-sm font-bold tabular-nums" style={{ color: theme.colors.down }}>
+                      {signal.stop_loss ? `$${Number(signal.stop_loss).toFixed(2)}` : '—'}
+                    </p>
+                    {signal.stop_loss && price && (
+                      <p className="text-[9px] tabular-nums" style={{ color: theme.colors.down }}>
+                        {(((Number(signal.stop_loss) - price) / price) * 100).toFixed(1)}%
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-center flex-1">
+                    <p className="text-[10px]" style={{ color: theme.colors.textSub }}>{t.signal.current}</p>
+                    <p className="text-lg font-bold tabular-nums" style={{ color: theme.colors.text }}>
+                      ${price.toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="text-center flex-1">
+                    <p className="text-[10px]" style={{ color: theme.colors.up }}>{t.signal.target}</p>
+                    <p className="text-sm font-bold tabular-nums" style={{ color: theme.colors.up }}>
+                      {signal.target_price ? `$${Number(signal.target_price).toFixed(2)}` : '—'}
+                    </p>
+                    {signal.target_price && price && (
+                      <p className="text-[9px] font-bold tabular-nums" style={{ color: theme.colors.up }}>
+                        +{(((Number(signal.target_price) - price) / price) * 100).toFixed(1)}%
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Reasoning */}
             {signal.reasoning && (
               <div>
-                <p className="text-[10px] uppercase tracking-wide mb-1" style={{ color: theme.colors.textHint }}>Why this signal</p>
+                <p className="text-[10px] uppercase tracking-wide mb-1" style={{ color: theme.colors.textHint }}>{t.signal.whyThisSignal}</p>
                 <p className="text-[13px] leading-relaxed" style={{ color: theme.colors.textSub }}>{signal.reasoning}</p>
               </div>
             )}
@@ -206,7 +270,7 @@ export function SignalCard({ signal, defaultExpanded = false }: SignalCardProps)
             {/* Scoring breakdown */}
             <div>
               <p className="text-[10px] uppercase tracking-wide mb-2" style={{ color: theme.colors.textHint }}>
-                Score breakdown ({isHighRisk ? t.signal.highRisk : t.signal.safeIncome} model)
+                {t.signal.scoreBreakdown} ({isHighRisk ? t.signal.highRisk : t.signal.safeIncome})
               </p>
               <div className="space-y-1.5">
                 {weights.map((w) => (

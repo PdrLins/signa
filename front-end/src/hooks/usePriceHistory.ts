@@ -1,54 +1,33 @@
 import { useQuery } from '@tanstack/react-query'
+import { client } from '@/lib/api'
 import type { PricePoint, TimeRange } from '@/types/chart'
 
-function generateMockData(range: TimeRange, basePrice: number): PricePoint[] {
-  const points: PricePoint[] = []
-  const now = new Date()
-  let count: number
-  let stepMs: number
-
-  switch (range) {
-    case '1D':
-      count = 78 // 6.5 hours of trading, 5-min intervals
-      stepMs = 5 * 60 * 1000
-      break
-    case '1W':
-      count = 35 // 5 days, ~7 points per day
-      stepMs = 60 * 60 * 1000
-      break
-    case '1M':
-      count = 22 // trading days in a month
-      stepMs = 24 * 60 * 60 * 1000
-      break
-    case '3M':
-      count = 65
-      stepMs = 24 * 60 * 60 * 1000
-      break
-  }
-
-  let price = basePrice
-  for (let i = count; i >= 0; i--) {
-    const date = new Date(now.getTime() - i * stepMs)
-    const change = (Math.random() - 0.48) * basePrice * 0.015
-    price = Math.max(price + change, basePrice * 0.8)
-    points.push({
-      date: date.toISOString(),
-      price: Math.round(price * 100) / 100,
-    })
-  }
-
-  return points
+const RANGE_TO_PERIOD: Record<TimeRange, string> = {
+  '1D': '1d',
+  '1W': '5d',
+  '1M': '1mo',
+  '3M': '3mo',
 }
 
-export function usePriceHistory(symbol: string, range: TimeRange = '1M', basePrice?: number) {
+export function usePriceHistory(symbol: string, range: TimeRange = '1M') {
   return useQuery<PricePoint[]>({
     queryKey: ['price-history', symbol, range],
     queryFn: async () => {
-      // TODO: Replace with real API call when backend supports price history
-      // e.g. const res = await api.get(`/prices/${symbol}?range=${range}`)
-      return generateMockData(range, basePrice ?? 100)
+      const period = RANGE_TO_PERIOD[range]
+      const res = await client.get(`/tickers/${symbol}/chart`, { params: { period } })
+      const data = res.data as { data_points?: Array<{ date: string; close: number }> }
+
+      if (data.data_points && data.data_points.length > 0) {
+        return data.data_points.map((p) => ({
+          date: p.date,
+          price: p.close,
+        }))
+      }
+
+      return []
     },
     staleTime: 5 * 60 * 1000,
     enabled: !!symbol,
+    retry: 1,
   })
 }

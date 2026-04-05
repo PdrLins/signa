@@ -92,21 +92,18 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         # Load brain knowledge block ONCE per scan (not per ticker)
         from app.services.knowledge_service import KnowledgeService
         _ks = KnowledgeService()
-        import asyncio as _aio
-        _knowledge_block = await _aio.to_thread(
-            lambda: _ks.get_knowledge_block([
-                "signa_is_short_term_only",
-                "score_ranges_and_actions",
-                "backtest_key_findings",
-                "gem_conditions",
-                "signal_blockers",
-                "market_regime_detection",
-                "grok_sentiment_calibration",
-                "supply_deficit_asymmetry",
-                "contrarian_sentiment_in_commodities",
-                "bubble_detection_framework",
-            ])
-        )
+        _knowledge_block = await _ks.get_knowledge_block([
+            "signa_is_short_term_only",
+            "score_ranges_and_actions",
+            "backtest_key_findings",
+            "gem_conditions",
+            "signal_blockers",
+            "market_regime_detection",
+            "grok_sentiment_calibration",
+            "supply_deficit_asymmetry",
+            "contrarian_sentiment_in_commodities",
+            "bubble_detection_framework",
+        ])
         if _knowledge_block:
             logger.info(f"Brain knowledge loaded: {len(_knowledge_block)} chars")
 
@@ -137,7 +134,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
 
                 async with semaphore:
                     price_df, fundamental_data = await asyncio.gather(
-                        market_scanner.get_price_history(ticker, "3mo"),
+                        market_scanner.get_price_history(ticker, "1y"),
                         market_scanner.get_fundamentals(ticker),
                     )
 
@@ -157,11 +154,31 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         pre_scores = [r for r in prescore_results if r is not None]
 
         # Sort by pre-score descending, pick top N for AI
+        # Ensure a balanced mix: at least 5 HIGH_RISK slots so Grok sentiment gets used
         pre_scores.sort(key=lambda x: x[1], reverse=True)
 
         if settings.ai_enabled and AI_CANDIDATE_LIMIT > 0:
-            ai_candidates = pre_scores[:AI_CANDIDATE_LIMIT]
-            skip_candidates = pre_scores[AI_CANDIDATE_LIMIT:]
+            safe_pool = [x for x in pre_scores if x[2] == "SAFE_INCOME"]
+            risk_pool = [x for x in pre_scores if x[2] == "HIGH_RISK"]
+
+            # Reserve at least 5 slots for HIGH_RISK (sentiment matters most there)
+            min_risk_slots = min(5, len(risk_pool))
+            safe_slots = AI_CANDIDATE_LIMIT - min_risk_slots
+
+            ai_safe = safe_pool[:safe_slots]
+            ai_risk = risk_pool[:min_risk_slots]
+
+            # If one bucket didn't fill its slots, give extras to the other
+            remaining = AI_CANDIDATE_LIMIT - len(ai_safe) - len(ai_risk)
+            if remaining > 0:
+                used = {(t[0]) for t in ai_safe + ai_risk}
+                extras = [x for x in pre_scores if x[0] not in used][:remaining]
+                ai_candidates = ai_safe + ai_risk + extras
+            else:
+                ai_candidates = ai_safe + ai_risk
+
+            ai_tickers = {x[0] for x in ai_candidates}
+            skip_candidates = [x for x in pre_scores if x[0] not in ai_tickers]
         else:
             # AI disabled — all candidates get tech-only scoring (zero AI cost)
             ai_candidates = []
@@ -206,7 +223,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         for ticker, quick_score, bucket, technical_data, fundamental_data in skip_candidates:
             from app.scanners.universe import get_exchange
             exchange = get_exchange(ticker)
-            action = score_to_action(quick_score)
+            action = score_to_action(quick_score, bucket)
             prev = previous_signals.get(ticker)
             status = determine_status(action, quick_score, prev)
 
@@ -234,7 +251,8 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 "grok_data": {},
                 "market_regime": market_regime,
                 "catalyst_type": None,
-                "account_recommendation": "RRSP" if bucket == "HIGH_RISK" else "TFSA",
+                "account_recommendation": _recommend_account(bucket, exchange),
+                "company_name": fundamental_data.get("company_name") if fundamental_data else None,
             }
             valid_signals.append(signal_data)
 
@@ -252,7 +270,13 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         # Phase 6: Send alerts (90-95%)
         _update_progress(90, "alerting", "Sending alerts...")
         for gem_signal in gems:
-            await send_gem_alert(gem_signal)
+            sent = await send_gem_alert(gem_signal)
+            queries.insert_alert({
+                "alert_type": "GEM",
+                "message": gem_signal.get("symbol", ""),
+                "status": "SENT" if sent else "FAILED",
+                "sent_at": datetime.now(timezone.utc).isoformat(),
+            })
 
         # Check watchlist for SELL/AVOID signals — alert immediately
         watchlist_items = queries.get_watchlist()
@@ -261,13 +285,32 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             sym = sig.get("symbol")
             action = sig.get("action")
             if sym in watchlist_symbols and action in ("SELL", "AVOID"):
-                await send_watchlist_sell_alert(sig)
+                sent = await send_watchlist_sell_alert(sig)
+                queries.insert_alert({
+                    "alert_type": "WATCHLIST_SELL",
+                    "message": sym,
+                    "status": "SENT" if sent else "FAILED",
+                    "sent_at": datetime.now(timezone.utc).isoformat(),
+                })
                 logger.info(f"Watchlist SELL alert sent for {sym}")
 
         if scan_type in ("PRE_MARKET", "AFTER_CLOSE") and valid_signals:
-            await send_scan_digest(scan_type, valid_signals)
+            sent = await send_scan_digest(scan_type, valid_signals)
+            queries.insert_alert({
+                "alert_type": "SCAN_DIGEST",
+                "message": f"{scan_type}: {len(valid_signals)} signals",
+                "status": "SENT" if sent else "FAILED",
+                "sent_at": datetime.now(timezone.utc).isoformat(),
+            })
 
-        # Phase 7: Monitor positions (95-100%)
+        # Phase 7: Virtual portfolio tracking
+        if valid_signals and watchlist_symbols:
+            from app.services.virtual_portfolio import process_virtual_trades
+            vt_result = process_virtual_trades(valid_signals, watchlist_symbols)
+            if vt_result["buys"] or vt_result["sells"]:
+                logger.info(f"Virtual portfolio: {vt_result['buys']} buys, {vt_result['sells']} sells")
+
+        # Phase 8: Monitor positions (95-100%)
         _update_progress(95, "monitoring", "Checking positions...")
         if valid_signals:
             from app.services.position_service import monitor_positions
@@ -334,13 +377,13 @@ async def _process_candidate(
         # Skip sentiment for SAFE_INCOME (only 10% weight — not worth the AI cost)
         if bucket == "SAFE_INCOME":
             price_df, fundamental_data = await asyncio.gather(
-                market_scanner.get_price_history(ticker, "3mo"),
+                market_scanner.get_price_history(ticker, "1y"),
                 market_scanner.get_fundamentals(ticker),
             )
             grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [], "summary": "Sentiment skipped for Safe Income (10% weight)"}
         else:
             price_df, fundamental_data, grok_data = await asyncio.gather(
-                market_scanner.get_price_history(ticker, "3mo"),
+                market_scanner.get_price_history(ticker, "1y"),
                 market_scanner.get_fundamentals(ticker),
                 ai_provider.analyze_sentiment(ticker),
             )
@@ -375,8 +418,19 @@ async def _process_candidate(
             grok_data, fundamental_data, macro_data, technical_data,
         )
 
-        # Determine action (blockers override score)
-        action = "AVOID" if is_blocked else score_to_action(score)
+        # Contrarian detection
+        from app.signals.contrarian import detect_contrarian
+        contrarian = detect_contrarian(technical_data, bucket)
+        signal_style = contrarian["signal_style"]
+
+        # Determine action — contrarian signals can generate BUY even at lower scores
+        if is_blocked:
+            action = "AVOID"
+        elif contrarian["is_contrarian"] and contrarian["contrarian_score"] >= 60:
+            # Contrarian BUY: lower threshold (score 55+) since these are reversal plays
+            action = "BUY" if score >= 55 else "HOLD"
+        else:
+            action = score_to_action(score, bucket)
 
         # Check GEM (blocked signals can't be GEMs)
         is_gem, gem_conditions = check_gem(score, grok_data, synthesis)
@@ -416,7 +470,10 @@ async def _process_candidate(
             "grok_data": grok_data,
             "market_regime": market_regime,
             "catalyst_type": breakdown.get("catalyst_type"),
-            "account_recommendation": "RRSP" if bucket == "HIGH_RISK" else "TFSA",
+            "account_recommendation": _recommend_account(bucket, exchange),
+            "signal_style": signal_style,
+            "contrarian_score": contrarian["contrarian_score"] if contrarian["is_contrarian"] else None,
+            "company_name": fundamental_data.get("company_name") if fundamental_data else None,
         }
 
         # Kelly position sizing (if actionable)
@@ -451,18 +508,48 @@ def _classify_bucket(ticker: str, screening: dict) -> str:
     if ticker in safe_etfs or any(ticker.endswith(s) for s in safe_suffixes):
         return "SAFE_INCOME"
 
+    # Energy / Commodities → HIGH_RISK (momentum plays, not dividend stocks)
+    energy_tickers = {"CNQ.TO", "SU.TO", "CVE.TO", "ARX.TO", "IMO.TO", "BTE.TO",
+                      "WCP.TO", "TVE.TO", "ERF.TO",  # TSX energy
+                      "XOM", "COP", "EOG", "SLB", "MPC", "OXY"}  # US energy
+
+    # Mining / Materials → HIGH_RISK
+    mining_tickers = {"ABX.TO", "FNV.TO", "WPM.TO", "NTR.TO", "K.TO",
+                      "TECK.TO", "FM.TO", "LUN.TO", "IVN.TO",
+                      "ABX", "FNV", "WPM", "NTR", "K", "NEM", "FCX"}
+
     # High volatility or small cap → HIGH_RISK
     high_risk_tickers = {"WEED.TO", "ACB.TO", "TLRY.TO", "CRON.TO", "OGI.TO",
                          "RIVN", "LCID", "PLTR", "RKLB", "IONQ", "SMCI",
                          "MSTR", "SOUN", "HIMS", "COIN", "SOFI", "AFRM",
                          "HOOD", "MRNA"}
+    high_risk_tickers |= energy_tickers | mining_tickers
 
     if ticker in high_risk_tickers:
         return "HIGH_RISK"
 
-    # Default based on day change
+    # Default based on day change or sector hint
     day_change = abs(screening.get("day_change", 0))
     if day_change > 0.03:
         return "HIGH_RISK"
 
+    # Check sector from screening data — energy/materials default to HIGH_RISK
+    sector = (screening.get("sector") or "").lower()
+    if sector in ("energy", "basic materials", "materials"):
+        return "HIGH_RISK"
+
     return "SAFE_INCOME"
+
+
+def _recommend_account(bucket: str, exchange: str) -> str:
+    """Recommend a Canadian account type based on bucket and asset type.
+
+    - SAFE_INCOME → TFSA (tax-free dividends & gains)
+    - HIGH_RISK → RRSP (shields active trading from CRA business income rules)
+    - CRYPTO → TAXABLE (crypto gains are always taxable in Canada)
+    """
+    if exchange == "CRYPTO":
+        return "TAXABLE"
+    if bucket == "HIGH_RISK":
+        return "RRSP"
+    return "TFSA"

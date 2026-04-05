@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import { LeftNav } from '@/components/layout/LeftNav'
 import { BottomNav } from '@/components/layout/BottomNav'
-import { Sidebar } from '@/components/layout/Sidebar'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -32,10 +31,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* Desktop: offset for floating nav */}
       <div className="hidden md:block md:ml-[72px]">
         <main className="max-w-[1200px] mx-auto px-6 lg:px-8 py-6">
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6">
-            <div className="min-w-0">{children}</div>
-            <Sidebar />
-          </div>
+          <div className="min-w-0">{children}</div>
         </main>
       </div>
       {/* Mobile: full width */}

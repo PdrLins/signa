@@ -93,7 +93,7 @@ def get_outcomes(days: int = 30, limit: int = 200) -> list[dict]:
 def get_suggestions(status: str | None = None, limit: int = 50) -> list[dict]:
     """Get brain suggestions."""
     client = get_client()
-    query = client.table("brain_suggestions").select("*").order("created_at", desc=True).limit(limit)
+    query = client.table("brain_suggestions").select("*").order("confidence", desc=True).order("created_at", desc=True).limit(limit)
     if status:
         query = query.eq("status", status)
     return query.execute().data or []

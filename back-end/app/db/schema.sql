@@ -1,5 +1,5 @@
 -- ============================================================
--- Signa Database Schema — Complete (16 tables)
+-- Signa Database Schema — Complete (18 tables)
 -- Idempotent — safe to re-run at any time.
 -- Run in Supabase SQL Editor.
 -- Last updated: 2026-04-04
@@ -118,6 +118,9 @@ CREATE TABLE IF NOT EXISTS signals (
     fundamental_data  JSONB DEFAULT '{}'::jsonb,
     macro_data        JSONB DEFAULT '{}'::jsonb,
     grok_data         JSONB DEFAULT '{}'::jsonb,
+    signal_style      VARCHAR,
+    contrarian_score  INT,
+    kelly_recommendation JSONB DEFAULT '{}'::jsonb,
     scan_id           UUID REFERENCES scans(id) ON DELETE SET NULL,
     created_at        TIMESTAMPTZ DEFAULT now(),
     updated_at        TIMESTAMPTZ DEFAULT now()
@@ -298,6 +301,46 @@ CREATE TABLE IF NOT EXISTS brain_suggestions (
 );
 CREATE INDEX IF NOT EXISTS idx_brain_suggestions_status ON brain_suggestions(status);
 CREATE INDEX IF NOT EXISTS idx_brain_suggestions_date ON brain_suggestions(analysis_date DESC);
+
+
+-- 17. VIRTUAL TRADES (brain accuracy tracking)
+CREATE TABLE IF NOT EXISTS virtual_trades (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    symbol          VARCHAR NOT NULL,
+    action          VARCHAR NOT NULL,
+    entry_price     DOUBLE PRECISION,
+    entry_date      TIMESTAMPTZ,
+    entry_score     INT,
+    exit_price      DOUBLE PRECISION,
+    exit_date       TIMESTAMPTZ,
+    exit_score      INT,
+    exit_action     VARCHAR,
+    pnl_pct         DOUBLE PRECISION,
+    pnl_amount      DOUBLE PRECISION,
+    is_win          BOOLEAN,
+    status          VARCHAR DEFAULT 'OPEN',
+    bucket          VARCHAR,
+    signal_style    VARCHAR,
+    source          VARCHAR DEFAULT 'watchlist',
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_virtual_trades_symbol ON virtual_trades(symbol);
+CREATE INDEX IF NOT EXISTS idx_virtual_trades_status ON virtual_trades(status);
+CREATE INDEX IF NOT EXISTS idx_virtual_trades_source ON virtual_trades(source);
+
+
+-- 18. AI USAGE (budget tracking)
+CREATE TABLE IF NOT EXISTS ai_usage (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider        VARCHAR NOT NULL,
+    call_type       VARCHAR NOT NULL,
+    ticker          VARCHAR,
+    estimated_cost  DOUBLE PRECISION DEFAULT 0,
+    success         BOOLEAN DEFAULT TRUE,
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_provider ON ai_usage(provider, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_date ON ai_usage(created_at DESC);
 
 
 -- ============================================================

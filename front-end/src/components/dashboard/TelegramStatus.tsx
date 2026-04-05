@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { client } from '@/lib/api'
 import { useI18nStore } from '@/store/i18nStore'
 import { useToast } from '@/hooks/useToast'
+import Link from 'next/link'
 import { Database, Send, Brain, Zap, Sparkles, Clock } from 'lucide-react'
 
 interface Integration {
@@ -86,6 +87,7 @@ export function TelegramStatus() {
   const entries = Object.entries(data.integrations)
 
   return (
+    <Link href="/integrations">
     <Card>
       <div className="flex items-center justify-between mb-3">
         <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
@@ -140,5 +142,6 @@ export function TelegramStatus() {
         })}
       </div>
     </Card>
+    </Link>
   )
 }

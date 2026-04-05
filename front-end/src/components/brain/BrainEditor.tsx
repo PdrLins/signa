@@ -72,9 +72,17 @@ function RuleCard({ rule, onEdit }: { rule: Record<string, unknown>; onEdit: () 
       )}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {Number(rule.weight_safe) > 0 && <span className="text-[10px]" style={{ color: theme.colors.up }}>Safe: {String(rule.weight_safe)}</span>}
-          {Number(rule.weight_risk) > 0 && <span className="text-[10px]" style={{ color: theme.colors.primary }}>Risk: {String(rule.weight_risk)}</span>}
-          {Boolean(rule.source_name) && <span className="text-[10px]" style={{ color: theme.colors.textHint }}>{String(rule.source_name)}</span>}
+          {Number(rule.weight_safe) > 0 && <span className="text-[10px]" style={{ color: theme.colors.up }}>{t.brain.safeWeight}: {String(rule.weight_safe)}</span>}
+          {Number(rule.weight_risk) > 0 && <span className="text-[10px]" style={{ color: theme.colors.primary }}>{t.brain.riskWeight}: {String(rule.weight_risk)}</span>}
+          {Boolean(rule.source_name) && (
+            rule.source_url ? (
+              <a href={String(rule.source_url)} target="_blank" rel="noopener noreferrer" className="text-[10px] underline" style={{ color: theme.colors.primary }} onClick={(e) => e.stopPropagation()}>
+                {String(rule.source_name)}
+              </a>
+            ) : (
+              <span className="text-[10px]" style={{ color: theme.colors.textHint }}>{String(rule.source_name)}</span>
+            )
+          )}
         </div>
         <Button variant="secondary" onClick={onEdit}>{t.brain.edit}</Button>
       </div>
@@ -236,7 +244,13 @@ function KnowledgeCard({ entry, onEdit }: { entry: Record<string, unknown>; onEd
         </button>
       )}
       <div className="flex items-center justify-between">
-        <span className="text-[10px]" style={{ color: theme.colors.textHint }}>{entry.source_name as string}</span>
+        {entry.source_url ? (
+          <a href={String(entry.source_url)} target="_blank" rel="noopener noreferrer" className="text-[10px] underline" style={{ color: theme.colors.primary }} onClick={(e) => e.stopPropagation()}>
+            {String(entry.source_name)}
+          </a>
+        ) : (
+          <span className="text-[10px]" style={{ color: theme.colors.textHint }}>{String(entry.source_name)}</span>
+        )}
         <Button variant="secondary" onClick={onEdit}>{t.brain.edit}</Button>
       </div>
     </div>
@@ -307,6 +321,7 @@ function KnowledgeEditForm({ entry, onSave, onCancel }: {
 
 function AuditEntry({ event }: { event: Record<string, unknown> }) {
   const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
   const type = event.event_type as string
   const color = type.includes('GRANTED') ? theme.colors.up
     : type.includes('DENIED') || type.includes('LOCKED') ? theme.colors.down
@@ -324,7 +339,7 @@ function AuditEntry({ event }: { event: Record<string, unknown> }) {
       {Boolean(meta.rule_name) && <p className="text-xs" style={{ color: theme.colors.text }}>{String(meta.rule_name)}</p>}
       {Boolean(meta.key_concept) && <p className="text-xs" style={{ color: theme.colors.text }}>{String(meta.key_concept)}</p>}
       {Array.isArray(meta.changed_fields) && (
-        <p className="text-[10px]" style={{ color: theme.colors.textSub }}>Changed: {(meta.changed_fields as string[]).join(', ')}</p>
+        <p className="text-[10px]" style={{ color: theme.colors.textSub }}>{t.brain.changed}: {(meta.changed_fields as string[]).join(', ')}</p>
       )}
       {(() => {
         const before = meta.before as Record<string, unknown> | undefined
@@ -438,7 +453,15 @@ export function BrainEditor() {
       </div>
 
       {/* Workflow tab */}
-      {tab === 'workflow' && <BrainWorkflow />}
+      {tab === 'workflow' && (
+        <BrainWorkflow
+          unlocked
+          onViewRules={(ruleType) => {
+            setRuleFilter(ruleType)
+            setTab('rules')
+          }}
+        />
+      )}
 
       {/* Rules tab */}
       {tab === 'rules' && (
@@ -555,7 +578,7 @@ export function BrainEditor() {
 
                   {Boolean(s.expected_impact) && (
                     <p className="text-[10px]" style={{ color: theme.colors.primary }}>
-                      Expected: {String(s.expected_impact)}
+                      {t.brain.expected}: {String(s.expected_impact)}
                     </p>
                   )}
 

@@ -44,7 +44,7 @@ class Settings(BaseSettings):
 
     # --- Grok ---
     grok_base_url: str = "https://api.x.ai/v1"
-    grok_model: str = "grok-2-latest"
+    grok_model: str = "grok-3-mini"
 
     # --- Gemini ---
     gemini_api_key: str = ""
@@ -56,8 +56,10 @@ class Settings(BaseSettings):
     sentiment_providers: list[str] = ["grok", "gemini"]
 
     # --- Scoring Thresholds ---
-    score_buy: int = 75
-    score_hold: int = 50
+    score_buy: int = 65           # Default BUY threshold (configurable in Settings)
+    score_buy_safe: int = 62      # Safe Income BUY threshold
+    score_buy_risk: int = 65      # High Risk BUY threshold
+    score_hold: int = 55          # HOLD threshold (below = AVOID)
     gem_min_score: int = 85
     gem_catalyst_days: int = 30
     gem_min_rr_ratio: float = 3.0
@@ -102,6 +104,13 @@ class Settings(BaseSettings):
     brain_token_expire_minutes: int = 15
     brain_max_challenges_per_window: int = 3
     brain_max_otp_attempts: int = 3
+
+    # --- AI Budget Limits ---
+    budget_daily_limit_usd: float = 1.00     # Max spend per provider per day
+    budget_monthly_limit_usd: float = 5.00   # Default monthly cap per provider
+    budget_claude_monthly_usd: float = 5.00  # Claude monthly cap
+    budget_grok_monthly_usd: float = 5.00    # Grok monthly cap
+    budget_gemini_monthly_usd: float = 0.00  # Gemini = free tier (0 = unlimited)
 
     # --- Language ---
     language: str = "en"  # "en" or "pt"

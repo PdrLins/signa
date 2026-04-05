@@ -6,14 +6,16 @@ import { useQuery } from '@tanstack/react-query'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useToast } from '@/hooks/useToast'
-import { useAddTicker } from '@/hooks/useWatchlist'
-import { tickersApi, signalsApi } from '@/lib/api'
+import { useWatchlist, useAddTicker, useRemoveTicker } from '@/hooks/useWatchlist'
+import { tickersApi, signalsApi, client } from '@/lib/api'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { ScoreRing } from '@/components/ui/ScoreRing'
 import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { ArrowLeft, Star, TrendingUp, TrendingDown } from 'lucide-react'
+import { PriceChart } from '@/components/charts/PriceChart'
+import { Sidebar } from '@/components/layout/Sidebar'
+import { ArrowLeft, Star, TrendingUp, TrendingDown, Brain, ShieldAlert, BookOpen } from 'lucide-react'
 
 function formatPrice(v: number | null | undefined): string {
   if (v === null || v === undefined) return '--'
@@ -26,7 +28,10 @@ export default function TickerDetailPage() {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const toast = useToast()
+  const { data: watchlist } = useWatchlist()
   const addTicker = useAddTicker()
+  const removeTicker = useRemoveTicker()
+  const isWatchlisted = watchlist?.some((w) => w.symbol === ticker) ?? false
 
   const { data: detail, isLoading: loadingDetail } = useQuery({
     queryKey: ['ticker', ticker],
@@ -43,6 +48,20 @@ export default function TickerDetailPage() {
     enabled: !!ticker,
   })
 
+  const { data: brainInsights } = useQuery({
+    queryKey: ['brain', 'insights', ticker],
+    queryFn: async () => {
+      const res = await client.get(`/brain/insights/${ticker}`)
+      return res.data as {
+        summary: string
+        key_points: Array<{ type: string; text: string }>
+        knowledge: Array<{ concept: string; explanation: string }>
+      }
+    },
+    enabled: !!ticker,
+    staleTime: 60_000,
+  })
+
   const latest = signalHistory?.[0]
   const fundamentals = detail?.fundamentals as Record<string, unknown> | undefined
   const currentPrice = detail?.current_price as number | undefined
@@ -51,21 +70,21 @@ export default function TickerDetailPage() {
   const isHighRisk = latest?.bucket === 'HIGH_RISK'
   const weights = isHighRisk
     ? [
-        { label: 'Sentiment (X/Twitter)', pct: 35, color: theme.colors.primary },
-        { label: 'Catalyst', pct: 30, color: theme.colors.up },
-        { label: 'Technical momentum', pct: 25, color: theme.colors.warning },
-        { label: 'Fundamentals', pct: 10, color: theme.colors.textSub },
+        { label: t.signal.sentimentXTwitter, pct: 35, color: theme.colors.primary },
+        { label: t.signal.catalyst, pct: 30, color: theme.colors.up },
+        { label: t.signal.technicalMomentum, pct: 25, color: theme.colors.warning },
+        { label: t.signal.fundamentals, pct: 10, color: theme.colors.textSub },
       ]
     : [
-        { label: 'Dividend reliability', pct: 35, color: theme.colors.up },
-        { label: 'Fundamental health', pct: 30, color: theme.colors.primary },
-        { label: 'Macro conditions', pct: 25, color: theme.colors.warning },
-        { label: 'Sentiment', pct: 10, color: theme.colors.textSub },
+        { label: t.signal.dividendReliability, pct: 35, color: theme.colors.up },
+        { label: t.signal.fundamentalHealth, pct: 30, color: theme.colors.primary },
+        { label: t.signal.macroConditions, pct: 25, color: theme.colors.warning },
+        { label: t.signal.sentiment, pct: 10, color: theme.colors.textSub },
       ]
 
   if (loadingDetail) {
     return (
-      <div className="space-y-4 max-w-[720px]">
+      <div className="space-y-4">
         <Skeleton width={200} height={28} />
         <Skeleton width="100%" height={200} borderRadius={14} />
         <Skeleton width="100%" height={150} borderRadius={14} />
@@ -74,7 +93,7 @@ export default function TickerDetailPage() {
   }
 
   return (
-    <div className="space-y-4 max-w-[720px]">
+    <div className="space-y-4">
       {/* Back + Header */}
       <div className="flex items-center gap-3">
         <Link href="/signals" className="p-1.5 rounded-lg transition-opacity hover:opacity-70" style={{ color: theme.colors.textSub }}>
@@ -89,39 +108,113 @@ export default function TickerDetailPage() {
               </span>
             )}
             <button
-              onClick={() => addTicker.mutate(ticker, {
-                onSuccess: () => toast.show(`${ticker} added to watchlist`, 'success'),
-                onError: (err) => toast.show(err?.message || 'Failed', 'error'),
-              })}
+              onClick={() => {
+                if (isWatchlisted) {
+                  removeTicker.mutate(ticker, {
+                    onSuccess: () => toast.show(`${ticker} ${t.signal.removedFromWatchlist}`, 'info'),
+                    onError: (err) => toast.show(err?.message || t.signal.failed, 'error'),
+                  })
+                } else {
+                  addTicker.mutate(ticker, {
+                    onSuccess: () => toast.show(`${ticker} ${t.signal.addedToWatchlist}`, 'success'),
+                    onError: (err) => toast.show(err?.message || t.signal.failed, 'error'),
+                  })
+                }
+              }}
+              disabled={addTicker.isPending || removeTicker.isPending}
               className="p-1 rounded transition-opacity hover:opacity-70"
-              title={t.signal.addToWatchlist}
+              title={isWatchlisted ? t.signal.removeFromWatchlist : t.signal.addToWatchlist}
             >
-              <Star size={18} style={{ color: theme.colors.textHint }} />
+              <Star
+                size={18}
+                fill={isWatchlisted ? theme.colors.warning : 'none'}
+                style={{ color: isWatchlisted ? theme.colors.warning : theme.colors.textHint }}
+              />
             </button>
           </div>
-          <p className="text-sm" style={{ color: theme.colors.textSub }}>
-            {detail?.exchange as string ?? ''} &middot; {detail?.asset_type as string ?? 'Equity'}
+          {detail?.company_name && (
+            <p className="text-[13px]" style={{ color: theme.colors.text }}>{detail.company_name as string}</p>
+          )}
+          <p className="text-[11px]" style={{ color: theme.colors.textSub }}>
+            {detail?.exchange as string ?? ''} &middot; {(detail?.asset_type as string) === 'CRYPTO' ? t.signal.crypto : t.signal.equity}
           </p>
         </div>
         <div className="text-right">
-          <p className="text-2xl font-bold tabular-nums" style={{ color: theme.colors.text }}>
-            {formatPrice(currentPrice ?? null)}
-          </p>
+          {(() => {
+            const fund = fundamentals as Record<string, unknown> | undefined
+            const regPrice = fund?.regular_market_price as number | undefined
+            const regChange = fund?.regular_market_change as number | undefined
+            const regChangePct = fund?.regular_market_change_pct as number | undefined
+            const postPrice = fund?.post_market_price as number | undefined
+            const postChange = fund?.post_market_change as number | undefined
+            const postChangePct = fund?.post_market_change_pct as number | undefined
+            const prePrice = fund?.pre_market_price as number | undefined
+            const preChange = fund?.pre_market_change as number | undefined
+            const preChangePct = fund?.pre_market_change_pct as number | undefined
+
+            const displayPrice = regPrice ?? currentPrice
+            const isUp = (regChange ?? 0) >= 0
+
+            return (
+              <>
+                <p className="text-2xl font-bold tabular-nums" style={{ color: theme.colors.text }}>
+                  {formatPrice(displayPrice ?? null)}
+                </p>
+                {regChange != null && regChangePct != null && (
+                  <p className="text-[12px] font-semibold tabular-nums" style={{ color: isUp ? theme.colors.up : theme.colors.down }}>
+                    {regChange >= 0 ? '+' : ''}{regChange.toFixed(2)} ({regChange >= 0 ? '+' : ''}{regChangePct.toFixed(2)}%)
+                  </p>
+                )}
+                {postPrice != null && postChange != null && postChangePct != null && (
+                  <div className="mt-1 pt-1" style={{ borderTop: `1px solid ${theme.colors.border}20` }}>
+                    <p className="text-[10px]" style={{ color: theme.colors.textHint }}>{t.signal.afterHours}</p>
+                    <p className="text-[12px] font-semibold tabular-nums" style={{ color: postChange >= 0 ? theme.colors.up : theme.colors.down }}>
+                      {formatPrice(postPrice)} ({postChange >= 0 ? '+' : ''}{postChangePct.toFixed(2)}%)
+                    </p>
+                  </div>
+                )}
+                {prePrice != null && preChange != null && preChangePct != null && !postPrice && (
+                  <div className="mt-1 pt-1" style={{ borderTop: `1px solid ${theme.colors.border}20` }}>
+                    <p className="text-[10px]" style={{ color: theme.colors.textHint }}>{t.signal.preMarket}</p>
+                    <p className="text-[12px] font-semibold tabular-nums" style={{ color: preChange >= 0 ? theme.colors.up : theme.colors.down }}>
+                      {formatPrice(prePrice)} ({preChange >= 0 ? '+' : ''}{preChangePct.toFixed(2)}%)
+                    </p>
+                  </div>
+                )}
+              </>
+            )
+          })()}
         </div>
       </div>
+
+      {/* Content + Sidebar grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
+        <div className="space-y-4">
+
+      {/* Price Chart */}
+      <Card>
+        <PriceChart symbol={ticker} />
+      </Card>
 
       {/* Latest Signal */}
       {latest && (
         <Card>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>Latest Signal</p>
-            <div className="flex items-center gap-1.5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>{t.signal.latestSignal}</p>
+            <div className="flex items-center gap-1.5 flex-wrap">
               <Badge variant={latest.action === 'BUY' ? 'buy' : latest.action === 'SELL' ? 'sell' : latest.action === 'AVOID' ? 'avoid' : 'hold'}>
                 {latest.action}
               </Badge>
+              {latest.signal_style === 'CONTRARIAN' && <Badge variant="upgraded">CONTRARIAN</Badge>}
+              {latest.signal_style === 'MOMENTUM' && <Badge variant="confirmed">MOMENTUM</Badge>}
               <Badge variant={latest.status === 'CONFIRMED' ? 'confirmed' : latest.status === 'WEAKENING' ? 'weakening' : latest.status === 'UPGRADED' ? 'upgraded' : 'cancelled'}>
                 {latest.status}
               </Badge>
+              {latest.account_recommendation && (
+                <Badge variant={latest.account_recommendation === 'TFSA' ? 'safe' : 'risk'}>
+                  {latest.account_recommendation}
+                </Badge>
+              )}
             </div>
           </div>
 
@@ -143,10 +236,30 @@ export default function TickerDetailPage() {
             </div>
           </div>
 
+          {/* Confidence + Regime */}
+          {(latest.confidence > 0 || latest.market_regime) && (
+            <div className="flex items-center gap-4 mb-4">
+              {latest.confidence > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.confidence}</p>
+                  <p className="text-sm font-semibold" style={{ color: theme.colors.primary }}>{latest.confidence}%</p>
+                </div>
+              )}
+              {latest.market_regime && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>Regime</p>
+                  <Badge variant={latest.market_regime === 'TRENDING' ? 'confirmed' : latest.market_regime === 'VOLATILE' ? 'hold' : 'cancelled'}>
+                    {latest.market_regime}
+                  </Badge>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Reasoning */}
           {latest.reasoning && (
             <div className="mb-3">
-              <p className="text-[10px] uppercase tracking-wide mb-1" style={{ color: theme.colors.textHint }}>Why this signal</p>
+              <p className="text-[10px] uppercase tracking-wide mb-1" style={{ color: theme.colors.textHint }}>{t.signal.whyThisSignal}</p>
               <p className="text-sm leading-relaxed" style={{ color: theme.colors.textSub }}>{latest.reasoning}</p>
             </div>
           )}
@@ -154,7 +267,7 @@ export default function TickerDetailPage() {
           {/* Score breakdown */}
           <div>
             <p className="text-[10px] uppercase tracking-wide mb-2" style={{ color: theme.colors.textHint }}>
-              Score breakdown ({isHighRisk ? 'High Risk' : 'Safe Income'} model)
+              {t.signal.scoreBreakdown} ({isHighRisk ? t.signal.highRiskModel : t.signal.safeIncomeModel})
             </p>
             <div className="space-y-1.5">
               {weights.map((w) => (
@@ -172,20 +285,62 @@ export default function TickerDetailPage() {
       {/* Fundamentals */}
       {fundamentals && Object.keys(fundamentals).length > 0 && (
         <Card>
-          <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>Fundamentals</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>{t.signal.fundamentals}</p>
+
+          {/* Sector & Industry */}
+          {(fundamentals.sector || fundamentals.industry) && (
+            <p className="text-[11px] mb-3" style={{ color: theme.colors.textSub }}>
+              {fundamentals.sector as string}{fundamentals.industry ? ` · ${fundamentals.industry as string}` : ''}
+            </p>
+          )}
+
+          {/* 52-week range */}
+          {fundamentals['52w_low'] != null && fundamentals['52w_high'] != null && currentPrice && (
+            <div className="mb-4">
+              <p className="text-[10px] uppercase tracking-wide mb-1.5" style={{ color: theme.colors.textHint }}>{t.signal.fiftyTwoWeek}</p>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] tabular-nums" style={{ color: theme.colors.down }}>${Number(fundamentals['52w_low']).toFixed(0)}</span>
+                <div className="flex-1 h-1.5 rounded-full relative" style={{ backgroundColor: theme.colors.surfaceAlt }}>
+                  <div
+                    className="absolute h-full rounded-full"
+                    style={{
+                      backgroundColor: theme.colors.primary,
+                      left: '0%',
+                      width: `${Math.min(100, Math.max(0, ((currentPrice - Number(fundamentals['52w_low'])) / (Number(fundamentals['52w_high']) - Number(fundamentals['52w_low']))) * 100))}%`,
+                    }}
+                  />
+                  <div
+                    className="absolute w-2.5 h-2.5 rounded-full -top-0.5"
+                    style={{
+                      backgroundColor: theme.colors.primary,
+                      border: `2px solid ${theme.colors.surface}`,
+                      left: `${Math.min(98, Math.max(2, ((currentPrice - Number(fundamentals['52w_low'])) / (Number(fundamentals['52w_high']) - Number(fundamentals['52w_low']))) * 100))}%`,
+                      transform: 'translateX(-50%)',
+                    }}
+                  />
+                </div>
+                <span className="text-[10px] tabular-nums" style={{ color: theme.colors.up }}>${Number(fundamentals['52w_high']).toFixed(0)}</span>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[
-              { label: 'P/E Ratio', key: 'pe_ratio' },
-              { label: 'EPS Growth', key: 'eps_growth', suffix: '%' },
-              { label: 'Dividend Yield', key: 'dividend_yield', suffix: '%' },
-              { label: 'Market Cap', key: 'market_cap' },
-              { label: 'Profit Margin', key: 'profit_margin', suffix: '%' },
-              { label: 'Debt/Equity', key: 'debt_to_equity' },
+              { label: t.signal.peRatio, key: 'pe_ratio' },
+              { label: t.signal.forwardPE, key: 'forward_pe' },
+              { label: t.signal.epsGrowth, key: 'eps_growth', suffix: '%' },
+              { label: t.signal.dividendYield, key: 'dividend_yield', suffix: '%' },
+              { label: t.signal.payoutRatio, key: 'payout_ratio', suffix: '%' },
+              { label: t.signal.marketCap, key: 'market_cap' },
+              { label: t.signal.profitMargin, key: 'profit_margin', suffix: '%' },
+              { label: t.signal.revenueGrowth, key: 'revenue_growth', suffix: '%' },
+              { label: t.signal.debtEquity, key: 'debt_to_equity' },
+              { label: t.signal.betaLabel, key: 'beta' },
             ].map(({ label, key, suffix }) => {
               const val = fundamentals[key]
               if (val === null || val === undefined) return null
               const display = typeof val === 'number'
-                ? suffix ? `${val.toFixed(1)}${suffix}` : val >= 1e9 ? `$${(val / 1e9).toFixed(1)}B` : val >= 1e6 ? `$${(val / 1e6).toFixed(0)}M` : val.toFixed(2)
+                ? suffix ? `${(val * (key === 'payout_ratio' || key === 'profit_margin' || key === 'revenue_growth' ? 100 : 1)).toFixed(1)}${suffix}` : val >= 1e9 ? `$${(val / 1e9).toFixed(1)}B` : val >= 1e6 ? `$${(val / 1e6).toFixed(0)}M` : val.toFixed(2)
                 : String(val)
               return (
                 <div key={key}>
@@ -198,17 +353,86 @@ export default function TickerDetailPage() {
         </Card>
       )}
 
+      {/* Brain Insights */}
+      {brainInsights && (
+        <Card>
+          <div className="flex items-center gap-2 mb-3">
+            <Brain size={16} style={{ color: theme.colors.primary }} />
+            <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+              {t.signal.brainSays}
+            </p>
+          </div>
+
+          {/* Summary */}
+          <div
+            className="rounded-xl px-4 py-3 mb-3"
+            style={{ backgroundColor: theme.colors.primary + '08', border: `1px solid ${theme.colors.primary}15` }}
+          >
+            <p className="text-[13px] leading-relaxed" style={{ color: theme.colors.text }}>
+              {brainInsights.summary}
+            </p>
+          </div>
+
+          {/* Key Points — specific to this ticker */}
+          {brainInsights.key_points?.length > 0 && (
+            <div className="space-y-2 mb-3">
+              {brainInsights.key_points.map((point, i) => {
+                const color = point.type === 'positive' ? theme.colors.up
+                  : point.type === 'warning' ? theme.colors.down
+                  : theme.colors.primary
+                const icon = point.type === 'positive' ? '✓'
+                  : point.type === 'warning' ? '!'
+                  : '→'
+                return (
+                  <div key={i} className="flex items-start gap-2.5">
+                    <span
+                      className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
+                      style={{ backgroundColor: color + '15', color }}
+                    >
+                      {icon}
+                    </span>
+                    <p className="text-[12px] leading-relaxed pt-0.5" style={{ color: theme.colors.text }}>
+                      {point.text}
+                    </p>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Knowledge */}
+          {brainInsights.knowledge?.length > 0 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wide mb-2" style={{ color: theme.colors.textHint }}>
+                {t.signal.brainKnowledge}
+              </p>
+              <div className="space-y-1.5">
+                {brainInsights.knowledge.map((k) => (
+                  <div key={k.concept} className="flex items-start gap-2">
+                    <BookOpen size={12} className="shrink-0 mt-0.5" style={{ color: theme.colors.primary }} />
+                    <div>
+                      <span className="text-[11px] font-semibold" style={{ color: theme.colors.text }}>{k.concept}</span>
+                      <p className="text-[10px] leading-relaxed" style={{ color: theme.colors.textSub }}>{k.explanation}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* Signal History */}
       {signalHistory && signalHistory.length > 1 && (
         <Card>
-          <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>Signal History</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>{t.signal.signalHistory}</p>
           <div className="space-y-2">
             {signalHistory.map((sig) => (
               <div key={sig.id} className="flex items-center justify-between py-1.5" style={{ borderBottom: `1px solid ${theme.colors.border}` }}>
                 <div className="flex items-center gap-2">
                   {sig.action === 'BUY' ? <TrendingUp size={14} style={{ color: theme.colors.up }} /> : <TrendingDown size={14} style={{ color: theme.colors.down }} />}
                   <span className="text-xs font-medium" style={{ color: theme.colors.text }}>{sig.action}</span>
-                  <span className="text-[11px]" style={{ color: theme.colors.textSub }}>Score {sig.score}</span>
+                  <span className="text-[11px]" style={{ color: theme.colors.textSub }}>{t.signal.score} {sig.score}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs tabular-nums" style={{ color: theme.colors.textSub }}>{formatPrice(sig.price_at_signal)}</span>
@@ -221,6 +445,11 @@ export default function TickerDetailPage() {
           </div>
         </Card>
       )}
+        </div>
+        <div className="sticky top-6 hidden lg:block">
+          <Sidebar />
+        </div>
+      </div>
     </div>
   )
 }

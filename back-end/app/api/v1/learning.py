@@ -130,7 +130,7 @@ async def approve_suggestion(
     client.table("brain_suggestions").update({
         "status": "APPROVED",
         "reviewed_at": datetime.now(timezone.utc).isoformat(),
-        "reviewed_by": user.get("user_id"),
+        "reviewed_by": user.get("user_id") if user.get("user_id") != "dev-user-id" else None,
     }).eq("id", suggestion_id).execute()
 
     insert_audit_log(
@@ -156,7 +156,7 @@ async def reject_suggestion(
     client.table("brain_suggestions").update({
         "status": "REJECTED",
         "reviewed_at": datetime.now(timezone.utc).isoformat(),
-        "reviewed_by": user.get("user_id"),
+        "reviewed_by": user.get("user_id") if user.get("user_id") != "dev-user-id" else None,
         "rejection_reason": body.reason or "",
     }).eq("id", suggestion_id).execute()
 

@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 
 from app.core.dependencies import get_current_user
+from app.db import queries
 from app.models.stats import DailyStatsResponse
 from app.services import stats_service
 
@@ -13,3 +14,40 @@ router = APIRouter(prefix="/stats", tags=["Stats"])
 async def get_daily_stats(user: dict = Depends(get_current_user)):
     """Get aggregated daily statistics."""
     return stats_service.get_daily_stats()
+
+
+@router.get("/recent-alerts")
+async def get_recent_alerts(user: dict = Depends(get_current_user)):
+    """Get the most recent Telegram alerts."""
+    return queries.get_recent_alerts(limit=5)
+
+
+@router.get("/virtual-portfolio")
+async def get_virtual_portfolio(user: dict = Depends(get_current_user)):
+    """Get virtual portfolio performance — brain accuracy tracking."""
+    from app.services.virtual_portfolio import get_virtual_summary
+    return get_virtual_summary()
+
+
+@router.get("/positions-summary")
+async def get_positions_summary(user: dict = Depends(get_current_user)):
+    """Get a summary of open positions for the dashboard."""
+    positions = queries.get_open_positions()
+    if not positions:
+        return {"count": 0, "positions": [], "total_pnl_pct": 0}
+
+    return {
+        "count": len(positions),
+        "positions": [
+            {
+                "symbol": p.get("symbol"),
+                "entry_price": p.get("entry_price"),
+                "shares": p.get("shares"),
+                "bucket": p.get("bucket"),
+                "account_type": p.get("account_type"),
+                "last_signal_score": p.get("last_signal_score"),
+                "last_signal_status": p.get("last_signal_status"),
+            }
+            for p in positions[:5]
+        ],
+    }

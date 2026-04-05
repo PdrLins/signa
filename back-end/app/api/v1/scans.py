@@ -74,6 +74,19 @@ async def get_scans_today(user: dict = Depends(get_current_user)):
 
         existing = scan_by_type.get(scan_type)
         if existing:
+            # Compute duration if both timestamps exist
+            duration = None
+            started = existing.get("started_at")
+            completed = existing.get("completed_at")
+            if started and completed:
+                try:
+                    from datetime import datetime as _dt
+                    s = _dt.fromisoformat(started.replace("Z", "+00:00")) if isinstance(started, str) else started
+                    c = _dt.fromisoformat(completed.replace("Z", "+00:00")) if isinstance(completed, str) else completed
+                    duration = int((c - s).total_seconds())
+                except Exception:
+                    pass
+
             result.append(ScanTodayRecord(
                 id=existing.get("id"),
                 scan_type=scan_type,
@@ -83,7 +96,9 @@ async def get_scans_today(user: dict = Depends(get_current_user)):
                 tickers_scanned=existing.get("tickers_scanned", 0),
                 signals_found=existing.get("signals_found", 0),
                 gems_found=existing.get("gems_found", 0),
+                started_at=existing.get("started_at"),
                 completed_at=existing.get("completed_at"),
+                duration_seconds=duration,
             ))
         else:
             result.append(ScanTodayRecord(
@@ -103,7 +118,16 @@ async def trigger_scan(
     """Manually trigger a scan. Runs in the background — returns immediately.
 
     Use GET /scans/{scan_id}/progress to poll for real-time progress.
+    Blocked on weekends — markets are closed, data would be stale.
     """
+    from zoneinfo import ZoneInfo
+    et_now = datetime.now(ZoneInfo("America/New_York"))
+    if et_now.weekday() >= 5:  # Saturday=5, Sunday=6
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Markets are closed on weekends — scans are skipped to save AI credits.",
+        )
+
     # Create the scan record first so we can return the ID
     scan = queries.insert_scan({
         "scan_type": scan_type,

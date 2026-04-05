@@ -11,9 +11,10 @@ interface SignalListProps {
   isError: boolean
   error?: Error | null
   emptyMessage?: string
+  topPickId?: string
 }
 
-export function SignalList({ signals, isLoading, isError, error, emptyMessage }: SignalListProps) {
+export function SignalList({ signals, isLoading, isError, error, emptyMessage, topPickId }: SignalListProps) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
 
@@ -52,7 +53,7 @@ export function SignalList({ signals, isLoading, isError, error, emptyMessage }:
   return (
     <div className="space-y-4">
       {signals.map((signal) => (
-        <SignalCard key={signal.id} signal={signal} />
+        <SignalCard key={signal.id} signal={signal} isTopPick={signal.id === topPickId} />
       ))}
     </div>
   )

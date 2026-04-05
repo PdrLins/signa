@@ -31,6 +31,11 @@ interface AIProviderConfig {
     ai_candidate_limit: number
     max_candidates: number
   }
+  thresholds?: {
+    score_buy_safe: number
+    score_buy_risk: number
+    score_hold: number
+  }
 }
 
 const PROVIDER_META: Record<string, { name: string; icon: typeof Brain; color: string }> = {
@@ -199,6 +204,9 @@ export default function SettingsPage() {
   const [aiEnabled, setAiEnabled] = useState(true)
   const [aiLimit, setAiLimit] = useState(15)
   const [maxCandidates, setMaxCandidates] = useState(50)
+  const [scoreBuySafe, setScoreBuySafe] = useState(62)
+  const [scoreBuyRisk, setScoreBuyRisk] = useState(65)
+  const [scoreHold, setScoreHold] = useState(55)
   const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
@@ -209,6 +217,11 @@ export default function SettingsPage() {
         setAiEnabled(aiConfig.scanning.ai_enabled)
         setAiLimit(aiConfig.scanning.ai_candidate_limit)
         setMaxCandidates(aiConfig.scanning.max_candidates)
+      }
+      if (aiConfig.thresholds) {
+        setScoreBuySafe(aiConfig.thresholds.score_buy_safe)
+        setScoreBuyRisk(aiConfig.thresholds.score_buy_risk)
+        setScoreHold(aiConfig.thresholds.score_hold)
       }
     }
   }, [aiConfig])
@@ -221,13 +234,16 @@ export default function SettingsPage() {
         ai_enabled: aiEnabled,
         ai_candidate_limit: aiLimit,
         max_candidates: maxCandidates,
+        score_buy_safe: scoreBuySafe,
+        score_buy_risk: scoreBuyRisk,
+        score_hold: scoreHold,
       })
       toast.show(t.settings.configSaved, 'success')
       setDirty(false)
     } catch {
       toast.show(t.settings.configSaveFailed, 'error')
     }
-  }, [synthProviders, sentProviders, aiEnabled, aiLimit, maxCandidates, toast, t])
+  }, [synthProviders, sentProviders, aiEnabled, aiLimit, maxCandidates, scoreBuySafe, scoreBuyRisk, scoreHold, toast, t])
 
   const handleLogout = () => {
     logout()
@@ -235,10 +251,16 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-[600px]">
-      <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>
-        {t.settings.title}
-      </h1>
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>{t.settings.title}</h1>
+          <p className="text-sm mt-1" style={{ color: theme.colors.textSub }}>{t.settings.subtitle}</p>
+        </div>
+        {dirty && (
+          <Button onClick={handleSave}>{t.settings.save}</Button>
+        )}
+      </div>
 
       {/* AI Providers */}
       <Card>
@@ -246,9 +268,6 @@ export default function SettingsPage() {
           <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
             {t.settings.aiProviders}
           </p>
-          {dirty && (
-            <Button onClick={handleSave}>{t.settings.save}</Button>
-          )}
         </div>
 
         {aiLoading ? (
@@ -280,7 +299,6 @@ export default function SettingsPage() {
           <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
             {t.settings.scanning}
           </p>
-          {dirty && <Button onClick={handleSave}>{t.settings.save}</Button>}
         </div>
         <div className="space-y-4">
           {/* AI toggle */}
@@ -349,6 +367,82 @@ export default function SettingsPage() {
           <p className="text-[10px]" style={{ color: theme.colors.textHint }}>
             {t.settings.preFilterDesc.replace('{max}', String(maxCandidates)).replace('{aiDesc}', aiEnabled ? t.settings.aiOnDesc.replace('{limit}', String(aiLimit)) : t.settings.aiOffDesc)}
           </p>
+        </div>
+      </Card>
+
+      {/* Score Thresholds */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+            {t.settings.signalThresholds}
+          </p>
+        </div>
+        <div className="space-y-5">
+          {/* Safe Income BUY threshold */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm font-medium" style={{ color: theme.colors.text }}>{t.settings.safeIncomeBuy}</p>
+              <span className="text-sm font-bold tabular-nums" style={{ color: theme.colors.up }}>{scoreBuySafe}+</span>
+            </div>
+            <input
+              type="range" min={55} max={75} value={scoreBuySafe}
+              onChange={(e) => { setScoreBuySafe(Number(e.target.value)); setDirty(true) }}
+              className="w-full"
+            />
+            <div className="flex justify-between items-center mt-1">
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>55 ({t.settings.moreSignals})</span>
+              <span className="text-[10px] font-semibold tabular-nums" style={{ color: theme.colors.up }}>
+                {scoreBuySafe <= 60 ? '~61%' : scoreBuySafe <= 62 ? '~61%' : scoreBuySafe <= 65 ? '~59%' : scoreBuySafe <= 68 ? '~57%' : scoreBuySafe <= 70 ? '~59%' : '~62%'} {t.settings.winRate}
+              </span>
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>75 ({t.settings.fewerStricter})</span>
+            </div>
+            <p className="text-[9px] mt-1" style={{ color: theme.colors.textHint }}>
+              {t.settings.backtestValidated.replace('{threshold}', String(scoreBuySafe)).replace('{count}', scoreBuySafe <= 60 ? '6,033' : scoreBuySafe <= 62 ? '5,489' : scoreBuySafe <= 65 ? '3,631' : scoreBuySafe <= 68 ? '1,475' : scoreBuySafe <= 70 ? '564' : '102')}
+            </p>
+          </div>
+
+          {/* High Risk BUY threshold */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm font-medium" style={{ color: theme.colors.text }}>{t.settings.highRiskBuy}</p>
+              <span className="text-sm font-bold tabular-nums" style={{ color: theme.colors.primary }}>{scoreBuyRisk}+</span>
+            </div>
+            <input
+              type="range" min={55} max={75} value={scoreBuyRisk}
+              onChange={(e) => { setScoreBuyRisk(Number(e.target.value)); setDirty(true) }}
+              className="w-full"
+            />
+            <div className="flex justify-between items-center mt-1">
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>55 ({t.settings.moreSignals})</span>
+              <span className="text-[10px] font-semibold tabular-nums" style={{ color: theme.colors.primary }}>
+                {scoreBuyRisk <= 60 ? '~53%' : scoreBuyRisk <= 62 ? '~52%' : scoreBuyRisk <= 65 ? '~53%' : scoreBuyRisk <= 68 ? '~52%' : scoreBuyRisk <= 70 ? '~52%' : '~48%'} {t.settings.winRate}
+              </span>
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>75 ({t.settings.fewerStricter})</span>
+            </div>
+            <p className="text-[9px] mt-1" style={{ color: theme.colors.textHint }}>
+              {t.settings.highRiskNeedsAi}
+            </p>
+          </div>
+
+          {/* HOLD threshold */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm font-medium" style={{ color: theme.colors.text }}>{t.settings.holdAvoidCutoff}</p>
+              <span className="text-sm font-bold tabular-nums" style={{ color: theme.colors.warning }}>{scoreHold}</span>
+            </div>
+            <input
+              type="range" min={40} max={60} value={scoreHold}
+              onChange={(e) => { setScoreHold(Number(e.target.value)); setDirty(true) }}
+              className="w-full"
+            />
+            <div className="flex justify-between">
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>40 ({t.settings.lenient})</span>
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>60 ({t.settings.strict})</span>
+            </div>
+            <p className="text-[9px] mt-1" style={{ color: theme.colors.textHint }}>
+              {t.settings.belowScoreAvoid}
+            </p>
+          </div>
         </div>
       </Card>
 

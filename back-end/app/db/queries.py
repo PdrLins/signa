@@ -150,6 +150,9 @@ def insert_audit_log(
     metadata: dict | None = None,
 ) -> dict:
     """Write an audit log entry."""
+    # Dev mode safety: "dev-user-id" is not a valid UUID
+    if user_id == "dev-user-id":
+        user_id = None
     client = get_client()
     data = {
         "event_type": event_type,
@@ -207,9 +210,12 @@ def insert_signal(signal_data: dict) -> dict:
 
 
 def insert_signals_batch(signals: list[dict]) -> list[dict]:
-    """Batch insert signals."""
+    """Batch insert signals. Strips non-DB fields before insert."""
     client = get_client()
-    result = client.table("signals").insert(signals).execute()
+    # Remove fields that aren't columns in the signals table
+    _non_db_fields = {"company_name"}
+    clean = [{k: v for k, v in s.items() if k not in _non_db_fields} for s in signals]
+    result = client.table("signals").insert(clean).execute()
     logger.info(f"Batch inserted {len(signals)} signals")
     return result.data or []
 
@@ -254,7 +260,22 @@ def get_signals(
     if gems_only:
         query = query.eq("is_gem", True)
     result = query.execute()
-    return result.data or []
+    # Deduplicate: keep the best signal per ticker.
+    # Prefer signals with AI analysis (target_price filled) over tech-only.
+    # Among same quality, keep the most recent.
+    seen: dict[str, dict] = {}
+    for row in result.data or []:
+        symbol = row.get("symbol")
+        if not symbol:
+            continue
+        has_ai = row.get("target_price") is not None
+        existing = seen.get(symbol)
+        if not existing:
+            seen[symbol] = row
+        elif has_ai and existing.get("target_price") is None:
+            # New one has AI data, old one doesn't → replace
+            seen[symbol] = row
+    return list(seen.values())
 
 
 def get_signals_by_ticker(symbol: str, limit: int = 20) -> list[dict]:
@@ -280,7 +301,7 @@ def get_latest_signals_map() -> dict[str, dict]:
     client = get_client()
     result = (
         client.table("signals")
-        .select("*")
+        .select("symbol, score, action, created_at")
         .order("created_at", desc=True)
         .limit(500)
         .execute()
@@ -449,6 +470,19 @@ def get_pending_alerts() -> list[dict]:
         .eq("status", "PENDING")
         .order("created_at")
         .limit(500)
+        .execute()
+    )
+    return result.data or []
+
+
+def get_recent_alerts(limit: int = 5) -> list[dict]:
+    """Get most recent sent alerts."""
+    client = get_client()
+    result = (
+        client.table("alerts")
+        .select("id, alert_type, message, sent_at, status, created_at")
+        .order("created_at", desc=True)
+        .limit(limit)
         .execute()
     )
     return result.data or []

@@ -1,11 +1,19 @@
 """Telegram bot — send alerts and handle commands."""
 
+from datetime import datetime, timezone
 from html import escape
+from zoneinfo import ZoneInfo
 
 import httpx
 from loguru import logger
 
 from app.core.config import settings
+
+
+def _now_et() -> str:
+    """Current date/time in ET for Telegram messages."""
+    et = ZoneInfo("America/New_York")
+    return datetime.now(timezone.utc).astimezone(et).strftime("%b %d, %Y • %I:%M %p ET")
 
 # Reusable HTTP client (created lazily, closed on app shutdown)
 _http_client: httpx.AsyncClient | None = None
@@ -54,6 +62,7 @@ async def send_gem_alert(signal: dict) -> bool:
 
     message = msg("gem_alert",
         ticker=ticker,
+        date=_now_et(),
         action=escape(str(signal.get("action", "?"))),
         score=signal.get("score", 0),
         price=signal.get("price_at_signal", "?"),
@@ -77,6 +86,7 @@ async def send_scan_digest(scan_type: str, signals: list[dict]) -> bool:
     scan_label = escape(scan_type.replace("_", " ").title())
     message = msg("scan_digest_header",
         scan_label=scan_label,
+        date=_now_et(),
         total=len(signals),
         buys=len(buys),
         gems=len(gems),
@@ -102,14 +112,39 @@ async def send_watchlist_sell_alert(signal: dict) -> bool:
     action = escape(str(signal.get("action", "?")))
     emoji = "🚨" if action == "SELL" else "⚠️"
 
+    # Build target/stop line
+    target = signal.get("target_price")
+    stop = signal.get("stop_loss")
+    target_line = ""
+    if target or stop:
+        parts = []
+        if target:
+            parts.append(f"Target: ${target}")
+        if stop:
+            parts.append(f"Stop: ${stop}")
+        target_line = "🎯 " + " | ".join(parts) + "\n"
+
+    # Bucket line
+    bucket = signal.get("bucket")
+    bucket_label = "Safe Income" if bucket == "SAFE_INCOME" else "High Risk" if bucket == "HIGH_RISK" else ""
+    bucket_line = f"📦 {bucket_label}\n" if bucket_label else ""
+
+    # Better reasoning — replace tech-only placeholder
+    reasoning = str(signal.get("reasoning", ""))
+    if "AI skipped" in reasoning:
+        reasoning = f"Score {signal.get('score', 0)}/100 based on technical + fundamental analysis. Below AI threshold — consider reviewing manually."
+
     message = msg("watchlist_sell",
         emoji=emoji,
         ticker=escape(str(signal.get("symbol", "?"))),
+        date=_now_et(),
         action=action,
         score=signal.get("score", 0),
         status=escape(str(signal.get("status", "?"))),
         price=signal.get("price_at_signal", "?"),
-        reasoning=escape(str(signal.get("reasoning", ""))),
+        target_line=target_line,
+        bucket_line=bucket_line,
+        reasoning=escape(reasoning),
     )
     return await send_message(settings.telegram_chat_id, message)
 

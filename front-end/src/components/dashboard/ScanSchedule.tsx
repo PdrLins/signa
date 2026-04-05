@@ -68,10 +68,29 @@ export function ScanSchedule() {
                   <span className="text-xs" style={{ color: theme.colors.text }}>
                     {scan.label}
                   </span>
+                  {scan.status === 'COMPLETE' && scan.duration_seconds != null && (
+                    <span className="text-[9px] tabular-nums" style={{ color: theme.colors.up }}>
+                      {scan.duration_seconds}s
+                    </span>
+                  )}
+                  {scan.status === 'FAILED' && (
+                    <span className="text-[9px]" style={{ color: theme.colors.down }}>
+                      {t.scans.failed}
+                    </span>
+                  )}
                 </div>
-                <span className="text-[11px]" style={{ color: theme.colors.textSub }}>
-                  {scan.scheduled_time}
-                </span>
+                <div className="flex items-center gap-2">
+                  {scan.status === 'COMPLETE' && scan.signals_found > 0 && (
+                    <span className="text-[9px] tabular-nums" style={{ color: theme.colors.textHint }}>
+                      {scan.gems_found > 0
+                        ? t.scans.signalCountGems.replace('{count}', String(scan.signals_found)).replace('{gems}', String(scan.gems_found))
+                        : t.scans.signalCount.replace('{count}', String(scan.signals_found))}
+                    </span>
+                  )}
+                  <span className="text-[11px]" style={{ color: theme.colors.textSub }}>
+                    {scan.scheduled_time}
+                  </span>
+                </div>
               </div>
             )
           })}

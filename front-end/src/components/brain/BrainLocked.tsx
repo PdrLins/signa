@@ -10,7 +10,6 @@ import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Lock, Brain } from 'lucide-react'
 import { useI18nStore } from '@/store/i18nStore'
-import { BrainWorkflow } from './BrainWorkflow'
 
 type Step = 'locked' | 'otp'
 
@@ -43,7 +42,7 @@ export function BrainLocked() {
       setOtpDigits(['', '', '', '', '', ''])
       setTimeout(() => inputRefs.current[0]?.focus(), 100)
     } catch (err) {
-      toast.show((err as Error)?.message || 'Failed to send code', 'error')
+      toast.show((err as Error)?.message || t.brain.failedToSendCode, 'error')
     }
   }, [challenge, toast])
 
@@ -84,7 +83,7 @@ export function BrainLocked() {
       await verify.mutateAsync(code)
       toast.show(t.brain.editorUnlocked, 'success')
     } catch (err) {
-      toast.show((err as Error)?.message || 'Invalid code', 'error')
+      toast.show((err as Error)?.message || t.brain.invalidCode, 'error')
       setOtpDigits(['', '', '', '', '', ''])
       inputRefs.current[0]?.focus()
     }
@@ -160,20 +159,12 @@ export function BrainLocked() {
         <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>{t.brain.signalBrain}</h1>
         {Boolean(highlights?.last_rule_updated) && (
           <p className="text-xs mt-1" style={{ color: theme.colors.textSub }}>
-            Last updated: {new Date(String(highlights?.last_rule_updated)).toLocaleDateString()}
+            {new Date(String(highlights?.last_rule_updated)).toLocaleDateString()}
           </p>
         )}
       </div>
 
-      {/* How the brain works */}
-      <Card>
-        <p className="text-[11px] font-semibold uppercase tracking-wide mb-4" style={{ color: theme.colors.textSub }}>
-          {t.brain.howItWorks}
-        </p>
-        <BrainWorkflow />
-      </Card>
-
-      {/* Highlights */}
+      {/* Highlights — safe summary only, no architecture details */}
       <Card>
         <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>
           {t.brain.highlights}

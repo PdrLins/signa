@@ -1,8 +1,8 @@
 """Backtest configuration."""
 
 BACKTEST_CONFIG = {
-    "start_date": "2024-10-01",
-    "end_date": "2025-04-01",
+    "start_date": "2024-04-05",
+    "end_date": "2026-04-05",
     "tickers": {
         "US": [
             "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL",

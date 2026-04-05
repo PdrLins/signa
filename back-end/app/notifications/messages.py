@@ -24,6 +24,7 @@ _MESSAGES = {
     "gem_alert": {
         "en": (
             "💎 <b>GEM ALERT — {ticker}</b>\n\n"
+            "📅 {date}\n"
             "Signal: <b>{action}</b> | Score: <b>{score}/100</b>\n"
             "Price: ${price} | Target: ${target} | Stop: ${stop}\n"
             "Risk/Reward: {rr}x\n\n"
@@ -33,6 +34,7 @@ _MESSAGES = {
         ),
         "pt": (
             "💎 <b>ALERTA GEM — {ticker}</b>\n\n"
+            "📅 {date}\n"
             "Sinal: <b>{action}</b> | Pontuação: <b>{score}/100</b>\n"
             "Preço: ${price} | Alvo: ${target} | Stop: ${stop}\n"
             "Risco/Retorno: {rr}x\n\n"
@@ -44,22 +46,28 @@ _MESSAGES = {
     "watchlist_sell": {
         "en": (
             "{emoji} <b>WATCHLIST ALERT — {ticker}</b>\n\n"
+            "📅 {date}\n"
             "Signal: <b>{action}</b> | Score: <b>{score}/100</b>\n"
-            "Status: {status} | Price: ${price}\n\n"
-            "📋 {reasoning}\n\n"
+            "Status: {status} | Price: ${price}\n"
+            "{target_line}"
+            "{bucket_line}"
+            "\n📋 {reasoning}\n\n"
             "⚡ This ticker is on your watchlist — take action now."
         ),
         "pt": (
             "{emoji} <b>ALERTA FAVORITOS — {ticker}</b>\n\n"
+            "📅 {date}\n"
             "Sinal: <b>{action}</b> | Pontuação: <b>{score}/100</b>\n"
-            "Status: {status} | Preço: ${price}\n\n"
-            "📋 {reasoning}\n\n"
+            "Status: {status} | Preço: ${price}\n"
+            "{target_line}"
+            "{bucket_line}"
+            "\n📋 {reasoning}\n\n"
             "⚡ Este ticker está nos seus favoritos — tome ação agora."
         ),
     },
     "scan_digest_header": {
-        "en": "📊 <b>Signa {scan_label} Digest</b>\n\nSignals: {total} | BUYs: {buys} | GEMs: {gems}\n\n",
-        "pt": "📊 <b>Resumo Signa {scan_label}</b>\n\nSinais: {total} | COMPRAs: {buys} | GEMs: {gems}\n\n",
+        "en": "📊 <b>Signa {scan_label} Digest</b>\n\n📅 {date}\nSignals: {total} | BUYs: {buys} | GEMs: {gems}\n\n",
+        "pt": "📊 <b>Resumo Signa {scan_label}</b>\n\n📅 {date}\nSinais: {total} | COMPRAs: {buys} | GEMs: {gems}\n\n",
     },
     "scan_digest_top3": {
         "en": "<b>Top 3 Signals:</b>\n",

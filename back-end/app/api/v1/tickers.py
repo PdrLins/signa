@@ -57,6 +57,7 @@ async def get_ticker_detail(
 
     return {
         "ticker": ticker,
+        "company_name": fundamentals.get("company_name") if fundamentals else None,
         "exchange": exchange,
         "asset_type": asset_type,
         "current_price": current_price,

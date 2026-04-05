@@ -13,6 +13,8 @@ import {
   Settings,
   Brain,
   ScrollText,
+  Plug,
+  Activity,
 } from 'lucide-react'
 
 export function LeftNav() {
@@ -26,14 +28,16 @@ export function LeftNav() {
     { label: t.nav.watchlist, href: '/watchlist', icon: Star },
     { label: t.nav.portfolio, href: '/portfolio', icon: Briefcase },
     { label: t.nav.brain, href: '/brain', icon: Brain },
+    { label: t.nav.brainPerformance, href: '/brain/performance', icon: Activity },
     { label: t.nav.logs, href: '/logs', icon: ScrollText },
+    { label: t.nav.integrations, href: '/integrations', icon: Plug },
     { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle },
     { label: t.nav.settings, href: '/settings', icon: Settings },
   ]
 
   return (
     <nav
-      className="hidden md:flex flex-col items-center fixed left-4 top-1/2 -translate-y-1/2 z-50 py-3 px-1.5 gap-1 rounded-2xl"
+      className="hidden md:flex flex-col items-center fixed left-5 top-1/2 -translate-y-1/2 z-50 py-3 px-1.5 gap-1 rounded-2xl"
       style={{
         backgroundColor: theme.colors.surface,
         border: `1px solid ${theme.colors.border}`,

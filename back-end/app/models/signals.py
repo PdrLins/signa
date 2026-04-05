@@ -40,6 +40,8 @@ class SignalResponse(BaseModel):
     market_regime: Optional[str] = None  # TRENDING, VOLATILE, CRISIS
     regime_adjustment_applied: bool = False
     catalyst_type: Optional[str] = None  # PRE_EARNINGS, PEAD, DIVIDEND, OTHER
+    signal_style: Optional[str] = None  # MOMENTUM, CONTRARIAN, NEUTRAL
+    contrarian_score: Optional[int] = None
     scan_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -75,7 +77,9 @@ class ScanTodayRecord(BaseModel):
     tickers_scanned: int = 0
     signals_found: int = 0
     gems_found: int = 0
+    started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
     is_market_day: bool = True
 
 

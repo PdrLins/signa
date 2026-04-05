@@ -9,6 +9,7 @@ import { useBrainChallenge, useBrainVerify } from '@/hooks/useBrain'
 import { client } from '@/lib/api'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { Sidebar } from '@/components/layout/Sidebar'
 import { Brain, Lock, Search, Pause, Play, ArrowDown } from 'lucide-react'
 
 interface LogEntry {
@@ -21,7 +22,7 @@ interface LogEntry {
 }
 
 const LEVEL_COLORS: Record<string, string> = {
-  DEBUG: '#6B7280',
+  DEBUG: '#9CA3AF',
   INFO: '#3B82F6',
   WARNING: '#F59E0B',
   ERROR: '#EF4444',
@@ -37,7 +38,7 @@ function LogLine({ entry }: { entry: LogEntry }) {
   })
 
   return (
-    <div className="flex gap-2 py-0.5 px-3 hover:bg-white/5 font-mono text-[12px] leading-relaxed">
+    <div className="flex gap-2 py-0.5 px-3 font-mono text-[12px] leading-relaxed" style={{ borderBottom: `1px solid ${theme.colors.border}20` }}>
       <span className="text-[11px] shrink-0 tabular-nums" style={{ color: theme.colors.textHint }}>{time}</span>
       <span
         className="text-[10px] font-bold w-[52px] shrink-0 text-right"
@@ -137,9 +138,12 @@ function LogViewer() {
   return (
     <div className="space-y-3">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>{t.logs.systemLogs}</h1>
+          <p className="text-sm mt-1" style={{ color: theme.colors.textSub }}>{t.logs.subtitle}</p>
+        </div>
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold" style={{ color: theme.colors.text }}>{t.logs.systemLogs}</h1>
           <div className="flex items-center gap-1.5">
             <span
               className="w-2 h-2 rounded-full"
@@ -149,8 +153,6 @@ function LogViewer() {
               {connected ? t.logs.live : t.logs.disconnected}
             </span>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
           <span className="text-xs tabular-nums" style={{ color: timerColor }}>
             {mins}:{s.toString().padStart(2, '0')}
           </span>
@@ -159,6 +161,10 @@ function LogViewer() {
           </Button>
         </div>
       </div>
+
+      {/* Content + Sidebar grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
+        <div className="space-y-3">
 
       {/* Toolbar */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -199,7 +205,7 @@ function LogViewer() {
           onClick={() => setPaused(!paused)}
           className="p-1.5 rounded-lg transition-all"
           style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.textSub }}
-          title={paused ? 'Resume' : 'Pause'}
+          title={paused ? t.logs.resume : t.logs.pause}
         >
           {paused ? <Play size={14} /> : <Pause size={14} />}
         </button>
@@ -210,7 +216,7 @@ function LogViewer() {
             backgroundColor: autoScroll ? theme.colors.primary + '15' : theme.colors.surfaceAlt,
             color: autoScroll ? theme.colors.primary : theme.colors.textSub,
           }}
-          title={autoScroll ? 'Auto-scroll on' : 'Auto-scroll off'}
+          title={autoScroll ? t.logs.autoScrollOn : t.logs.autoScrollOff}
         >
           <ArrowDown size={14} />
         </button>
@@ -221,7 +227,7 @@ function LogViewer() {
         ref={scrollRef}
         className="rounded-xl overflow-hidden overflow-y-auto"
         style={{
-          backgroundColor: theme.isDark ? '#0D1117' : '#1E1E2E',
+          backgroundColor: theme.colors.surfaceAlt,
           border: `1px solid ${theme.colors.border}`,
           height: 'calc(100vh - 260px)',
           minHeight: 400,
@@ -229,7 +235,7 @@ function LogViewer() {
       >
         <div className="py-2">
           {filteredLogs.length === 0 ? (
-            <p className="text-center py-12 text-sm" style={{ color: '#6B7280' }}>
+            <p className="text-center py-12 text-sm" style={{ color: theme.colors.textSub }}>
               {logs.length === 0 ? t.logs.waitingForLogs : t.logs.noMatch}
             </p>
           ) : (
@@ -247,6 +253,11 @@ function LogViewer() {
         <span className="text-[10px]" style={{ color: theme.colors.textHint }}>
           {t.logs.buffer}: {logs.length}/500
         </span>
+      </div>
+        </div>
+        <div className="sticky top-6 hidden lg:block">
+          <Sidebar />
+        </div>
       </div>
     </div>
   )
@@ -278,9 +289,9 @@ function LogsLocked() {
       setOtpDigits(['', '', '', '', '', ''])
       setTimeout(() => inputRefs.current[0]?.focus(), 100)
     } catch (err) {
-      toast.show((err as Error)?.message || 'Failed', 'error')
+      toast.show((err as Error)?.message || t.brain.failedToSendCode, 'error')
     }
-  }, [challenge, toast])
+  }, [challenge, toast, t])
 
   const handleDigitChange = (idx: number, value: string) => {
     if (!/^\d?$/.test(value)) return
@@ -303,9 +314,9 @@ function LogsLocked() {
   const handleVerify = async (code: string) => {
     try {
       await verify.mutateAsync(code)
-      toast.show('Logs unlocked', 'success')
+      toast.show(t.logs.logsUnlocked, 'success')
     } catch (err) {
-      toast.show((err as Error)?.message || 'Invalid code', 'error')
+      toast.show((err as Error)?.message || t.logs.invalidCode, 'error')
       setOtpDigits(['', '', '', '', '', ''])
       inputRefs.current[0]?.focus()
     }

@@ -29,6 +29,8 @@ export interface Signal {
   superficial_loss_warning: boolean
   market_regime: 'TRENDING' | 'VOLATILE' | 'CRISIS' | null
   catalyst_type: string | null
+  signal_style: 'MOMENTUM' | 'CONTRARIAN' | 'NEUTRAL' | null
+  contrarian_score: number | null
   scan_id: string | null
   created_at: string
   updated_at: string
@@ -68,6 +70,8 @@ export interface ScanTodayRecord {
   tickers_scanned: number
   signals_found: number
   gems_found: number
+  started_at: string | null
   completed_at: string | null
+  duration_seconds: number | null
   is_market_day: boolean
 }
