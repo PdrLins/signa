@@ -138,8 +138,12 @@ async def synthesize_signal(
             last_error = str(e)
             is_rate_limit = "429" in last_error or "RESOURCE_EXHAUSTED" in last_error
             if is_rate_limit:
+                # If daily quota exhausted, don't retry -- it won't recover
+                if "FreeTier" in last_error or "quota" in last_error.lower():
+                    logger.warning(f"Gemini daily quota exhausted for {ticker} -- skipping retries")
+                    break
                 wait = 15 * attempt
-                logger.warning(f"Gemini rate limited for {ticker} — waiting {wait}s (attempt {attempt})")
+                logger.warning(f"Gemini rate limited for {ticker} -- waiting {wait}s (attempt {attempt})")
                 if attempt < max_retries:
                     await asyncio.sleep(wait)
                 continue
@@ -213,8 +217,11 @@ async def analyze_sentiment(ticker: str, max_retries: int = 2) -> dict:
             last_error = str(e)
             is_rate_limit = "429" in last_error or "RESOURCE_EXHAUSTED" in last_error
             if is_rate_limit:
+                if "FreeTier" in last_error or "quota" in last_error.lower():
+                    logger.warning(f"Gemini daily quota exhausted for sentiment {ticker} -- skipping retries")
+                    break
                 wait = 15 * attempt
-                logger.warning(f"Gemini sentiment rate limited for {ticker} — waiting {wait}s")
+                logger.warning(f"Gemini sentiment rate limited for {ticker} -- waiting {wait}s")
                 if attempt < max_retries:
                     await asyncio.sleep(wait)
                 continue
