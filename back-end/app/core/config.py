@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     position_alert_profit_pct: float = 5.0
     position_alert_loss_pct: float = -5.0
 
+    # --- Virtual Portfolio ---
+    virtual_trade_max_days: int = 30  # Auto-close virtual trades after N days
+
     # --- Brain Editor ---
     brain_token_secret: str = ""  # Separate secret for brain tokens
     brain_otp_expire_seconds: int = 60

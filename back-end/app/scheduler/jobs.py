@@ -69,3 +69,15 @@ async def cleanup_expired_tokens():
 
     except Exception as e:
         logger.warning(f"DB cleanup failed: {e}")
+
+
+async def virtual_portfolio_snapshot():
+    """5:00 PM ET — Daily snapshot of virtual portfolio for equity curve."""
+    import asyncio
+    from app.services.virtual_portfolio import snapshot_virtual_portfolio
+
+    try:
+        result = await asyncio.to_thread(snapshot_virtual_portfolio)
+        logger.info(f"📊 Virtual portfolio snapshot: brain_cum={result.get('brain_cumulative_pnl', 0):+.1f}%")
+    except Exception as e:
+        logger.warning(f"Virtual portfolio snapshot failed: {e}")

@@ -75,7 +75,7 @@ export default function SignalsPage() {
   const handleScanNow = useCallback(async () => {
     if (scanning) return
     try {
-      const res = await scansApi.trigger('MORNING')
+      const res = await scansApi.trigger('MANUAL')
       setScanId(res.scan_id)
       toast.show(t.signals.scanStarted, 'info', 3000)
     } catch {

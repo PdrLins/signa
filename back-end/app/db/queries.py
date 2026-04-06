@@ -384,7 +384,7 @@ def get_scan_by_id(scan_id: str) -> dict | None:
 _SCAN_LIST_COLUMNS = (
     "id, scan_type, started_at, completed_at, tickers_scanned, "
     "candidates, signals_found, gems_found, status, error_message, "
-    "progress_pct, phase, current_ticker, market_regime, created_at"
+    "progress_pct, phase, current_ticker, market_regime, triggered_by, created_at"
 )
 
 

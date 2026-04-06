@@ -54,6 +54,7 @@ async def get_scans_today(user: dict = Depends(get_current_user)):
         today_scans = [
             s for s in recent_scans
             if s.get("started_at") and s["started_at"] >= today_start.isoformat()
+            and s.get("triggered_by", "scheduler") != "manual"
         ]
         for s in today_scans:
             st = s.get("scan_type")
@@ -112,7 +113,7 @@ async def get_scans_today(user: dict = Depends(get_current_user)):
 @router.post("/trigger")
 async def trigger_scan(
     background_tasks: BackgroundTasks,
-    scan_type: Literal["PRE_MARKET", "MORNING", "PRE_CLOSE", "AFTER_CLOSE"] = Query("MORNING"),
+    scan_type: Literal["PRE_MARKET", "MORNING", "PRE_CLOSE", "AFTER_CLOSE", "MANUAL"] = Query("MANUAL"),
     user: dict = Depends(get_current_user),
 ):
     """Manually trigger a scan. Runs in the background — returns immediately.
@@ -145,6 +146,7 @@ async def trigger_scan(
         "started_at": datetime.now(timezone.utc).isoformat(),
         "progress_pct": 0,
         "phase": "queued",
+        "triggered_by": "manual",
     })
     scan_id = scan.get("id")
 

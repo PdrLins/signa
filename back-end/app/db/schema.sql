@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS scans (
     phase             VARCHAR DEFAULT 'starting',
     current_ticker    VARCHAR,
     market_regime     VARCHAR,
+    triggered_by      VARCHAR DEFAULT 'scheduler',  -- 'scheduler' or 'manual'
     created_at        TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);
@@ -340,6 +341,9 @@ CREATE TABLE IF NOT EXISTS virtual_trades (
     bucket          VARCHAR,
     signal_style    VARCHAR,
     source          VARCHAR DEFAULT 'watchlist',
+    target_price    DOUBLE PRECISION,
+    stop_loss       DOUBLE PRECISION,
+    exit_reason     VARCHAR,            -- SIGNAL, STOP_HIT, TARGET_HIT, TIME_EXPIRED
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_virtual_trades_symbol ON virtual_trades(symbol);
@@ -347,7 +351,22 @@ CREATE INDEX IF NOT EXISTS idx_virtual_trades_status ON virtual_trades(status);
 CREATE INDEX IF NOT EXISTS idx_virtual_trades_source ON virtual_trades(source);
 
 
--- 18. AI USAGE (budget tracking)
+-- 19. VIRTUAL SNAPSHOTS (daily equity curve for performance charts)
+CREATE TABLE IF NOT EXISTS virtual_snapshots (
+    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    snapshot_date               DATE NOT NULL UNIQUE,
+    brain_open                  INT DEFAULT 0,
+    brain_unrealized_pnl        DOUBLE PRECISION DEFAULT 0,
+    brain_cumulative_pnl        DOUBLE PRECISION DEFAULT 0,
+    watchlist_open              INT DEFAULT 0,
+    watchlist_unrealized_pnl    DOUBLE PRECISION DEFAULT 0,
+    watchlist_cumulative_pnl    DOUBLE PRECISION DEFAULT 0,
+    spy_price                   DOUBLE PRECISION,
+    created_at                  TIMESTAMPTZ DEFAULT now()
+);
+
+
+-- 20. AI USAGE (budget tracking)
 CREATE TABLE IF NOT EXISTS ai_usage (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     provider        VARCHAR NOT NULL,

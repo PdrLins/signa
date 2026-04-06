@@ -10,6 +10,7 @@ import { QuickActions } from '@/components/dashboard/QuickActions'
 import { BudgetWidget, AlertsWidget, PortfolioWidget, BrainPerformanceWidget } from '@/components/dashboard/DashboardWidgets'
 import { SignalList } from '@/components/signals/SignalList'
 import { WatchlistTable } from '@/components/watchlist/WatchlistTable'
+import { ScanSchedule } from '@/components/dashboard/ScanSchedule'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Clock } from 'lucide-react'
@@ -156,6 +157,9 @@ export default function OverviewPage() {
           )}
         </div>
       </Card>
+
+      {/* Scan Schedule */}
+      <ScanSchedule />
 
       {/* Stats */}
       <StatsBar />

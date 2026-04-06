@@ -11,6 +11,7 @@ from app.scheduler.jobs import (
     morning_scan,
     pre_close_scan,
     pre_market_scan,
+    virtual_portfolio_snapshot,
 )
 
 scheduler = AsyncIOScheduler(timezone=settings.timezone)
@@ -67,8 +68,17 @@ def init_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # 5:00 PM ET — Daily virtual portfolio snapshot (after last scan with prices)
+    scheduler.add_job(
+        virtual_portfolio_snapshot,
+        CronTrigger(hour=17, minute=0, day_of_week="mon-fri", timezone=settings.timezone),
+        id="virtual_portfolio_snapshot",
+        name="Virtual Portfolio Snapshot (5:00 PM ET)",
+        replace_existing=True,
+    )
+
     logger.info(
-        f"Scheduler configured with 4 daily scan jobs + cleanup "
+        f"Scheduler configured with 4 daily scan jobs + cleanup + snapshot "
         f"(timezone: {settings.timezone})"
     )
 

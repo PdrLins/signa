@@ -76,8 +76,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # Skip exempt paths
-        if path in _EXEMPT_PATHS or path.startswith("/docs") or path.startswith("/redoc"):
+        # Skip exempt paths (includes scan progress polling)
+        if path in _EXEMPT_PATHS or path.startswith("/docs") or path.startswith("/redoc") or "/progress" in path:
             return await call_next(request)
 
         ip = get_client_ip(request)

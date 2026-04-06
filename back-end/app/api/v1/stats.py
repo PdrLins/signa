@@ -51,6 +51,32 @@ async def get_virtual_portfolio(user: dict = Depends(get_current_user)):
     return get_virtual_summary()
 
 
+@router.get("/virtual-portfolio/charts")
+async def get_virtual_portfolio_charts(user: dict = Depends(get_current_user)):
+    """Get chart data for brain performance page.
+
+    Returns: pnl_by_bucket, monthly_returns, exit_reasons, score_vs_pnl, win_rate_over_time.
+    """
+    from app.services.virtual_portfolio import get_virtual_charts
+    return get_virtual_charts()
+
+
+@router.get("/virtual-portfolio/equity-curve")
+async def get_equity_curve(user: dict = Depends(get_current_user)):
+    """Get daily equity curve snapshots for charting performance over time."""
+    from app.db.supabase import get_client
+    db = get_client()
+    result = (
+        db.table("virtual_snapshots")
+        .select("snapshot_date, brain_open, brain_unrealized_pnl, brain_cumulative_pnl, "
+                "watchlist_open, watchlist_unrealized_pnl, watchlist_cumulative_pnl, spy_price")
+        .order("snapshot_date", desc=False)
+        .limit(365)
+        .execute()
+    )
+    return result.data or []
+
+
 @router.get("/positions-summary")
 async def get_positions_summary(user: dict = Depends(get_current_user)):
     """Get a summary of open positions for the dashboard."""

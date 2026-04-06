@@ -303,11 +303,17 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             })
 
         # Phase 7: Virtual portfolio tracking
-        if valid_signals and watchlist_symbols:
+        if valid_signals:
             from app.services.virtual_portfolio import process_virtual_trades
             vt_result = process_virtual_trades(valid_signals, watchlist_symbols)
             if vt_result["buys"] or vt_result["sells"]:
                 logger.info(f"Virtual portfolio: {vt_result['buys']} buys, {vt_result['sells']} sells")
+
+            # Check stop/target/time exits on all open virtual trades
+            from app.services.virtual_portfolio import check_virtual_exits
+            vt_exits = check_virtual_exits()
+            if any(vt_exits.values()):
+                logger.info(f"Virtual exits: {vt_exits}")
 
         # Phase 8: Monitor positions (95-100%)
         _update_progress(95, "monitoring", "Checking positions...")

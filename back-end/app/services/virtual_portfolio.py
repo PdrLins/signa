@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 
 from loguru import logger
 
+from app.core.config import settings
 from app.db.supabase import get_client
+from app.services.price_cache import _fetch_prices_batch
 
 
 # Brain auto-pick criteria: only the strongest signals
@@ -36,12 +38,15 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
         .execute()
     )
     all_open = open_result.data or []
-    open_by_symbol = {}
+    open_watchlist = set()   # symbols with open watchlist positions
+    open_brain = set()       # symbols with open brain positions
     brain_open_count = 0
     for r in all_open:
-        open_by_symbol[r["symbol"]] = r
         if r.get("source") == "brain":
+            open_brain.add(r["symbol"])
             brain_open_count += 1
+        else:
+            open_watchlist.add(r["symbol"])
 
     now = datetime.now(timezone.utc).isoformat()
 
@@ -56,42 +61,43 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
         price = float(price)
 
         is_watchlisted = symbol in watchlist_symbols
-        is_open = symbol in open_by_symbol
 
-        # ── SELL: close any open position (watchlist or brain) ──
-        if action in ("SELL", "AVOID") and is_open:
-            pos = open_by_symbol[symbol]
-            entry_price = float(pos["entry_price"])
-            pnl_pct = ((price - entry_price) / entry_price) * 100
-            pnl_amount = price - entry_price
-            is_win = pnl_pct > 0
-            source = pos.get("source", "watchlist")
+        # ── SELL: close all open positions for this symbol ──
+        if action in ("SELL", "AVOID"):
+            for pos in all_open:
+                if pos["symbol"] != symbol:
+                    continue
+                entry_price = float(pos["entry_price"])
+                pnl_pct = ((price - entry_price) / entry_price) * 100
+                pnl_amount = price - entry_price
+                is_win = pnl_pct > 0
+                source = pos.get("source", "watchlist")
 
-            db.table("virtual_trades").update({
-                "status": "CLOSED",
-                "exit_price": price,
-                "exit_date": now,
-                "exit_score": score,
-                "exit_action": action,
-                "pnl_pct": round(pnl_pct, 2),
-                "pnl_amount": round(pnl_amount, 2),
-                "is_win": is_win,
-            }).eq("id", pos["id"]).execute()
-            sells += 1
+                db.table("virtual_trades").update({
+                    "status": "CLOSED",
+                    "exit_price": price,
+                    "exit_date": now,
+                    "exit_score": score,
+                    "exit_action": action,
+                    "pnl_pct": round(pnl_pct, 2),
+                    "pnl_amount": round(pnl_amount, 2),
+                    "is_win": is_win,
+                    "exit_reason": "SIGNAL",
+                }).eq("id", pos["id"]).execute()
+                sells += 1
 
-            emoji = "✅" if is_win else "❌"
-            logger.info(
-                f"Virtual SELL [{source}]: {emoji} {symbol} @ ${price:.2f} "
-                f"(entry ${entry_price:.2f}, P&L {pnl_pct:+.1f}%)"
-            )
+                emoji = "✅" if is_win else "❌"
+                logger.info(
+                    f"Virtual SELL [{source}]: {emoji} {symbol} @ ${price:.2f} "
+                    f"(entry ${entry_price:.2f}, P&L {pnl_pct:+.1f}%)"
+                )
             continue
 
-        # ── BUY: open new position ──
-        if action != "BUY" or is_open:
+        if action != "BUY":
             continue
 
         # Track 1: Watchlist picks (score 62+)
-        if is_watchlisted and score >= 62:
+        if is_watchlisted and score >= 62 and symbol not in open_watchlist:
             db.table("virtual_trades").insert({
                 "symbol": symbol,
                 "action": "BUY",
@@ -102,12 +108,15 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
                 "bucket": sig.get("bucket"),
                 "signal_style": sig.get("signal_style"),
                 "source": "watchlist",
+                "target_price": sig.get("target_price"),
+                "stop_loss": sig.get("stop_loss"),
             }).execute()
             buys += 1
             logger.info(f"Virtual BUY [watchlist]: {symbol} @ ${price:.2f} (score {score})")
 
         # Track 2: Brain auto-picks (score 72+, limited slots)
-        if not is_watchlisted and score >= BRAIN_MIN_SCORE and brain_open_count < BRAIN_MAX_OPEN:
+        # Brain picks independently — watchlisted tickers can also be brain picks
+        if score >= BRAIN_MIN_SCORE and brain_open_count < BRAIN_MAX_OPEN and symbol not in open_brain:
             # Only pick if it has AI analysis (target/stop filled)
             if sig.get("target_price") and sig.get("stop_loss"):
                 db.table("virtual_trades").insert({
@@ -120,6 +129,8 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
                     "bucket": sig.get("bucket"),
                     "signal_style": sig.get("signal_style"),
                     "source": "brain",
+                    "target_price": sig.get("target_price"),
+                    "stop_loss": sig.get("stop_loss"),
                 }).execute()
                 buys += 1
                 brain_open_count += 1
@@ -128,14 +139,125 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
     return {"buys": buys, "sells": sells}
 
 
+def check_virtual_exits() -> dict:
+    """Check open virtual trades for stop/target hits and time-based exits.
+
+    Called after each scan cycle. Fetches current prices via price_cache
+    and closes trades that hit their stop, target, or max age.
+    """
+    db = get_client()
+    max_days = settings.virtual_trade_max_days
+
+    open_result = (
+        db.table("virtual_trades")
+        .select("id, symbol, entry_price, entry_date, source, target_price, stop_loss")
+        .eq("status", "OPEN")
+        .execute()
+    )
+    open_trades = open_result.data or []
+    if not open_trades:
+        return {"stops_hit": 0, "targets_hit": 0, "expired": 0}
+
+    # Batch-fetch current prices
+    symbols = list({t["symbol"] for t in open_trades})
+    prices = _fetch_prices_batch(symbols)
+
+    # Fetch latest signal scores for exit tracking
+    current_scores: dict[str, int] = {}
+    for sym in symbols:
+        sig = (
+            db.table("signals")
+            .select("score")
+            .eq("symbol", sym)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if sig.data:
+            current_scores[sym] = sig.data[0].get("score", 0)
+
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    stops_hit = 0
+    targets_hit = 0
+    expired = 0
+
+    for trade in open_trades:
+        symbol = trade["symbol"]
+        entry_price = float(trade["entry_price"])
+        current_price, _ = prices.get(symbol, (None, None))
+
+        if current_price is None:
+            continue
+
+        target = float(trade["target_price"]) if trade.get("target_price") else None
+        stop = float(trade["stop_loss"]) if trade.get("stop_loss") else None
+
+        # Parse entry_date for age check
+        entry_date_str = trade.get("entry_date", "")
+        try:
+            entry_date = datetime.fromisoformat(entry_date_str.replace("Z", "+00:00"))
+            days_held = (now - entry_date).days
+        except (ValueError, TypeError):
+            days_held = 0
+
+        # Determine exit reason (priority: stop > target > time)
+        exit_reason = None
+        if stop and current_price <= stop:
+            exit_reason = "STOP_HIT"
+            stops_hit += 1
+        elif target and current_price >= target:
+            exit_reason = "TARGET_HIT"
+            targets_hit += 1
+        elif days_held >= max_days:
+            exit_reason = "TIME_EXPIRED"
+            expired += 1
+
+        if not exit_reason:
+            continue
+
+        pnl_pct = ((current_price - entry_price) / entry_price) * 100
+        pnl_amount = current_price - entry_price
+        is_win = pnl_pct > 0
+        source = trade.get("source", "watchlist")
+
+        exit_score = current_scores.get(symbol)
+
+        db.table("virtual_trades").update({
+            "status": "CLOSED",
+            "exit_price": current_price,
+            "exit_date": now_iso,
+            "exit_score": exit_score,
+            "pnl_pct": round(pnl_pct, 2),
+            "pnl_amount": round(pnl_amount, 2),
+            "is_win": is_win,
+            "exit_reason": exit_reason,
+        }).eq("id", trade["id"]).execute()
+
+        emoji = "✅" if is_win else "❌"
+        logger.info(
+            f"Virtual EXIT [{source}]: {emoji} {symbol} @ ${current_price:.2f} "
+            f"(entry ${entry_price:.2f}, P&L {pnl_pct:+.1f}%, reason={exit_reason}, exit_score={exit_score})"
+        )
+
+    total = stops_hit + targets_hit + expired
+    if total:
+        logger.info(f"Virtual exits: {stops_hit} stops, {targets_hit} targets, {expired} expired")
+
+    return {"stops_hit": stops_hit, "targets_hit": targets_hit, "expired": expired}
+
+
 def get_virtual_summary() -> dict:
-    """Get virtual portfolio performance summary for the dashboard."""
+    """Get virtual portfolio performance summary for the dashboard.
+
+    Includes live P&L for open positions via current price fetch.
+    """
     db = get_client()
 
     # All trades
     open_result = (
         db.table("virtual_trades")
-        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source")
+        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss")
         .eq("status", "OPEN")
         .order("entry_date", desc=True)
         .execute()
@@ -144,13 +266,36 @@ def get_virtual_summary() -> dict:
 
     closed_result = (
         db.table("virtual_trades")
-        .select("symbol, entry_price, exit_price, pnl_pct, pnl_amount, is_win, entry_date, exit_date, bucket, source")
+        .select("symbol, entry_price, exit_price, pnl_pct, pnl_amount, is_win, "
+                "entry_date, exit_date, entry_score, exit_score, bucket, source, exit_reason")
         .eq("status", "CLOSED")
         .order("exit_date", desc=True)
         .limit(50)
         .execute()
     )
     closed_trades = closed_result.data or []
+
+    # Fetch current prices for open positions
+    now = datetime.now(timezone.utc)
+    current_prices = {}
+    signal_context = {}
+    if open_trades:
+        symbols = list({t["symbol"] for t in open_trades})
+        price_data = _fetch_prices_batch(symbols)
+        current_prices = {sym: p for sym, (p, _) in price_data.items() if p is not None}
+
+        # Fetch signal reasoning + current score for open trades
+        for sym in symbols:
+            sig_result = (
+                db.table("signals")
+                .select("score, reasoning, risk_reward, signal_style, contrarian_score, market_regime")
+                .eq("symbol", sym)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if sig_result.data:
+                signal_context[sym] = sig_result.data[0]
 
     def _calc_stats(trades: list[dict]) -> dict:
         total = len(trades)
@@ -171,24 +316,64 @@ def get_virtual_summary() -> dict:
             "worst_trade": {"symbol": worst["symbol"], "pnl_pct": worst["pnl_pct"]} if worst else None,
         }
 
+    def _enrich_open_trade(t: dict) -> dict:
+        symbol = t["symbol"]
+        entry_price = float(t["entry_price"])
+        current = current_prices.get(symbol)
+
+        # Calculate days held
+        entry_date_str = t.get("entry_date", "")
+        try:
+            entry_date = datetime.fromisoformat(entry_date_str.replace("Z", "+00:00"))
+            days_held = (now - entry_date).days
+        except (ValueError, TypeError):
+            days_held = 0
+
+        # Get signal reasoning (why the brain picked this)
+        sig = signal_context.get(symbol, {})
+
+        enriched = {
+            "symbol": symbol,
+            "entry_price": entry_price,
+            "entry_score": t.get("entry_score"),
+            "bucket": t.get("bucket"),
+            "source": t.get("source", "watchlist"),
+            "signal_style": t.get("signal_style") or sig.get("signal_style"),
+            "target_price": t.get("target_price"),
+            "stop_loss": t.get("stop_loss"),
+            "days_held": days_held,
+            "current_score": sig.get("score"),
+            "reasoning": sig.get("reasoning"),
+            "risk_reward": sig.get("risk_reward"),
+            "contrarian_score": sig.get("contrarian_score"),
+            "market_regime": sig.get("market_regime"),
+        }
+
+        if current:
+            pnl_pct = ((current - entry_price) / entry_price) * 100
+            enriched["current_price"] = round(current, 2)
+            enriched["unrealized_pnl_pct"] = round(pnl_pct, 2)
+            enriched["unrealized_pnl_amount"] = round(current - entry_price, 2)
+
+        return enriched
+
+    # Enrich open trades with live P&L
+    enriched_open = [_enrich_open_trade(t) for t in open_trades[:10]]
+
+    # Calculate aggregate unrealized P&L per source
+    def _unrealized_agg(trades: list[dict]) -> float:
+        pnls = [t.get("unrealized_pnl_pct", 0) for t in trades if "unrealized_pnl_pct" in t]
+        return round(sum(pnls) / len(pnls), 2) if pnls else 0
+
     # Split by source
-    watchlist_open = [t for t in open_trades if t.get("source") == "watchlist"]
-    brain_open = [t for t in open_trades if t.get("source") == "brain"]
+    watchlist_open_enriched = [t for t in enriched_open if t.get("source") == "watchlist"]
+    brain_open_enriched = [t for t in enriched_open if t.get("source") == "brain"]
     watchlist_closed = [t for t in closed_trades if t.get("source") == "watchlist"]
     brain_closed = [t for t in closed_trades if t.get("source") == "brain"]
 
     return {
         "open_count": len(open_trades),
-        "open_trades": [
-            {
-                "symbol": t["symbol"],
-                "entry_price": t["entry_price"],
-                "entry_score": t.get("entry_score"),
-                "bucket": t.get("bucket"),
-                "source": t.get("source", "watchlist"),
-            }
-            for t in open_trades[:10]
-        ],
+        "open_trades": enriched_open,
         # Combined stats
         **_calc_stats(closed_trades),
         "recent_closed": [
@@ -197,16 +382,189 @@ def get_virtual_summary() -> dict:
                 "pnl_pct": t["pnl_pct"],
                 "is_win": t["is_win"],
                 "source": t.get("source", "watchlist"),
+                "exit_reason": t.get("exit_reason"),
+                "entry_score": t.get("entry_score"),
+                "exit_score": t.get("exit_score"),
             }
             for t in closed_trades[:5]
         ],
         # Per-source breakdown
         "watchlist": {
-            "open_count": len(watchlist_open),
+            "open_count": len(watchlist_open_enriched),
+            "avg_unrealized_pnl_pct": _unrealized_agg(watchlist_open_enriched),
             **_calc_stats(watchlist_closed),
         },
         "brain": {
-            "open_count": len(brain_open),
+            "open_count": len(brain_open_enriched),
+            "avg_unrealized_pnl_pct": _unrealized_agg(brain_open_enriched),
             **_calc_stats(brain_closed),
         },
     }
+
+
+def get_virtual_charts() -> dict:
+    """Get chart data for the brain performance page.
+
+    Returns pre-computed data structures the frontend can render directly.
+    """
+    db = get_client()
+
+    # All closed trades for charts
+    result = (
+        db.table("virtual_trades")
+        .select("symbol, entry_price, exit_price, pnl_pct, is_win, entry_date, exit_date, "
+                "entry_score, bucket, source, exit_reason, signal_style")
+        .eq("status", "CLOSED")
+        .order("exit_date", desc=True)
+        .limit(200)
+        .execute()
+    )
+    closed = result.data or []
+
+    if not closed:
+        return {
+            "pnl_by_bucket": [],
+            "monthly_returns": [],
+            "exit_reasons": [],
+            "score_vs_pnl": [],
+            "win_rate_over_time": [],
+        }
+
+    # 1. P&L by bucket (brain vs watchlist, SAFE_INCOME vs HIGH_RISK)
+    bucket_groups: dict[str, dict] = {}
+    for t in closed:
+        key = f"{t.get('source', 'watchlist')}_{t.get('bucket', 'UNKNOWN')}"
+        if key not in bucket_groups:
+            bucket_groups[key] = {"source": t.get("source"), "bucket": t.get("bucket"), "trades": 0, "total_pnl": 0, "wins": 0}
+        bucket_groups[key]["trades"] += 1
+        bucket_groups[key]["total_pnl"] += t.get("pnl_pct", 0)
+        if t.get("is_win"):
+            bucket_groups[key]["wins"] += 1
+
+    pnl_by_bucket = [
+        {
+            "source": v["source"],
+            "bucket": v["bucket"],
+            "trades": v["trades"],
+            "total_pnl_pct": round(v["total_pnl"], 2),
+            "avg_pnl_pct": round(v["total_pnl"] / v["trades"], 2) if v["trades"] else 0,
+            "win_rate": round(v["wins"] / v["trades"] * 100, 1) if v["trades"] else 0,
+        }
+        for v in bucket_groups.values()
+    ]
+
+    # 2. Monthly returns (brain track)
+    brain_closed = [t for t in closed if t.get("source") == "brain"]
+    monthly: dict[str, dict] = {}
+    for t in brain_closed:
+        exit_date = t.get("exit_date", "")
+        if not exit_date:
+            continue
+        month_key = exit_date[:7]  # "2026-04"
+        if month_key not in monthly:
+            monthly[month_key] = {"month": month_key, "trades": 0, "total_pnl": 0, "wins": 0}
+        monthly[month_key]["trades"] += 1
+        monthly[month_key]["total_pnl"] += t.get("pnl_pct", 0)
+        if t.get("is_win"):
+            monthly[month_key]["wins"] += 1
+
+    monthly_returns = sorted([
+        {
+            "month": v["month"],
+            "trades": v["trades"],
+            "total_pnl_pct": round(v["total_pnl"], 2),
+            "avg_pnl_pct": round(v["total_pnl"] / v["trades"], 2) if v["trades"] else 0,
+            "win_rate": round(v["wins"] / v["trades"] * 100, 1) if v["trades"] else 0,
+        }
+        for v in monthly.values()
+    ], key=lambda x: x["month"])
+
+    # 3. Exit reasons distribution
+    reason_counts: dict[str, int] = {}
+    for t in closed:
+        reason = t.get("exit_reason", "SIGNAL") or "SIGNAL"
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
+    exit_reasons = [
+        {"reason": reason, "count": count, "pct": round(count / len(closed) * 100, 1)}
+        for reason, count in sorted(reason_counts.items())
+    ]
+
+    # 4. Score vs P&L scatter (for all closed trades)
+    score_vs_pnl = [
+        {
+            "symbol": t["symbol"],
+            "entry_score": t.get("entry_score"),
+            "pnl_pct": t.get("pnl_pct"),
+            "source": t.get("source"),
+            "bucket": t.get("bucket"),
+        }
+        for t in closed
+        if t.get("entry_score") is not None and t.get("pnl_pct") is not None
+    ]
+
+    # 5. Rolling win rate (last N trades, window of 10)
+    win_rate_over_time = []
+    # Reverse to chronological order
+    chronological = list(reversed(closed))
+    window = 10
+    for i in range(window - 1, len(chronological)):
+        batch = chronological[i - window + 1: i + 1]
+        wins = sum(1 for t in batch if t.get("is_win"))
+        trade = chronological[i]
+        win_rate_over_time.append({
+            "trade_num": i + 1,
+            "symbol": trade.get("symbol"),
+            "exit_date": trade.get("exit_date", "")[:10],
+            "win_rate": round(wins / window * 100, 1),
+        })
+
+    return {
+        "pnl_by_bucket": pnl_by_bucket,
+        "monthly_returns": monthly_returns,
+        "exit_reasons": exit_reasons,
+        "score_vs_pnl": score_vs_pnl,
+        "win_rate_over_time": win_rate_over_time,
+    }
+
+
+def snapshot_virtual_portfolio() -> dict:
+    """Take a daily snapshot of portfolio state for the equity curve.
+
+    Call once per day (after the last scan). Upserts by snapshot_date.
+    """
+    db = get_client()
+    summary = get_virtual_summary()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Get cumulative closed P&L (all time)
+    all_closed = (
+        db.table("virtual_trades")
+        .select("pnl_pct, source")
+        .eq("status", "CLOSED")
+        .execute()
+    )
+    all_closed_data = all_closed.data or []
+    brain_cum = sum(t.get("pnl_pct", 0) for t in all_closed_data if t.get("source") == "brain")
+    watchlist_cum = sum(t.get("pnl_pct", 0) for t in all_closed_data if t.get("source") == "watchlist")
+
+    # Fetch SPY price for benchmark
+    spy_data = _fetch_prices_batch(["SPY"])
+    spy_price, _ = spy_data.get("SPY", (None, None))
+
+    snapshot = {
+        "snapshot_date": today,
+        "brain_open": summary.get("brain", {}).get("open_count", 0),
+        "brain_unrealized_pnl": summary.get("brain", {}).get("avg_unrealized_pnl_pct", 0),
+        "brain_cumulative_pnl": round(brain_cum, 2),
+        "watchlist_open": summary.get("watchlist", {}).get("open_count", 0),
+        "watchlist_unrealized_pnl": summary.get("watchlist", {}).get("avg_unrealized_pnl_pct", 0),
+        "watchlist_cumulative_pnl": round(watchlist_cum, 2),
+        "spy_price": spy_price,
+    }
+
+    # Upsert by snapshot_date
+    db.table("virtual_snapshots").upsert(snapshot, on_conflict="snapshot_date").execute()
+    logger.info(f"Virtual snapshot saved for {today}: brain_cum={brain_cum:+.1f}%, watchlist_cum={watchlist_cum:+.1f}%")
+
+    return snapshot
