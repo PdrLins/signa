@@ -33,6 +33,61 @@ async def get_price_history(ticker: str, period: str = "3mo") -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _compute_period_changes(hist: pd.DataFrame) -> dict:
+    """Compute 1W, 1M, 3M, YTD price changes from a 1-year history DataFrame."""
+    if hist.empty or len(hist) < 2:
+        return {}
+
+    current = float(hist["Close"].iloc[-1])
+    result = {}
+
+    def _pct(days_ago_approx: int, key: str):
+        idx = max(0, len(hist) - days_ago_approx)
+        if idx < len(hist):
+            old = float(hist["Close"].iloc[idx])
+            if old > 0:
+                result[key] = round(((current - old) / old) * 100, 2)
+
+    _pct(5, "week_change_pct")    # ~5 trading days
+    _pct(21, "month_change_pct")  # ~21 trading days
+    _pct(63, "three_month_change_pct")  # ~63 trading days
+
+    # YTD: find first trading day of this year
+    try:
+        this_year = date.today().year
+        ytd_data = hist[hist.index.year == this_year]
+        if not ytd_data.empty:
+            ytd_start = float(ytd_data["Close"].iloc[0])
+            if ytd_start > 0:
+                result["ytd_change_pct"] = round(((current - ytd_start) / ytd_start) * 100, 2)
+    except Exception:
+        pass
+
+    return result
+
+
+async def _get_spy_benchmark() -> dict:
+    """Get SPY period changes for benchmark comparison. Cached for 5 min."""
+    from app.core.cache import price_cache
+    cache_key = "benchmark:SPY"
+    cached = price_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _fetch():
+        t = yf.Ticker("SPY")
+        hist = t.history(period="1y")
+        return _compute_period_changes(hist)
+
+    try:
+        result = await asyncio.to_thread(_fetch)
+        price_cache.set(cache_key, result, ttl=300)
+        return result
+    except Exception as e:
+        logger.debug(f"SPY benchmark fetch failed: {e}")
+        return {}
+
+
 async def get_fundamentals(ticker: str) -> dict:
     """Fetch fundamental data for a ticker via yfinance .info. Cached for 5 min.
 
@@ -44,12 +99,14 @@ async def get_fundamentals(ticker: str) -> dict:
     if cached is not None:
         return cached
 
-    def _fetch():
-        t = yf.Ticker(ticker)
-        return t.info
-
     try:
-        info = await asyncio.to_thread(_fetch)
+        def _fetch_with_history():
+            t = yf.Ticker(ticker)
+            info = t.info
+            hist = t.history(period="1y")
+            return info, hist
+
+        info, hist = await asyncio.to_thread(_fetch_with_history)
 
         # Parse earnings date
         earnings_date = None
@@ -63,8 +120,15 @@ async def get_fundamentals(ticker: str) -> dict:
             except (ValueError, TypeError, OSError, OverflowError):
                 pass
 
+        # Compute multi-period price changes from history
+        period_changes = _compute_period_changes(hist)
+
+        # Fetch SPY benchmark changes (cached separately)
+        spy_changes = await _get_spy_benchmark()
+
         result = {
             "company_name": info.get("longName") or info.get("shortName"),
+            "description": info.get("longBusinessSummary"),
             "pe_ratio": info.get("trailingPE"),
             "forward_pe": info.get("forwardPE"),
             "eps": info.get("trailingEps"),
@@ -92,6 +156,10 @@ async def get_fundamentals(ticker: str) -> dict:
             "pre_market_price": info.get("preMarketPrice"),
             "pre_market_change": info.get("preMarketChange"),
             "pre_market_change_pct": info.get("preMarketChangePercent"),
+            # Multi-period changes
+            **period_changes,
+            # SPY benchmark
+            "spy": spy_changes,
         }
         price_cache.set(cache_key, result, ttl=300)
         return result

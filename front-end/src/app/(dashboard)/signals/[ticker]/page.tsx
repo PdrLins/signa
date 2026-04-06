@@ -185,6 +185,43 @@ export default function TickerDetailPage() {
         </div>
       </div>
 
+      {/* Period changes + benchmark */}
+      {(() => {
+        const fund = fundamentals as Record<string, unknown> | undefined
+        const periods = [
+          { label: '1W', key: 'week_change_pct' },
+          { label: '1M', key: 'month_change_pct' },
+          { label: '3M', key: 'three_month_change_pct' },
+          { label: 'YTD', key: 'ytd_change_pct' },
+        ]
+        const spy = fund?.spy as Record<string, unknown> | undefined
+        const hasAny = periods.some(p => fund?.[p.key] != null)
+        if (!hasAny) return null
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            {periods.map(({ label, key }) => {
+              const val = fund?.[key] as number | undefined
+              const spyVal = spy?.[key] as number | undefined
+              if (val == null) return null
+              const isUp = val >= 0
+              return (
+                <div key={key} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg" style={{ backgroundColor: theme.colors.surfaceAlt }}>
+                  <span className="text-[10px] font-medium" style={{ color: theme.colors.textHint }}>{label}</span>
+                  <span className="text-[11px] font-bold tabular-nums" style={{ color: isUp ? theme.colors.up : theme.colors.down }}>
+                    {isUp ? '+' : ''}{val.toFixed(1)}%
+                  </span>
+                  {spyVal != null && (
+                    <span className="text-[9px] tabular-nums" style={{ color: theme.colors.textHint }}>
+                      vs {spyVal >= 0 ? '+' : ''}{spyVal.toFixed(1)}%
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
+
       {/* Content + Sidebar grid */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
         <div className="space-y-4">
@@ -285,9 +322,16 @@ export default function TickerDetailPage() {
         <Card>
           <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>{t.signal.fundamentals}</p>
 
+          {/* Company description */}
+          {fundamentals.description && (
+            <p className="text-[11px] leading-relaxed mb-3 line-clamp-3" style={{ color: theme.colors.textSub }}>
+              {fundamentals.description as string}
+            </p>
+          )}
+
           {/* Sector & Industry */}
           {(fundamentals.sector || fundamentals.industry) && (
-            <p className="text-[11px] mb-3" style={{ color: theme.colors.textSub }}>
+            <p className="text-[11px] mb-3" style={{ color: theme.colors.textHint }}>
               {fundamentals.sector as string}{fundamentals.industry ? ` · ${fundamentals.industry as string}` : ''}
             </p>
           )}

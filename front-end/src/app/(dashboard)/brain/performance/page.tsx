@@ -3,7 +3,6 @@
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
 import { client } from '@/lib/api'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -97,7 +96,6 @@ function ExitReasonBadge({ reason, theme }: { reason?: string; theme: ReturnType
 
 export default function BrainPerformancePage() {
   const theme = useTheme()
-  const t = useI18nStore((s) => s.t).brainPerf
   const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null)
 
   const { data, isLoading } = useQuery<VirtualSummary>({
