@@ -104,6 +104,11 @@ export default function TickerDetailPage() {
                 GEM
               </span>
             )}
+            {latest?.is_discovered && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ backgroundColor: theme.colors.primary + '18', color: theme.colors.primary }}>
+                Discovered
+              </span>
+            )}
             <button
               onClick={() => {
                 if (isWatchlisted) {

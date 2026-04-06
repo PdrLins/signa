@@ -114,6 +114,14 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
                     {t.signals.topPick}
                   </span>
                 )}
+                {signal.is_discovered && (
+                  <span
+                    className="text-[9px] font-bold px-1.5 py-0.5 rounded-md"
+                    style={{ backgroundColor: theme.colors.primary + '18', color: theme.colors.primary }}
+                  >
+                    Discovered
+                  </span>
+                )}
                 <button
                   onClick={(e) => {
                     stopProp(e)

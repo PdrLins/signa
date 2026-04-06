@@ -93,6 +93,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             logger.debug(f"Discovery failed: {e}")
             discovered = []
 
+        discovered_set = set(discovered)
         logger.info(
             f"Universe: {len(all_tickers)} tickers "
             f"({len(core_set)} core + {len(db_additions)} brain-added + {len(discovered)} discovered)"
@@ -308,6 +309,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 "catalyst_type": None,
                 "account_recommendation": _recommend_account(bucket, exchange),
                 "company_name": fundamental_data.get("company_name") if fundamental_data else None,
+                "is_discovered": ticker in discovered_set,
             }
             valid_signals.append(signal_data)
 
@@ -539,6 +541,7 @@ async def _process_candidate(
             "signal_style": signal_style,
             "contrarian_score": contrarian["contrarian_score"] if contrarian["is_contrarian"] else None,
             "company_name": fundamental_data.get("company_name") if fundamental_data else None,
+            "is_discovered": ticker in discovered_set,
         }
 
         # Kelly position sizing (if actionable)

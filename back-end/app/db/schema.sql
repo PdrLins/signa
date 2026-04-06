@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS signals (
     score             INT DEFAULT 0 CHECK (score >= 0 AND score <= 100),
     confidence        INT DEFAULT 0 CHECK (confidence >= 0 AND confidence <= 100),
     is_gem            BOOLEAN DEFAULT FALSE,
+    is_discovered     BOOLEAN DEFAULT FALSE,
     bucket            VARCHAR,
     asset_type        VARCHAR,
     exchange          VARCHAR,

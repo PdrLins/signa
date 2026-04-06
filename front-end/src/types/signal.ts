@@ -31,6 +31,7 @@ export interface Signal {
   catalyst_type: string | null
   signal_style: 'MOMENTUM' | 'CONTRARIAN' | 'NEUTRAL' | null
   contrarian_score: number | null
+  is_discovered?: boolean
   scan_id: string | null
   created_at: string
   updated_at: string
