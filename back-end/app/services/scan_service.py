@@ -44,6 +44,14 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
     start_time = time.time()
     logger.info(f"Starting {scan_type} scan...")
 
+    # Load bucket cache once for the entire scan (avoids N individual DB queries)
+    global _bucket_cache
+    try:
+        all_tickers = queries.get_active_tickers()
+        _bucket_cache = {t["symbol"]: t["bucket"] for t in all_tickers if t.get("bucket")}
+    except Exception:
+        _bucket_cache = {}
+
     # Use pre-created scan or create new one
     if scan_id:
         queries.update_scan(scan_id, status="RUNNING", progress_pct=0, phase="loading")
@@ -114,7 +122,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         # ══════════════════════════════════════════════════════
 
         AI_CANDIDATE_LIMIT = settings.ai_candidate_limit
-        semaphore = asyncio.Semaphore(settings.max_concurrent_api_calls)
+        semaphore = asyncio.Semaphore(min(settings.max_concurrent_api_calls, 5))  # Limit concurrent yfinance calls
         total_candidates = len(candidates)
 
         # ── PASS 1: Pre-score all candidates (no AI tokens) ──
@@ -525,15 +533,9 @@ def _classify_bucket(ticker: str, screening: dict) -> str:
     Priority: 1) stored bucket from tickers table (stable across scans),
     2) hardcoded lists, 3) heuristic fallback.
     """
-    # 1. Check tickers table first -- stable bucket from previous scans
-    try:
-        from app.db.supabase import get_client as _get_db
-        _db = _get_db()
-        stored = _db.table("tickers").select("bucket").eq("symbol", ticker).limit(1).execute()
-        if stored.data and stored.data[0].get("bucket"):
-            return stored.data[0]["bucket"]
-    except Exception:
-        pass
+    # 1. Check cached bucket map first (loaded once per scan, not per ticker)
+    if ticker in _bucket_cache:
+        return _bucket_cache[ticker]
 
     # 2. Hardcoded classifications
     if ticker.endswith("-USD"):
@@ -575,7 +577,12 @@ def _classify_bucket(ticker: str, screening: dict) -> str:
     except Exception:
         pass
 
+    _bucket_cache[ticker] = bucket
     return bucket
+
+
+# Module-level bucket cache, loaded once per scan
+_bucket_cache: dict[str, str] = {}
 
 
 def _recommend_account(bucket: str, exchange: str) -> str:
