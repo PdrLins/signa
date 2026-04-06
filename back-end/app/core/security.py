@@ -64,6 +64,33 @@ def decode_token(token: str) -> dict | None:
         return None
 
 
+def decode_token_allow_expired(token: str, max_age_hours: int = 24) -> dict | None:
+    """Decode a JWT token even if expired, within a grace period.
+
+    Used for token refresh -- allows refreshing tokens that expired
+    recently (within max_age_hours) without forcing re-login.
+    """
+    import jwt as pyjwt
+    from datetime import datetime, timezone
+
+    try:
+        payload = pyjwt.decode(
+            token, settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+            options={"verify_exp": False},
+        )
+        # Check the token isn't TOO old
+        exp = payload.get("exp", 0)
+        now = datetime.now(timezone.utc).timestamp()
+        if now - exp > max_age_hours * 3600:
+            logger.debug("Token too old for refresh")
+            return None
+        return payload
+    except Exception:
+        logger.debug("Token decode failed (even with expired allowed)")
+        return None
+
+
 def generate_otp() -> str:
     """Generate a 6-digit OTP code."""
     return f"{secrets.randbelow(900000) + 100000}"

@@ -56,15 +56,29 @@ async def logout(request: Request, user: dict = Depends(get_current_user)):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(request: Request, user: dict = Depends(get_current_user)):
-    """Refresh the JWT access token. (Protected)"""
+async def refresh_token(request: Request):
+    """Refresh the JWT access token. Accepts expired tokens (within 24h)."""
+    from app.core.security import decode_token_allow_expired
+
     auth_header = request.headers.get("Authorization", "")
     token = auth_header.split(" ", 1)[1] if " " in auth_header else ""
 
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No token provided")
+
+    payload = decode_token_allow_expired(token, max_age_hours=24)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token too old for refresh")
+
+    user_id = payload.get("sub")
+    username = payload.get("username")
+    if not user_id or not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
     result = auth_service.refresh_token(
         token=token,
-        user_id=user["user_id"],
-        username=user["username"],
+        user_id=user_id,
+        username=username,
         ip_address=get_client_ip(request),
         user_agent=request.headers.get("User-Agent", ""),
     )
