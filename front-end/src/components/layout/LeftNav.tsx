@@ -88,7 +88,7 @@ export function LeftNav() {
         }}
         className="flex items-center justify-center w-10 h-10 rounded-xl transition-all hover:opacity-80"
         style={{ color: theme.colors.down }}
-        title={t.settings.logout}
+        title={t.settings.logOut}
       >
         <LogOut size={18} strokeWidth={1.8} />
       </button>

@@ -7,8 +7,7 @@ import { useI18nStore } from '@/store/i18nStore'
 import { useThemeStore } from '@/store/themeStore'
 import { useAuthStore } from '@/store/authStore'
 import { authApi } from '@/lib/api'
-import { Button } from '@/components/ui/Button'
-import { Lock, Eye, EyeOff, Activity, Cpu, Send, ArrowLeft, Shield } from 'lucide-react'
+import { Eye, EyeOff, Activity, Cpu, Send, ArrowLeft, Shield } from 'lucide-react'
 
 export default function LoginPage() {
   const theme = useTheme()
@@ -27,9 +26,6 @@ export default function LoginPage() {
   const [attempts, setAttempts] = useState(0)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [lastLogin, setLastLogin] = useState<string | null>(
-    typeof window !== 'undefined' ? localStorage.getItem('signa-last-login') : null
-  )
 
   const otpRefs = useRef<(HTMLInputElement | null)[]>([])
 
@@ -51,7 +47,6 @@ export default function LoginPage() {
       const res = await authApi.login({ username, password })
       setSessionToken(res.session_token)
       if (res.last_login) {
-        setLastLogin(res.last_login)
         localStorage.setItem('signa-last-login', res.last_login)
       }
       setStep(2)
