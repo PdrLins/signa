@@ -102,7 +102,7 @@ async def get_fundamentals(ticker: str) -> dict:
     try:
         def _fetch_with_history():
             t = yf.Ticker(ticker)
-            info = t.info
+            info = t.info or {}
             hist = t.history(period="1y")
             return info, hist
 

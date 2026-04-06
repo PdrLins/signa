@@ -22,7 +22,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [sessionToken, setSessionToken] = useState('')
   const [otp, setOtp] = useState(['', '', '', '', '', ''])
-  const [countdown, setCountdown] = useState(30)
+  const [countdown, setCountdown] = useState(120)
   const [attempts, setAttempts] = useState(0)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)

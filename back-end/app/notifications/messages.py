@@ -11,13 +11,13 @@ _MESSAGES = {
         "en": (
             "🔐 <b>Signa Verification Code</b>\n\n"
             "Your login code is: <code>{otp_code}</code>\n\n"
-            "⏱ Valid for 2 minutes only\n"
+            "⏱ Valid for 30 seconds only\n"
             "Never share this code with anyone."
         ),
         "pt": (
             "🔐 <b>Código de Verificação Signa</b>\n\n"
             "Seu código de login é: <code>{otp_code}</code>\n\n"
-            "⏱ Válido por 2 minutos apenas\n"
+            "⏱ Válido por 30 segundos apenas\n"
             "Nunca compartilhe este código."
         ),
     },

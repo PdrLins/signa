@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str  # No default — forces env var
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60  # 1 hour (refresh for longer sessions)
-    otp_expire_seconds: int = 120  # 2 minutes (accounts for Telegram delivery latency)
+    otp_expire_seconds: int = 30  # 30 seconds
     session_token_expire_seconds: int = 180
 
     # --- Telegram Webhook ---
