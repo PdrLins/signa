@@ -231,7 +231,7 @@ _SIGNAL_LIST_COLUMNS = (
     "asset_type, exchange, price_at_signal, target_price, stop_loss, "
     "risk_reward, catalyst, sentiment_score, reasoning, market_regime, "
     "catalyst_type, account_recommendation, signal_style, contrarian_score, "
-    "kelly_recommendation, scan_id, created_at, updated_at"
+    "kelly_recommendation, is_discovered, scan_id, created_at, updated_at"
 )
 
 
