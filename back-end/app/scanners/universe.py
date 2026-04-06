@@ -7,13 +7,13 @@ TSX_TICKERS = [
     "MFC.TO", "SLF.TO", "IFC.TO", "FFH.TO",
     # Energy
     "ENB.TO", "TRP.TO", "CNQ.TO", "SU.TO", "CVE.TO", "IMO.TO",
-    "ARX.TO", "TVE.TO", "BTE.TO", "WCP.TO", "ERF.TO",
+    "ARX.TO", "TVE.TO", "BTE.TO", "WCP.TO",
     # Mining & Materials
     "ABX.TO", "FNV.TO", "WPM.TO", "NTR.TO", "CCO.TO",
-    "FM.TO", "LUN.TO", "TECK.TO", "K.TO", "AGI.TO",
+    "FM.TO", "LUN.TO", "AGI.TO",
     # Tech
     "SHOP.TO", "CSU.TO", "OTEX.TO", "LSPD.TO", "BB.TO",
-    "TIXT.TO", "KXS.TO", "DCBO.TO", "NVEI.TO",
+    "KXS.TO", "DCBO.TO",
     # Telecom
     "T.TO", "BCE.TO", "RCI-B.TO", "QBR-B.TO",
     # Utilities
@@ -44,7 +44,7 @@ NYSE_TICKERS = [
     "BAC", "WFC", "GS", "MS", "C", "AXP", "BLK", "SCHW",
     "USB", "PNC", "TFC",
     # Energy
-    "XOM", "COP", "SLB", "EOG", "PXD", "MPC", "OXY",
+    "XOM", "COP", "SLB", "EOG", "MPC", "OXY",
     "PSX", "VLO", "HAL",
     # Healthcare
     "PFE", "BMY", "GILD", "AMGN", "ISRG", "SYK",
@@ -54,7 +54,7 @@ NYSE_TICKERS = [
     "MMM", "DE", "EMR",
     # Consumer
     "LOW", "TGT", "SBUX", "EL", "CL", "KMB", "GIS",
-    "SJM", "K", "HSY",
+    "SJM", "HSY",
     # REITs
     "AMT", "PLD", "CCI", "EQIX", "SPG", "O", "WELL",
     "DLR", "AVB", "PSA",
@@ -72,7 +72,7 @@ NASDAQ_TICKERS = [
     "MRNA", "REGN", "VRTX", "BIIB", "ILMN", "DXCM",
     "ALGN", "IDXX",
     # Fintech
-    "PYPL", "SQ", "COIN", "SOFI", "AFRM", "HOOD",
+    "PYPL", "COIN", "SOFI", "AFRM", "HOOD",
     # Cloud / SaaS
     "SNOW", "NET", "DDOG", "ZS", "CRWD", "PANW", "FTNT",
     "OKTA", "MDB", "TEAM",
@@ -93,13 +93,13 @@ CRYPTO_TICKERS = [
     # Major
     "BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD",
     # Layer 1 / Layer 2
-    "ADA-USD", "AVAX-USD", "DOT-USD", "MATIC-USD", "ATOM-USD",
+    "ADA-USD", "AVAX-USD", "DOT-USD", "ATOM-USD",
     # DeFi
-    "LINK-USD", "UNI-USD", "AAVE-USD", "MKR-USD",
+    "LINK-USD", "AAVE-USD", "MKR-USD",
     # Meme / High Risk
-    "DOGE-USD", "SHIB-USD", "PEPE-USD",
+    "DOGE-USD", "SHIB-USD",
     # Other
-    "LTC-USD", "NEAR-USD", "APT-USD",
+    "LTC-USD", "NEAR-USD",
 ]
 
 
@@ -148,3 +148,44 @@ def get_exchange(ticker: str) -> str:
 def get_ticker_count() -> int:
     """Total unique tickers in the universe."""
     return len(get_all_tickers())
+
+
+def discover_tickers() -> list[str]:
+    """Discover new tickers from Yahoo Finance screeners.
+
+    Queries most_actives, day_gainers, undervalued_large_caps, and
+    growth_technology_stocks. Returns tickers NOT already in the core
+    universe -- these are potential gems the brain hasn't seen before.
+    """
+    import yfinance as yf
+    from loguru import logger
+
+    core = set(get_all_tickers())
+    discovered = set()
+
+    queries = [
+        "most_actives",
+        "day_gainers",
+        "undervalued_large_caps",
+        "growth_technology_stocks",
+    ]
+
+    for query in queries:
+        try:
+            result = yf.screen(query)
+            quotes = result.get("quotes", []) if isinstance(result, dict) else []
+            for q in quotes:
+                symbol = q.get("symbol", "")
+                # Skip OTC, warrants, preferred shares, non-US/CA
+                if not symbol or "." in symbol and not symbol.endswith(".TO"):
+                    continue
+                if symbol not in core:
+                    discovered.add(symbol)
+        except Exception as e:
+            logger.debug(f"Screener query '{query}' failed: {e}")
+
+    discovered_list = sorted(discovered)
+    if discovered_list:
+        logger.info(f"Discovery: found {len(discovered_list)} new tickers: {discovered_list[:20]}")
+
+    return discovered_list

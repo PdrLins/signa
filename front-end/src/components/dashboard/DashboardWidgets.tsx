@@ -361,26 +361,20 @@ export function BrainPerformanceWidget() {
                   </div>
                 </div>
               )}
-              {/* Brain auto-picks (exclude symbols already shown in watchlist picks) */}
-              {(() => {
-                const watchlistSymbols = new Set(data.open_trades.filter(v => v.source === 'watchlist').map(v => v.symbol))
-                const brainOnly = data.open_trades.filter(v => v.source === 'brain' && !watchlistSymbols.has(v.symbol))
-                if (brainOnly.length === 0) return null
-                return (
-                  <div>
-                    <p className="text-[9px] uppercase mb-1" style={{ color: theme.colors.textHint }}>
-                      {t.overview.brainPicks} ({brainOnly.length})
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {brainOnly.map((vt) => (
-                        <span key={vt.symbol} className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ backgroundColor: theme.colors.warning + '12', color: theme.colors.warning }}>
-                          {vt.symbol}
-                        </span>
-                      ))}
-                    </div>
+              {/* Brain auto-picks */}
+              {data.open_trades.filter(v => v.source === 'brain').length > 0 && (
+                <div>
+                  <p className="text-[9px] uppercase mb-1" style={{ color: theme.colors.textHint }}>
+                    {t.overview.brainPicks} ({data.brain.open_count})
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {data.open_trades.filter(v => v.source === 'brain').map((vt) => (
+                      <span key={vt.symbol} className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ backgroundColor: theme.colors.warning + '12', color: theme.colors.warning }}>
+                        {vt.symbol}
+                      </span>
+                    ))}
                   </div>
-                )
-              })()}
+                </div>
               )}
             </div>
           )}

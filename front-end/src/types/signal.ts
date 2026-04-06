@@ -63,7 +63,7 @@ export interface DailyStats {
 
 export interface ScanTodayRecord {
   id: string | null
-  scan_type: 'PRE_MARKET' | 'MORNING' | 'PRE_CLOSE' | 'AFTER_CLOSE'
+  scan_type: 'PRE_MARKET' | 'MORNING' | 'MIDDAY' | 'PRE_CLOSE' | 'AFTER_CLOSE'
   label: string
   scheduled_time: string
   status: 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED' | 'CLOSED'

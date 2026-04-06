@@ -70,10 +70,33 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         queries.update_scan(scan_id, progress_pct=pct, phase=phase, current_ticker=current_ticker)
 
     try:
-        # Phase 1: Load tickers and pre-filter (0-15%)
+        # Phase 1: Load tickers + discovery and pre-filter (0-15%)
         _update_progress(5, "screening", "Loading universe...")
         all_tickers = get_all_tickers()
-        logger.info(f"Universe: {len(all_tickers)} tickers")
+
+        # Add tickers from DB that brain previously discovered and picked
+        core_set = set(all_tickers)
+        db_tickers = queries.get_active_tickers()
+        db_additions = [t["symbol"] for t in db_tickers if t["symbol"] not in core_set]
+        if db_additions:
+            all_tickers = all_tickers + db_additions
+
+        # Discovery: find trending/active tickers not in the universe
+        from app.scanners.universe import discover_tickers
+        try:
+            full_set = set(all_tickers)
+            discovered = await asyncio.to_thread(discover_tickers)
+            discovered = [d for d in discovered if d not in full_set]
+            if discovered:
+                all_tickers = all_tickers + discovered
+        except Exception as e:
+            logger.debug(f"Discovery failed: {e}")
+            discovered = []
+
+        logger.info(
+            f"Universe: {len(all_tickers)} tickers "
+            f"({len(core_set)} core + {len(db_additions)} brain-added + {len(discovered)} discovered)"
+        )
 
         screening_data = await market_scanner.get_bulk_screening(all_tickers)
         _update_progress(10, "filtering")

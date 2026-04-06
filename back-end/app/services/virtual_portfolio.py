@@ -152,6 +152,20 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
                 brain_open_count += 1
                 logger.info(f"Virtual BUY [brain]: {symbol} @ ${price:.2f} (score {score})")
 
+                # Auto-add discovered tickers to the tickers table
+                # so they keep getting scanned in future scans
+                from app.db import queries as db_queries
+                from app.scanners.universe import get_exchange
+                try:
+                    db_queries.upsert_ticker(
+                        symbol,
+                        name=sig.get("company_name", ""),
+                        exchange=get_exchange(symbol),
+                        bucket=sig.get("bucket"),
+                    )
+                except Exception:
+                    pass
+
     return {"buys": buys, "sells": sells}
 
 

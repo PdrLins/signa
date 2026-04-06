@@ -116,6 +116,7 @@ export default function HowItWorksPage() {
                 <div className="space-y-2 mt-2">
                   <Step title="06:00 AM ET" desc={h.scan1} />
                   <Step title="10:00 AM ET" desc={h.scan2} />
+                  <Step title="12:00 PM ET" desc={h.scan2b} />
                   <Step title="03:00 PM ET" desc={h.scan3} />
                   <Step title="04:30 PM ET" desc={h.scan4} />
                 </div>
@@ -130,6 +131,7 @@ export default function HowItWorksPage() {
               <Section title={h.pipelineTitle}>
                 <P>{h.pipelineDesc}</P>
                 <div className="space-y-2 mt-2">
+                  <Step title={h.discoveryTitle} desc={h.discoveryDesc} />
                   <Step title={h.step1Title} desc={h.step1Desc} />
                   <Step title={h.step2Title} desc={h.step2Desc} />
                   <Step title={h.step3Title} desc={h.step3Desc} />

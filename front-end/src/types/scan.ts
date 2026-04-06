@@ -1,6 +1,6 @@
 export interface ScanRecord {
   id: string
-  scan_type: 'PRE_MARKET' | 'MORNING' | 'PRE_CLOSE' | 'AFTER_CLOSE' | 'MANUAL'
+  scan_type: 'PRE_MARKET' | 'MORNING' | 'MIDDAY' | 'PRE_CLOSE' | 'AFTER_CLOSE' | 'MANUAL'
   started_at: string
   completed_at: string | null
   tickers_scanned: number

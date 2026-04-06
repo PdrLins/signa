@@ -103,7 +103,7 @@ class Settings(BaseSettings):
 
     # --- Brain Watchdog ---
     watchdog_enabled: bool = True
-    watchdog_pnl_alert_pct: float = 3.0       # Alert if P&L drops this % in one interval
+    watchdog_pnl_alert_pct: float = 2.0       # Alert if P&L drops this % in one interval
     watchdog_stop_proximity_pct: float = 2.0  # Alert if price within this % of stop
 
     # --- Brain Editor ---
