@@ -90,6 +90,59 @@ async def virtual_portfolio_snapshot():
         logger.warning(f"Virtual portfolio snapshot failed: {e}")
 
 
+async def catch_up_missed_scans():
+    """Run on startup -- check which scheduled scans were missed today and run them."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    et = ZoneInfo("America/New_York")
+    now_et = datetime.now(et)
+
+    # Only on weekdays
+    if now_et.weekday() >= 5:
+        return
+
+    from app.db import queries
+
+    scan_slots = [
+        ("PRE_MARKET", 6, 0),
+        ("MORNING", 10, 0),
+        ("MIDDAY", 12, 0),
+        ("PRE_CLOSE", 15, 0),
+        ("AFTER_CLOSE", 16, 30),
+    ]
+
+    # Get today's completed scans (exclude manual)
+    today_start = now_et.replace(hour=0, minute=0, second=0, microsecond=0)
+    recent_scans = queries.get_scans(limit=20)
+    completed_types = set()
+    for s in recent_scans:
+        started = s.get("started_at", "")
+        if started and started >= today_start.isoformat():
+            if s.get("triggered_by", "scheduler") != "manual" and s.get("status") == "COMPLETE":
+                completed_types.add(s.get("scan_type"))
+
+    # Find missed scans (scheduled time has passed but no completed scan)
+    missed = []
+    for scan_type, hour, minute in scan_slots:
+        scheduled_time = now_et.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if now_et > scheduled_time and scan_type not in completed_types:
+            missed.append(scan_type)
+
+    if not missed:
+        logger.info("Startup catch-up: no missed scans")
+        return
+
+    logger.info(f"Startup catch-up: running {len(missed)} missed scan(s): {missed}")
+    from app.services.scan_service import run_scan
+    for scan_type in missed:
+        try:
+            logger.info(f"Catch-up: running missed {scan_type} scan")
+            await run_scan(scan_type)
+        except Exception as e:
+            logger.error(f"Catch-up scan {scan_type} failed: {e}")
+
+
 async def brain_watchdog():
     """Every 15 min during market hours -- monitor open brain positions."""
     from app.services.watchdog_service import run_watchdog

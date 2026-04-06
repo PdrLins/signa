@@ -3,6 +3,7 @@
 Run with: uvicorn main:app --reload --port 8000
 """
 
+import asyncio
 import hmac
 from contextlib import asynccontextmanager
 
@@ -32,6 +33,10 @@ async def lifespan(app: FastAPI):
     init_log_capture()
     init_scheduler()
     start_scheduler()
+
+    # Catch up any missed scans (e.g., app was down during scheduled time)
+    from app.scheduler.jobs import catch_up_missed_scans
+    asyncio.ensure_future(catch_up_missed_scans())
 
     yield
 
