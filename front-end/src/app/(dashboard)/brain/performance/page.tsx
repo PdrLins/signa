@@ -139,7 +139,7 @@ export default function BrainPerformancePage() {
 
   const { data: watchdogEvents } = useQuery<WatchdogEvent[]>({
     queryKey: ['stats', 'watchdog-events'],
-    queryFn: async () => (await client.get<WatchdogEvent[]>('/stats/watchdog-events?limit=1')).data,
+    queryFn: async () => (await client.get<WatchdogEvent[]>('/stats/watchdog-events?limit=3')).data,
     staleTime: 30_000,
   })
 
@@ -278,6 +278,72 @@ export default function BrainPerformancePage() {
                 </div>
               )}
             </div>
+          )}
+
+          {/* Watchdog Timeline */}
+          {watchdogEvents && watchdogEvents.length > 0 && (
+            <Card>
+              <div className="flex items-center gap-1.5 mb-3">
+                <Eye size={14} style={{ color: theme.colors.warning }} />
+                <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+                  Watchdog
+                </p>
+                {data?.watchdog?.active && (
+                  <span className="text-[8px] px-1.5 py-0.5 rounded-full ml-auto" style={{ backgroundColor: theme.colors.up + '15', color: theme.colors.up }}>
+                    Active
+                  </span>
+                )}
+              </div>
+
+              <div className="relative pl-4">
+                {/* Timeline line */}
+                <div className="absolute left-[5px] top-1 bottom-1 w-px" style={{ backgroundColor: theme.colors.border }} />
+
+                <div className="space-y-3">
+                  {watchdogEvents.map((evt, i) => {
+                    const typeColor = getEventTypeColor(evt.event_type, theme)
+                    const pnlColor = evt.pnl_pct >= 0 ? theme.colors.up : theme.colors.down
+
+                    return (
+                      <div key={i} className="relative">
+                        {/* Timeline dot */}
+                        <div
+                          className="absolute -left-4 top-1 w-[10px] h-[10px] rounded-full border-2"
+                          style={{ backgroundColor: theme.colors.surface, borderColor: typeColor }}
+                        />
+
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] font-semibold" style={{ color: theme.colors.text }}>{evt.symbol}</span>
+                            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded" style={{ backgroundColor: typeColor + '15', color: typeColor }}>
+                              {evt.event_type.replace(/_/g, ' ')}
+                            </span>
+                            {evt.in_watchlist && (
+                              <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ backgroundColor: theme.colors.primary + '15', color: theme.colors.primary }}>
+                                WL
+                              </span>
+                            )}
+                            {evt.sentiment_label && (
+                              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{evt.sentiment_label}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-[11px] font-bold tabular-nums" style={{ color: pnlColor }}>
+                              {evt.pnl_pct >= 0 ? '+' : ''}{evt.pnl_pct.toFixed(1)}%
+                            </span>
+                            <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{relativeTime(evt.created_at)}</span>
+                          </div>
+                        </div>
+
+                        <p className="text-[9px] mt-0.5" style={{ color: theme.colors.textHint }}>
+                          {evt.action_taken}
+                        </p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </Card>
           )}
 
           {/* Open positions — brain picks */}
@@ -473,29 +539,6 @@ export default function BrainPerformancePage() {
             )}
           </Card>
 
-          {/* Watchdog — latest event */}
-          {watchdogEvents && watchdogEvents.length > 0 && (() => {
-            const evt = watchdogEvents[0]
-            const typeColor = getEventTypeColor(evt.event_type, theme)
-            const pnlColor = evt.pnl_pct >= 0 ? theme.colors.up : theme.colors.down
-            return (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ backgroundColor: theme.colors.surfaceAlt }}>
-                <Eye size={12} style={{ color: theme.colors.warning }} />
-                <span className="text-[11px] font-semibold" style={{ color: theme.colors.text }}>{evt.symbol}</span>
-                <span className="text-[9px] font-medium px-1.5 py-0.5 rounded" style={{ backgroundColor: typeColor + '15', color: typeColor }}>
-                  {evt.event_type.replace(/_/g, ' ')}
-                </span>
-                <span className="text-[10px]" style={{ color: theme.colors.textHint }}>{evt.action_taken}</span>
-                <span className="text-[11px] font-bold tabular-nums" style={{ color: pnlColor }}>
-                  {evt.pnl_pct >= 0 ? '+' : ''}{evt.pnl_pct.toFixed(1)}%
-                </span>
-                {evt.sentiment_label && (
-                  <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{evt.sentiment_label}</span>
-                )}
-                <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{relativeTime(evt.created_at)}</span>
-              </div>
-            )
-          })()}
 
         </div>
         <div className="sticky top-6 hidden lg:block">
