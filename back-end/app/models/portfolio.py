@@ -22,21 +22,21 @@ class PortfolioItem(BaseModel):
 
 class PortfolioAddRequest(BaseModel):
     """Request to add a position."""
-    symbol: str = Field(..., min_length=1, max_length=10)
-    bucket: Optional[str] = None
-    account_type: Optional[str] = None
-    shares: Optional[Decimal] = None
-    avg_cost: Optional[Decimal] = None
-    currency: str = "CAD"
+    symbol: str = Field(..., min_length=1, max_length=10, pattern=r"^[A-Z0-9.\-]+$")
+    bucket: Optional[str] = Field(None, pattern=r"^(SAFE_INCOME|HIGH_RISK)$")
+    account_type: Optional[str] = Field(None, pattern=r"^(TFSA|RRSP|TAXABLE)$")
+    shares: Optional[Decimal] = Field(None, gt=0)
+    avg_cost: Optional[Decimal] = Field(None, gt=0)
+    currency: str = Field("CAD", pattern=r"^(CAD|USD)$")
 
 
 class PortfolioUpdateRequest(BaseModel):
     """Request to update a position."""
-    bucket: Optional[str] = None
-    account_type: Optional[str] = None
-    shares: Optional[Decimal] = None
-    avg_cost: Optional[Decimal] = None
-    currency: Optional[str] = None
+    bucket: Optional[str] = Field(None, pattern=r"^(SAFE_INCOME|HIGH_RISK)$")
+    account_type: Optional[str] = Field(None, pattern=r"^(TFSA|RRSP|TAXABLE)$")
+    shares: Optional[Decimal] = Field(None, gt=0)
+    avg_cost: Optional[Decimal] = Field(None, gt=0)
+    currency: Optional[str] = Field(None, pattern=r"^(CAD|USD)$")
 
 
 class PortfolioResponse(BaseModel):

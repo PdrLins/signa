@@ -116,16 +116,26 @@ def invalidate_otp(otp_id: str) -> None:
 
 def blacklist_token(token_jti: str, user_id: str, expires_at: datetime) -> None:
     """Add a token to the blacklist (on logout)."""
+    from app.core.cache import blacklist_cache
     client = get_client()
     client.table("token_blacklist").insert({
         "token_jti": token_jti,
         "user_id": user_id,
         "expires_at": expires_at.isoformat(),
     }).execute()
+    # Immediately mark as blacklisted in cache
+    blacklist_cache.set(f"bl:{token_jti}", True, ttl=3600)
 
 
 def is_token_blacklisted(token_jti: str) -> bool:
-    """Check if a token has been blacklisted."""
+    """Check if a token has been blacklisted. Uses TTL cache to avoid DB hit per request."""
+    from app.core.cache import blacklist_cache
+    cache_key = f"bl:{token_jti}"
+
+    cached = blacklist_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     client = get_client()
     result = (
         client.table("token_blacklist")
@@ -134,7 +144,10 @@ def is_token_blacklisted(token_jti: str) -> bool:
         .limit(1)
         .execute()
     )
-    return len(result.data) > 0 if result.data else False
+    is_blocked = len(result.data) > 0 if result.data else False
+    # Cache: blacklisted tokens cached 5 min, non-blacklisted 30s
+    blacklist_cache.set(cache_key, is_blocked, ttl=300 if is_blocked else 30)
+    return is_blocked
 
 
 # ============================================================
@@ -201,6 +214,16 @@ def upsert_ticker(symbol: str, name: str = "", exchange: str = "", bucket: str |
 # SIGNALS
 # ============================================================
 
+# Light columns for list endpoints — excludes heavy JSONB blobs
+_SIGNAL_LIST_COLUMNS = (
+    "id, symbol, action, status, score, confidence, is_gem, bucket, "
+    "asset_type, exchange, price_at_signal, target_price, stop_loss, "
+    "risk_reward, catalyst, sentiment_score, reasoning, market_regime, "
+    "catalyst_type, account_recommendation, signal_style, contrarian_score, "
+    "kelly_recommendation, scan_id, company_name, created_at, updated_at"
+)
+
+
 def insert_signal(signal_data: dict) -> dict:
     """Insert a signal record."""
     client = get_client()
@@ -229,13 +252,9 @@ def get_signals(
     limit: int = 50,
     gems_only: bool = False,
 ) -> list[dict]:
-    """Get latest signals with optional filters.
-
-    Fetches all columns. Future optimization: exclude large JSON blobs
-    once all columns are confirmed in the schema.
-    """
+    """Get latest signals with optional filters. Excludes heavy JSONB blobs."""
     client = get_client()
-    query = client.table("signals").select("*").order("created_at", desc=True).limit(limit)
+    query = client.table("signals").select(_SIGNAL_LIST_COLUMNS).order("created_at", desc=True).limit(limit)
     if bucket:
         query = query.eq("bucket", bucket)
     if action:
@@ -351,12 +370,19 @@ def get_scan_by_id(scan_id: str) -> dict | None:
     return result.data[0] if result.data else None
 
 
+_SCAN_LIST_COLUMNS = (
+    "id, scan_type, started_at, completed_at, tickers_scanned, "
+    "candidates, signals_found, gems_found, status, error_message, "
+    "progress_pct, phase, current_ticker, market_regime, created_at"
+)
+
+
 def get_scans(limit: int = 20) -> list[dict]:
     """Get recent scan history."""
     client = get_client()
     result = (
         client.table("scans")
-        .select("*")
+        .select(_SCAN_LIST_COLUMNS)
         .order("started_at", desc=True)
         .limit(limit)
         .execute()
@@ -369,7 +395,7 @@ def get_last_completed_scan() -> dict | None:
     client = get_client()
     result = (
         client.table("scans")
-        .select("*")
+        .select(_SCAN_LIST_COLUMNS)
         .eq("status", "COMPLETE")
         .order("completed_at", desc=True)
         .limit(1)

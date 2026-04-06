@@ -34,10 +34,12 @@ function ToastItem({ toast }: { toast: Toast }) {
     requestAnimationFrame(() => setVisible(true))
     const fadeTimer = setTimeout(() => setVisible(false), toast.duration - 300)
     return () => clearTimeout(fadeTimer)
-  }, [toast.duration])
+  }, [toast.id, toast.duration])
 
   return (
     <div
+      role={toast.variant === 'error' ? 'alert' : 'status'}
+      aria-live={toast.variant === 'error' ? 'assertive' : 'polite'}
       className="flex items-center gap-3 px-4 py-3 rounded-xl max-w-sm w-full transition-all duration-300"
       style={{
         backgroundColor: theme.colors.surface,

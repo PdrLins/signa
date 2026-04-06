@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
@@ -15,12 +16,8 @@ import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { PriceChart } from '@/components/charts/PriceChart'
 import { Sidebar } from '@/components/layout/Sidebar'
-import { ArrowLeft, Star, TrendingUp, TrendingDown, Brain, ShieldAlert, BookOpen } from 'lucide-react'
-
-function formatPrice(v: number | null | undefined): string {
-  if (v === null || v === undefined) return '--'
-  return `$${Number(v).toFixed(2)}`
-}
+import { formatPrice } from '@/lib/utils'
+import { ArrowLeft, Star, TrendingUp, TrendingDown, Brain, BookOpen } from 'lucide-react'
 
 export default function TickerDetailPage() {
   const params = useParams()
@@ -39,7 +36,7 @@ export default function TickerDetailPage() {
     enabled: !!ticker,
   })
 
-  const { data: signalHistory } = useQuery({
+  const { data: signalHistory, isError: signalHistoryError } = useQuery({
     queryKey: ['signals', ticker, 'history'],
     queryFn: async () => {
       const res = await signalsApi.getByTicker(ticker, 10)
@@ -48,7 +45,7 @@ export default function TickerDetailPage() {
     enabled: !!ticker,
   })
 
-  const { data: brainInsights } = useQuery({
+  const { data: brainInsights, isError: brainInsightsError } = useQuery({
     queryKey: ['brain', 'insights', ticker],
     queryFn: async () => {
       const res = await client.get(`/brain/insights/${ticker}`)
@@ -63,12 +60,12 @@ export default function TickerDetailPage() {
   })
 
   const latest = signalHistory?.[0]
-  const fundamentals = detail?.fundamentals as Record<string, unknown> | undefined
+  const fundamentals = detail?.fundamentals as Record<string, string | number | null> | undefined
   const currentPrice = detail?.current_price as number | undefined
 
   // Scoring weights
   const isHighRisk = latest?.bucket === 'HIGH_RISK'
-  const weights = isHighRisk
+  const weights = useMemo(() => isHighRisk
     ? [
         { label: t.signal.sentimentXTwitter, pct: 35, color: theme.colors.primary },
         { label: t.signal.catalyst, pct: 30, color: theme.colors.up },
@@ -80,7 +77,7 @@ export default function TickerDetailPage() {
         { label: t.signal.fundamentalHealth, pct: 30, color: theme.colors.primary },
         { label: t.signal.macroConditions, pct: 25, color: theme.colors.warning },
         { label: t.signal.sentiment, pct: 10, color: theme.colors.textSub },
-      ]
+      ], [isHighRisk, t, theme])
 
   if (loadingDetail) {
     return (
@@ -96,7 +93,7 @@ export default function TickerDetailPage() {
     <div className="space-y-4">
       {/* Back + Header */}
       <div className="flex items-center gap-3">
-        <Link href="/signals" className="p-1.5 rounded-lg transition-opacity hover:opacity-70" style={{ color: theme.colors.textSub }}>
+        <Link href="/signals" aria-label="Go back" className="p-1.5 rounded-lg transition-opacity hover:opacity-70" style={{ color: theme.colors.textSub }}>
           <ArrowLeft size={20} />
         </Link>
         <div className="flex-1">
@@ -124,6 +121,7 @@ export default function TickerDetailPage() {
               disabled={addTicker.isPending || removeTicker.isPending}
               className="p-1 rounded transition-opacity hover:opacity-70"
               title={isWatchlisted ? t.signal.removeFromWatchlist : t.signal.addToWatchlist}
+              aria-label="Toggle watchlist"
             >
               <Star
                 size={18}
@@ -353,6 +351,13 @@ export default function TickerDetailPage() {
         </Card>
       )}
 
+      {/* Brain Insights Error */}
+      {brainInsightsError && (
+        <Card>
+          <p className="text-xs" style={{ color: theme.colors.down }}>{t.error.failedBrainInsights}</p>
+        </Card>
+      )}
+
       {/* Brain Insights */}
       {brainInsights && (
         <Card>
@@ -419,6 +424,13 @@ export default function TickerDetailPage() {
               </div>
             </div>
           )}
+        </Card>
+      )}
+
+      {/* Signal History Error */}
+      {signalHistoryError && (
+        <Card>
+          <p className="text-xs" style={{ color: theme.colors.down }}>{t.error.failedSignalHistory}</p>
         </Card>
       )}
 

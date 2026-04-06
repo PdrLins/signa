@@ -16,11 +16,12 @@ export function useGemSignals() {
 
 export function useAllSignals(filters?: SignalFilters) {
   return useQuery<Signal[]>({
-    queryKey: ['signals', filters],
+    queryKey: ['signals', filters?.limit, filters?.bucket, filters?.action, filters?.status, filters?.period, filters?.min_score],
     queryFn: async () => {
       const res = await signalsApi.getAll(filters)
       return res.signals
     },
+    staleTime: 2 * 60 * 1000,
   })
 }
 
@@ -32,5 +33,6 @@ export function useSignalHistory(ticker: string) {
       return res.signals
     },
     enabled: !!ticker,
+    staleTime: 2 * 60 * 1000,
   })
 }

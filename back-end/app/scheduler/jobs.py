@@ -1,4 +1,4 @@
-"""Scheduled scan jobs — 4 daily scans on market days."""
+"""Scheduled scan jobs — 4 daily scans on market days + maintenance."""
 
 from loguru import logger
 
@@ -29,3 +29,43 @@ async def after_close_scan():
     logger.info("⏰ After-close scan triggered (4:30 PM ET)")
     from app.services.scan_service import run_scan
     await run_scan("AFTER_CLOSE")
+
+
+async def cleanup_expired_tokens():
+    """Daily cleanup — remove expired blacklisted tokens and used OTPs.
+
+    Runs at 2:00 AM ET to keep tables lean.
+    """
+    from datetime import datetime, timezone
+    from app.db.supabase import get_client
+
+    try:
+        db = get_client()
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Delete expired blacklisted tokens
+        bl_result = db.table("token_blacklist").delete().lt("expires_at", now).execute()
+        bl_count = len(bl_result.data) if bl_result.data else 0
+
+        # Delete OTPs that are either used or expired (safe — never deletes valid unexpired ones)
+        otp_used = db.table("otp_codes").delete().not_.is_("used_at", "null").execute()
+        otp_expired = db.table("otp_codes").delete().lt("expires_at", now).execute()
+        otp_count = (len(otp_used.data) if otp_used.data else 0) + (len(otp_expired.data) if otp_expired.data else 0)
+
+        # Delete expired brain sessions
+        bs_result = db.table("brain_sessions").delete().lt("expires_at", now).execute()
+        bs_count = len(bs_result.data) if bs_result.data else 0
+
+        if bl_count or otp_count or bs_count:
+            logger.info(
+                f"DB cleanup: {bl_count} expired tokens, "
+                f"{otp_count} old OTPs, {bs_count} brain sessions removed"
+            )
+        # Purge expired entries from in-memory caches
+        from app.core.cache import blacklist_cache, stats_cache, price_cache
+        blacklist_cache.cleanup()
+        stats_cache.cleanup()
+        price_cache.cleanup()
+
+    except Exception as e:
+        logger.warning(f"DB cleanup failed: {e}")

@@ -1,60 +1,33 @@
 # CLAUDE.md — Signa Frontend
 
-Next.js 14 dashboard for the Signa investment signal engine. Displays signals, scans, watchlist, brain editor, and settings with 6 themes and bilingual support (EN/PT).
+Next.js 14 dashboard for Signa investment signal engine. 6 themes, EN/PT bilingual.
 
 ## Commands
 
 ```bash
-cd front-end
-npm run dev     # Development server on :3000
+npm run dev     # :3000
 npm run build   # Production build
-npm run lint    # ESLint check
+npm run lint    # ESLint
 ```
 
-## Structure
+## Rules (MUST follow)
 
-```
-front-end/src/
-├── app/
-│   ├── (dashboard)/          → Protected layout with floating left nav
-│   │   ├── overview/         → Dashboard: stats, quick actions, top signals
-│   │   ├── signals/          → Signal list with filters + Scan Now button
-│   │   ├── signals/[ticker]/ → Ticker detail page (dynamic)
-│   │   ├── watchlist/        → Watchlist management
-│   │   ├── portfolio/        → Portfolio (placeholder)
-│   │   ├── brain/            → Brain editor (locked/unlocked states)
-│   │   ├── how-it-works/     → Guide page (21 sections)
-│   │   └── settings/         → Theme, language, AI providers, logout
-│   ├── login/                → Two-step auth (credentials + OTP)
-│   └── providers.tsx         → QueryProvider, theme, auth, i18n, toast
-├── components/
-│   ├── brain/                → BrainLocked, BrainEditor, BrainWorkflow
-│   ├── dashboard/            → StatsBar, QuickActions, ScanSchedule, etc.
-│   ├── signals/              → SignalCard, SignalList
-│   ├── layout/               → LeftNav (floating), BottomNav, Sidebar
-│   └── ui/                   → Card, Button, Badge, ScoreRing, Toast, etc.
-├── hooks/                    → useSignals, useStats, useScans, useBrain, etc.
-├── store/                    → Zustand: authStore, themeStore, i18nStore, brainStore
-├── lib/
-│   ├── api.ts                → Axios client with auth interceptor
-│   ├── i18n/                 → en.json + pt.json (250+ translation keys)
-│   └── themes.ts             → 6 theme definitions
-└── types/                    → TypeScript interfaces
-```
+- **Theme**: All colors from `useTheme()` — NEVER hardcode hex/rgb
+- **i18n**: All text from `useI18nStore((s) => s.t)` — NEVER hardcode strings
+- **Brain token**: Memory only via brainStore — NEVER save to localStorage
+- **Toast**: Global via `useToast()` — NEVER use local toast state
+- **API**: All calls through `src/lib/api.ts` — NEVER use raw fetch/axios
+- **Memoize**: Wrap computed arrays/objects in `useMemo`, wrap list item components in `React.memo`
+- **Accessibility**: All interactive elements need `aria-label`, tabs need ARIA roles
+- **Utilities**: Use `src/lib/utils.ts` for shared helpers (formatPrice, interpolate, maskIp) — don't duplicate
+- **Timezone**: Use `DEFAULT_TIMEZONE` from `@/lib/utils` — don't hardcode `'America/New_York'`
 
-## Key Patterns
+## Key Behaviors
 
-- **Theme**: All colors from `useTheme()` — never hardcode colors
-- **i18n**: All text from `useI18nStore((s) => s.t)` — never hardcode strings
-- **Auth**: JWT stored in localStorage via authStore. 401 → redirect to /login
-- **Brain token**: Memory only (never localStorage). Refresh = re-auth required
-- **Toast**: Global system via `useToast()` — never use local toast state
-- **API**: All calls through `src/lib/api.ts` with typed response interfaces
-
-## Important Rules
-
-- Brain token is session-only — NEVER save to localStorage
 - Watchlist star toggles add/remove (filled = in watchlist)
-- Sentiment bar hidden when `grok_data.confidence === 0` (fallback data)
-- Score fallback shows `44/100` format when live price unavailable
+- Sentiment bar hidden when `grok_data.confidence === 0`
 - Two-pass scan: top 15 get AI reasoning, bottom 35 get "tech-only" label
+- Auth: JWT in localStorage + cookie. Middleware guards routes server-side. 401 → /login
+- Score fallback: `44/100` format when live price unavailable
+
+## Use `/frontend-*` skills for deep context on each area.

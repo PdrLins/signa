@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useWatchlist, useAddTicker, useRemoveTicker } from '@/hooks/useWatchlist'
 import { useToast } from '@/hooks/useToast'
+import { formatPrice } from '@/lib/utils'
 import { ChevronDown, Star, ExternalLink } from 'lucide-react'
 import type { Signal } from '@/types/signal'
 
@@ -31,12 +32,7 @@ function getStatusVariant(status: string) {
   return map[status] || 'hold'
 }
 
-function formatPrice(value: number | null): string {
-  if (value === null) return '--'
-  return `$${value.toFixed(2)}`
-}
-
-export function SignalCard({ signal, defaultExpanded = false, isTopPick = false }: SignalCardProps) {
+export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = false, isTopPick = false }: SignalCardProps) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const [expanded, setExpanded] = useState(defaultExpanded)
@@ -81,7 +77,11 @@ export function SignalCard({ signal, defaultExpanded = false, isTopPick = false 
         border: `1px solid ${theme.colors.border}`,
         boxShadow: theme.isDark ? '0 1px 4px rgba(0,0,0,0.2)' : '0 1px 4px rgba(0,0,0,0.04)',
       }}
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
       onClick={handleToggle}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleToggle() } }}
     >
       <div className="px-4 pt-4 pb-3">
         {/* Row 1: Ticker + Watchlist star + Price */}
@@ -132,6 +132,7 @@ export function SignalCard({ signal, defaultExpanded = false, isTopPick = false 
                   disabled={addTicker.isPending || removeTicker.isPending}
                   className="p-0.5 rounded transition-opacity hover:opacity-70"
                   title={isWatchlisted ? t.signal.removeFromWatchlist : t.signal.addToWatchlist}
+                  aria-label="Toggle watchlist"
                 >
                   <Star
                     size={14}
@@ -338,7 +339,7 @@ export function SignalCard({ signal, defaultExpanded = false, isTopPick = false 
       )}
     </div>
   )
-}
+})
 
 export function SignalCardSkeleton() {
   return (

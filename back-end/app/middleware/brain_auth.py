@@ -10,13 +10,14 @@ from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.db.supabase import get_client
 
-from jose import JWTError, jwt
+import jwt as pyjwt
+from jwt.exceptions import PyJWTError
 
 
 def _decode_brain_token(token: str) -> dict | None:
     """Decode and validate a brain token."""
     try:
-        payload = jwt.decode(
+        payload = pyjwt.decode(
             token,
             settings.brain_token_secret,
             algorithms=[settings.jwt_algorithm],
@@ -24,7 +25,7 @@ def _decode_brain_token(token: str) -> dict | None:
         if payload.get("type") != "brain_editor":
             return None
         return payload
-    except JWTError:
+    except PyJWTError:
         return None
 
 
@@ -58,21 +59,27 @@ async def require_brain_token(
             detail="Brain token user mismatch.",
         )
 
-    # Verify JTI exists in brain_sessions
+    # JTI is required — reject tokens without one
     jti = payload.get("jti")
-    if jti:
-        client = get_client()
-        result = (
-            client.table("brain_sessions")
-            .select("id")
-            .eq("brain_token_jti", jti)
-            .limit(1)
-            .execute()
+    if not jti:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid brain token (missing session ID). Please re-verify.",
         )
-        if not result.data:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Brain session not found. Please re-verify.",
-            )
+
+    # Verify JTI exists in brain_sessions
+    client = get_client()
+    result = (
+        client.table("brain_sessions")
+        .select("id")
+        .eq("brain_token_jti", jti)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Brain session not found. Please re-verify.",
+        )
 
     return {**user, "brain_jti": jti}

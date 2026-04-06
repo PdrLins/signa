@@ -9,8 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from jose import jwt
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -18,7 +17,7 @@ from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.core.security import generate_otp, hash_otp, verify_otp
 from app.core.utils import get_client_ip
-from app.db.queries import insert_audit_log
+from app.db.queries import get_user_by_id, insert_audit_log
 from app.db.supabase import get_client
 from app.middleware.brain_auth import require_brain_token
 from app.models.audit import AuditEvent
@@ -34,33 +33,30 @@ class BrainVerifyRequest(BaseModel):
 
 
 class RuleUpdateRequest(BaseModel):
-    description: Optional[str] = None
-    formula: Optional[str] = None
+    description: Optional[str] = Field(None, max_length=2000)
+    formula: Optional[str] = Field(None, max_length=500)
     threshold_min: Optional[float] = None
     threshold_max: Optional[float] = None
-    threshold_unit: Optional[str] = None
+    threshold_unit: Optional[str] = Field(None, max_length=50)
     is_blocker: Optional[bool] = None
     weight_safe: Optional[float] = Field(None, ge=0, le=1)
     weight_risk: Optional[float] = Field(None, ge=0, le=1)
     is_active: Optional[bool] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
 class KnowledgeUpdateRequest(BaseModel):
-    explanation: Optional[str] = None
-    formula: Optional[str] = None
-    example: Optional[str] = None
+    explanation: Optional[str] = Field(None, max_length=5000)
+    formula: Optional[str] = Field(None, max_length=500)
+    example: Optional[str] = Field(None, max_length=2000)
     is_active: Optional[bool] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
 router = APIRouter(prefix="/brain", tags=["Brain Editor"])
 _ks = KnowledgeService()
 
-# Rate limit tracking (in-memory)
-_challenge_timestamps: dict[str, list[float]] = {}
-_otp_attempts: dict[str, int] = {}
-_lockouts: dict[str, float] = {}
+from app.core.cache import brain_challenge_cache, brain_lockout_cache, brain_otp_attempt_cache
 
 
 def _safe_uid(user_id: str) -> str | None:
@@ -71,16 +67,16 @@ def _safe_uid(user_id: str) -> str | None:
 def _check_challenge_rate(user_id: str):
     now = datetime.now(timezone.utc).timestamp()
     window = settings.rate_limit_window_minutes * 60
-    timestamps = _challenge_timestamps.get(user_id, [])
+    timestamps = brain_challenge_cache.get(f"ch:{user_id}") or []
     timestamps = [t for t in timestamps if t > now - window]
-    _challenge_timestamps[user_id] = timestamps
+    brain_challenge_cache.set(f"ch:{user_id}", timestamps, ttl=int(window))
     if len(timestamps) >= settings.brain_max_challenges_per_window:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests. Try again in 15 minutes.")
 
 
 def _check_lockout(user_id: str):
-    lock_until = _lockouts.get(user_id, 0)
-    if datetime.now(timezone.utc).timestamp() < lock_until:
+    lock_until = brain_lockout_cache.get(f"lock:{user_id}")
+    if lock_until and datetime.now(timezone.utc).timestamp() < lock_until:
         remaining = int(lock_until - datetime.now(timezone.utc).timestamp())
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=f"Locked. Try again in {remaining}s.")
 
@@ -95,7 +91,7 @@ async def get_highlights(user: dict = Depends(get_current_user)):
 # ═══ BRAIN INSIGHTS FOR A TICKER (JWT only) ═══
 
 @router.get("/insights/{ticker}")
-async def get_brain_insights(ticker: str, user: dict = Depends(get_current_user)):
+async def get_brain_insights(ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10}$"), user: dict = Depends(get_current_user)):
     """Return brain insights relevant to a specific ticker.
 
     No brain 2FA needed — read-only. Returns a bilingual summary,
@@ -398,9 +394,12 @@ async def brain_challenge(request: Request, user: dict = Depends(get_current_use
     except Exception as e:
         logger.debug(f"brain_sessions insert skipped: {e}")
 
-    _challenge_timestamps.setdefault(user_id, []).append(datetime.now(timezone.utc).timestamp())
+    timestamps = brain_challenge_cache.get(f"ch:{user_id}") or []
+    timestamps.append(datetime.now(timezone.utc).timestamp())
+    brain_challenge_cache.set(f"ch:{user_id}", timestamps, ttl=settings.rate_limit_window_minutes * 60)
 
-    chat_id = settings.telegram_chat_id
+    db_user = get_user_by_id(user_id)
+    chat_id = db_user["telegram_chat_id"] if db_user else settings.telegram_chat_id
     await send_message(chat_id, msg("brain_otp", otp=otp))
 
     insert_audit_log(event_type=AuditEvent.BRAIN_CHALLENGE_SENT, success=True, user_id=_safe_uid(user_id), ip_address=ip)
@@ -415,10 +414,11 @@ async def brain_verify(request: Request, body: BrainVerifyRequest, user: dict = 
     otp_code = body.otp_code
     _check_lockout(user_id)
 
-    attempts = _otp_attempts.get(user_id, 0)
+    attempts = brain_otp_attempt_cache.get(f"otp:{user_id}") or 0
     if attempts >= settings.brain_max_otp_attempts:
-        _lockouts[user_id] = datetime.now(timezone.utc).timestamp() + (settings.rate_limit_window_minutes * 60)
-        _otp_attempts[user_id] = 0
+        lockout_ttl = settings.rate_limit_window_minutes * 60
+        brain_lockout_cache.set(f"lock:{user_id}", datetime.now(timezone.utc).timestamp() + lockout_ttl, ttl=lockout_ttl)
+        brain_otp_attempt_cache.delete(f"otp:{user_id}")
         insert_audit_log(event_type=AuditEvent.BRAIN_ACCESS_LOCKED, success=False, user_id=_safe_uid(user_id), ip_address=ip)
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many failed attempts. Locked for 15 minutes.")
 
@@ -432,7 +432,7 @@ async def brain_verify(request: Request, body: BrainVerifyRequest, user: dict = 
     result = query.execute()
 
     if not result.data:
-        _otp_attempts[user_id] = attempts + 1
+        brain_otp_attempt_cache.set(f"otp:{user_id}", attempts + 1, ttl=settings.rate_limit_window_minutes * 60)
         remaining = settings.brain_max_otp_attempts - attempts - 1
         insert_audit_log(event_type=AuditEvent.BRAIN_ACCESS_DENIED, success=False, user_id=_safe_uid(user_id), ip_address=ip, metadata={"reason": "no_valid_session"})
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Code expired or not found. {remaining} attempt(s) remaining.")
@@ -440,27 +440,22 @@ async def brain_verify(request: Request, body: BrainVerifyRequest, user: dict = 
     session = result.data[0]
 
     if not verify_otp(otp_code, session["otp_hash"], salt=user_id):
-        _otp_attempts[user_id] = attempts + 1
+        brain_otp_attempt_cache.set(f"otp:{user_id}", attempts + 1, ttl=settings.rate_limit_window_minutes * 60)
         remaining = settings.brain_max_otp_attempts - attempts - 1
         insert_audit_log(event_type=AuditEvent.BRAIN_ACCESS_DENIED, success=False, user_id=_safe_uid(user_id), ip_address=ip, metadata={"reason": "invalid_otp", "remaining": remaining})
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid code. {remaining} attempt(s) remaining.")
 
     jti = str(uuid.uuid4())
-    expires_delta = timedelta(minutes=settings.brain_token_expire_minutes)
+    from app.core.security import create_brain_token
+    brain_token = create_brain_token(user_id, jti)
+
     now_dt = datetime.now(timezone.utc)
-
-    brain_token = jwt.encode(
-        {"sub": user_id, "type": "brain_editor", "iat": now_dt.timestamp(), "exp": (now_dt + expires_delta).timestamp(), "jti": jti},
-        settings.brain_token_secret,
-        algorithm=settings.jwt_algorithm,
-    )
-
     client.table("brain_sessions").update({"used_at": now_dt.isoformat(), "brain_token_jti": jti}).eq("id", session["id"]).execute()
-    _otp_attempts[user_id] = 0
+    brain_otp_attempt_cache.delete(f"otp:{user_id}")
 
     insert_audit_log(event_type=AuditEvent.BRAIN_ACCESS_GRANTED, success=True, user_id=_safe_uid(user_id), ip_address=ip, metadata={"brain_jti": jti})
     logger.info(f"Brain access granted for user {user_id}")
-    return {"brain_token": brain_token, "expires_in": int(expires_delta.total_seconds())}
+    return {"brain_token": brain_token, "expires_in": settings.brain_token_expire_minutes * 60}
 
 
 # ═══ RULES (JWT + brain_token) ═══

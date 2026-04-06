@@ -11,7 +11,7 @@ interface BrainStore {
   getHeaders: () => Record<string, string>
 }
 
-let _timer: ReturnType<typeof setInterval> | null = null
+let _timer: ReturnType<typeof setTimeout> | null = null
 
 export const useBrainStore = create<BrainStore>((set, get) => ({
   brainToken: null,
@@ -23,19 +23,15 @@ export const useBrainStore = create<BrainStore>((set, get) => ({
     set({ brainToken: token, brainTokenExpiry: expiry, isUnlocked: true })
 
     // Clear any existing timer
-    if (_timer) clearInterval(_timer)
+    if (_timer) clearTimeout(_timer)
 
-    // Start countdown — lock when expired
-    _timer = setInterval(() => {
-      if (new Date() >= expiry) {
-        get().lock()
-      }
-    }, 1000)
+    // Lock exactly when token expires — no polling
+    _timer = setTimeout(() => get().lock(), expiresIn * 1000)
   },
 
   lock: () => {
     if (_timer) {
-      clearInterval(_timer)
+      clearTimeout(_timer)
       _timer = null
     }
     set({ brainToken: null, brainTokenExpiry: null, isUnlocked: false })
@@ -49,6 +45,8 @@ export const useBrainStore = create<BrainStore>((set, get) => ({
 
   getHeaders: () => {
     const { brainToken } = get()
-    return brainToken ? { 'X-Brain-Token': brainToken } : ({} as Record<string, string>)
+    const headers: Record<string, string> = {}
+    if (brainToken) headers['X-Brain-Token'] = brainToken
+    return headers
   },
 }))

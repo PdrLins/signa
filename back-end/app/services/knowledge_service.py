@@ -4,26 +4,22 @@ Used by the signal engine to build AI prompts with current rules.
 Caches results for 5 minutes to avoid hammering the DB during scans.
 """
 
-import time
 from typing import Optional
 
 from loguru import logger
 
+from app.core.cache import TTLCache
 from app.db.supabase import get_client
 
-_cache: dict[str, tuple[float, object]] = {}
-_TTL = 300  # 5 minutes
+_cache = TTLCache(max_size=200, default_ttl=300)
 
 
 def _get_cached(key: str):
-    entry = _cache.get(key)
-    if entry and entry[0] > time.time():
-        return entry[1]
-    return None
+    return _cache.get(key)
 
 
 def _set_cached(key: str, value):
-    _cache[key] = (time.time() + _TTL, value)
+    _cache.set(key, value)
 
 
 def invalidate_cache():

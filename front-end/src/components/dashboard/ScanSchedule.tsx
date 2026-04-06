@@ -5,6 +5,7 @@ import { useScansToday } from '@/hooks/useScans'
 import { useI18nStore } from '@/store/i18nStore'
 import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { interpolate } from '@/lib/utils'
 
 export function ScanSchedule() {
   const theme = useTheme()
@@ -83,8 +84,8 @@ export function ScanSchedule() {
                   {scan.status === 'COMPLETE' && scan.signals_found > 0 && (
                     <span className="text-[9px] tabular-nums" style={{ color: theme.colors.textHint }}>
                       {scan.gems_found > 0
-                        ? t.scans.signalCountGems.replace('{count}', String(scan.signals_found)).replace('{gems}', String(scan.gems_found))
-                        : t.scans.signalCount.replace('{count}', String(scan.signals_found))}
+                        ? interpolate(t.scans.signalCountGems, { count: scan.signals_found, gems: scan.gems_found })
+                        : interpolate(t.scans.signalCount, { count: scan.signals_found })}
                     </span>
                   )}
                   <span className="text-[11px]" style={{ color: theme.colors.textSub }}>

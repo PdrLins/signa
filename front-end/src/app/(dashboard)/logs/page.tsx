@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 import { useToast } from '@/hooks/useToast'
 import { useI18nStore } from '@/store/i18nStore'
 import { useBrainStore } from '@/store/brainStore'
 import { useBrainChallenge, useBrainVerify } from '@/hooks/useBrain'
 import { client } from '@/lib/api'
+import { maskIp } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Sidebar } from '@/components/layout/Sidebar'
@@ -21,6 +22,7 @@ interface LogEntry {
   message: string
 }
 
+
 const LEVEL_COLORS: Record<string, string> = {
   DEBUG: '#9CA3AF',
   INFO: '#3B82F6',
@@ -30,7 +32,7 @@ const LEVEL_COLORS: Record<string, string> = {
   SUCCESS: '#10B981',
 }
 
-function LogLine({ entry }: { entry: LogEntry }) {
+const LogLine = memo(function LogLine({ entry }: { entry: LogEntry }) {
   const theme = useTheme()
   const levelColor = LEVEL_COLORS[entry.level] || theme.colors.textSub
   const time = new Date(entry.timestamp).toLocaleTimeString('en-US', {
@@ -50,11 +52,11 @@ function LogLine({ entry }: { entry: LogEntry }) {
         {entry.module}
       </span>
       <span className="flex-1 break-all" style={{ color: theme.colors.text }}>
-        {entry.message}
+        {maskIp(entry.message)}
       </span>
     </div>
   )
-}
+})
 
 function LogViewer() {
   const theme = useTheme()
@@ -97,7 +99,7 @@ function LogViewer() {
 
     const wsUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1')
       .replace('http', 'ws')
-    const ws = new WebSocket(`${wsUrl}/logs/stream?token=${brainToken}`)
+    const ws = new WebSocket(`${wsUrl}/logs/stream`, [`brain-token.${brainToken}`])
     wsRef.current = ws
 
     ws.onopen = () => setConnected(true)

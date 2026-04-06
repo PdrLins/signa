@@ -5,7 +5,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useWatchlist, useRemoveTicker } from '@/hooks/useWatchlist'
 import { WatchlistRow } from './WatchlistRow'
-import { Badge } from '@/components/ui/Badge'
+
 import { Skeleton } from '@/components/ui/Skeleton'
 import { X } from 'lucide-react'
 import type { Signal } from '@/types/signal'
@@ -82,6 +82,7 @@ export function WatchlistTable({ signals, compact = false }: WatchlistTableProps
                 )}
                 <button
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeTicker.mutate(item.symbol) }}
+                  aria-label={`Remove ${item.symbol} from watchlist`}
                   className="opacity-30 hover:opacity-100 transition-opacity"
                 >
                   <X size={10} style={{ color: theme.colors.textHint }} />

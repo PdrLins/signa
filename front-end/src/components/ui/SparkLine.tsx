@@ -1,5 +1,6 @@
 'use client'
 
+import { useId } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 
 const MOCK_UP = [4, 6, 5, 8, 7, 10, 9, 12, 11, 14]
@@ -14,10 +15,13 @@ interface SparkLineProps {
 
 export function SparkLine({ positive = true, width = 64, height = 28, data }: SparkLineProps) {
   const theme = useTheme()
+  const reactId = useId()
 
   const points = data || (positive ? MOCK_UP : MOCK_DOWN)
   const color = positive ? theme.colors.up : theme.colors.down
-  const id = `spark-${positive ? 'up' : 'down'}-${Math.random().toString(36).slice(2, 8)}`
+  const id = `spark-${positive ? 'up' : 'down'}-${reactId}`
+
+  if (points.length < 2) return null
 
   const max = Math.max(...points)
   const min = Math.min(...points)

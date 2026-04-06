@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import dynamic from 'next/dynamic'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
@@ -21,7 +21,7 @@ interface PriceChartProps {
 
 const TIME_RANGES: TimeRange[] = ['1D', '1W', '1M', '3M']
 
-export function PriceChart({ symbol }: PriceChartProps) {
+export const PriceChart = memo(function PriceChart({ symbol }: PriceChartProps) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const [range, setRange] = useState<TimeRange>('1D')
@@ -66,6 +66,8 @@ export function PriceChart({ symbol }: PriceChartProps) {
             <button
               key={r}
               onClick={(e) => { e.stopPropagation(); setRange(r) }}
+              aria-label={`Show ${r} price history`}
+              aria-pressed={range === r}
               className="px-2 py-0.5 rounded-md text-[10px] font-semibold transition-all"
               style={{
                 backgroundColor: range === r ? theme.colors.surface : 'transparent',
@@ -132,4 +134,4 @@ export function PriceChart({ symbol }: PriceChartProps) {
       </div>
     </div>
   )
-}
+})

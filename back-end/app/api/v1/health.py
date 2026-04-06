@@ -1,4 +1,4 @@
-"""Health check route — public."""
+"""Health check and configuration routes — protected."""
 
 import time
 from typing import Optional
@@ -23,6 +23,15 @@ class AIConfigUpdateRequest(BaseModel):
     score_buy_risk: Optional[int] = Field(None, ge=55, le=85)
     score_hold: Optional[int] = Field(None, ge=40, le=65)
 
+
+class BudgetUpdateRequest(BaseModel):
+    """Validated budget update — all fields optional, all clamped."""
+    daily_limit: Optional[float] = Field(None, ge=0.10, le=50.0)
+    claude_monthly: Optional[float] = Field(None, ge=0, le=100.0)
+    grok_monthly: Optional[float] = Field(None, ge=0, le=100.0)
+    gemini_monthly: Optional[float] = Field(None, ge=0, le=100.0)
+
+
 router = APIRouter(tags=["Health"])
 
 _start_time = time.time()
@@ -41,106 +50,100 @@ async def health_check():
 
 @router.get("/health/integrations")
 async def integration_status(user: dict = Depends(get_current_user)):
-    """Check connectivity of all external integrations."""
-    results = {}
+    """Check connectivity of all external integrations in parallel.
 
-    # Supabase
-    try:
-        from app.db.supabase import get_client
-        client = get_client()
-        client.table("users").select("id").limit(1).execute()
-        results["supabase"] = {"status": "connected", "ok": True}
-    except Exception as e:
-        logger.debug(f"Supabase health check failed: {e}")
-        results["supabase"] = {"status": "error", "ok": False}
+    Returns status only — no model names, no error details, no API key hints.
+    """
+    import asyncio
 
-    # Telegram
-    try:
-        import httpx
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(
-                f"https://api.telegram.org/bot{settings.telegram_bot_token}/getMe"
+    async def _check_supabase() -> tuple[str, dict]:
+        try:
+            from app.db.supabase import get_client
+            client = get_client()
+            await asyncio.to_thread(
+                lambda: client.table("users").select("id").limit(1).execute()
             )
-            if r.status_code == 200 and r.json().get("ok"):
-                results["telegram"] = {"status": "connected", "ok": True}
-            else:
-                results["telegram"] = {"status": "error", "ok": False, "detail": "Invalid token"}
-    except Exception as e:
-        logger.debug(f"Telegram health check failed: {e}")
-        results["telegram"] = {"status": "error", "ok": False}
+            return "supabase", {"status": "connected", "ok": True}
+        except Exception:
+            return "supabase", {"status": "error", "ok": False}
 
-    # Claude (Anthropic) — test API with minimal cost
-    if settings.anthropic_api_key:
+    async def _check_telegram() -> tuple[str, dict]:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(
+                    f"https://api.telegram.org/bot{settings.telegram_bot_token}/getMe"
+                )
+                if r.status_code == 200 and r.json().get("ok"):
+                    return "telegram", {"status": "connected", "ok": True}
+                return "telegram", {"status": "error", "ok": False}
+        except Exception:
+            return "telegram", {"status": "error", "ok": False}
+
+    async def _check_claude() -> tuple[str, dict]:
+        if not settings.anthropic_api_key:
+            return "claude", {"status": "not_configured", "ok": False}
         try:
             import anthropic
-            c = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-            # Use count_tokens instead of a real generation to avoid spending credits
-            try:
-                r = c.messages.count_tokens(
-                    model=settings.claude_model,
-                    messages=[{"role": "user", "content": "test"}],
-                )
-                results["claude"] = {"status": "connected", "ok": True, "model": settings.claude_model, "detail": "API responding"}
-            except anthropic.NotFoundError:
-                # count_tokens not available on all models, fall back to tiny call
-                r = c.messages.create(model=settings.claude_model, max_tokens=1, messages=[{"role": "user", "content": "ok"}])
-                results["claude"] = {"status": "connected", "ok": True, "model": settings.claude_model, "detail": "API responding"}
+            def _test():
+                c = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+                try:
+                    c.messages.count_tokens(
+                        model=settings.claude_model,
+                        messages=[{"role": "user", "content": "test"}],
+                    )
+                except anthropic.NotFoundError:
+                    c.messages.create(model=settings.claude_model, max_tokens=1, messages=[{"role": "user", "content": "ok"}])
+            await asyncio.to_thread(_test)
+            return "claude", {"status": "connected", "ok": True}
         except Exception as e:
-            err = str(e)
-            if "credit balance" in err.lower() or "billing" in err.lower():
-                results["claude"] = {"status": "no credits", "ok": False, "model": settings.claude_model, "detail": "API key valid but no credits remaining"}
-            elif "invalid" in err.lower() or "authentication" in err.lower():
-                results["claude"] = {"status": "invalid key", "ok": False, "model": settings.claude_model, "detail": "API key is invalid"}
-            else:
-                logger.debug(f"Claude health check error: {err}")
-                results["claude"] = {"status": "error", "ok": False, "model": settings.claude_model, "detail": f"Connection issue: {err[:100]}"}
-    else:
-        results["claude"] = {"status": "not configured", "ok": False, "model": settings.claude_model, "detail": "No API key set"}
+            err = str(e).lower()
+            if "credit" in err or "billing" in err:
+                return "claude", {"status": "no_credits", "ok": False}
+            elif "invalid" in err or "authentication" in err:
+                return "claude", {"status": "invalid_key", "ok": False}
+            return "claude", {"status": "error", "ok": False}
 
-    # Grok (xAI) — actually test the API
-    if settings.xai_api_key:
+    async def _check_grok() -> tuple[str, dict]:
+        if not settings.xai_api_key:
+            return "grok", {"status": "not_configured", "ok": False}
         try:
-            import httpx as _httpx
-            async with _httpx.AsyncClient(timeout=5) as _c:
-                r = await _c.get("https://api.x.ai/v1/models", headers={"Authorization": f"Bearer {settings.xai_api_key}"})
+            import httpx
+            async with httpx.AsyncClient(timeout=5) as c:
+                r = await c.get("https://api.x.ai/v1/models", headers={"Authorization": f"Bearer {settings.xai_api_key}"})
                 if r.status_code == 200:
-                    models = [m["id"] for m in r.json().get("data", [])][:5]
-                    results["grok"] = {"status": "connected", "ok": True, "model": settings.grok_model, "detail": f"Available models: {', '.join(models)}" if models else "API responding"}
+                    return "grok", {"status": "connected", "ok": True}
                 elif r.status_code == 403:
-                    body = r.json().get("error", r.text[:100])
-                    if "credit" in str(body).lower():
-                        results["grok"] = {"status": "no credits", "ok": False, "model": settings.grok_model, "detail": "API key valid but no credits"}
-                    else:
-                        results["grok"] = {"status": "forbidden", "ok": False, "model": settings.grok_model, "detail": "Access denied"}
-                else:
-                    results["grok"] = {"status": "error", "ok": False, "model": settings.grok_model, "detail": f"HTTP {r.status_code}"}
+                    return "grok", {"status": "no_credits", "ok": False}
+                return "grok", {"status": "error", "ok": False}
         except Exception:
-            results["grok"] = {"status": "error", "ok": False, "model": settings.grok_model, "detail": "Connection failed"}
-    else:
-        results["grok"] = {"status": "not configured", "ok": False, "model": settings.grok_model, "detail": "No API key set"}
+            return "grok", {"status": "error", "ok": False}
 
-    # Gemini (Google) — actually test the API
-    if settings.gemini_api_key:
+    async def _check_gemini() -> tuple[str, dict]:
+        if not settings.gemini_api_key:
+            return "gemini", {"status": "not_configured", "ok": False}
         try:
             from google import genai
-            gc = genai.Client(api_key=settings.gemini_api_key)
-            gc.models.generate_content(model=settings.gemini_model, contents="hi")
-            results["gemini"] = {"status": "connected", "ok": True, "model": settings.gemini_model, "detail": "API responding"}
+            def _test():
+                gc = genai.Client(api_key=settings.gemini_api_key)
+                gc.models.generate_content(model=settings.gemini_model, contents="hi")
+            await asyncio.to_thread(_test)
+            return "gemini", {"status": "connected", "ok": True}
         except Exception as e:
             err = str(e)
             if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                results["gemini"] = {"status": "rate limited", "ok": True, "model": settings.gemini_model, "detail": "API key valid but daily quota exhausted. Resets at midnight PT."}
+                return "gemini", {"status": "rate_limited", "ok": True}
             elif "invalid" in err.lower() or "API_KEY" in err:
-                results["gemini"] = {"status": "invalid key", "ok": False, "model": settings.gemini_model, "detail": "API key is invalid"}
-            else:
-                results["gemini"] = {"status": "error", "ok": False, "model": settings.gemini_model, "detail": "Connection failed"}
-    else:
-        results["gemini"] = {
-        "status": "not configured", "ok": False,
-        "model": settings.gemini_model, "detail": "No API key set",
-    }
+                return "gemini", {"status": "invalid_key", "ok": False}
+            return "gemini", {"status": "error", "ok": False}
 
-    # Scheduler
+    # Run all checks in parallel (~5s instead of ~25s)
+    checks = await asyncio.gather(
+        _check_supabase(), _check_telegram(), _check_claude(),
+        _check_grok(), _check_gemini(),
+    )
+    results = dict(checks)
+
     results["scheduler"] = {
         "status": "running" if scheduler.running else "stopped",
         "ok": scheduler.running,
@@ -173,25 +176,25 @@ async def get_budget(user: dict = Depends(get_current_user)):
 @router.put("/health/budget")
 async def update_budget(
     request: Request,
-    body: dict,
+    body: BudgetUpdateRequest,
     user: dict = Depends(get_current_user),
 ):
-    """Update budget limits. Accepts: daily_limit, claude_monthly, grok_monthly, gemini_monthly."""
+    """Update budget limits. Validated via Pydantic model."""
     from app.core.utils import get_client_ip
     from app.db.queries import insert_audit_log
-
     changed = []
-    if "daily_limit" in body and isinstance(body["daily_limit"], (int, float)):
-        settings.budget_daily_limit_usd = max(0.1, float(body["daily_limit"]))
+
+    if body.daily_limit is not None:
+        settings.budget_daily_limit_usd = body.daily_limit
         changed.append("daily_limit")
-    if "claude_monthly" in body and isinstance(body["claude_monthly"], (int, float)):
-        settings.budget_claude_monthly_usd = max(0, float(body["claude_monthly"]))
+    if body.claude_monthly is not None:
+        settings.budget_claude_monthly_usd = body.claude_monthly
         changed.append("claude_monthly")
-    if "grok_monthly" in body and isinstance(body["grok_monthly"], (int, float)):
-        settings.budget_grok_monthly_usd = max(0, float(body["grok_monthly"]))
+    if body.grok_monthly is not None:
+        settings.budget_grok_monthly_usd = body.grok_monthly
         changed.append("grok_monthly")
-    if "gemini_monthly" in body and isinstance(body["gemini_monthly"], (int, float)):
-        settings.budget_gemini_monthly_usd = max(0, float(body["gemini_monthly"]))
+    if body.gemini_monthly is not None:
+        settings.budget_gemini_monthly_usd = body.gemini_monthly
         changed.append("gemini_monthly")
 
     if changed:
@@ -201,7 +204,7 @@ async def update_budget(
             success=True,
             user_id=uid if uid != "dev-user-id" else None,
             ip_address=get_client_ip(request),
-            metadata={"changed": changed, **body},
+            metadata={"changed": changed},
         )
 
     from app.services.budget_service import BudgetService
@@ -216,27 +219,15 @@ async def get_ai_config(user: dict = Depends(get_current_user)):
         "synthesis": {
             "providers": settings.synthesis_providers,
             "available": {
-                "claude": {
-                    "configured": bool(settings.anthropic_api_key),
-                    "model": settings.claude_model,
-                },
-                "gemini": {
-                    "configured": bool(settings.gemini_api_key),
-                    "model": settings.gemini_model,
-                },
+                "claude": {"configured": bool(settings.anthropic_api_key)},
+                "gemini": {"configured": bool(settings.gemini_api_key)},
             },
         },
         "sentiment": {
             "providers": settings.sentiment_providers,
             "available": {
-                "grok": {
-                    "configured": bool(settings.xai_api_key),
-                    "model": settings.grok_model,
-                },
-                "gemini": {
-                    "configured": bool(settings.gemini_api_key),
-                    "model": settings.gemini_model,
-                },
+                "grok": {"configured": bool(settings.xai_api_key)},
+                "gemini": {"configured": bool(settings.gemini_api_key)},
             },
         },
         "scanning": {
@@ -292,11 +283,11 @@ async def update_ai_config(
         settings.max_candidates = body.max_candidates
 
     # Score thresholds
-    if hasattr(body, 'score_buy_safe') and body.score_buy_safe is not None:
+    if body.score_buy_safe is not None:
         settings.score_buy_safe = body.score_buy_safe
-    if hasattr(body, 'score_buy_risk') and body.score_buy_risk is not None:
+    if body.score_buy_risk is not None:
         settings.score_buy_risk = body.score_buy_risk
-    if hasattr(body, 'score_hold') and body.score_hold is not None:
+    if body.score_hold is not None:
         settings.score_hold = body.score_hold
 
     # Audit log config changes

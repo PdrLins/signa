@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTheme } from '@/hooks/useTheme'
 import { Card } from '@/components/ui/Card'
@@ -50,6 +50,12 @@ export function TelegramStatus() {
   const toast = useToast()
   const { data, isLoading } = useIntegrations()
   const [pinging, setPinging] = useState(false)
+  const [cooldown, setCooldown] = useState(false)
+  const cooldownTimer = useRef<ReturnType<typeof setTimeout>>()
+
+  useEffect(() => {
+    return () => { clearTimeout(cooldownTimer.current) }
+  }, [])
 
   const getName = (key: string): string => {
     const names: Record<string, string> = {
@@ -64,7 +70,7 @@ export function TelegramStatus() {
   }
 
   const handlePing = async (key: string) => {
-    if (key !== 'telegram' || pinging) return
+    if (key !== 'telegram' || pinging || cooldown) return
     setPinging(true)
     try {
       const res = await client.post<{ status: string; message: string }>('/health/ping-telegram')
@@ -77,6 +83,9 @@ export function TelegramStatus() {
       toast.show(t.integrations.pingFailed, 'error')
     }
     setPinging(false)
+    setCooldown(true)
+    clearTimeout(cooldownTimer.current)
+    cooldownTimer.current = setTimeout(() => setCooldown(false), 5000)
   }
 
   if (isLoading) {
@@ -108,7 +117,7 @@ export function TelegramStatus() {
           const label = LABELS[key] || { icon: Zap }
           const Icon = label.icon
           const color = integration.ok ? theme.colors.up : theme.colors.down
-          const isPingable = label.pingable && integration.ok
+          const isPingable = label.pingable && integration.ok && !cooldown
 
           return (
             <div

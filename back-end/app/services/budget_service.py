@@ -5,7 +5,7 @@ When a provider's budget is exhausted, calls are blocked and fallback kicks in.
 """
 
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 
 from loguru import logger
@@ -29,6 +29,9 @@ COST_ESTIMATES: dict[str, dict[str, float]] = {
     },
 }
 
+# Only keep this many days of daily data in memory
+_MAX_DAILY_HISTORY = 7
+
 
 class BudgetService:
     """Singleton that tracks AI spending and enforces budget limits."""
@@ -41,8 +44,9 @@ class BudgetService:
         self._daily_usage: dict[str, dict[str, float]] = {}
         # {provider: {month_str: cost_usd}}
         self._monthly_usage: dict[str, dict[str, float]] = {}
-        # {provider: call_count_today}
+        # {provider: {date_str: call_count}}
         self._daily_calls: dict[str, dict[str, int]] = {}
+        self._data_lock = asyncio.Lock()
         self._initialized = False
 
     @classmethod
@@ -119,61 +123,63 @@ class BudgetService:
         """Get today's call count for a provider."""
         return self._daily_calls.get(provider, {}).get(self._today(), 0)
 
-    def can_call(self, provider: str, call_type: str = "synthesis") -> tuple[bool, str]:
-        """Check if a provider call is within budget.
+    async def can_call(self, provider: str, call_type: str = "synthesis") -> tuple[bool, str]:
+        """Check if a provider call is within budget. Thread-safe."""
+        async with self._data_lock:
+            daily_limit = settings.budget_daily_limit_usd
+            monthly_limit = settings.budget_monthly_limit_usd
 
-        Returns (allowed, reason).
-        """
-        daily_limit = settings.budget_daily_limit_usd
-        monthly_limit = settings.budget_monthly_limit_usd
+            # Per-provider monthly limit (0 = unlimited, e.g. Gemini free tier)
+            provider_limit = getattr(settings, f"budget_{provider}_monthly_usd", monthly_limit)
 
-        # Per-provider monthly limit (0 = unlimited, e.g. Gemini free tier)
-        provider_limit = getattr(settings, f"budget_{provider}_monthly_usd", monthly_limit)
+            daily_spend = self.get_daily_spend(provider)
+            monthly_spend = self.get_monthly_spend(provider)
 
-        daily_spend = self.get_daily_spend(provider)
-        monthly_spend = self.get_monthly_spend(provider)
+            # Free tier providers — always allow
+            cost = COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
+            if cost == 0:
+                return True, "free_tier"
 
-        # Free tier providers — always allow
-        cost = COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
-        if cost == 0:
-            return True, "free_tier"
+            # Check daily limit
+            if daily_limit > 0 and daily_spend + cost > daily_limit:
+                return False, f"Daily budget exceeded (${daily_spend:.3f}/${daily_limit:.2f})"
 
-        # Check daily limit
-        if daily_limit > 0 and daily_spend + cost > daily_limit:
-            return False, f"Daily budget exceeded (${daily_spend:.3f}/${daily_limit:.2f})"
+            # Check provider monthly limit (0 = unlimited)
+            if provider_limit > 0 and monthly_spend + cost > provider_limit:
+                return False, f"Monthly budget exceeded for {provider} (${monthly_spend:.3f}/${provider_limit:.2f})"
 
-        # Check provider monthly limit (0 = unlimited)
-        if provider_limit > 0 and monthly_spend + cost > provider_limit:
-            return False, f"Monthly budget exceeded for {provider} (${monthly_spend:.3f}/${provider_limit:.2f})"
-
-        return True, "ok"
+            return True, "ok"
 
     async def record_call(self, provider: str, call_type: str, ticker: str = "", success: bool = True):
-        """Record an AI call and its estimated cost."""
+        """Record an AI call and its estimated cost. Thread-safe."""
         cost = COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
         today = self._today()
         month = self._month()
 
-        # Update in-memory
-        if provider not in self._daily_usage:
-            self._daily_usage[provider] = {}
-        self._daily_usage[provider][today] = (
-            self._daily_usage[provider].get(today, 0) + cost
-        )
+        async with self._data_lock:
+            # Update in-memory
+            if provider not in self._daily_usage:
+                self._daily_usage[provider] = {}
+            self._daily_usage[provider][today] = (
+                self._daily_usage[provider].get(today, 0) + cost
+            )
 
-        if provider not in self._monthly_usage:
-            self._monthly_usage[provider] = {}
-        self._monthly_usage[provider][month] = (
-            self._monthly_usage[provider].get(month, 0) + cost
-        )
+            if provider not in self._monthly_usage:
+                self._monthly_usage[provider] = {}
+            self._monthly_usage[provider][month] = (
+                self._monthly_usage[provider].get(month, 0) + cost
+            )
 
-        if provider not in self._daily_calls:
-            self._daily_calls[provider] = {}
-        self._daily_calls[provider][today] = (
-            self._daily_calls[provider].get(today, 0) + 1
-        )
+            if provider not in self._daily_calls:
+                self._daily_calls[provider] = {}
+            self._daily_calls[provider][today] = (
+                self._daily_calls[provider].get(today, 0) + 1
+            )
 
-        # Persist to DB (fire-and-forget)
+            # Cleanup old daily entries to prevent unbounded growth
+            self._cleanup_old_daily(provider)
+
+        # Persist to DB (fire-and-forget via to_thread to not block)
         try:
             from app.db.supabase import get_client
             client = get_client()
@@ -196,10 +202,17 @@ class BudgetService:
                 f"of monthly limit (${monthly_spend:.3f}/${provider_limit:.2f})"
             )
 
+    def _cleanup_old_daily(self, provider: str):
+        """Remove daily entries older than _MAX_DAILY_HISTORY days."""
+        for store in (self._daily_usage, self._daily_calls):
+            if provider in store and len(store[provider]) > _MAX_DAILY_HISTORY:
+                # Sort keys and keep only recent ones
+                sorted_keys = sorted(store[provider].keys())
+                for old_key in sorted_keys[:-_MAX_DAILY_HISTORY]:
+                    del store[provider][old_key]
+
     def get_budget_summary(self) -> dict:
         """Return budget summary for all providers."""
-        today = self._today()
-        month = self._month()
         providers = ["claude", "gemini", "grok"]
 
         summary = {

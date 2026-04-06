@@ -208,6 +208,7 @@ export default function SettingsPage() {
   const [scoreBuyRisk, setScoreBuyRisk] = useState(65)
   const [scoreHold, setScoreHold] = useState(55)
   const [dirty, setDirty] = useState(false)
+  const [confirmSave, setConfirmSave] = useState(false)
 
   useEffect(() => {
     if (aiConfig) {
@@ -257,8 +258,29 @@ export default function SettingsPage() {
           <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>{t.settings.title}</h1>
           <p className="text-sm mt-1" style={{ color: theme.colors.textSub }}>{t.settings.subtitle}</p>
         </div>
-        {dirty && (
-          <Button onClick={handleSave}>{t.settings.save}</Button>
+        {dirty && !confirmSave && (
+          <Button onClick={() => setConfirmSave(true)}>{t.settings.save}</Button>
+        )}
+        {confirmSave && (
+          <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ backgroundColor: theme.colors.warning + '12', border: `1px solid ${theme.colors.warning}40` }}>
+            <p className="text-xs" style={{ color: theme.colors.text }}>
+              {t.settings.confirmSaveMessage}
+            </p>
+            <button
+              onClick={() => { handleSave(); setConfirmSave(false) }}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg shrink-0 transition-opacity hover:opacity-80"
+              style={{ backgroundColor: theme.colors.warning, color: theme.colors.surface }}
+            >
+              {t.settings.confirm}
+            </button>
+            <button
+              onClick={() => setConfirmSave(false)}
+              className="text-xs font-medium px-2 py-1.5 rounded-lg shrink-0 transition-opacity hover:opacity-80"
+              style={{ color: theme.colors.textSub }}
+            >
+              {t.settings.cancel}
+            </button>
+          </div>
         )}
       </div>
 
@@ -477,8 +499,8 @@ export default function SettingsPage() {
                   {th.name}
                 </p>
                 <div className="flex gap-1.5 mt-2">
-                  {[th.colors.primary, th.colors.up, th.colors.down, th.colors.warning].map((c, i) => (
-                    <span key={i} className="w-4 h-4 rounded-full" style={{ backgroundColor: c }} />
+                  {[th.colors.primary, th.colors.up, th.colors.down, th.colors.warning].map((c) => (
+                    <span key={c} className="w-4 h-4 rounded-full" style={{ backgroundColor: c }} />
                   ))}
                 </div>
               </button>

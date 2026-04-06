@@ -5,6 +5,7 @@ import { useStats } from '@/hooks/useStats'
 import { useI18nStore } from '@/store/i18nStore'
 import { StatCard } from '@/components/ui/StatCard'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { interpolate } from '@/lib/utils'
 
 export function StatsBar() {
   const theme = useTheme()
@@ -28,7 +29,7 @@ export function StatsBar() {
       <StatCard
         label={t.stats.gems}
         value={stats.gems_today}
-        sub={t.stats.yesterday.replace('{count}', String(stats.gems_yesterday))}
+        sub={interpolate(t.stats.yesterday, { count: stats.gems_yesterday })}
         valueColor={theme.colors.primary}
       />
       <StatCard

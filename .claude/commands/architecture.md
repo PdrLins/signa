@@ -1,82 +1,117 @@
 Show the Signa backend architecture and how modules connect.
 
-## Module Map (103 files)
+## Module Map
 
-### Live System (app/)
+### Core
 ```
-main.py                    → FastAPI app, lifespan (starts scheduler), middleware stack, webhook
-app/core/config.py         → All env vars via pydantic-settings, startup validators
-app/core/security.py       → JWT encode/decode (jose), bcrypt (passlib), OTP (HMAC-SHA256)
-app/core/dependencies.py   → get_current_user reads request.state.user (set by middleware)
-app/core/exceptions.py     → AuthenticationError, RateLimitExceeded, OTPExpired/Invalid
-app/core/utils.py          → get_client_ip (trusted proxy aware), validate_ticker (regex)
-app/middleware/auth.py      → JWT validation, sets request.state.user, skips public paths
-app/middleware/audit.py     → Logs method/path/status/duration/IP/username per request
-app/middleware/rate_limit.py → IP rate limiting on /auth/*, LRU bounded OrderedDict
-app/api/v1/*.py             → Route handlers (thin — delegate to services)
-app/models/*.py             → Pydantic schemas for requests/responses
-app/services/auth_service.py → Login, OTP send/verify, JWT issue/revoke/refresh
-app/services/scan_service.py → Full scan pipeline orchestrator (the main engine)
-app/services/signal_service.py → Signal queries
-app/services/watchlist_service.py → Watchlist CRUD
-app/scanners/market_scanner.py → yfinance: OHLCV, fundamentals (async via to_thread)
-app/scanners/macro_scanner.py → FRED API: fed funds, 10Y, CPI, unemployment + VIX
-app/scanners/indicators.py → RSI, MACD, Bollinger Bands, SMA 50/200, ATR, volume Z-score
-app/scanners/prefilter.py  → 1000 → 50 candidates by volume + price change
-app/scanners/universe.py   → Hardcoded ticker lists (TSX .TO, NYSE, NASDAQ)
-app/ai/grok_client.py      → xAI sentiment analysis (OpenAI SDK), async lock, retries
-app/ai/claude_client.py    → Anthropic signal synthesis, async lock, retries
-app/ai/prompts.py          → All prompt templates + clean_json_response utility
-app/ai/signal_engine.py    → Scoring (backtest-tuned), GEM detection, blockers, status
-app/scheduler/runner.py    → APScheduler AsyncIOScheduler, 4 CronTrigger jobs
-app/scheduler/jobs.py      → Async functions that call scan_service.run_scan()
-app/notifications/telegram_bot.py → Send messages, handle commands, HTML-escaped
-app/notifications/formatters.py → Signal summary/detail/digest templates
-app/notifications/dispatcher.py → Process pending alert queue
-app/db/supabase.py         → Thread-safe Supabase client singleton
-app/db/queries.py          → All DB operations
-app/db/schema.sql          → 9 tables + indexes + triggers + RPC function
+main.py                         → FastAPI app, lifespan, middleware stack, Telegram webhook
+app/core/config.py              → Pydantic Settings from .env, startup validators
+app/core/security.py            → JWT (PyJWT), bcrypt, OTP (HMAC-SHA256), create_brain_token
+app/core/cache.py               → TTLCache class + shared instances (blacklist, stats, price, brain)
+app/core/dependencies.py        → get_current_user reads request.state.user
+app/core/exceptions.py          → AuthenticationError, RateLimitExceeded, OTPExpired/Invalid
+app/core/utils.py               → get_client_ip (trusted proxy aware), validate_ticker (regex)
 ```
 
-### Backtest System (backtest/)
+### Middleware (outermost ��� innermost)
 ```
-backtest/run_backtest.py   → CLI entry point (--dry-run, --tickers, --start, --end, --no-cache)
-backtest/config.py         → Tickers (15 US + 15 TSX), thresholds (buy=65, ceiling=72), weights
-backtest/data/loader.py    → DataLoader: yfinance OHLCV (300-day warmup), fundamentals, FRED macro
-backtest/engine/simulator.py → BacktestSimulator: runs all tickers x all trading days
-backtest/engine/indicators.py → compute_indicators(df, as_of_date) — sliced, no look-ahead
-backtest/engine/fundamentals.py → extract_fundamentals, classify_bucket (SAFE_INCOME/HIGH_RISK)
-backtest/engine/scorer.py  → Data-tuned scoring (RSI sweet spots, MACD histogram, momentum caps)
-backtest/evaluation/evaluator.py → Measures 5/10/20d actual returns per signal
-backtest/evaluation/metrics.py → Win rates, distributions, top/worst, auto-detected issues
-backtest/reports/summary.py → Rich terminal output
-backtest/reports/generator.py → CSV, JSON, Claude analysis MD, IMPROVEMENTS MD
+CORSMiddleware → AuditMiddleware → RateLimitMiddleware → AuthMiddleware → Routes
+```
+- **AuditMiddleware** — logs method/path/status/duration/IP/username
+- **RateLimitMiddleware** — tiered: AUTH (5/15min failures), STRICT (3/5min), STANDARD (60/min). Thread-safe with lock.
+- **AuthMiddleware** — JWT validation, token blacklist check (cached), sets request.state.user
+
+### API Routes (app/api/v1/)
+```
+auth.py       → login, verify-otp, logout, refresh
+signals.py    → list signals, gems, ticker history
+tickers.py    → ticker detail, chart (OHLCV), ticker signals
+scans.py      → scan history, today's slots, trigger (with concurrency guard), progress polling
+watchlist.py  → CRUD
+portfolio.py  → CRUD
+positions.py  → open, close, update, history
+stats.py      → daily stats, recent alerts, virtual portfolio, positions summary
+brain.py      → highlights, insights, 2FA challenge/verify, rules CRUD, knowledge CRUD, audit
+learning.py   → trade outcomes, AI analysis, suggestions approve/reject/apply
+logs.py       → recent logs (REST), real-time stream (WebSocket, requires JWT + brain token)
+health.py     → health check, parallel integration checks, budget CRUD, AI config CRUD
 ```
 
-## Request Flow (Live)
+### AI System (app/ai/)
 ```
-Request → CORSMiddleware → AuditMiddleware → RateLimitMiddleware → AuthMiddleware
-  → AuthMiddleware sets request.state.user (or rejects)
-  → Route handler → Depends(get_current_user) reads request.state.user
-  → Service layer → DB queries → Response
-```
-
-## Scan Flow (Live)
-```
-APScheduler CronTrigger → jobs.py → scan_service.run_scan()
-  → Load universe → bulk screen (yfinance) → prefilter → macro snapshot (FRED+VIX)
-  → For each candidate (semaphore=10):
-      (price_history + fundamentals + grok_sentiment) in parallel
-      → compute_indicators → claude synthesis → score → blockers → GEM check → status
-  → batch insert signals → send Telegram alerts
+provider.py        → Fallback router: synthesis (claude→gemini), sentiment (grok→gemini). Budget-checked.
+claude_client.py   → Anthropic synthesis: technical+fundamental+macro+sentiment → BUY/HOLD/SELL/AVOID
+grok_client.py     → xAI sentiment: X/Twitter analysis → score, label, confidence, themes, news
+gemini_client.py   → Google free tier fallback for both synthesis and sentiment. Rate-limited semaphore.
+signal_engine.py   → Scoring (bucket-specific weights), GEM detection (5 conditions), blockers (5 checks), status tracking
+prompts.py         → All prompt templates + format_technicals/fundamentals/macro/sentiment + clean_json_response
 ```
 
-## Backtest Flow
+### Signals (app/signals/)
 ```
-run_backtest.py → DataLoader.load_all() + load_macro() + load_fundamentals()
-  → BacktestSimulator.run(): for each day x each ticker:
-      indicators(df, as_of_date) → fundamentals → classify_bucket → score → signal
-  → BacktestEvaluator.evaluate(): measure 5/10/20d returns
-  → compute_metrics(): win rates, distributions, auto-detected issues
-  → print_summary() + save_results() (CSV, JSON, MD, IMPROVEMENTS)
+regime.py      → Market regime from VIX: TRENDING (<20), VOLATILE (20-30), CRISIS (>30)
+kelly.py       → Fractional Kelly (25%) position sizing, score→win_rate mapping, regime adjustments
+contrarian.py  → Deep-value detector: below SMA200 + oversold RSI + volume + MACD turning. 3/4 conditions = contrarian.
+```
+
+### Scanners (app/scanners/)
+```
+universe.py        → ~141 tickers: 35 TSX, 43 NYSE, 48 NASDAQ, 15 crypto
+market_scanner.py  → yfinance: price history, fundamentals, bulk screening, current price. Cached 60s/5min.
+macro_scanner.py   → FRED (fed funds, 10Y, CPI, unemployment) + VIX. Classifies favorable/neutral/hostile.
+indicators.py      → RSI(14), MACD(12,26,9), Bollinger(20,2), SMA(50/200), ATR(14), volume Z-score, momentum
+prefilter.py       → ~141 → ~50 candidates: volume >= 200K, |change| > 1%, price > $1, 5 crypto slots reserved
+```
+
+### Services (app/services/)
+```
+scan_service.py        → Full scan orchestrator: two-pass pipeline, progress tracking
+auth_service.py        → Login, OTP send/verify, JWT issue/revoke/refresh
+signal_service.py      → Signal queries + price enrichment
+position_service.py    → Position CRUD + monitor (stop-loss, target, P&L milestones, signal weakening)
+learning_service.py    → Record outcomes → weekly AI analysis → brain suggestions
+knowledge_service.py   → Investment rules + signal knowledge from DB (TTLCache, 5min)
+budget_service.py      → Per-provider daily+monthly spend caps, async-safe singleton
+stats_service.py       → Daily stats with targeted DB queries (cached 30s)
+watchlist_service.py   → Watchlist CRUD
+price_cache.py         → Batch yfinance price enrichment (TTLCache, 5min)
+virtual_portfolio.py   → Virtual trade tracking for brain accuracy
+log_service.py         → In-memory log buffer + WebSocket subscriber queue
+```
+
+### Scheduler (app/scheduler/)
+```
+runner.py  → APScheduler: 4 daily scans (6AM, 10AM, 3PM, 4:30PM ET) + 2AM cleanup job
+jobs.py    → Async scan wrappers + cleanup_expired_tokens (purges blacklist, OTPs, brain sessions)
+```
+
+### Notifications (app/notifications/)
+```
+telegram_bot.py   → Send messages, handle 10 bot commands, HTML-escaped. Reusable httpx client.
+messages.py       → Bilingual templates (EN/PT): OTP, GEM alert, scan digest, watchlist alert, position alerts, brain OTP
+dispatcher.py     → Process pending alert queue from DB
+```
+
+### Database (app/db/)
+```
+supabase.py    → Thread-safe singleton client
+queries.py     → All DB operations. Light columns for lists, full select for detail. Blacklist cached.
+schema.sql     → 18 tables, indexes, triggers, RPC functions, Realtime
+seed_brain.py  → Seeds investment_rules + signal_knowledge tables
+```
+
+## Request Flow
+```
+Request → CORS → Audit (log) → RateLimit (tiered) → Auth (JWT + blacklist cache)
+  → Route �� Depends(get_current_user) → Service → queries.py → Supabase �� Response
+```
+
+## Scan Flow
+```
+Scheduler/Trigger → scan_service.run_scan()
+  → Universe (141) → Bulk screen → Prefilter (~50) → Macro snapshot + Regime
+  → Pass 1: All candidates prescored (technicals + fundamentals, FREE)
+  → Pass 2: Top 15 get AI (sentiment + synthesis, PAID, budget-checked)
+  → Bottom 35 stored with tech-only scores
+  → Batch insert → GEM alerts → Watchlist sell alerts → Scan digest → Position monitor
 ```

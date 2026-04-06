@@ -11,13 +11,13 @@ class WatchlistItem(BaseModel):
     id: Optional[str] = None
     symbol: str = Field(..., min_length=1, max_length=10)
     added_at: Optional[datetime] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=500)
 
 
 class WatchlistAddRequest(BaseModel):
     """Request to add a ticker to the watchlist."""
     symbol: str = Field(..., min_length=1, max_length=10)
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=500)
 
 
 class WatchlistResponse(BaseModel):

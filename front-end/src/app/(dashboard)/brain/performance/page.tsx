@@ -8,7 +8,7 @@ import { client } from '@/lib/api'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { PageHeader } from '@/components/layout/PageHeader'
+
 import { Sidebar } from '@/components/layout/Sidebar'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 

@@ -8,5 +8,6 @@ export function useStats() {
     queryFn: () => statsApi.getDaily(),
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
+    refetchIntervalInBackground: false,
   })
 }

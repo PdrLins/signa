@@ -23,7 +23,7 @@ export function BottomNav() {
     <nav
       className="fixed bottom-0 left-0 right-0 z-50 md:hidden"
       style={{
-        backgroundColor: theme.colors.surface + 'E6',
+        backgroundColor: theme.colors.surface.startsWith('#') ? theme.colors.surface + 'E6' : theme.colors.surface,
         borderTop: `0.5px solid ${theme.colors.border}`,
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',

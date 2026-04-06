@@ -25,7 +25,7 @@ export function Button({
   const styles: Record<string, React.CSSProperties> = {
     primary: {
       backgroundColor: disabled ? theme.colors.textHint : theme.colors.primary,
-      color: '#FFFFFF',
+      color: theme.colors.surface,
     },
     secondary: {
       backgroundColor: theme.colors.surfaceAlt,
@@ -42,6 +42,7 @@ export function Button({
       type={type}
       onClick={onClick}
       disabled={disabled}
+      aria-disabled={disabled ? 'true' : undefined}
       className={cn(
         'rounded-[11px] px-[18px] py-3 text-sm font-semibold transition-opacity',
         fullWidth && 'w-full',

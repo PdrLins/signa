@@ -17,7 +17,8 @@ export function LangSwitcher() {
         color: theme.colors.textSub,
         border: `0.5px solid ${theme.colors.border}`,
       }}
-      title={locale === 'en' ? 'Mudar para Portugues' : 'Switch to English'}
+      title={locale === 'en' ? 'Switch to Portuguese' : 'Switch to English'}
+      aria-label={locale === 'en' ? 'Switch to Portuguese' : 'Switch to English'}
     >
       {locale === 'en' ? 'PT' : 'EN'}
     </button>

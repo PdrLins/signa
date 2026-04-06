@@ -1,54 +1,73 @@
 Show the Signa backend security architecture.
 
 ## Authentication Flow
-1. `POST /auth/login` — validates username + bcrypt password → generates 6-digit OTP → hashes with HMAC-SHA256 (session_token as salt) → stores in `otp_codes` table → sends OTP via Telegram → returns `session_token`
-2. `POST /auth/verify-otp` — looks up OTP by session_token → checks expiration (120s) → checks attempt limit (3 max, atomic increment via PostgreSQL RPC) → constant-time comparison via `hmac.compare_digest` → issues JWT (HS256, 1hr expiry) → blacklists used OTP
+1. `POST /auth/login` — bcrypt password check → 6-digit OTP → HMAC-SHA256 hash (session_token as salt) → stored in `otp_codes` → sent via Telegram → returns `session_token`
+2. `POST /auth/verify-otp` — lookup by session_token → check expiry (120s) → check attempts (3 max, atomic RPC increment) → constant-time `hmac.compare_digest` → issue JWT → blacklist OTP
+3. JWT: PyJWT HS256, 1hr expiry, payload: `sub`, `username`, `iat`, `exp`, `jti`. Refresh blacklists old token.
 
-## JWT
-- Signed with HS256, secret from `JWT_SECRET_KEY` env var (no default — app crashes if missing)
-- Payload: `sub` (user_id), `username`, `iat`, `exp`, `jti` (unique ID for blacklisting)
-- Validated in `AuthMiddleware` → sets `request.state.user`
-- `get_current_user` dependency just reads `request.state.user` (no duplicate validation)
-- Logout blacklists the `jti` in `token_blacklist` table
-- Refresh issues new JWT and blacklists old one
+## Brain Editor 2FA (second layer on top of JWT)
+1. `POST /brain/challenge` — rate-limited (3/15min per user via TTLCache) → OTP sent to user's Telegram (from DB, not env var) → stored in `brain_sessions`
+2. `POST /brain/verify` — validates OTP → issues brain token (separate secret, 15min expiry) → JTI mandatory, verified against `brain_sessions`
+3. All brain write endpoints require both JWT + `X-Brain-Token` header via `require_brain_token` dependency
 
-## Rate Limiting
-- In-memory `OrderedDict` with LRU eviction (max 10K entries)
-- Only counts **failed** attempts (4xx responses on `/auth/*`)
-- 5 login attempts per IP per 15 minutes → IP blocked for 15 minutes
-- 3 OTP attempts per session_token → session invalidated
+## Rate Limiting (app/middleware/rate_limit.py)
+Three tiers, all IP-based, thread-safe with `threading.Lock`:
+| Tier | Paths | Limit | Window | Notes |
+|------|-------|-------|--------|-------|
+| AUTH | /auth/login, /auth/verify-otp | 5 | 15 min | Failures only, IP blocked on exceed |
+| STRICT | /scans/trigger, /learning/analyze, /learning/outcomes | 3 | 5 min | All requests counted |
+| STANDARD | All other protected endpoints | 60 | 1 min | All requests counted |
 
-## Security Validators (startup)
-- `JWT_SECRET_KEY` cannot be "change-me-in-production" or empty
-- `AUTH_ENABLED=false` only works when `DEBUG=true`
+Lock held only for dict operations — DB audit log and response sent outside lock.
 
-## IP Extraction
-- Single function `get_client_ip()` in `app/core/utils.py`
-- Only trusts `X-Forwarded-For` if direct client IP is in `TRUSTED_PROXIES` list
-- Used by all middleware and route handlers
+## Token Blacklist
+- Checked on every authenticated request via `is_token_blacklisted()`
+- TTL-cached: blacklisted tokens cached 5min, non-blacklisted 30s
+- Expired tokens purged by 2AM daily cleanup job
+
+## Startup Validators (app/core/config.py)
+- `JWT_SECRET_KEY` cannot be empty or "change-me-in-production"
+- `AUTH_ENABLED=false` only allowed when `DEBUG=true`
+- `BRAIN_TOKEN_SECRET` required when auth enabled
+- `CORS_ORIGINS=["*"]` blocked in production
 
 ## Input Validation
-- Ticker paths: regex `^[A-Z0-9.\-]{1,10}$`
-- Portfolio IDs: UUID type
-- OTP: exactly 6 digits `^\d{6}$`
-- Password: max 128 chars (bcrypt 72-byte limit protection)
-- Session token: max 128 chars
-- Scan type: `Literal["PRE_MARKET", "MORNING", "PRE_CLOSE", "AFTER_CLOSE"]`
-- Bucket: `Literal["SAFE_INCOME", "HIGH_RISK"]`
+- Ticker paths: regex `^[A-Z0-9.\-]{1,10}$` (Path + Field)
+- IDs: UUID type
+- OTP: `^\d{6}$`
+- Enum fields: `Literal[...]` for scan_type, bucket, action, status, account_type, currency
+- Text fields: `max_length` on all string inputs (500-5000 depending on field)
+- Budget: Pydantic model with `ge`/`le` constraints
 
-## Telegram Security
-- Webhook validates `X-Telegram-Bot-Api-Secret-Token` header
-- Rejects ALL requests when `TELEGRAM_WEBHOOK_SECRET` is not configured
-- All dynamic values HTML-escaped in messages (prevents content injection)
-- Bot commands validate ticker format before DB operations
+## Webhook Security
+- Validates `X-Telegram-Bot-Api-Secret-Token` via `hmac.compare_digest` (timing-safe)
+- Rejects ALL requests when `TELEGRAM_WEBHOOK_SECRET` not configured (empty = rejected)
+- Only responds to messages from `settings.telegram_chat_id`
 
-## Audit Logging
-All events logged to `audit_logs` table: LOGIN_ATTEMPT, OTP_SENT, OTP_VERIFIED, OTP_FAILED, OTP_EXPIRED, TOKEN_ISSUED, TOKEN_REFRESHED, TOKEN_REVOKED, UNAUTHORIZED_ACCESS, RATE_LIMIT_EXCEEDED
+## WebSocket Security (logs/stream)
+- Requires both JWT (`?jwt=`) AND brain token (`?token=`) as query params
+- Validates both tokens and verifies user match before accepting connection
+
+## Audit Events (app/models/audit.py)
+LOGIN_ATTEMPT, OTP_SENT/VERIFIED/FAILED/EXPIRED, TOKEN_ISSUED/REFRESHED/REVOKED, UNAUTHORIZED_ACCESS, RATE_LIMIT_EXCEEDED, BRAIN_CHALLENGE_SENT, BRAIN_ACCESS_GRANTED/DENIED/LOCKED, BRAIN_RULE_UPDATED, BRAIN_KNOWLEDGE_UPDATED, BUDGET_UPDATED, CONFIG_UPDATED, LEARNING_ANALYSIS_RUN, LEARNING_SUGGESTION_APPROVED/REJECTED/APPLIED
+
+## Caching Architecture (app/core/cache.py)
+All in-memory caches are bounded `TTLCache` instances (max_size + auto-expiry):
+| Cache | Max Size | TTL | Purpose |
+|-------|----------|-----|---------|
+| blacklist_cache | 5000 | 30s | Token blacklist lookups |
+| stats_cache | 100 | 30s | Daily stats queries |
+| price_cache | 500 | 60s | yfinance price data |
+| brain_challenge_cache | 500 | 15min | Brain OTP rate limiting |
+| brain_otp_attempt_cache | 500 | 15min | Brain OTP attempt tracking |
+| brain_lockout_cache | 500 | 15min | Brain lockout tracking |
+
+Plus service-level caches: `price_cache.py` (TTLCache, 500, 5min), `knowledge_service.py` (TTLCache, 200, 5min).
 
 ## Key Files
-- `app/core/security.py` — JWT, bcrypt, OTP hashing
-- `app/core/config.py` — startup validators
-- `app/middleware/auth.py` — JWT middleware
-- `app/middleware/rate_limit.py` — rate limiting
-- `app/services/auth_service.py` — login/OTP/token logic
-- `app/db/queries.py` — user/OTP/token DB operations
+- `app/core/security.py` — JWT (PyJWT), bcrypt, OTP, create_brain_token
+- `app/core/cache.py` — TTLCache + shared instances
+- `app/middleware/auth.py` — JWT middleware + blacklist check
+- `app/middleware/brain_auth.py` — Brain 2FA dependency
+- `app/middleware/rate_limit.py` — Tiered rate limiting
+- `app/services/auth_service.py` — Login/OTP/token logic

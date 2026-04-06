@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useAllSignals } from '@/hooks/useSignals'
@@ -33,6 +33,7 @@ function isWeekday(): boolean {
   return day !== 0 && day !== 6
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function formatNextScan(nextScanTime: string | null, t: Record<string, any>): string | null {
   if (!nextScanTime) return null
   const scanDate = new Date(nextScanTime)
@@ -69,30 +70,33 @@ export default function OverviewPage() {
   const marketRegime = allSignals?.[0]?.market_regime ?? null
   const nextScanLabel = formatNextScan(stats?.next_scan_time ?? null, t)
 
-  const regimeColors: Record<string, string> = {
+  const regimeColors = useMemo<Record<string, string>>(() => ({
     TRENDING: theme.colors.up,
     VOLATILE: theme.colors.warning,
     CRISIS: theme.colors.down,
-  }
+  }), [theme.colors.up, theme.colors.warning, theme.colors.down])
 
-  const regimeLabels: Record<string, string> = {
+  const regimeLabels = useMemo<Record<string, string>>(() => ({
     TRENDING: t.market.trending,
     VOLATILE: t.market.volatile,
     CRISIS: t.market.crisis,
-  }
+  }), [t.market.trending, t.market.volatile, t.market.crisis])
 
-  // Top signals = highest score, sorted desc
-  const topSignals = allSignals
-    ?.filter((s: Signal) => {
-      if (filter === 'ALL') return true
-      return s.bucket === filter
-    })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 10)
+  const topSignals = useMemo(() => {
+    return allSignals
+      ?.filter((s: Signal) => {
+        if (filter === 'ALL') return true
+        return s.bucket === filter
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10)
+  }, [allSignals, filter])
 
-  const totalCount = allSignals?.length ?? 0
-  const buyCount = allSignals?.filter((s) => s.action === 'BUY').length ?? 0
-  const gemCount = allSignals?.filter((s) => s.is_gem).length ?? 0
+  const { totalCount, buyCount, gemCount } = useMemo(() => ({
+    totalCount: allSignals?.length ?? 0,
+    buyCount: allSignals?.filter((s) => s.action === 'BUY').length ?? 0,
+    gemCount: allSignals?.filter((s) => s.is_gem).length ?? 0,
+  }), [allSignals])
 
   const filters: { label: string; value: BucketFilter }[] = [
     { label: t.overview.all, value: 'ALL' },

@@ -19,7 +19,7 @@ export function ScoreRing({ score, size = 52 }: ScoreRingProps) {
     score >= 80 ? theme.colors.up : score >= 60 ? theme.colors.warning : theme.colors.down
 
   return (
-    <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
+    <div className="relative inline-flex items-center justify-center" role="img" aria-label={`Score: ${score} out of 100`} style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
         <circle
           cx={size / 2}

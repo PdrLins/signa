@@ -12,15 +12,16 @@ from typing import Optional
 
 from loguru import logger
 
-_cache: dict[str, tuple[float, Optional[float], Optional[float]]] = {}
-_TTL = 300  # 5 minutes
+from app.core.cache import TTLCache
+
+_cache = TTLCache(max_size=500, default_ttl=300)
 
 
 def _get_cached(symbol: str) -> tuple[bool, Optional[float], Optional[float]]:
     """Check cache. Returns (hit, price, change_pct)."""
     entry = _cache.get(symbol)
-    if entry and entry[0] > time.time():
-        return True, entry[1], entry[2]
+    if entry is not None:
+        return True, entry[0], entry[1]
     return False, None, None
 
 
@@ -32,7 +33,6 @@ def _fetch_prices_batch(symbols: list[str]) -> dict[str, tuple[Optional[float], 
     import yfinance as yf
 
     result: dict[str, tuple[Optional[float], Optional[float]]] = {}
-    now = time.time()
 
     if not symbols:
         return result
@@ -44,7 +44,7 @@ def _fetch_prices_batch(symbols: list[str]) -> dict[str, tuple[Optional[float], 
         if data.empty:
             for sym in symbols:
                 result[sym] = (None, None)
-                _cache[sym] = (now + _TTL, None, None)
+                _cache.set(sym, (None, None))
             return result
 
         import pandas as pd
@@ -58,13 +58,14 @@ def _fetch_prices_batch(symbols: list[str]) -> dict[str, tuple[Optional[float], 
                         prev = float(prices.iloc[-2]) if len(prices) >= 2 else None
                         change = round(((price - prev) / prev) * 100, 2) if prev and prev > 0 else None
                         result[sym] = (price, change)
-                        _cache[sym] = (now + _TTL, price, change)
+                        _cache.set(sym, (price, change))
                     else:
                         result[sym] = (None, None)
-                        _cache[sym] = (now + _TTL, None, None)
-                except Exception:
+                        _cache.set(sym, (None, None))
+                except Exception as e:
+                    logger.debug(f"Price parse failed for {sym}: {e}")
                     result[sym] = (None, None)
-                    _cache[sym] = (now + _TTL, None, None)
+                    _cache.set(sym, (None, None))
         else:
             # Single symbol case
             sym = symbols[0]
@@ -75,19 +76,20 @@ def _fetch_prices_batch(symbols: list[str]) -> dict[str, tuple[Optional[float], 
                     prev = float(prices.iloc[-2]) if len(prices) >= 2 else None
                     change = round(((price - prev) / prev) * 100, 2) if prev and prev > 0 else None
                     result[sym] = (price, change)
-                    _cache[sym] = (now + _TTL, price, change)
+                    _cache.set(sym, (price, change))
                 else:
                     result[sym] = (None, None)
-                    _cache[sym] = (now + _TTL, None, None)
-            except Exception:
+                    _cache.set(sym, (None, None))
+            except Exception as e:
+                logger.debug(f"Price parse failed for {sym}: {e}")
                 result[sym] = (None, None)
-                _cache[sym] = (now + _TTL, None, None)
+                _cache.set(sym, (None, None))
 
     except Exception as e:
         logger.debug(f"Batch price fetch failed: {e}")
         for sym in symbols:
             result[sym] = (None, None)
-            _cache[sym] = (now + _TTL, None, None)
+            _cache.set(sym, (None, None))
 
     return result
 

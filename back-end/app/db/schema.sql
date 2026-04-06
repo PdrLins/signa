@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username          VARCHAR UNIQUE NOT NULL,
     password_hash     VARCHAR NOT NULL,
-    telegram_chat_id  VARCHAR NOT NULL,
+    telegram_chat_id  VARCHAR UNIQUE NOT NULL,
     is_active         BOOLEAN DEFAULT TRUE,
     created_at        TIMESTAMPTZ DEFAULT now(),
     last_login        TIMESTAMPTZ

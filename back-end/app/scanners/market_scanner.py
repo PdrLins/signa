@@ -34,10 +34,16 @@ async def get_price_history(ticker: str, period: str = "3mo") -> pd.DataFrame:
 
 
 async def get_fundamentals(ticker: str) -> dict:
-    """Fetch fundamental data for a ticker via yfinance .info.
+    """Fetch fundamental data for a ticker via yfinance .info. Cached for 5 min.
 
     Returns dict with P/E, dividend yield, EPS, debt/equity, etc.
     """
+    from app.core.cache import price_cache
+    cache_key = f"fund:{ticker}"
+    cached = price_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     def _fetch():
         t = yf.Ticker(ticker)
         return t.info
@@ -57,7 +63,7 @@ async def get_fundamentals(ticker: str) -> dict:
             except (ValueError, TypeError, OSError, OverflowError):
                 pass
 
-        return {
+        result = {
             "company_name": info.get("longName") or info.get("shortName"),
             "pe_ratio": info.get("trailingPE"),
             "forward_pe": info.get("forwardPE"),
@@ -87,6 +93,8 @@ async def get_fundamentals(ticker: str) -> dict:
             "pre_market_change": info.get("preMarketChange"),
             "pre_market_change_pct": info.get("preMarketChangePercent"),
         }
+        price_cache.set(cache_key, result, ttl=300)
+        return result
     except Exception as e:
         logger.error(f"Failed to fetch fundamentals for {ticker}: {e}")
         return {}
@@ -148,7 +156,13 @@ async def get_bulk_screening(tickers: list[str]) -> dict[str, dict]:
 
 
 async def get_current_price(ticker: str) -> Optional[float]:
-    """Get the current/last price for a ticker."""
+    """Get the current/last price for a ticker. Cached for 60s."""
+    from app.core.cache import price_cache
+    cache_key = f"price:{ticker}"
+    cached = price_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     def _fetch():
         t = yf.Ticker(ticker)
         hist = t.history(period="1d")
@@ -157,7 +171,10 @@ async def get_current_price(ticker: str) -> Optional[float]:
         return None
 
     try:
-        return await asyncio.to_thread(_fetch)
+        price = await asyncio.to_thread(_fetch)
+        if price is not None:
+            price_cache.set(cache_key, price, ttl=60)
+        return price
     except Exception as e:
         logger.error(f"Failed to get price for {ticker}: {e}")
         return None

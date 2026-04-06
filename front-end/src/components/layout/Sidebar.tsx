@@ -4,7 +4,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useAllSignals } from '@/hooks/useSignals'
 import { WatchlistTable } from '@/components/watchlist/WatchlistTable'
-import { BudgetWidget, BrainPerformanceWidget } from '@/components/dashboard/DashboardWidgets'
+import { BrainPerformanceWidget } from '@/components/dashboard/DashboardWidgets'
 import { Card } from '@/components/ui/Card'
 
 export function Sidebar() {

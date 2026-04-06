@@ -1,6 +1,21 @@
 import { create } from 'zustand'
+import { TOKEN_KEY } from '@/lib/constants'
 
-const TOKEN_KEY = 'signa-token'
+function setCookie(token: string) {
+  try {
+    document.cookie = `${TOKEN_KEY}=${token}; path=/; SameSite=Strict; max-age=86400`
+  } catch {
+    // SSR or cookie access denied — ignore
+  }
+}
+
+function clearCookie() {
+  try {
+    document.cookie = `${TOKEN_KEY}=; path=/; max-age=0`
+  } catch {
+    // SSR or cookie access denied — ignore
+  }
+}
 
 interface AuthStore {
   token: string | null
@@ -15,19 +30,34 @@ export const useAuthStore = create<AuthStore>((set) => ({
   isAuthenticated: false,
 
   setToken: (token: string) => {
-    localStorage.setItem(TOKEN_KEY, token)
+    try {
+      localStorage.setItem(TOKEN_KEY, token)
+    } catch {
+      // localStorage unavailable — continue with in-memory token
+    }
+    setCookie(token)
     set({ token, isAuthenticated: true })
   },
 
   logout: () => {
-    localStorage.removeItem(TOKEN_KEY)
+    try {
+      localStorage.removeItem(TOKEN_KEY)
+    } catch {
+      // localStorage unavailable — ignore
+    }
+    clearCookie()
     set({ token: null, isAuthenticated: false })
   },
 
   initialize: () => {
-    const token = localStorage.getItem(TOKEN_KEY)
-    if (token) {
-      set({ token, isAuthenticated: true })
+    try {
+      const token = localStorage.getItem(TOKEN_KEY)
+      if (token) {
+        setCookie(token)
+        set({ token, isAuthenticated: true })
+      }
+    } catch {
+      // localStorage unavailable — remain unauthenticated
     }
   },
 }))

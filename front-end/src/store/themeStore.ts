@@ -15,14 +15,22 @@ export const useThemeStore = create<ThemeStore>((set) => ({
   theme: themes[DEFAULT_THEME],
 
   setTheme: (id: ThemeId) => {
-    localStorage.setItem(STORAGE_KEY, id)
+    try {
+      localStorage.setItem(STORAGE_KEY, id)
+    } catch (e) {
+      console.warn('Failed to persist theme:', e)
+    }
     set({ themeId: id, theme: themes[id] })
   },
 
   initialize: () => {
-    const saved = localStorage.getItem(STORAGE_KEY) as ThemeId | null
-    if (saved && themes[saved]) {
-      set({ themeId: saved, theme: themes[saved] })
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY) as ThemeId | null
+      if (saved && themes[saved]) {
+        set({ themeId: saved, theme: themes[saved] })
+      }
+    } catch (e) {
+      console.warn('Failed to read theme from localStorage:', e)
     }
   },
 }))

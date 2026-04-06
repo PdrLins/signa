@@ -118,7 +118,7 @@ async def trigger_scan(
     """Manually trigger a scan. Runs in the background — returns immediately.
 
     Use GET /scans/{scan_id}/progress to poll for real-time progress.
-    Blocked on weekends — markets are closed, data would be stale.
+    Blocked if a scan is already running or queued.
     """
     from zoneinfo import ZoneInfo
     et_now = datetime.now(ZoneInfo("America/New_York"))
@@ -126,6 +126,16 @@ async def trigger_scan(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Markets are closed on weekends — scans are skipped to save AI credits.",
+        )
+
+    # Concurrency guard — reject if a scan is already running
+    recent = queries.get_scans(limit=5)
+    active = [s for s in recent if s.get("status") in ("RUNNING", "QUEUED")]
+    if active:
+        active_id = active[0].get("id")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A scan is already in progress ({active_id}). Wait for it to complete.",
         )
 
     # Create the scan record first so we can return the ID

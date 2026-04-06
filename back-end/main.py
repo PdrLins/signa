@@ -3,6 +3,7 @@
 Run with: uvicorn main:app --reload --port 8000
 """
 
+import hmac
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
@@ -35,6 +36,12 @@ async def lifespan(app: FastAPI):
     yield
 
     stop_scheduler()
+
+    # Close the reusable Telegram HTTP client
+    from app.notifications.telegram_bot import _http_client
+    if _http_client and not _http_client.is_closed:
+        await _http_client.aclose()
+
     logger.info(f"{settings.app_name} shutting down")
 
 
@@ -85,9 +92,9 @@ async def telegram_webhook(request: Request):
 
     Validates the secret token header set via setWebhook.
     """
-    # Verify webhook secret (reject if not configured or mismatch)
-    secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    if not settings.telegram_webhook_secret or secret != settings.telegram_webhook_secret:
+    # Verify webhook secret — reject if secret is not configured or doesn't match
+    secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+    if not settings.telegram_webhook_secret or not secret or not hmac.compare_digest(secret, settings.telegram_webhook_secret):
         return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": "Forbidden"})
 
     try:

@@ -7,21 +7,21 @@ from pydantic import BaseModel, Field
 
 
 class PositionCreateRequest(BaseModel):
-    symbol: str = Field(..., min_length=1, max_length=10)
+    symbol: str = Field(..., min_length=1, max_length=10, pattern=r"^[A-Z0-9.\-]+$")
     entry_price: Decimal = Field(..., gt=0)
     shares: Decimal = Field(..., gt=0)
-    account_type: str | None = None      # TFSA, RRSP, TAXABLE
-    bucket: str | None = None            # SAFE_INCOME, HIGH_RISK
-    currency: str = "CAD"
+    account_type: str | None = Field(None, pattern=r"^(TFSA|RRSP|TAXABLE)$")
+    bucket: str | None = Field(None, pattern=r"^(SAFE_INCOME|HIGH_RISK)$")
+    currency: str = Field("CAD", pattern=r"^(CAD|USD)$")
     target_price: Decimal | None = None
     stop_loss: Decimal | None = None
-    notes: str | None = None
+    notes: str | None = Field(None, max_length=1000)
 
 
 class PositionUpdateRequest(BaseModel):
     target_price: Decimal | None = None
     stop_loss: Decimal | None = None
-    notes: str | None = None
+    notes: str | None = Field(None, max_length=1000)
 
 
 class PositionCloseRequest(BaseModel):

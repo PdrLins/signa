@@ -9,7 +9,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 
 from app.core.dependencies import get_current_user
 from app.core.utils import get_client_ip
@@ -22,24 +22,24 @@ router = APIRouter(prefix="/learning", tags=["Self-Learning"])
 
 
 class TradeOutcomeRequest(BaseModel):
-    signal_id: str
-    symbol: str
-    action: str
+    signal_id: str = Field(..., max_length=36)
+    symbol: str = Field(..., pattern=r"^[A-Z0-9.\-]{1,10}$")
+    action: str = Field(..., pattern=r"^(BUY|HOLD|SELL|AVOID)$")
     score: int = Field(ge=0, le=100)
-    bucket: str
-    signal_date: str
+    bucket: str = Field(..., pattern=r"^(SAFE_INCOME|HIGH_RISK)$")
+    signal_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}")
     entry_price: float = Field(gt=0)
     exit_price: float = Field(gt=0)
     days_held: int = Field(ge=0)
     target_price: Optional[float] = None
     stop_loss: Optional[float] = None
-    market_regime: Optional[str] = None
-    catalyst_type: Optional[str] = None
-    notes: Optional[str] = None
+    market_regime: Optional[str] = Field(None, pattern=r"^(TRENDING|VOLATILE|CRISIS)$")
+    catalyst_type: Optional[str] = Field(None, max_length=50)
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
 class RejectSuggestionRequest(BaseModel):
-    reason: Optional[str] = None
+    reason: Optional[str] = Field(None, max_length=500)
 
 
 # ── Outcomes (JWT only) ──
@@ -110,7 +110,7 @@ async def run_analysis(
 
 @router.get("/suggestions")
 async def get_suggestions(
-    status: str | None = Query(None),
+    status: Literal["PENDING", "APPROVED", "REJECTED", "APPLIED"] | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     user: dict = Depends(require_brain_token),
 ):
@@ -125,13 +125,17 @@ async def approve_suggestion(
     user: dict = Depends(require_brain_token),
 ):
     """Approve a suggestion. Does NOT apply it yet."""
-    client = get_client()
     from datetime import datetime, timezone
-    client.table("brain_suggestions").update({
-        "status": "APPROVED",
-        "reviewed_at": datetime.now(timezone.utc).isoformat(),
-        "reviewed_by": user.get("user_id") if user.get("user_id") != "dev-user-id" else None,
-    }).eq("id", suggestion_id).execute()
+
+    def _approve():
+        client = get_client()
+        client.table("brain_suggestions").update({
+            "status": "APPROVED",
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "reviewed_by": user.get("user_id") if user.get("user_id") != "dev-user-id" else None,
+        }).eq("id", suggestion_id).execute()
+
+    await asyncio.to_thread(_approve)
 
     insert_audit_log(
         event_type="LEARNING_SUGGESTION_APPROVED",
@@ -151,14 +155,18 @@ async def reject_suggestion(
     user: dict = Depends(require_brain_token),
 ):
     """Reject a suggestion with optional reason."""
-    client = get_client()
     from datetime import datetime, timezone
-    client.table("brain_suggestions").update({
-        "status": "REJECTED",
-        "reviewed_at": datetime.now(timezone.utc).isoformat(),
-        "reviewed_by": user.get("user_id") if user.get("user_id") != "dev-user-id" else None,
-        "rejection_reason": body.reason or "",
-    }).eq("id", suggestion_id).execute()
+
+    def _reject():
+        client = get_client()
+        client.table("brain_suggestions").update({
+            "status": "REJECTED",
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "reviewed_by": user.get("user_id") if user.get("user_id") != "dev-user-id" else None,
+            "rejection_reason": body.reason or "",
+        }).eq("id", suggestion_id).execute()
+
+    await asyncio.to_thread(_reject)
 
     insert_audit_log(
         event_type="LEARNING_SUGGESTION_REJECTED",

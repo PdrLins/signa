@@ -39,7 +39,7 @@ export function ThemeSwitcher({ compact = false }: ThemeSwitcherProps) {
                 <Check
                   size={12}
                   className="absolute inset-0 m-auto"
-                  style={{ color: t.isDark ? '#000' : '#fff' }}
+                  style={{ color: t.isDark ? t.colors.text : t.colors.surface }}
                 />
               )}
             </button>
@@ -72,7 +72,7 @@ export function ThemeSwitcher({ compact = false }: ThemeSwitcherProps) {
                 className="absolute top-3 right-3 w-5 h-5 rounded-full flex items-center justify-center"
                 style={{ backgroundColor: currentTheme.colors.primary }}
               >
-                <Check size={12} style={{ color: '#fff' }} />
+                <Check size={12} style={{ color: currentTheme.isDark ? currentTheme.colors.text : currentTheme.colors.surface }} />
               </div>
             )}
 

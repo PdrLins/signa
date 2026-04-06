@@ -1,4 +1,4 @@
-"""Stats service — computes daily aggregated statistics."""
+"""Stats service — computes daily aggregated statistics with caching."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
-from app.db import queries
+from app.core.cache import stats_cache
+from app.db.supabase import get_client
 
 
 # Scan schedule (ET times) — used to compute next_scan_time
@@ -19,41 +20,52 @@ _SCHEDULE = [
 
 
 def get_daily_stats() -> dict:
-    """Compute aggregated daily stats from existing tables."""
+    """Compute aggregated daily stats. Cached for 30s."""
+    cached = stats_cache.get("daily_stats")
+    if cached is not None:
+        return cached
+
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_start = today_start - timedelta(days=1)
 
     try:
-        # Get today's signals
-        all_signals = queries.get_signals(limit=500)
-        today_signals = [
-            s for s in all_signals
-            if s.get("created_at") and s["created_at"] >= today_start.isoformat()
-        ]
+        db = get_client()
+
+        # Query only today's signals (not 500 then filter in Python)
+        today_result = (
+            db.table("signals")
+            .select("is_gem")
+            .gte("created_at", today_start.isoformat())
+            .execute()
+        )
+        today_signals = today_result.data or []
         gems_today = sum(1 for s in today_signals if s.get("is_gem"))
 
-        # Get yesterday's gems
-        yesterday_signals = [
-            s for s in all_signals
-            if s.get("created_at")
-            and s["created_at"] >= yesterday_start.isoformat()
-            and s["created_at"] < today_start.isoformat()
-        ]
-        gems_yesterday = sum(1 for s in yesterday_signals if s.get("is_gem"))
+        # Query yesterday's gems
+        yesterday_result = (
+            db.table("signals")
+            .select("is_gem")
+            .gte("created_at", yesterday_start.isoformat())
+            .lt("created_at", today_start.isoformat())
+            .eq("is_gem", True)
+            .execute()
+        )
+        gems_yesterday = len(yesterday_result.data or [])
 
-        # Get today's scans for tickers_scanned
-        scans = queries.get_scans(limit=20)
-        today_scans = [
-            sc for sc in scans
-            if sc.get("started_at") and sc["started_at"] >= today_start.isoformat()
-        ]
-        tickers_scanned = sum(sc.get("tickers_scanned", 0) for sc in today_scans)
+        # Query today's scans for tickers_scanned
+        scans_result = (
+            db.table("scans")
+            .select("tickers_scanned")
+            .gte("started_at", today_start.isoformat())
+            .execute()
+        )
+        tickers_scanned = sum(s.get("tickers_scanned", 0) for s in scans_result.data or [])
 
         # Next scan time
         next_scan = _compute_next_scan_time()
 
-        return {
+        result = {
             "gems_today": gems_today,
             "gems_yesterday": gems_yesterday,
             "win_rate_30d": _get_virtual_win_rate(),
@@ -63,6 +75,8 @@ def get_daily_stats() -> dict:
             "claude_cost": 0.0,
             "grok_cost": 0.0,
         }
+        stats_cache.set("daily_stats", result, ttl=30)
+        return result
     except Exception:
         logger.exception("Failed to compute daily stats")
         return {
@@ -78,21 +92,30 @@ def get_daily_stats() -> dict:
 
 
 def _get_virtual_win_rate() -> float:
-    """Get win rate from virtual portfolio (brain accuracy)."""
+    """Get win rate from virtual portfolio. Cached for 5 min."""
+    cached = stats_cache.get("virtual_win_rate")
+    if cached is not None:
+        return cached
+
     try:
-        from app.db.supabase import get_client
         db = get_client()
+        # Only count recent trades (last 90 days) to keep it relevant
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
         result = (
             db.table("virtual_trades")
             .select("is_win")
             .eq("status", "CLOSED")
+            .gte("created_at", cutoff)
+            .limit(500)
             .execute()
         )
         trades = result.data or []
         if not trades:
             return 0.0
         wins = sum(1 for t in trades if t.get("is_win"))
-        return round(wins / len(trades), 4)  # Returns 0.0-1.0
+        rate = round(wins / len(trades), 4)
+        stats_cache.set("virtual_win_rate", rate, ttl=300)
+        return rate
     except Exception:
         return 0.0
 
@@ -100,7 +123,6 @@ def _get_virtual_win_rate() -> float:
 def _get_ai_cost_today() -> float:
     """Get today's total AI spend from ai_usage table."""
     try:
-        from app.db.supabase import get_client
         db = get_client()
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         result = (

@@ -16,6 +16,9 @@ export function useVerifyOtp() {
     onSuccess: (data) => {
       setToken(data.access_token)
     },
+    onError: (err) => {
+      console.error('OTP verification failed:', err)
+    },
   })
 }
 

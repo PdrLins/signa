@@ -7,6 +7,7 @@ from loguru import logger
 from app.core.config import settings
 from app.scheduler.jobs import (
     after_close_scan,
+    cleanup_expired_tokens,
     morning_scan,
     pre_close_scan,
     pre_market_scan,
@@ -57,8 +58,17 @@ def init_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # 2:00 AM ET — Daily cleanup of expired tokens, OTPs, brain sessions
+    scheduler.add_job(
+        cleanup_expired_tokens,
+        CronTrigger(hour=2, minute=0, timezone=settings.timezone),
+        id="cleanup_expired_tokens",
+        name="DB Cleanup (2:00 AM ET)",
+        replace_existing=True,
+    )
+
     logger.info(
-        f"Scheduler configured with 4 daily scan jobs "
+        f"Scheduler configured with 4 daily scan jobs + cleanup "
         f"(timezone: {settings.timezone})"
     )
 

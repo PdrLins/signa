@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 import { useToast } from '@/hooks/useToast'
 import { useBrainHighlights, useBrainChallenge, useBrainVerify } from '@/hooks/useBrain'
+import { DEFAULT_TIMEZONE } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { ProgressBar } from '@/components/ui/ProgressBar'
@@ -44,6 +45,7 @@ export function BrainLocked() {
     } catch (err) {
       toast.show((err as Error)?.message || t.brain.failedToSendCode, 'error')
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- t ref is stable
   }, [challenge, toast])
 
   const handleDigitChange = (idx: number, value: string) => {
@@ -113,6 +115,7 @@ export function BrainLocked() {
                   inputMode="numeric"
                   maxLength={1}
                   value={digit}
+                  aria-label={`OTP digit ${i + 1}`}
                   onChange={(e) => handleDigitChange(i, e.target.value)}
                   onKeyDown={(e) => handleKeyDown(i, e)}
                   className="w-10 sm:w-11 h-12 text-center text-lg font-bold rounded-xl outline-none transition-all"
@@ -159,7 +162,7 @@ export function BrainLocked() {
         <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>{t.brain.signalBrain}</h1>
         {Boolean(highlights?.last_rule_updated) && (
           <p className="text-xs mt-1" style={{ color: theme.colors.textSub }}>
-            {new Date(String(highlights?.last_rule_updated)).toLocaleDateString()}
+            {new Date(String(highlights?.last_rule_updated)).toLocaleDateString('en-US', { timeZone: DEFAULT_TIMEZONE })}
           </p>
         )}
       </div>

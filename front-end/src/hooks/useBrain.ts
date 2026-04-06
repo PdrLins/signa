@@ -58,7 +58,7 @@ export function useBrainRules() {
       return res.data as Record<string, unknown>[]
     },
     enabled: isUnlocked,
-    staleTime: 0,
+    staleTime: 30 * 1000,
   })
 }
 
@@ -85,7 +85,7 @@ export function useBrainKnowledge() {
       return res.data as Record<string, unknown>[]
     },
     enabled: isUnlocked,
-    staleTime: 0,
+    staleTime: 30 * 1000,
   })
 }
 
@@ -124,7 +124,7 @@ export function useRunAnalysis() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (days: number = 7) => {
-      const res = await client.post(`/learning/analyze?days=${days}`, null, { headers: brainHeaders() })
+      const res = await client.post('/learning/analyze', null, { headers: brainHeaders(), params: { days } })
       return res.data as { suggestions: Record<string, unknown>[]; count: number }
     },
     onSuccess: () => {

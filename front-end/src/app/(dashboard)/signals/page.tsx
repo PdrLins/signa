@@ -26,9 +26,16 @@ export default function SignalsPage() {
   const [minScore, setMinScore] = useState<number>(0)
   const [sortBy, setSortBy] = useState<'score' | 'rr' | 'change'>('score')
   const [search, setSearch] = useState<string>('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [scanId, setScanId] = useState<string | null>(null)
   const [progress, setProgress] = useState<ScanProgress | null>(null)
   const scanning = !!scanId
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(timer)
+  }, [search])
 
   // Poll scan progress
   useEffect(() => {
@@ -62,6 +69,7 @@ export default function SignalsPage() {
     poll()
     const interval = setInterval(poll, 2500)
     return () => { cancelled = true; clearInterval(interval) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- t.signals refs are stable across renders
   }, [scanId, queryClient, toast])
 
   const handleScanNow = useCallback(async () => {
@@ -90,10 +98,10 @@ export default function SignalsPage() {
       if (assetType !== 'All' && s.asset_type !== assetType) return false
       if (signalStyle !== 'All' && s.signal_style !== signalStyle) return false
       if (actionFilter !== 'All' && s.action !== actionFilter) return false
-      if (search && !s.symbol.toLowerCase().startsWith(search.toLowerCase())) return false
+      if (debouncedSearch && !s.symbol.toLowerCase().startsWith(debouncedSearch.toLowerCase())) return false
       return true
     })
-  }, [allSignals, assetType, signalStyle, actionFilter, search])
+  }, [allSignals, assetType, signalStyle, actionFilter, debouncedSearch])
 
   // Sorting
   const signals = useMemo(() => {
@@ -110,10 +118,12 @@ export default function SignalsPage() {
   }, [filtered, sortBy])
 
   // Summary stats
-  const buys = signals?.filter((s) => s.action === 'BUY').length ?? 0
-  const holds = signals?.filter((s) => s.action === 'HOLD').length ?? 0
-  const avoids = signals?.filter((s) => s.action === 'AVOID').length ?? 0
-  const marketRegime = signals?.[0]?.market_regime ?? null
+  const { buys, holds, avoids, marketRegime } = useMemo(() => ({
+    buys: signals?.filter((s) => s.action === 'BUY').length ?? 0,
+    holds: signals?.filter((s) => s.action === 'HOLD').length ?? 0,
+    avoids: signals?.filter((s) => s.action === 'AVOID').length ?? 0,
+    marketRegime: signals?.[0]?.market_regime ?? null,
+  }), [signals])
 
   // Top pick = highest score in current filtered list
   const topPickId = useMemo(() => {
@@ -277,19 +287,21 @@ export default function SignalsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t.signals.searchPlaceholder}
+            aria-label="Search signals"
             className="bg-transparent outline-none text-[11px] font-medium w-24"
             style={{ color: theme.colors.text }}
           />
         </div>
 
         {/* Asset type */}
-        <div className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
+        <div role="group" aria-label="Filter by asset type" className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
           {assetOptions.map((opt) => {
             const isActive = assetType === opt
             return (
               <button
                 key={opt}
                 onClick={() => setAssetType(opt)}
+                aria-pressed={isActive}
                 className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all"
                 style={{
                   backgroundColor: isActive ? theme.colors.navActive : 'transparent',
@@ -303,13 +315,14 @@ export default function SignalsPage() {
         </div>
 
         {/* Signal Style */}
-        <div className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
+        <div role="group" aria-label="Filter by signal style" className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
           {styleOptions.map((opt) => {
             const isActive = signalStyle === opt
             return (
               <button
                 key={opt}
                 onClick={() => setSignalStyle(opt)}
+                aria-pressed={isActive}
                 className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all"
                 style={{
                   backgroundColor: isActive ? theme.colors.navActive : 'transparent',
@@ -323,13 +336,14 @@ export default function SignalsPage() {
         </div>
 
         {/* Bucket */}
-        <div className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
+        <div role="group" aria-label="Filter by bucket" className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
           {bucketOptions.map((opt) => {
             const isActive = bucket === opt
             return (
               <button
                 key={opt}
                 onClick={() => setBucket(opt)}
+                aria-pressed={isActive}
                 className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all"
                 style={{
                   backgroundColor: isActive ? theme.colors.navActive : 'transparent',
@@ -343,13 +357,14 @@ export default function SignalsPage() {
         </div>
 
         {/* Action */}
-        <div className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
+        <div role="group" aria-label="Filter by action" className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
           {actionOptions.map((opt) => {
             const isActive = actionFilter === opt
             return (
               <button
                 key={opt}
                 onClick={() => setActionFilter(opt)}
+                aria-pressed={isActive}
                 className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all"
                 style={{
                   backgroundColor: isActive ? theme.colors.navActive : 'transparent',
@@ -363,13 +378,14 @@ export default function SignalsPage() {
         </div>
 
         {/* Score */}
-        <div className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
+        <div role="group" aria-label="Filter by minimum score" className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
           {scoreOptions.map((opt) => {
             const isActive = minScore === opt.value
             return (
               <button
                 key={opt.value}
                 onClick={() => setMinScore(opt.value)}
+                aria-pressed={isActive}
                 className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all"
                 style={{
                   backgroundColor: isActive ? theme.colors.navActive : 'transparent',
@@ -383,13 +399,14 @@ export default function SignalsPage() {
         </div>
 
         {/* Sort */}
-        <div className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
+        <div role="group" aria-label="Sort signals" className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
           {sortOptions.map((opt) => {
             const isActive = sortBy === opt.value
             return (
               <button
                 key={opt.value}
                 onClick={() => setSortBy(opt.value)}
+                aria-pressed={isActive}
                 className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all"
                 style={{
                   backgroundColor: isActive ? theme.colors.navActive : 'transparent',

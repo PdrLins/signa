@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo } from 'react'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
@@ -74,6 +75,28 @@ export function QuickActions() {
   const t = useI18nStore((s) => s.t)
   const { data: signals, isLoading } = useAllSignals({ limit: 200 })
 
+  // Safe to buy: BUY signals sorted by score desc, prefer SAFE_INCOME
+  const safeToBuy = useMemo(() => {
+    if (!signals?.length) return []
+    return signals
+      .filter((s) => s.action === 'BUY' && s.score >= 65)
+      .sort((a, b) => {
+        const aRisk = getRiskLevel(a) === 'low' ? 0 : getRiskLevel(a) === 'medium' ? 1 : 2
+        const bRisk = getRiskLevel(b) === 'low' ? 0 : getRiskLevel(b) === 'medium' ? 1 : 2
+        return aRisk - bRisk || b.score - a.score
+      })
+      .slice(0, 5)
+  }, [signals])
+
+  // Must sell: SELL or AVOID signals, plus WEAKENING signals
+  const mustSell = useMemo(() => {
+    if (!signals?.length) return []
+    return signals
+      .filter((s) => s.action === 'SELL' || s.action === 'AVOID' || s.status === 'WEAKENING')
+      .sort((a, b) => a.score - b.score)
+      .slice(0, 5)
+  }, [signals])
+
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -84,22 +107,6 @@ export function QuickActions() {
   }
 
   if (!signals?.length) return null
-
-  // Safe to buy: BUY signals sorted by score desc, prefer SAFE_INCOME
-  const safeToBuy = signals
-    .filter((s) => s.action === 'BUY' && s.score >= 65)
-    .sort((a, b) => {
-      const aRisk = getRiskLevel(a) === 'low' ? 0 : getRiskLevel(a) === 'medium' ? 1 : 2
-      const bRisk = getRiskLevel(b) === 'low' ? 0 : getRiskLevel(b) === 'medium' ? 1 : 2
-      return aRisk - bRisk || b.score - a.score
-    })
-    .slice(0, 5)
-
-  // Must sell: SELL or AVOID signals, plus WEAKENING signals
-  const mustSell = signals
-    .filter((s) => s.action === 'SELL' || s.action === 'AVOID' || s.status === 'WEAKENING')
-    .sort((a, b) => a.score - b.score)
-    .slice(0, 5)
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

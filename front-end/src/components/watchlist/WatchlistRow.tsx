@@ -1,5 +1,6 @@
 'use client'
 
+import { memo } from 'react'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { Badge } from '@/components/ui/Badge'
@@ -13,7 +14,7 @@ interface WatchlistRowProps {
   onRemove: (symbol: string) => void
 }
 
-export function WatchlistRow({ item, signal, onRemove }: WatchlistRowProps) {
+export const WatchlistRow = memo(function WatchlistRow({ item, signal, onRemove }: WatchlistRowProps) {
   const theme = useTheme()
 
   const actionColor: Record<string, string> = {
@@ -71,6 +72,7 @@ export function WatchlistRow({ item, signal, onRemove }: WatchlistRowProps) {
         </span>
         <button
           onClick={(e) => { e.preventDefault(); onRemove(item.symbol) }}
+          aria-label={`Remove ${item.symbol} from watchlist`}
           className="p-1 rounded-md transition-opacity hover:opacity-70"
         >
           <X size={14} style={{ color: theme.colors.textSub }} />
@@ -78,4 +80,4 @@ export function WatchlistRow({ item, signal, onRemove }: WatchlistRowProps) {
       </div>
     </div>
   )
-}
+})

@@ -29,7 +29,7 @@ async def synthesize_signal(
 
     for provider in providers:
         # Budget check
-        allowed, reason = budget.can_call(provider, "synthesis")
+        allowed, reason = await budget.can_call(provider, "synthesis")
         if not allowed:
             logger.warning(f"Budget blocked {provider} synthesis for {ticker}: {reason}")
             continue
@@ -84,7 +84,7 @@ async def analyze_sentiment(ticker: str) -> dict:
 
     for provider in providers:
         # Budget check
-        allowed, reason = budget.can_call(provider, "sentiment")
+        allowed, reason = await budget.can_call(provider, "sentiment")
         if not allowed:
             logger.warning(f"Budget blocked {provider} sentiment for {ticker}: {reason}")
             continue

@@ -3,99 +3,116 @@ Show the Signa scan pipeline, scoring system, GEM detection, and signal blockers
 ## Scan Schedule (Eastern Time, Mon-Fri)
 | Time | Type | Purpose |
 |------|------|---------|
-| 6:00 AM | PRE_MARKET | Pre-market scan, confirm/cancel overnight signals |
+| 6:00 AM | PRE_MARKET | Pre-market scan, overnight signal confirmation |
 | 10:00 AM | MORNING | Morning confirmation (best entry window) |
 | 3:00 PM | PRE_CLOSE | Pre-close check (second best entry) |
-| 4:30 PM | AFTER_CLOSE | Full scan, generate next-day watchlist |
+| 4:30 PM | AFTER_CLOSE | Full scan, next-day watchlist |
+| 2:00 AM | CLEANUP | Purge expired tokens, OTPs, brain sessions, caches |
 
-## Pipeline Steps (scan_service.run_scan)
-1. Load ~250 tickers from `app/scanners/universe.py`
+Trigger endpoint has a concurrency guard — rejects if a scan is already RUNNING/QUEUED (409 Conflict). Weekend triggers blocked (400).
+
+## Two-Pass Pipeline (scan_service.run_scan)
+1. Load ~141 tickers from universe.py
 2. Bulk screen via yfinance (5d data, batches of 50)
-3. Pre-filter to ~50 candidates: volume > 200K, |day_change| > 1%, price > $1
-4. Fetch macro snapshot once: FRED (fed funds, 10Y, CPI, unemployment) + VIX — all in parallel
-5. For each candidate (asyncio.gather, semaphore=10):
-   a. Fetch price_history + fundamentals + Grok sentiment — **in parallel**
-   b. Compute technical indicators (pandas-ta, CPU only)
-   c. Call Claude **once** with all real data → signal synthesis
-   d. Score using bucket-specific weights
-   e. Check signal blockers
-   f. Check GEM conditions
-   g. Determine status vs previous signal
-6. Batch insert all signals to Supabase
-7. Send GEM alerts + scan digest via Telegram
+3. Pre-filter to ~50 candidates: volume >= 200K, |change| > 1%, price > $1, 5 crypto slots reserved
+4. Macro snapshot once: FRED (fed funds, 10Y, CPI, unemployment) + VIX
+5. Market regime once: TRENDING/VOLATILE/CRISIS from VIX + SPY vs SMA200
+6. Load brain knowledge block once (10 key concepts)
 
-## Scoring System (backtest-validated from Oct 2024 → Apr 2025)
+**Pass 1 — FREE (all ~50 candidates):**
+- Fetch price history + fundamentals in parallel (semaphore=10)
+- Compute technical indicators (CPU only)
+- Quick score: technicals + fundamentals + macro only, no AI
+- Sort by pre-score descending
 
-### Key Findings from Backtest
-- RSI 50-65 is the sweet spot; oversold (< 30) is NOT better
-- Momentum > 5% is a TRAP (46.2% win rate); sweet spot is +1% to +3%
-- High MACD histogram predicts surges (avg 3.3 on surgers vs 1.5 on normal)
-- Score ceiling: scores above 72 have INVERTED win rates (overbought trap)
-- Safe Income: low RSI + low volume wins (buy the dip on stable stocks)
-- High Risk: moderate RSI + volume confirmation needed
+**Pass 2 — PAID (top 15 by pre-score, budget-checked):**
+- Balanced: at least 5 HIGH_RISK slots (sentiment matters most there)
+- Safe Income tickers skip sentiment (only 10% weight — not worth the cost)
+- For each: sentiment (Grok/Gemini) + synthesis (Claude/Gemini) in parallel
+- Full scoring with all weights
+- Contrarian detection, blocker checks, GEM detection, status tracking
+- Kelly position sizing for BUY signals
 
-### Live System Weights (app/ai/signal_engine.py)
+**Bottom ~35 — stored with tech-only scores and generic reasoning**
+
+7. Batch insert all signals
+8. GEM alerts → Watchlist sell alerts → Scan digest (PRE_MARKET + AFTER_CLOSE only)
+9. Position monitor: stop-loss, target, P&L milestones, signal weakening
+
+## Scoring Weights (app/ai/signal_engine.py)
+
 **Safe Income:**
-- Dividend reliability: 35%
-- Fundamental health: 30%
-- Macro environment: 25%
-- Sentiment (Grok): 10%
+| Component | Weight |
+|-----------|--------|
+| Dividend reliability | 35% |
+| Fundamental health | 30% |
+| Macro environment | 25% |
+| Sentiment (Grok) | 10% |
 
 **High Risk:**
-- X/Twitter sentiment (Grok): 35%
-- Catalyst detection (Claude): 30%
-- Technical momentum: 25%
-- Fundamentals: 10%
+| Component | Weight |
+|-----------|--------|
+| X/Twitter sentiment (Grok) | 35% |
+| Catalyst detection (Claude) | 30% |
+| Technical momentum | 25% |
+| Fundamentals | 10% |
 
-### Backtest Weights (backtest/engine/scorer.py) — no AI
-**Safe Income:**
-- Dividend: 25%, Fundamental: 25%, Macro: 20%, Technical: 30%
+Dynamic sentiment weight: if mention_count < 100, sentiment weight drops to 5%, excess redistributed to macro (SAFE) or technical (RISK).
 
-**High Risk:**
-- Trend + MACD: 35%, Momentum: 25%, Fundamental: 20%, Macro: 20%
+Contrarian adjustment: extreme sentiment (100+ mentions, score >85 or <15) gets +-10 contrarian dampening.
 
-### Thresholds
-| | Live | Backtest |
+## Thresholds
+| | SAFE_INCOME | HIGH_RISK |
 |---|---|---|
-| BUY | >= 75 (has AI) | >= 65 |
-| Score Ceiling | 90 | 72 |
-| HOLD | 50-74 | 50-64 |
-| AVOID | < 50 | < 50 |
+| BUY | >= 62 | >= 65 |
+| Contrarian BUY | >= 55 (+ contrarian_score >= 60) | >= 55 |
+| Score Ceiling | 90 (forced HOLD) | 90 |
+| HOLD | >= 55 | >= 55 |
+| AVOID | < 55 | < 55 |
 
-## GEM Alert Conditions
+All configurable via `SCORE_BUY_SAFE`, `SCORE_BUY_RISK`, `SCORE_HOLD` env vars or Settings API.
 
-### Live (all 5 must be true)
+## Market Regimes
+| Regime | VIX | Effect |
+|--------|-----|--------|
+| TRENDING | < 20 | Normal operation |
+| VOLATILE | 20-30 | HIGH_RISK scores reduced 15%, Kelly halved |
+| CRISIS | > 30 | HIGH_RISK paused (score=0), SAFE_INCOME non-dividend reduced 40% |
+
+## GEM Alert (all 5 must be true)
 1. Score >= 85
-2. Catalyst within 30 days (from Claude)
+2. Catalyst within 30 days (from Claude synthesis)
 3. Grok sentiment = bullish AND confidence >= 80
 4. No red flags from Claude
 5. Risk/reward >= 3.0x
 
-### Backtest (all 4 must be true — no AI)
-1. Score >= 78
-2. MACD bullish with histogram > 1.0
-3. Above SMA200 by > 5%
-4. RSI between 40-70
-
 ## Signal Blockers (auto-AVOID regardless of score)
-1. Fraud/legal keywords in Grok sentiment
-2. 2+ consecutive earnings misses
-3. Hostile macro environment (VIX > 30, high fed funds, high unemployment)
+1. Fraud/legal keywords in sentiment ("fraud", "sec investigation", "lawsuit", etc.)
+2. Breaking news with fraud keywords
+3. Hostile macro (VIX > 30, high fed funds, high unemployment)
 4. Suspiciously low volume (Z-score < -2.0 or avg < 50K)
-5. **RSI > 75 overbought** (backtest-validated: 60%+ fail rate)
+5. RSI > 75 overbought (backtest-validated: 60%+ fail rate)
 
-## Signal Status Tracking
-Compared to previous signal for same ticker:
-- CONFIRMED — no significant change
+## Contrarian Detection (app/signals/contrarian.py)
+4 conditions, need 3/4:
+1. Below SMA200 by >5% (out of favor)
+2. RSI < 45 (oversold)
+3. Volume ratio > 1.0 (accumulation)
+4. MACD histogram positive (momentum shifting)
+
+Contrarian signals use lower BUY threshold (55 vs 62/65).
+
+## Signal Status (vs previous signal for same ticker)
+- CONFIRMED — stable
 - WEAKENING — score dropped 15+ points
 - CANCELLED — was BUY, now SELL/AVOID
-- UPGRADED — score increased 10+ points, or HOLD → BUY
+- UPGRADED — score up 10+ points, or HOLD → BUY
 
 ## Key Files
-- `app/services/scan_service.py` — orchestrator
-- `app/ai/signal_engine.py` — live scoring + GEM + blockers
-- `backtest/engine/scorer.py` — backtest scoring (data-tuned)
-- `app/scanners/indicators.py` — RSI, MACD, Bollinger, SMA, ATR
-- `app/ai/claude_client.py` — Claude synthesis
-- `app/ai/grok_client.py` — Grok sentiment
-- `app/scheduler/runner.py` — APScheduler cron jobs
+- `app/services/scan_service.py` — orchestrator + bucket classification
+- `app/ai/signal_engine.py` — scoring + GEM + blockers + status
+- `app/ai/provider.py` — AI provider fallback router (budget-checked)
+- `app/signals/regime.py` — market regime from VIX
+- `app/signals/kelly.py` — position sizing
+- `app/signals/contrarian.py` — deep-value detection
+- `app/scanners/` — data ingestion (yfinance, FRED, pandas-ta)
