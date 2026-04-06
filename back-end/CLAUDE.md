@@ -36,5 +36,11 @@ Config in `app/core/config.py` (Pydantic Settings from `.env`). Required: `JWT_S
 - Score ceiling: 90 (forced HOLD)
 - GEM: score >= 85, bullish sentiment >= 80%, catalyst <= 30d, R/R >= 3.0, no red flags
 - RSI blocker: > 75 auto-blocks BUY
-- Pre-filter: volume >= 200K, price >= $1
+- Pre-filter: volume >= 200K, price >= $1, abs(day_change) >= 1%
+  - Sorted by absolute day change (most active first), capped at 50 candidates
+  - Top 15 by pre-score get AI synthesis, remaining 35 are tech-only
+  - Crypto gets 5 reserved slots so equities don't crowd them out
+  - **Watchlist tickers are NOT guaranteed** — if they don't move enough, they drop off
+- Sentiment: Grok runs for HIGH_RISK only (35% weight); SAFE_INCOME skips it (10% weight, hardcoded neutral)
 - Kelly: fractional 25%, max position 15%
+- Virtual portfolio: brain auto-picks score >= 72 with target+stop filled, max 10 open, exits on stop/target/30d/SELL signal

@@ -187,20 +187,20 @@ export default function TickerDetailPage() {
 
       {/* Period changes + benchmark */}
       {(() => {
-        const fund = fundamentals as Record<string, unknown> | undefined
+        const pc = detail?.period_changes as Record<string, unknown> | undefined
         const periods = [
           { label: '1W', key: 'week_change_pct' },
           { label: '1M', key: 'month_change_pct' },
           { label: '3M', key: 'three_month_change_pct' },
           { label: 'YTD', key: 'ytd_change_pct' },
         ]
-        const spy = fund?.spy as Record<string, unknown> | undefined
-        const hasAny = periods.some(p => fund?.[p.key] != null)
+        const spy = pc?.spy as Record<string, unknown> | undefined
+        const hasAny = periods.some(p => pc?.[p.key] != null)
         if (!hasAny) return null
         return (
           <div className="flex flex-wrap items-center gap-2">
             {periods.map(({ label, key }) => {
-              const val = fund?.[key] as number | undefined
+              const val = pc?.[key] as number | undefined
               const spyVal = spy?.[key] as number | undefined
               if (val == null) return null
               const isUp = val >= 0

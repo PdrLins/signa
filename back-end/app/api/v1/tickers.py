@@ -35,10 +35,11 @@ async def get_ticker_detail(
     """
     ticker = ticker.upper()
 
-    # Fetch price + fundamentals in parallel
+    # Fetch price + fundamentals + period changes in parallel
     price_task = market_scanner.get_current_price(ticker)
     fundamentals_task = market_scanner.get_fundamentals(ticker)
-    current_price, fundamentals = await asyncio.gather(price_task, fundamentals_task)
+    periods_task = market_scanner.get_period_changes(ticker)
+    current_price, fundamentals, period_changes = await asyncio.gather(price_task, fundamentals_task, periods_task)
 
     if current_price is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ticker {ticker} not found")
@@ -62,6 +63,7 @@ async def get_ticker_detail(
         "asset_type": asset_type,
         "current_price": current_price,
         "fundamentals": fundamentals,
+        "period_changes": period_changes,
         "latest_signal": latest_signal,
         "open_position": open_position,
     }
