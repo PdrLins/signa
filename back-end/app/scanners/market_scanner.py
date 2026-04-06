@@ -33,6 +33,27 @@ async def get_price_history(ticker: str, period: str = "3mo") -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _normalize_pct(value) -> float | None:
+    """Normalize percentage values from yfinance.
+
+    yfinance is inconsistent -- dividend_yield and payout_ratio
+    sometimes come as decimals (0.0199 = 1.99%) and sometimes
+    as whole numbers (1.99 = 1.99%). We normalize to decimal form
+    so 0.04 means 4%.
+    """
+    if value is None:
+        return None
+    try:
+        v = float(value)
+        # If value > 1, it's likely a percentage (e.g., 1.99 = 1.99%)
+        # Convert to decimal form (0.0199)
+        if v > 1:
+            return v / 100
+        return v
+    except (ValueError, TypeError):
+        return None
+
+
 def _compute_period_changes(hist: pd.DataFrame) -> dict:
     """Compute 1W, 1M, 3M, YTD price changes from a 1-year history DataFrame."""
     if hist.empty or len(hist) < 2:
@@ -129,8 +150,8 @@ async def get_fundamentals(ticker: str) -> dict:
             "forward_pe": info.get("forwardPE"),
             "eps": info.get("trailingEps"),
             "eps_growth": info.get("earningsGrowth"),
-            "dividend_yield": info.get("dividendYield"),
-            "payout_ratio": info.get("payoutRatio"),
+            "dividend_yield": _normalize_pct(info.get("dividendYield")),
+            "payout_ratio": _normalize_pct(info.get("payoutRatio")),
             "debt_to_equity": info.get("debtToEquity"),
             "market_cap": info.get("marketCap"),
             "sector": info.get("sector"),

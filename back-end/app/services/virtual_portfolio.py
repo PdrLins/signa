@@ -33,7 +33,7 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
     # Get current open virtual positions (both sources)
     open_result = (
         db.table("virtual_trades")
-        .select("id, symbol, entry_price, entry_date, source")
+        .select("id, symbol, entry_price, entry_date, entry_score, source")
         .eq("status", "OPEN")
         .execute()
     )
@@ -67,6 +67,22 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
             for pos in all_open:
                 if pos["symbol"] != symbol:
                     continue
+
+                entry_score = pos.get("entry_score", 0) or 0
+                score_drop = entry_score - score
+
+                # Guard: if score dropped 25+ points, don't auto-close.
+                # This usually means the ticker lost AI analysis (tech-only fallback)
+                # rather than a real deterioration. Wait for next scan to confirm.
+                if score_drop >= 25 and score < 50:
+                    source = pos.get("source", "watchlist")
+                    logger.warning(
+                        f"Virtual SELL BLOCKED [{source}]: {symbol} score dropped "
+                        f"{entry_score} -> {score} (-{score_drop}pts). "
+                        f"Likely methodology change, not real signal. Waiting for confirmation."
+                    )
+                    continue
+
                 entry_price = float(pos["entry_price"])
                 pnl_pct = ((price - entry_price) / entry_price) * 100
                 pnl_amount = price - entry_price
@@ -89,7 +105,7 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
                 emoji = "✅" if is_win else "❌"
                 logger.info(
                     f"Virtual SELL [{source}]: {emoji} {symbol} @ ${price:.2f} "
-                    f"(entry ${entry_price:.2f}, P&L {pnl_pct:+.1f}%)"
+                    f"(entry ${entry_price:.2f}, P&L {pnl_pct:+.1f}%, score {entry_score}->{score})"
                 )
             continue
 

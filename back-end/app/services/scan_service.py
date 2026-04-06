@@ -178,6 +178,24 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 ai_candidates = ai_safe + ai_risk
 
             ai_tickers = {x[0] for x in ai_candidates}
+
+            # Guard: force AI analysis on tickers with open brain positions
+            # Prevents false AVOID/SELL from tech-only scoring on held positions
+            from app.db.supabase import get_client as _get_db
+            _db = _get_db()
+            open_brain_result = _db.table("virtual_trades") \
+                .select("symbol") \
+                .eq("status", "OPEN") \
+                .eq("source", "brain") \
+                .execute()
+            open_brain_symbols = {r["symbol"] for r in (open_brain_result.data or [])}
+
+            for ps in pre_scores:
+                if ps[0] in open_brain_symbols and ps[0] not in ai_tickers:
+                    ai_candidates.append(ps)
+                    ai_tickers.add(ps[0])
+                    logger.info(f"Forced AI analysis for {ps[0]} (open brain position)")
+
             skip_candidates = [x for x in pre_scores if x[0] not in ai_tickers]
         else:
             # AI disabled — all candidates get tech-only scoring (zero AI cost)
@@ -429,13 +447,18 @@ async def _process_candidate(
         signal_style = contrarian["signal_style"]
 
         # Determine action — contrarian signals can generate BUY even at lower scores
+        confidence = synthesis.get("confidence", 0) or 0
         if is_blocked:
             action = "AVOID"
         elif contrarian["is_contrarian"] and contrarian["contrarian_score"] >= 60:
-            # Contrarian BUY: lower threshold (score 55+) since these are reversal plays
             action = "BUY" if score >= 55 else "HOLD"
         else:
             action = score_to_action(score, bucket)
+
+        # Low confidence guard: if AI confidence < 40, downgrade BUY to HOLD
+        if action == "BUY" and confidence < 40 and confidence > 0:
+            logger.info(f"{ticker}: BUY downgraded to HOLD (low AI confidence {confidence}%)")
+            action = "HOLD"
 
         # Check GEM (blocked signals can't be GEMs)
         is_gem, gem_conditions = check_gem(score, grok_data, synthesis)
@@ -497,15 +520,25 @@ async def _process_candidate(
 
 
 def _classify_bucket(ticker: str, screening: dict) -> str:
-    """Simple heuristic to classify a ticker into SAFE_INCOME or HIGH_RISK.
+    """Classify a ticker into SAFE_INCOME or HIGH_RISK.
 
-    In production, this would come from the tickers table.
+    Priority: 1) stored bucket from tickers table (stable across scans),
+    2) hardcoded lists, 3) heuristic fallback.
     """
-    # All crypto → HIGH_RISK (no dividends, high volatility)
+    # 1. Check tickers table first -- stable bucket from previous scans
+    try:
+        from app.db.supabase import get_client as _get_db
+        _db = _get_db()
+        stored = _db.table("tickers").select("bucket").eq("symbol", ticker).limit(1).execute()
+        if stored.data and stored.data[0].get("bucket"):
+            return stored.data[0]["bucket"]
+    except Exception:
+        pass
+
+    # 2. Hardcoded classifications
     if ticker.endswith("-USD"):
         return "HIGH_RISK"
 
-    # ETFs and high-dividend stocks → SAFE_INCOME
     safe_suffixes = ["-UN.TO", "-B.TO", "-A.TO"]
     safe_etfs = {"XIU.TO", "XIC.TO", "VFV.TO", "ZDV.TO", "XEI.TO", "ZWC.TO",
                  "XDIV.TO", "VDY.TO", "QQQ", "SPY", "O", "PLD", "AMT"}
@@ -513,17 +546,12 @@ def _classify_bucket(ticker: str, screening: dict) -> str:
     if ticker in safe_etfs or any(ticker.endswith(s) for s in safe_suffixes):
         return "SAFE_INCOME"
 
-    # Energy / Commodities → HIGH_RISK (momentum plays, not dividend stocks)
     energy_tickers = {"CNQ.TO", "SU.TO", "CVE.TO", "ARX.TO", "IMO.TO", "BTE.TO",
-                      "WCP.TO", "TVE.TO", "ERF.TO",  # TSX energy
-                      "XOM", "COP", "EOG", "SLB", "MPC", "OXY"}  # US energy
-
-    # Mining / Materials → HIGH_RISK
+                      "WCP.TO", "TVE.TO", "ERF.TO",
+                      "XOM", "COP", "EOG", "SLB", "MPC", "OXY"}
     mining_tickers = {"ABX.TO", "FNV.TO", "WPM.TO", "NTR.TO", "K.TO",
                       "TECK.TO", "FM.TO", "LUN.TO", "IVN.TO",
                       "ABX", "FNV", "WPM", "NTR", "K", "NEM", "FCX"}
-
-    # High volatility or small cap → HIGH_RISK
     high_risk_tickers = {"WEED.TO", "ACB.TO", "TLRY.TO", "CRON.TO", "OGI.TO",
                          "RIVN", "LCID", "PLTR", "RKLB", "IONQ", "SMCI",
                          "MSTR", "SOUN", "HIMS", "COIN", "SOFI", "AFRM",
@@ -533,17 +561,21 @@ def _classify_bucket(ticker: str, screening: dict) -> str:
     if ticker in high_risk_tickers:
         return "HIGH_RISK"
 
-    # Default based on day change or sector hint
-    day_change = abs(screening.get("day_change", 0))
-    if day_change > 0.03:
-        return "HIGH_RISK"
-
-    # Check sector from screening data — energy/materials default to HIGH_RISK
+    # 3. Heuristic fallback (sector-based only, NOT day_change)
     sector = (screening.get("sector") or "").lower()
     if sector in ("energy", "basic materials", "materials"):
-        return "HIGH_RISK"
+        bucket = "HIGH_RISK"
+    else:
+        bucket = "SAFE_INCOME"
 
-    return "SAFE_INCOME"
+    # Persist bucket so it's stable across scans
+    try:
+        from app.scanners.universe import get_exchange
+        queries.upsert_ticker(ticker, exchange=get_exchange(ticker), bucket=bucket)
+    except Exception:
+        pass
+
+    return bucket
 
 
 def _recommend_account(bucket: str, exchange: str) -> str:
