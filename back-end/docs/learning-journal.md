@@ -103,6 +103,45 @@ Tracks lessons learned from each day of operation. Each entry records what happe
 
 ---
 
+### Backtest Results (run end of Day 1)
+
+Backtest: 18,759 signals across ~18 months of historical data (tech-only, no AI).
+
+| Metric | SAFE_INCOME | HIGH_RISK | Overall |
+|--------|------------|-----------|---------|
+| Signals | 3,148 | 2,339 | 5,487 |
+| 5d win rate | 58.4% | 53.6% | 56.4% |
+| 10d win rate | 59.1% | 53.8% | 56.8% |
+| 20d win rate | 62.2% | 56.7% | 59.9% |
+| 20d avg return | +1.47% | +1.75% | +1.59% |
+
+Key findings:
+1. SAFE_INCOME has higher win rate (62%) -- brain's bias toward SAFE_INCOME is correct
+2. HIGH_RISK has higher avg returns (+1.75%) but lower consistency -- high variance
+3. Best/worst trades are ALL crypto (DOGE +84%, SOL -29%) -- crypto needs the watchdog
+4. Score distribution bottom-heavy: 9,355 in 60-70 range, only 1,810 at 70+, zero above 80 -- validates tech-only calibration need
+5. 20-day hold outperforms 5-day (60% vs 56% win rate) -- current 30-day max hold is reasonable
+6. Zero GEMs found -- GEM conditions (85+ score) are very strict, needs real AI sentiment to trigger
+
+Impact on pending suggestions:
+- low_confidence_guard: SUPPORTED (too many marginal BUYs)
+- discovery_market_cap_filter: SUPPORTED (best trades are established names)
+- tech_only_score_calibration: SUPPORTED (scores cluster low without AI)
+- brain_bucket_diversification: WAIT (HIGH_RISK lower win rate, let brain find balance)
+- watchdog_cooldown: NOT TESTABLE (needs real-time data)
+
+### Suggestions Status (end of Day 1)
+
+| Suggestion | Confidence | Decision | Rationale |
+|-----------|-----------|----------|-----------|
+| low_confidence_guard (40->50%) | 80% | APPROVE | Backtest shows too many marginal BUYs |
+| discovery_market_cap_filter ($5B+) | 70% | APPROVE | Day 1 found 80 tickers, 0 scored 72+ |
+| tech_only_score_calibration (+10) | 75% | WAIT | See if forced AI on open positions is enough first |
+| watchdog_cooldown (3 holds -> hourly) | 65% | WAIT | Only 1 day of data |
+| brain_bucket_diversification | 50% | REJECT | Brain naturally picks quality, don't force it |
+
+---
+
 ## Template for Future Days
 
 ### Day N -- [Date]
@@ -115,5 +154,7 @@ Tracks lessons learned from each day of operation. Each entry records what happe
 **Patterns:** [Recurring observations]
 
 **Fixes Applied:** [What was changed]
+
+**Backtest comparison:** [Did metrics improve from previous backtest?]
 
 **Metrics:** [Did yesterday's fixes work?]
