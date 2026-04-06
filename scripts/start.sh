@@ -37,7 +37,7 @@ echo ""
 # Start backend in background (logs to terminal)
 cd "$BACKEND"
 source venv/bin/activate
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 &
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 
 # Wait for backend
