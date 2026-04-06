@@ -39,7 +39,7 @@ def _fetch_prices_batch(symbols: list[str]) -> dict[str, tuple[Optional[float], 
 
     try:
         # Batch download — 1 network call instead of N
-        data = yf.download(symbols, period="2d", interval="1d", progress=False, threads=True)
+        data = yf.download(symbols, period="2d", interval="1d", progress=False, threads=False)
 
         if data.empty:
             for sym in symbols:
