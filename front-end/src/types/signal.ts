@@ -56,6 +56,7 @@ export interface DailyStats {
   gems_yesterday: number
   win_rate_30d: number
   tickers_scanned: number
+  discovered_today: number
   next_scan_time: string | null
   ai_cost_today: number
   claude_cost: number

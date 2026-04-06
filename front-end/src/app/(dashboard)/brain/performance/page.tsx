@@ -143,12 +143,25 @@ export default function BrainPerformancePage() {
     staleTime: 30_000,
   })
 
+  const { data: signalsData } = useQuery<{ signals: { symbol: string; is_discovered?: boolean }[] }>({
+    queryKey: ['signals', 'discovered-check'],
+    queryFn: async () => (await client.get('/signals?limit=200')).data,
+    staleTime: 60_000,
+  })
+
   // Symbols with recent watchdog events — must be before early return (Rules of Hooks)
   const recentEvents = data?.watchdog?.recent_events
   const monitoredSymbols = useMemo(
     () => new Set(recentEvents?.map(e => e.symbol) ?? []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [recentEvents?.length],
+  )
+
+  // Symbols found via discovery (not in core universe)
+  const discoveredSymbols = useMemo(
+    () => new Set(signalsData?.signals?.filter(s => s.is_discovered).map(s => s.symbol) ?? []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [signalsData?.signals?.length],
   )
 
   if (isLoading) {
@@ -306,6 +319,11 @@ export default function BrainPerformancePage() {
                           {monitoredSymbols.has(vt.symbol) && (
                             <span className="text-[9px] font-medium px-1.5 py-0.5 rounded flex items-center gap-0.5" style={{ backgroundColor: theme.colors.warning + '18', color: theme.colors.warning }}>
                               <Eye size={8} /> Monitoring
+                            </span>
+                          )}
+                          {discoveredSymbols.has(vt.symbol) && (
+                            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded" style={{ backgroundColor: theme.colors.primary + '18', color: theme.colors.primary }}>
+                              Discovered
                             </span>
                           )}
                           {vt.signal_style === 'CONTRARIAN' && (

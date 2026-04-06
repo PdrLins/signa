@@ -41,7 +41,9 @@ export function StatsBar() {
       <StatCard
         label={t.stats.scanned}
         value={stats.tickers_scanned}
-        sub={t.stats.tickersToday}
+        sub={stats.discovered_today > 0
+          ? `${stats.discovered_today} discovered`
+          : t.stats.tickersToday}
       />
       <StatCard
         label={t.stats.aiCost}

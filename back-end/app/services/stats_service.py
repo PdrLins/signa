@@ -35,12 +35,13 @@ def get_daily_stats() -> dict:
         # Query only today's signals (not 500 then filter in Python)
         today_result = (
             db.table("signals")
-            .select("is_gem")
+            .select("is_gem, is_discovered")
             .gte("created_at", today_start.isoformat())
             .execute()
         )
         today_signals = today_result.data or []
         gems_today = sum(1 for s in today_signals if s.get("is_gem"))
+        discovered_today = sum(1 for s in today_signals if s.get("is_discovered"))
 
         # Query yesterday's gems
         yesterday_result = (
@@ -70,6 +71,7 @@ def get_daily_stats() -> dict:
             "gems_yesterday": gems_yesterday,
             "win_rate_30d": _get_virtual_win_rate(),
             "tickers_scanned": tickers_scanned,
+            "discovered_today": discovered_today,
             "next_scan_time": next_scan,
             "ai_cost_today": _get_ai_cost_today(),
             "claude_cost": 0.0,
@@ -84,6 +86,7 @@ def get_daily_stats() -> dict:
             "gems_yesterday": 0,
             "win_rate_30d": 0.0,
             "tickers_scanned": 0,
+            "discovered_today": 0,
             "next_scan_time": None,
             "ai_cost_today": 0.0,
             "claude_cost": 0.0,

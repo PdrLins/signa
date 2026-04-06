@@ -11,6 +11,7 @@ class DailyStatsResponse(BaseModel):
     gems_yesterday: int = 0
     win_rate_30d: float = 0.0
     tickers_scanned: int = 0
+    discovered_today: int = 0
     next_scan_time: Optional[str] = None
     ai_cost_today: float = 0.0
     claude_cost: float = 0.0
