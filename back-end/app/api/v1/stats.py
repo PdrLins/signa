@@ -1,6 +1,6 @@
 """Stats + User Settings API routes — protected."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -72,6 +72,24 @@ async def get_equity_curve(user: dict = Depends(get_current_user)):
                 "watchlist_open, watchlist_unrealized_pnl, watchlist_cumulative_pnl, spy_price")
         .order("snapshot_date", desc=False)
         .limit(365)
+        .execute()
+    )
+    return result.data or []
+
+
+@router.get("/watchdog-events")
+async def get_watchdog_events(
+    limit: int = Query(10, ge=1, le=50),
+    user: dict = Depends(get_current_user),
+):
+    """Get recent watchdog events for the brain performance page."""
+    from app.db.supabase import get_client as get_db
+    db = get_db()
+    result = (
+        db.table("watchdog_events")
+        .select("symbol, event_type, price, pnl_pct, sentiment_label, action_taken, in_watchlist, notes, created_at")
+        .order("created_at", desc=True)
+        .limit(limit)
         .execute()
     )
     return result.data or []

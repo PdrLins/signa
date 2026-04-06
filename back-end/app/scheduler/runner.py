@@ -1,4 +1,4 @@
-"""APScheduler setup — initializes and configures the 4 daily scan jobs."""
+"""APScheduler setup -- scan jobs, cleanup, snapshot, and watchdog."""
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -7,6 +7,7 @@ from loguru import logger
 from app.core.config import settings
 from app.scheduler.jobs import (
     after_close_scan,
+    brain_watchdog,
     cleanup_expired_tokens,
     morning_scan,
     pre_close_scan,
@@ -77,8 +78,19 @@ def init_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # Every 15 min during market hours — brain watchdog monitors open positions
+    if settings.watchdog_enabled:
+        scheduler.add_job(
+            brain_watchdog,
+            CronTrigger(minute="*/15", hour="9-16", day_of_week="mon-fri", timezone=settings.timezone),
+            id="brain_watchdog",
+            name="Brain Watchdog (every 15 min)",
+            replace_existing=True,
+        )
+
+    watchdog_status = "enabled" if settings.watchdog_enabled else "disabled"
     logger.info(
-        f"Scheduler configured with 4 daily scan jobs + cleanup + snapshot "
+        f"Scheduler configured: 4 scans + cleanup + snapshot + watchdog ({watchdog_status}) "
         f"(timezone: {settings.timezone})"
     )
 

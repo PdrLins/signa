@@ -162,19 +162,19 @@ def check_virtual_exits() -> dict:
     symbols = list({t["symbol"] for t in open_trades})
     prices = _fetch_prices_batch(symbols)
 
-    # Fetch latest signal scores for exit tracking
+    # Batch fetch latest signal scores for exit tracking (1 query instead of N)
     current_scores: dict[str, int] = {}
-    for sym in symbols:
-        sig = (
-            db.table("signals")
-            .select("score")
-            .eq("symbol", sym)
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if sig.data:
-            current_scores[sym] = sig.data[0].get("score", 0)
+    sig_result = (
+        db.table("signals")
+        .select("symbol, score")
+        .in_("symbol", symbols)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    for row in (sig_result.data or []):
+        sym = row.get("symbol")
+        if sym and sym not in current_scores:
+            current_scores[sym] = row.get("score", 0)
 
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
@@ -284,18 +284,18 @@ def get_virtual_summary() -> dict:
         price_data = _fetch_prices_batch(symbols)
         current_prices = {sym: p for sym, (p, _) in price_data.items() if p is not None}
 
-        # Fetch signal reasoning + current score for open trades
-        for sym in symbols:
-            sig_result = (
-                db.table("signals")
-                .select("score, reasoning, risk_reward, signal_style, contrarian_score, market_regime")
-                .eq("symbol", sym)
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            if sig_result.data:
-                signal_context[sym] = sig_result.data[0]
+        # Batch fetch latest signal context for all open symbols (1 query instead of N)
+        sig_result = (
+            db.table("signals")
+            .select("symbol, score, reasoning, risk_reward, signal_style, contrarian_score, market_regime")
+            .in_("symbol", symbols)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        for row in (sig_result.data or []):
+            sym = row.get("symbol")
+            if sym and sym not in signal_context:
+                signal_context[sym] = row
 
     def _calc_stats(trades: list[dict]) -> dict:
         total = len(trades)
@@ -399,7 +399,29 @@ def get_virtual_summary() -> dict:
             "avg_unrealized_pnl_pct": _unrealized_agg(brain_open_enriched),
             **_calc_stats(brain_closed),
         },
+        # Watchdog summary
+        "watchdog": _get_watchdog_summary(db, len(brain_open_enriched)),
     }
+
+
+def _get_watchdog_summary(db, positions_monitored: int) -> dict:
+    """Get watchdog status for the dashboard."""
+    try:
+        recent = (
+            db.table("watchdog_events")
+            .select("symbol, event_type, created_at")
+            .order("created_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+        return {
+            "active": settings.watchdog_enabled,
+            "positions_monitored": positions_monitored,
+            "recent_events": recent.data or [],
+        }
+    except Exception as e:
+        logger.warning(f"Watchdog summary query failed: {e}")
+        return {"active": settings.watchdog_enabled, "positions_monitored": positions_monitored, "recent_events": []}
 
 
 def get_virtual_charts() -> dict:

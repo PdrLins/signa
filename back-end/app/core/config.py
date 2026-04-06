@@ -101,6 +101,11 @@ class Settings(BaseSettings):
     # --- Virtual Portfolio ---
     virtual_trade_max_days: int = 30  # Auto-close virtual trades after N days
 
+    # --- Brain Watchdog ---
+    watchdog_enabled: bool = True
+    watchdog_pnl_alert_pct: float = 3.0       # Alert if P&L drops this % in one interval
+    watchdog_stop_proximity_pct: float = 2.0  # Alert if price within this % of stop
+
     # --- Brain Editor ---
     brain_token_secret: str = ""  # Separate secret for brain tokens
     brain_otp_expire_seconds: int = 60

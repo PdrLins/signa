@@ -380,6 +380,28 @@ CREATE INDEX IF NOT EXISTS idx_ai_usage_provider ON ai_usage(provider, created_a
 CREATE INDEX IF NOT EXISTS idx_ai_usage_date ON ai_usage(created_at DESC);
 
 
+-- 21. WATCHDOG EVENTS (brain watchdog decision log for self-learning)
+CREATE TABLE IF NOT EXISTS watchdog_events (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    symbol          VARCHAR NOT NULL,
+    event_type      VARCHAR NOT NULL,       -- ALERT, CLOSE, HOLD_THROUGH_DIP, RECOVERY, ESCALATION
+    price           DOUBLE PRECISION,
+    entry_price     DOUBLE PRECISION,
+    pnl_pct         DOUBLE PRECISION,
+    stop_loss       DOUBLE PRECISION,
+    stop_distance_pct DOUBLE PRECISION,
+    sentiment_label VARCHAR,                -- bullish, neutral, bearish
+    sentiment_score INT,
+    action_taken    VARCHAR,                -- warned, closed, held, escalated
+    in_watchlist    BOOLEAN DEFAULT FALSE,
+    notes           TEXT,
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_watchdog_events_symbol ON watchdog_events(symbol);
+CREATE INDEX IF NOT EXISTS idx_watchdog_events_type ON watchdog_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_watchdog_events_date ON watchdog_events(created_at DESC);
+
+
 -- ============================================================
 -- TRIGGERS (auto-update updated_at)
 -- ============================================================

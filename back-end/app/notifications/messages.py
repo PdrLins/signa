@@ -165,6 +165,66 @@ _MESSAGES = {
             "/status — Status do bot/varredura"
         ),
     },
+    "watchdog_warning": {
+        "en": (
+            "<b>Signa Watchdog</b>\n\n"
+            "{symbol} dropped {change}% since last check.\n"
+            "Now: ${price} | Stop: ${stop}\n"
+            "Sentiment: {sentiment}\n\n"
+            "Brain is monitoring closely."
+        ),
+        "pt": (
+            "<b>Signa Watchdog</b>\n\n"
+            "{symbol} caiu {change}% desde a \u00faltima verifica\u00e7\u00e3o.\n"
+            "Agora: ${price} | Stop: ${stop}\n"
+            "Sentimento: {sentiment}\n\n"
+            "O brain est\u00e1 monitorando de perto."
+        ),
+    },
+    "watchdog_exit": {
+        "en": (
+            "<b>Signa Watchdog -- Brain Sold</b>\n\n"
+            "{symbol} closed @ ${price}\n"
+            "P&L: {pnl}%\n"
+            "Reason: bearish sentiment + price drop\n"
+            "Sentiment: {sentiment}"
+        ),
+        "pt": (
+            "<b>Signa Watchdog -- Brain Vendeu</b>\n\n"
+            "{symbol} fechado @ ${price}\n"
+            "P&L: {pnl}%\n"
+            "Motivo: sentimento bearish + queda de pre\u00e7o\n"
+            "Sentimento: {sentiment}"
+        ),
+    },
+    "watchdog_user_warning": {
+        "en": (
+            "<b>Signa Alert -- Watchlist</b>\n\n"
+            "Signa identified unusual activity on {symbol}.\n"
+            "This ticker is in your watchlist -- keep an eye on it "
+            "and consider selling if needed."
+        ),
+        "pt": (
+            "<b>Signa Alerta -- Watchlist</b>\n\n"
+            "Signa identificou atividade incomum em {symbol}.\n"
+            "Este ticker est\u00e1 na sua watchlist -- fique de olho "
+            "e considere vender se necess\u00e1rio."
+        ),
+    },
+    "watchdog_user_brain_sold": {
+        "en": (
+            "<b>Signa Alert -- Brain Sold Your Watchlist Ticker</b>\n\n"
+            "Brain just sold {symbol} @ ${price} (P&L: {pnl}%).\n"
+            "This ticker is in your watchlist -- your call whether "
+            "to sell your real position too."
+        ),
+        "pt": (
+            "<b>Signa Alerta -- Brain Vendeu Ticker da Watchlist</b>\n\n"
+            "Brain acabou de vender {symbol} @ ${price} (P&L: {pnl}%).\n"
+            "Este ticker est\u00e1 na sua watchlist -- voc\u00ea decide se "
+            "quer vender sua posi\u00e7\u00e3o real tamb\u00e9m."
+        ),
+    },
     "brain_otp": {
         "en": (
             "🧠 <b>Signa Brain Editor</b>\n\n"

@@ -4,12 +4,13 @@ import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { client } from '@/lib/api'
+import { relativeTime } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Sidebar } from '@/components/layout/Sidebar'
-import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Brain, Target, ShieldAlert, Clock } from 'lucide-react'
-import { useState } from 'react'
+import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Brain, Target, ShieldAlert, Clock, Eye } from 'lucide-react'
+import { useState, useMemo } from 'react'
 
 // ── Types ──
 
@@ -56,11 +57,30 @@ interface ClosedTrade {
   exit_score?: number
 }
 
+interface WatchdogEvent {
+  symbol: string
+  event_type: 'ALERT' | 'CLOSE' | 'HOLD_THROUGH_DIP' | 'RECOVERY' | 'ESCALATION'
+  price: number
+  pnl_pct: number
+  sentiment_label?: string
+  action_taken: string
+  in_watchlist: boolean
+  notes?: string
+  created_at: string
+}
+
+interface WatchdogSummary {
+  active: boolean
+  positions_monitored: number
+  recent_events: { symbol: string; event_type: string; created_at: string }[]
+}
+
 interface VirtualSummary extends TrackStats {
   open_trades: VirtualTrade[]
   recent_closed: ClosedTrade[]
   watchlist: TrackStats
   brain: TrackStats
+  watchdog?: WatchdogSummary
 }
 
 // ── Small components ──
@@ -83,6 +103,7 @@ function ExitReasonBadge({ reason, theme }: { reason?: string; theme: ReturnType
     STOP_HIT: { label: 'Stop hit', color: theme.colors.down },
     TARGET_HIT: { label: 'Target hit', color: theme.colors.up },
     TIME_EXPIRED: { label: 'Expired', color: theme.colors.warning },
+    WATCHDOG_EXIT: { label: 'Watchdog', color: theme.colors.warning },
   }
   const c = config[reason] || { label: reason, color: theme.colors.textHint }
   return (
@@ -90,6 +111,17 @@ function ExitReasonBadge({ reason, theme }: { reason?: string; theme: ReturnType
       {c.label}
     </span>
   )
+}
+
+function getEventTypeColor(eventType: string, theme: ReturnType<typeof useTheme>): string {
+  const map: Record<string, string> = {
+    CLOSE: theme.colors.down,
+    ALERT: theme.colors.warning,
+    ESCALATION: theme.colors.warning,
+    HOLD_THROUGH_DIP: theme.colors.primary,
+    RECOVERY: theme.colors.up,
+  }
+  return map[eventType] || theme.colors.textHint
 }
 
 // ── Main page ──
@@ -101,6 +133,12 @@ export default function BrainPerformancePage() {
   const { data, isLoading } = useQuery<VirtualSummary>({
     queryKey: ['stats', 'virtual-portfolio'],
     queryFn: async () => (await client.get<VirtualSummary>('/stats/virtual-portfolio')).data,
+    staleTime: 30_000,
+  })
+
+  const { data: watchdogEvents } = useQuery<WatchdogEvent[]>({
+    queryKey: ['stats', 'watchdog-events'],
+    queryFn: async () => (await client.get<WatchdogEvent[]>('/stats/watchdog-events?limit=10')).data,
     staleTime: 30_000,
   })
 
@@ -120,6 +158,15 @@ export default function BrainPerformancePage() {
   const brainTrades = (data?.open_trades.filter(t => t.source === 'brain') ?? []).sort((a, b) => b.entry_score - a.entry_score)
   const brainClosed = data?.recent_closed.filter(t => t.source === 'brain') ?? []
   const hasClosedData = brain.closed_count > 0
+
+  // Symbols with recent watchdog events — use length as stable proxy since
+  // react-query returns new object references on each refetch
+  const recentEvents = data?.watchdog?.recent_events
+  const monitoredSymbols = useMemo(
+    () => new Set(recentEvents?.map(e => e.symbol) ?? []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [recentEvents?.length],
+  )
 
   // Calculate total unrealized P&L across all open brain trades
   const totalUnrealizedPnl = brainTrades.reduce((sum, t) => sum + (t.unrealized_pnl_pct ?? 0), 0)
@@ -242,6 +289,11 @@ export default function BrainPerformancePage() {
                           <Badge variant={vt.bucket === 'SAFE_INCOME' ? 'safe' : 'risk'}>
                             {vt.bucket === 'SAFE_INCOME' ? 'Safe' : 'Risk'}
                           </Badge>
+                          {monitoredSymbols.has(vt.symbol) && (
+                            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded flex items-center gap-0.5" style={{ backgroundColor: theme.colors.warning + '18', color: theme.colors.warning }}>
+                              <Eye size={8} /> Monitoring
+                            </span>
+                          )}
                           {vt.signal_style === 'CONTRARIAN' && (
                             <span className="text-[9px] font-medium px-1.5 py-0.5 rounded" style={{ backgroundColor: theme.colors.warning + '18', color: theme.colors.warning }}>
                               Contrarian
@@ -388,6 +440,58 @@ export default function BrainPerformancePage() {
               </div>
             )}
           </Card>
+
+          {/* Watchdog Activity */}
+          {watchdogEvents && watchdogEvents.length > 0 && (
+            <Card>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-1.5">
+                  <Eye size={14} style={{ color: theme.colors.warning }} />
+                  <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+                    Watchdog Activity ({watchdogEvents.length})
+                  </p>
+                </div>
+                {data?.watchdog?.active && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ backgroundColor: theme.colors.up + '15', color: theme.colors.up }}>
+                    Active
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                {watchdogEvents.map((evt, i) => {
+                  const typeColor = getEventTypeColor(evt.event_type, theme)
+                  const pnlColor = evt.pnl_pct >= 0 ? theme.colors.up : theme.colors.down
+
+                  return (
+                    <div key={i} className="flex items-center justify-between py-1.5 px-3 rounded-lg" style={{ backgroundColor: theme.colors.surfaceAlt }}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{evt.symbol}</span>
+                        <span className="text-[9px] font-medium px-1.5 py-0.5 rounded" style={{ backgroundColor: typeColor + '15', color: typeColor }}>
+                          {evt.event_type.replace(/_/g, ' ')}
+                        </span>
+                        {evt.in_watchlist && (
+                          <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ backgroundColor: theme.colors.primary + '15', color: theme.colors.primary }}>
+                            WL
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[10px]" style={{ color: theme.colors.textHint }}>{evt.action_taken}</span>
+                        <span className="text-[11px] font-bold tabular-nums" style={{ color: pnlColor }}>
+                          {evt.pnl_pct >= 0 ? '+' : ''}{evt.pnl_pct.toFixed(1)}%
+                        </span>
+                        {evt.sentiment_label && (
+                          <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{evt.sentiment_label}</span>
+                        )}
+                        <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{relativeTime(evt.created_at)}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </Card>
+          )}
 
         </div>
         <div className="sticky top-6 hidden lg:block">

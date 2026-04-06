@@ -483,6 +483,24 @@ export default function HowItWorksPage() {
               </Section>
             </Card>
 
+            {/* Brain Watchdog */}
+            <Card>
+              <Section title={h.watchdogTitle}>
+                <P>{h.watchdogDesc}</P>
+                <ul className="space-y-1.5 mt-2">
+                  <Li>{h.wd1}</Li>
+                  <Li>{h.wd2}</Li>
+                  <Li>{h.wd3}</Li>
+                  <Li>{h.wd4}</Li>
+                  <Li>{h.wd5}</Li>
+                  <Li>{h.wd6}</Li>
+                </ul>
+                <div className="mt-3">
+                  <P>{h.wdNote}</P>
+                </div>
+              </Section>
+            </Card>
+
             {/* AI Budget System */}
             <Card>
               <Section title={h.budgetSystemTitle}>

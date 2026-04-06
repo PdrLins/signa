@@ -81,3 +81,15 @@ async def virtual_portfolio_snapshot():
         logger.info(f"📊 Virtual portfolio snapshot: brain_cum={result.get('brain_cumulative_pnl', 0):+.1f}%")
     except Exception as e:
         logger.warning(f"Virtual portfolio snapshot failed: {e}")
+
+
+async def brain_watchdog():
+    """Every 15 min during market hours -- monitor open brain positions."""
+    from app.services.watchdog_service import run_watchdog
+
+    try:
+        result = await run_watchdog()
+        if result.get("concerned"):
+            logger.info(f"Watchdog: {result}")
+    except Exception as e:
+        logger.error(f"Brain watchdog failed: {e}")

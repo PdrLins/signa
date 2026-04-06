@@ -5,10 +5,11 @@ import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { client } from '@/lib/api'
+import { relativeTime } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { DollarSign, Brain, Zap, Bell, Briefcase, TrendingUp } from 'lucide-react'
+import { DollarSign, Brain, Zap, Bell, Briefcase, TrendingUp, Eye } from 'lucide-react'
 
 // ─── Budget Summary ─────────────────────────────────
 
@@ -262,6 +263,11 @@ interface VirtualSummary extends TrackStats {
   recent_closed: Array<{ symbol: string; pnl_pct: number; is_win: boolean; source: string }>
   watchlist: TrackStats
   brain: TrackStats
+  watchdog?: {
+    active: boolean
+    positions_monitored: number
+    recent_events: { symbol: string; event_type: string; created_at: string }[]
+  }
 }
 
 export function BrainPerformanceWidget() {
@@ -278,6 +284,16 @@ export function BrainPerformanceWidget() {
   if (!data) return null
 
   const hasData = data.closed_count > 0 || data.open_count > 0
+
+  const watchdogStatusText = (() => {
+    if (!data.watchdog?.active) return null
+    const alerts = data.watchdog.recent_events.filter(e => e.event_type === 'ALERT' || e.event_type === 'CLOSE')
+    if (alerts.length > 0) {
+      const latest = alerts[0]
+      return `Watchdog: ${alerts.length} alert${alerts.length > 1 ? 's' : ''} on ${latest.symbol} (${relativeTime(latest.created_at)})`
+    }
+    return `Watchdog: active (${data.watchdog.positions_monitored} positions monitored)`
+  })()
 
   return (
     <Link href="/brain/performance" className="block">
@@ -360,6 +376,16 @@ export function BrainPerformanceWidget() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Watchdog status */}
+          {watchdogStatusText && (
+            <div className="flex items-center gap-1.5 pt-2" style={{ borderTop: `1px solid ${theme.colors.border}15` }}>
+              <Eye size={10} style={{ color: theme.colors.warning }} />
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>
+                {watchdogStatusText}
+              </span>
             </div>
           )}
 
