@@ -227,14 +227,14 @@ async def get_bulk_screening(tickers: list[str]) -> dict[str, dict]:
     """
     def _fetch():
         results = {}
-        batch_size = 50
+        batch_size = 20  # Reduced from 50 to prevent DNS thread exhaustion
         for i in range(0, len(tickers), batch_size):
             batch = tickers[i:i + batch_size]
             symbols = " ".join(batch)
             try:
                 data = yf.download(
                     symbols, period="5d", group_by="ticker",
-                    progress=False, threads=True,
+                    progress=False, threads=False,
                 )
                 for ticker in batch:
                     try:
