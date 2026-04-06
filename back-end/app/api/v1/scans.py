@@ -17,6 +17,7 @@ router = APIRouter(prefix="/scans", tags=["Scans"])
 _SCAN_SLOTS = [
     ("PRE_MARKET", "Morning scan", "06:00"),
     ("MORNING", "Market open", "10:00"),
+    ("MIDDAY", "Midday", "12:00"),
     ("PRE_CLOSE", "Pre-close", "15:00"),
     ("AFTER_CLOSE", "After close", "16:30"),
 ]
@@ -113,7 +114,7 @@ async def get_scans_today(user: dict = Depends(get_current_user)):
 @router.post("/trigger")
 async def trigger_scan(
     background_tasks: BackgroundTasks,
-    scan_type: Literal["PRE_MARKET", "MORNING", "PRE_CLOSE", "AFTER_CLOSE", "MANUAL"] = Query("MANUAL"),
+    scan_type: Literal["PRE_MARKET", "MORNING", "MIDDAY", "PRE_CLOSE", "AFTER_CLOSE", "MANUAL"] = Query("MANUAL"),
     user: dict = Depends(get_current_user),
 ):
     """Manually trigger a scan. Runs in the background — returns immediately.

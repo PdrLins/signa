@@ -9,6 +9,7 @@ from app.scheduler.jobs import (
     after_close_scan,
     brain_watchdog,
     cleanup_expired_tokens,
+    midday_scan,
     morning_scan,
     pre_close_scan,
     pre_market_scan,
@@ -39,6 +40,15 @@ def init_scheduler() -> AsyncIOScheduler:
         CronTrigger(hour=10, minute=0, day_of_week="mon-fri", timezone=settings.timezone),
         id="morning_scan",
         name="Morning Scan (10:00 AM ET)",
+        replace_existing=True,
+    )
+
+    # 12:00 PM ET — Midday scan (covers the 10 AM - 3 PM gap)
+    scheduler.add_job(
+        midday_scan,
+        CronTrigger(hour=12, minute=0, day_of_week="mon-fri", timezone=settings.timezone),
+        id="midday_scan",
+        name="Midday Scan (12:00 PM ET)",
         replace_existing=True,
     )
 

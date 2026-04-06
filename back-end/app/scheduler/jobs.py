@@ -24,6 +24,13 @@ async def pre_close_scan():
     await run_scan("PRE_CLOSE")
 
 
+async def midday_scan():
+    """12:00 PM ET — Midday scan."""
+    logger.info("Midday scan triggered (12:00 PM ET)")
+    from app.services.scan_service import run_scan
+    await run_scan("MIDDAY")
+
+
 async def after_close_scan():
     """4:30 PM ET — After-close full scan."""
     logger.info("⏰ After-close scan triggered (4:30 PM ET)")
