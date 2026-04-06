@@ -8,6 +8,14 @@ import pandas as pd
 import yfinance as yf
 from loguru import logger
 
+# Use a per-process temp dir for yfinance cache to avoid SQLite corruption
+# under concurrent access from multiple asyncio threads
+import tempfile as _tempfile
+import os as _os
+_yf_cache_dir = _os.path.join(_tempfile.gettempdir(), f"yfinance-{_os.getpid()}")
+_os.makedirs(_yf_cache_dir, exist_ok=True)
+yf.set_tz_cache_location(_yf_cache_dir)
+
 
 async def get_price_history(ticker: str, period: str = "3mo") -> pd.DataFrame:
     """Fetch OHLCV price history for a ticker.
