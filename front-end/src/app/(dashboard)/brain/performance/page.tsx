@@ -142,6 +142,14 @@ export default function BrainPerformancePage() {
     staleTime: 30_000,
   })
 
+  // Symbols with recent watchdog events — must be before early return (Rules of Hooks)
+  const recentEvents = data?.watchdog?.recent_events
+  const monitoredSymbols = useMemo(
+    () => new Set(recentEvents?.map(e => e.symbol) ?? []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [recentEvents?.length],
+  )
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -158,15 +166,6 @@ export default function BrainPerformancePage() {
   const brainTrades = (data?.open_trades.filter(t => t.source === 'brain') ?? []).sort((a, b) => b.entry_score - a.entry_score)
   const brainClosed = data?.recent_closed.filter(t => t.source === 'brain') ?? []
   const hasClosedData = brain.closed_count > 0
-
-  // Symbols with recent watchdog events — use length as stable proxy since
-  // react-query returns new object references on each refetch
-  const recentEvents = data?.watchdog?.recent_events
-  const monitoredSymbols = useMemo(
-    () => new Set(recentEvents?.map(e => e.symbol) ?? []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [recentEvents?.length],
-  )
 
   // Calculate total unrealized P&L across all open brain trades
   const totalUnrealizedPnl = brainTrades.reduce((sum, t) => sum + (t.unrealized_pnl_pct ?? 0), 0)
