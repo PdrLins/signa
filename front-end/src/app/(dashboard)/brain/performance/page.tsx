@@ -1,6 +1,6 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { client } from '@/lib/api'
@@ -9,7 +9,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Sidebar } from '@/components/layout/Sidebar'
-import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Brain, Target, ShieldAlert, Clock, Eye } from 'lucide-react'
+import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Brain, Target, ShieldAlert, Clock, Eye, RefreshCw } from 'lucide-react'
 import { useState, useMemo } from 'react'
 
 // ── Types ──
@@ -128,9 +128,10 @@ function getEventTypeColor(eventType: string, theme: ReturnType<typeof useTheme>
 
 export default function BrainPerformancePage() {
   const theme = useTheme()
+  const queryClient = useQueryClient()
   const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null)
 
-  const { data, isLoading } = useQuery<VirtualSummary>({
+  const { data, isLoading, isFetching } = useQuery<VirtualSummary>({
     queryKey: ['stats', 'virtual-portfolio'],
     queryFn: async () => (await client.get<VirtualSummary>('/stats/virtual-portfolio')).data,
     staleTime: 30_000,
@@ -174,14 +175,28 @@ export default function BrainPerformancePage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <div className="flex items-center gap-2">
-          <Brain size={22} style={{ color: theme.colors.warning }} />
-          <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>Brain Performance</h1>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Brain size={22} style={{ color: theme.colors.warning }} />
+            <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>Brain Performance</h1>
+          </div>
+          <p className="text-sm mt-1" style={{ color: theme.colors.textSub }}>
+            Autonomous picks proving the brain&apos;s accuracy with real market data.
+          </p>
         </div>
-        <p className="text-sm mt-1" style={{ color: theme.colors.textSub }}>
-          Autonomous picks proving the brain&apos;s accuracy with real market data.
-        </p>
+        <button
+          onClick={() => {
+            queryClient.invalidateQueries({ queryKey: ['stats', 'virtual-portfolio'] })
+            queryClient.invalidateQueries({ queryKey: ['stats', 'watchdog-events'] })
+          }}
+          disabled={isFetching}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-opacity hover:opacity-80 disabled:opacity-50 shrink-0"
+          style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.textSub }}
+        >
+          <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
+          {isFetching ? 'Refreshing...' : 'Refresh'}
+        </button>
       </div>
 
       {/* Content + Sidebar */}
