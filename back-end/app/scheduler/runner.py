@@ -88,13 +88,13 @@ def init_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # Every 15 min during market hours — brain watchdog monitors open positions
+    # Every 15 min during market hours (9:30 AM - 5:00 PM ET), then sleep
     if settings.watchdog_enabled:
         scheduler.add_job(
             brain_watchdog,
-            CronTrigger(minute="*/15", hour="9-16", day_of_week="mon-fri", timezone=settings.timezone),
+            CronTrigger(minute="*/15", hour="9-17", day_of_week="mon-fri", timezone=settings.timezone),
             id="brain_watchdog",
-            name="Brain Watchdog (every 15 min)",
+            name="Brain Watchdog (every 15 min, 9AM-5PM)",
             replace_existing=True,
         )
 
