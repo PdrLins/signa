@@ -122,7 +122,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         # ══════════════════════════════════════════════════════
 
         AI_CANDIDATE_LIMIT = settings.ai_candidate_limit
-        semaphore = asyncio.Semaphore(min(settings.max_concurrent_api_calls, 5))  # Limit concurrent yfinance calls
+        semaphore = asyncio.Semaphore(3)  # Strict limit to prevent DNS thread exhaustion
         total_candidates = len(candidates)
 
         # ── PASS 1: Pre-score all candidates (no AI tokens) ──
@@ -157,8 +157,14 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 logger.debug(f"Pre-score failed {ticker}: {e}")
                 return None
 
-        prescore_tasks = [_prescore(t, i) for i, t in enumerate(candidates)]
-        prescore_results = await asyncio.gather(*prescore_tasks)
+        # Process in batches of 10 to avoid DNS thread exhaustion
+        prescore_results = []
+        batch_size = 10
+        for batch_start in range(0, len(candidates), batch_size):
+            batch = candidates[batch_start:batch_start + batch_size]
+            batch_tasks = [_prescore(t, batch_start + i) for i, t in enumerate(batch)]
+            batch_results = await asyncio.gather(*batch_tasks)
+            prescore_results.extend(batch_results)
         pre_scores = [r for r in prescore_results if r is not None]
 
         # Sort by pre-score descending, pick top N for AI
