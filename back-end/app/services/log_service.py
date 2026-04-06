@@ -45,7 +45,20 @@ def _loguru_sink(message):
 
 def init_log_capture():
     """Initialize the loguru sink. Call once at startup."""
-    logger.add(_loguru_sink, level="DEBUG", format="{message}")
+    # Remove default handler and add a better formatted one
+    logger.remove()
+    logger.add(
+        _loguru_sink,
+        level="DEBUG",
+        format="{message}",
+    )
+    # Terminal output with clear ERROR/WARNING formatting and colors
+    logger.add(
+        lambda m: print(m, end=""),
+        level="DEBUG",
+        format="<level>{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {module}:{function}:{line} - {message}</level>",
+        colorize=True,
+    )
     logger.info("Log capture initialized — streaming available")
 
 
