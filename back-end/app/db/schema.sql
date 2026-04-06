@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash     VARCHAR NOT NULL,
     telegram_chat_id  VARCHAR UNIQUE NOT NULL,
     is_active         BOOLEAN DEFAULT TRUE,
+    login_attempts    INT DEFAULT 0,
+    locked_until      TIMESTAMPTZ,
     created_at        TIMESTAMPTZ DEFAULT now(),
     last_login        TIMESTAMPTZ
 );

@@ -1,11 +1,14 @@
 """Authentication service — login, OTP, token management."""
 
+import math
+import time
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
 from app.core.config import settings
 from app.core.exceptions import (
+    AccountLockedError,
     AuthenticationError,
     OTPExpiredError,
     OTPInvalidError,
@@ -23,6 +26,10 @@ from app.db import queries
 from app.models.audit import AuditEvent
 from app.notifications.telegram_bot import send_otp_message
 
+# Login lockout constants
+MAX_LOGIN_ATTEMPTS = 3
+LOCKOUT_SECONDS = 600  # 10 minutes
+
 
 async def login(
     username: str,
@@ -31,18 +38,83 @@ async def login(
     user_agent: str,
 ) -> dict:
     """Step 1: Validate credentials and send OTP via Telegram."""
+    from app.db.supabase import get_client
+    db = get_client()
+
     user = queries.get_user_by_username(username)
 
+    # ── Check DB lockout ──
+    if user:
+        locked_until = user.get("locked_until")
+        if locked_until:
+            lock_time = datetime.fromisoformat(locked_until)
+            now = datetime.now(timezone.utc)
+            if now < lock_time:
+                remaining = int((lock_time - now).total_seconds())
+                minutes = math.ceil(remaining / 60)
+                raise AccountLockedError(
+                    detail=f"Account locked. Try again in {minutes} minute{'s' if minutes != 1 else ''}.",
+                    retry_after=remaining,
+                )
+            else:
+                # Lockout expired — reset
+                db.table("users").update({
+                    "login_attempts": 0,
+                    "locked_until": None,
+                }).eq("id", user["id"]).execute()
+                user["login_attempts"] = 0
+                user["locked_until"] = None
+
     if user is None or not verify_password(password, user["password_hash"]):
-        queries.insert_audit_log(
-            event_type=AuditEvent.LOGIN_ATTEMPT,
-            success=False,
-            user_id=user["id"] if user else None,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            metadata={"username": username},
-        )
-        raise AuthenticationError("Invalid username or password")
+        # ── Increment failed attempts in DB ──
+        if user:
+            attempts = (user.get("login_attempts") or 0) + 1
+            remaining_attempts = MAX_LOGIN_ATTEMPTS - attempts
+
+            if remaining_attempts <= 0:
+                # Lock the account in DB
+                lock_until = datetime.now(timezone.utc) + timedelta(seconds=LOCKOUT_SECONDS)
+                db.table("users").update({
+                    "login_attempts": attempts,
+                    "locked_until": lock_until.isoformat(),
+                }).eq("id", user["id"]).execute()
+
+                queries.insert_audit_log(
+                    event_type=AuditEvent.LOGIN_LOCKED,
+                    success=False,
+                    user_id=user["id"],
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    metadata={"username": username, "lockout_minutes": 10},
+                )
+                logger.warning(f"Account locked for user {username} after {MAX_LOGIN_ATTEMPTS} failed attempts")
+                raise AccountLockedError(
+                    detail="Account locked. Try again in 10 minutes.",
+                    retry_after=LOCKOUT_SECONDS,
+                )
+
+            # Update attempts in DB
+            db.table("users").update({"login_attempts": attempts}).eq("id", user["id"]).execute()
+
+            queries.insert_audit_log(
+                event_type=AuditEvent.LOGIN_ATTEMPT,
+                success=False,
+                user_id=user["id"],
+                ip_address=ip_address,
+                user_agent=user_agent,
+                metadata={"username": username, "attempts": attempts, "remaining": remaining_attempts},
+            )
+            raise AuthenticationError(
+                f"Invalid credentials. {remaining_attempts} attempt{'s' if remaining_attempts != 1 else ''} remaining."
+            )
+
+        raise AuthenticationError("Invalid credentials.")
+
+    # ── Successful credentials — clear attempts in DB ──
+    db.table("users").update({
+        "login_attempts": 0,
+        "locked_until": None,
+    }).eq("id", user["id"]).execute()
 
     queries.insert_audit_log(
         event_type=AuditEvent.LOGIN_ATTEMPT,
@@ -80,6 +152,7 @@ async def login(
     return {
         "message": "OTP sent to your Telegram",
         "session_token": session_token,
+        "last_login": user.get("last_login"),
     }
 
 
@@ -155,6 +228,8 @@ async def verify_otp_code(
         username=user["username"],
     )
 
+    # Capture previous last_login before updating
+    previous_login = user.get("last_login")
     queries.update_user_last_login(user["id"])
 
     queries.insert_audit_log(
@@ -178,6 +253,7 @@ async def verify_otp_code(
         "access_token": access_token,
         "token_type": "bearer",
         "expires_in": settings.jwt_access_token_expire_minutes * 60,
+        "last_login": previous_login,
     }
 
 

@@ -18,7 +18,7 @@ def get_user_by_username(username: str) -> dict | None:
     client = get_client()
     result = (
         client.table("users")
-        .select("id, username, password_hash, telegram_chat_id, is_active")
+        .select("id, username, password_hash, telegram_chat_id, is_active, last_login, login_attempts, locked_until")
         .eq("username", username)
         .eq("is_active", True)
         .limit(1)

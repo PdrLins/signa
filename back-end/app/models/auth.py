@@ -1,5 +1,6 @@
 """Pydantic models for authentication."""
 
+from typing import Optional
 from pydantic import BaseModel, Field
 
 
@@ -11,6 +12,7 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     message: str = "OTP sent to your Telegram"
     session_token: str
+    last_login: Optional[str] = None
 
 
 class OTPVerifyRequest(BaseModel):
@@ -22,6 +24,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int = 3600
+    last_login: Optional[str] = None
 
 
 class MessageResponse(BaseModel):

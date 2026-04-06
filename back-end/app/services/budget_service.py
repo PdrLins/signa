@@ -18,14 +18,14 @@ from app.core.config import settings
 # Sentiment: ~400 input tokens + ~600 output tokens
 COST_ESTIMATES: dict[str, dict[str, float]] = {
     "claude": {
-        "synthesis": 0.012,   # Sonnet 4: $3/M in + $15/M out → ~$0.012/call
+        "synthesis": 0.012,   # Sonnet 4: $3/M in + $15/M out → ~$0.012/call (validated: $0.99 for ~85 calls)
     },
     "gemini": {
         "synthesis": 0.0,     # Free tier (2.0-flash, 1500 req/day)
         "sentiment": 0.0,     # Free tier
     },
     "grok": {
-        "sentiment": 0.008,   # Grok-2: $2/M in + $10/M out → ~$0.008/call
+        "sentiment": 0.0002,  # Grok-3-mini: ~$0.0002/call (validated: $0.0045 for ~30 calls)
     },
 }
 

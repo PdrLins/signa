@@ -18,6 +18,12 @@ class RateLimitExceeded(Exception):
         self.retry_after = retry_after
 
 
+class AccountLockedError(Exception):
+    def __init__(self, detail: str = "Account locked", retry_after: int = 600):
+        self.detail = detail
+        self.retry_after = retry_after
+
+
 class OTPExpiredError(Exception):
     def __init__(self, detail: str = "OTP has expired"):
         self.detail = detail
@@ -46,6 +52,15 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             content={"detail": exc.detail},
+            headers={"Retry-After": str(exc.retry_after)},
+        )
+
+    @app.exception_handler(AccountLockedError)
+    async def account_locked_handler(request: Request, exc: AccountLockedError):
+        logger.warning(f"Account locked from {get_client_ip(request)}")
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={"detail": exc.detail, "retry_after": exc.retry_after},
             headers={"Retry-After": str(exc.retry_after)},
         )
 

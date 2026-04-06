@@ -76,3 +76,6 @@ price_cache = TTLCache(max_size=500, default_ttl=60)
 brain_challenge_cache = TTLCache(max_size=500, default_ttl=900)
 brain_otp_attempt_cache = TTLCache(max_size=500, default_ttl=900)
 brain_lockout_cache = TTLCache(max_size=500, default_ttl=900)
+
+# Login attempt tracking (lockout after 3 failures, 10 min TTL)
+login_attempt_cache = TTLCache(max_size=1000, default_ttl=600)

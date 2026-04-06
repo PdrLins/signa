@@ -6,6 +6,7 @@ export interface LoginRequest {
 export interface LoginResponse {
   message: string
   session_token: string
+  last_login?: string
 }
 
 export interface OtpVerifyRequest {
@@ -17,6 +18,7 @@ export interface AuthResponse {
   access_token: string
   token_type: string
   expires_in: number
+  last_login?: string
 }
 
 export interface LogoutResponse {

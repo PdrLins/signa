@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
+import { useAuthStore } from '@/store/authStore'
 import {
   LayoutDashboard,
   TrendingUp,
@@ -15,12 +16,14 @@ import {
   ScrollText,
   Plug,
   Activity,
+  LogOut,
 } from 'lucide-react'
 
 export function LeftNav() {
   const theme = useTheme()
   const pathname = usePathname()
   const t = useI18nStore((s) => s.t)
+  const logout = useAuthStore((s) => s.logout)
 
   const NAV_ITEMS = [
     { label: t.nav.overview, href: '/overview', icon: LayoutDashboard },
@@ -72,6 +75,23 @@ export function LeftNav() {
           </div>
         )
       })}
+
+      {/* Logout */}
+      <div
+        className="w-6 h-px mx-auto my-1"
+        style={{ backgroundColor: theme.colors.border }}
+      />
+      <button
+        onClick={() => {
+          logout()
+          window.location.href = '/login'
+        }}
+        className="flex items-center justify-center w-10 h-10 rounded-xl transition-all hover:opacity-80"
+        style={{ color: theme.colors.down }}
+        title={t.settings.logout}
+      >
+        <LogOut size={18} strokeWidth={1.8} />
+      </button>
     </nav>
   )
 }
