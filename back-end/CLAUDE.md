@@ -17,7 +17,7 @@ python -m app.db.seed_brain                  # seed brain tables
 
 ## Environment
 
-Config in `app/core/config.py` (Pydantic Settings from `.env`). Required: `JWT_SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `BRAIN_TOKEN_SECRET` (when auth enabled). Dev mode: `DEBUG=true` + `AUTH_ENABLED=false` skips JWT (mock user). Validation at import time.
+Config in `app/core/config.py` (Pydantic Settings from `.env`). Required: `JWT_SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `BRAIN_TOKEN_SECRET`. Auth is always enabled. Validation at import time.
 
 ## Skills (use these — they have all the detail)
 

@@ -11,7 +11,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const token = useAuthStore((s) => s.token)
   const setToken = useAuthStore((s) => s.setToken)
-
   useEffect(() => {
     const saved = localStorage.getItem('signa-token')
     if (saved && !isAuthenticated) {

@@ -59,11 +59,6 @@ _ks = KnowledgeService()
 from app.core.cache import brain_challenge_cache, brain_lockout_cache, brain_otp_attempt_cache
 
 
-def _safe_uid(user_id: str) -> str | None:
-    """Return None for dev mode fake user IDs."""
-    return user_id if user_id != "dev-user-id" else None
-
-
 def _check_challenge_rate(user_id: str):
     now = datetime.now(timezone.utc).timestamp()
     window = settings.rate_limit_window_minutes * 60
@@ -386,7 +381,7 @@ async def brain_challenge(request: Request, user: dict = Depends(get_current_use
     try:
         client = get_client()
         client.table("brain_sessions").insert({
-            "user_id": _safe_uid(user_id),
+            "user_id": user_id,
             "otp_hash": otp_hashed,
             "expires_at": expires_at.isoformat(),
             "ip_address": ip,
@@ -402,7 +397,7 @@ async def brain_challenge(request: Request, user: dict = Depends(get_current_use
     chat_id = db_user["telegram_chat_id"] if db_user else settings.telegram_chat_id
     await send_message(chat_id, msg("brain_otp", otp=otp))
 
-    insert_audit_log(event_type=AuditEvent.BRAIN_CHALLENGE_SENT, success=True, user_id=_safe_uid(user_id), ip_address=ip)
+    insert_audit_log(event_type=AuditEvent.BRAIN_CHALLENGE_SENT, success=True, user_id=user_id, ip_address=ip)
     logger.info(f"Brain challenge sent for user {user_id}")
     return {"message": "Code sent to your Telegram"}
 
@@ -419,22 +414,19 @@ async def brain_verify(request: Request, body: BrainVerifyRequest, user: dict = 
         lockout_ttl = settings.rate_limit_window_minutes * 60
         brain_lockout_cache.set(f"lock:{user_id}", datetime.now(timezone.utc).timestamp() + lockout_ttl, ttl=lockout_ttl)
         brain_otp_attempt_cache.delete(f"otp:{user_id}")
-        insert_audit_log(event_type=AuditEvent.BRAIN_ACCESS_LOCKED, success=False, user_id=_safe_uid(user_id), ip_address=ip)
+        insert_audit_log(event_type=AuditEvent.BRAIN_ACCESS_LOCKED, success=False, user_id=user_id, ip_address=ip)
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many failed attempts. Locked for 15 minutes.")
 
     client = get_client()
     now = datetime.now(timezone.utc).isoformat()
     query = client.table("brain_sessions").select("id, otp_hash, expires_at, user_id").is_("used_at", "null").gte("expires_at", now).order("created_at", desc=True).limit(1)
-    if _safe_uid(user_id):
-        query = query.eq("user_id", user_id)
-    else:
-        query = query.is_("user_id", "null")
+    query = query.eq("user_id", user_id)
     result = query.execute()
 
     if not result.data:
         brain_otp_attempt_cache.set(f"otp:{user_id}", attempts + 1, ttl=settings.rate_limit_window_minutes * 60)
         remaining = settings.brain_max_otp_attempts - attempts - 1
-        insert_audit_log(event_type=AuditEvent.BRAIN_ACCESS_DENIED, success=False, user_id=_safe_uid(user_id), ip_address=ip, metadata={"reason": "no_valid_session"})
+        insert_audit_log(event_type=AuditEvent.BRAIN_ACCESS_DENIED, success=False, user_id=user_id, ip_address=ip, metadata={"reason": "no_valid_session"})
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Code expired or not found. {remaining} attempt(s) remaining.")
 
     session = result.data[0]
@@ -442,7 +434,7 @@ async def brain_verify(request: Request, body: BrainVerifyRequest, user: dict = 
     if not verify_otp(otp_code, session["otp_hash"], salt=user_id):
         brain_otp_attempt_cache.set(f"otp:{user_id}", attempts + 1, ttl=settings.rate_limit_window_minutes * 60)
         remaining = settings.brain_max_otp_attempts - attempts - 1
-        insert_audit_log(event_type=AuditEvent.BRAIN_ACCESS_DENIED, success=False, user_id=_safe_uid(user_id), ip_address=ip, metadata={"reason": "invalid_otp", "remaining": remaining})
+        insert_audit_log(event_type=AuditEvent.BRAIN_ACCESS_DENIED, success=False, user_id=user_id, ip_address=ip, metadata={"reason": "invalid_otp", "remaining": remaining})
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid code. {remaining} attempt(s) remaining.")
 
     jti = str(uuid.uuid4())
@@ -453,7 +445,7 @@ async def brain_verify(request: Request, body: BrainVerifyRequest, user: dict = 
     client.table("brain_sessions").update({"used_at": now_dt.isoformat(), "brain_token_jti": jti}).eq("id", session["id"]).execute()
     brain_otp_attempt_cache.delete(f"otp:{user_id}")
 
-    insert_audit_log(event_type=AuditEvent.BRAIN_ACCESS_GRANTED, success=True, user_id=_safe_uid(user_id), ip_address=ip, metadata={"brain_jti": jti})
+    insert_audit_log(event_type=AuditEvent.BRAIN_ACCESS_GRANTED, success=True, user_id=user_id, ip_address=ip, metadata={"brain_jti": jti})
     logger.info(f"Brain access granted for user {user_id}")
     return {"brain_token": brain_token, "expires_in": settings.brain_token_expire_minutes * 60}
 
@@ -496,7 +488,7 @@ async def update_rule(rule_id: str, body: RuleUpdateRequest, request: Request, u
 
     insert_audit_log(
         event_type=AuditEvent.BRAIN_RULE_UPDATED, success=True,
-        user_id=_safe_uid(user["user_id"]), ip_address=get_client_ip(request),
+        user_id=user["user_id"], ip_address=get_client_ip(request),
         metadata={"rule_id": rule_id, "rule_name": old.get("name"), "before": before, "after": after, "changed_fields": changed_fields},
     )
     return result
@@ -535,7 +527,7 @@ async def update_knowledge(knowledge_id: str, body: KnowledgeUpdateRequest, requ
 
     insert_audit_log(
         event_type=AuditEvent.BRAIN_KNOWLEDGE_UPDATED, success=True,
-        user_id=_safe_uid(user["user_id"]), ip_address=get_client_ip(request),
+        user_id=user["user_id"], ip_address=get_client_ip(request),
         metadata={"knowledge_id": knowledge_id, "key_concept": old.get("key_concept"), "before": before, "after": after, "changed_fields": changed_fields},
     )
     return result

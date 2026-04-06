@@ -558,6 +558,24 @@ export default function HowItWorksPage() {
               </Section>
             </Card>
 
+            {/* How Notifications Work */}
+            <Card>
+              <Section title={h.notificationsTitle}>
+                <P>{h.notificationsDesc}</P>
+                <ul className="space-y-1.5 mt-2">
+                  <Li>{h.notif1}</Li>
+                  <Li>{h.notif2}</Li>
+                  <Li>{h.notif3}</Li>
+                  <Li>{h.notif4}</Li>
+                  <Li>{h.notif5}</Li>
+                  <Li>{h.notif6}</Li>
+                </ul>
+                <div className="mt-3">
+                  <P>{h.notifNote}</P>
+                </div>
+              </Section>
+            </Card>
+
             {/* Risk Levels */}
             <Card>
               <Section title={h.riskLevelsTitle}>

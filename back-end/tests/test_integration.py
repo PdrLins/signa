@@ -1,7 +1,6 @@
 """Integration tests for API endpoints.
 
-Uses FastAPI TestClient with AUTH_ENABLED=false (dev mode)
-so that all protected routes are accessible without a real JWT.
+Uses a real JWT issued by the test secret to authenticate.
 Mocks Supabase queries to avoid needing a live database.
 """
 
@@ -12,17 +11,23 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Set env vars BEFORE importing app
-os.environ["AUTH_ENABLED"] = "false"
-os.environ["DEBUG"] = "true"
+os.environ["AUTH_ENABLED"] = "true"
+os.environ["DEBUG"] = "false"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-integration-tests-only"
+os.environ["BRAIN_TOKEN_SECRET"] = "test-brain-secret-for-integration-tests-only"
 os.environ["SUPABASE_URL"] = "https://test.supabase.co"
 os.environ["SUPABASE_KEY"] = "eyJtest"
 
 from fastapi.testclient import TestClient
 
 from main import app
+from app.core.security import create_access_token
 
 client = TestClient(app)
+
+# Create a valid test JWT for authenticated requests
+_TEST_TOKEN = create_access_token(user_id="test-user-uuid", username="testuser")
+_AUTH_HEADERS = {"Authorization": f"Bearer {_TEST_TOKEN}"}
 
 # ── Sample data ────────────────────────────────────────────
 
@@ -137,14 +142,10 @@ def test_login_returns_session_token(mock_login):
 
 
 def test_protected_route_without_token():
-    """GET /api/v1/signals with AUTH_ENABLED=false gives dev-mode access (200).
-
-    In production (AUTH_ENABLED=true), this would be 401.
-    We verify the auth middleware dev-mode bypass works.
-    """
+    """GET /api/v1/signals without token → 401."""
     with patch("app.db.queries.get_signals", return_value=[]):
         resp = client.get("/api/v1/signals")
-    assert resp.status_code == 200
+    assert resp.status_code == 401
 
 
 @patch("app.db.queries.get_signals")
@@ -152,7 +153,7 @@ def test_protected_route_without_token():
 def test_signals_returns_list(mock_enrich, mock_get):
     """GET /api/v1/signals → 200 + list (can be empty)."""
     mock_get.return_value = [SAMPLE_SIGNAL]
-    resp = client.get("/api/v1/signals")
+    resp = client.get("/api/v1/signals", headers=_AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert "signals" in data
@@ -165,7 +166,7 @@ def test_signals_returns_list(mock_enrich, mock_get):
 def test_signals_gems_never_404(mock_enrich, mock_get):
     """GET /api/v1/signals/gems → 200 + list (never 404)."""
     mock_get.return_value = []
-    resp = client.get("/api/v1/signals/gems")
+    resp = client.get("/api/v1/signals/gems", headers=_AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert "signals" in data
@@ -179,7 +180,7 @@ def test_stats_daily_shape(mock_scans, mock_signals):
     mock_signals.return_value = [SAMPLE_SIGNAL]
     mock_scans.return_value = [SAMPLE_SCAN]
 
-    resp = client.get("/api/v1/stats/daily")
+    resp = client.get("/api/v1/stats/daily", headers=_AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
 
@@ -196,7 +197,7 @@ def test_stats_daily_shape(mock_scans, mock_signals):
 def test_scans_today_returns_4(mock_get):
     """GET /api/v1/scans/today → 200 + list of exactly 4 items."""
     mock_get.return_value = [SAMPLE_SCAN]
-    resp = client.get("/api/v1/scans/today")
+    resp = client.get("/api/v1/scans/today", headers=_AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -216,24 +217,24 @@ def test_watchlist_add_remove(mock_add, mock_get, mock_remove):
     mock_add.return_value = SAMPLE_WATCHLIST_ITEM
 
     # Add
-    resp = client.post("/api/v1/watchlist/AAPL")
+    resp = client.post("/api/v1/watchlist/AAPL", headers=_AUTH_HEADERS)
     assert resp.status_code == 201
 
     # Get (with AAPL in list)
     mock_get.return_value = [SAMPLE_WATCHLIST_ITEM]
-    resp = client.get("/api/v1/watchlist")
+    resp = client.get("/api/v1/watchlist", headers=_AUTH_HEADERS)
     assert resp.status_code == 200
     symbols = [item["symbol"] for item in resp.json()["items"]]
     assert "AAPL" in symbols
 
     # Remove
     mock_remove.return_value = True
-    resp = client.delete("/api/v1/watchlist/AAPL")
+    resp = client.delete("/api/v1/watchlist/AAPL", headers=_AUTH_HEADERS)
     assert resp.status_code == 200
 
     # Get again (empty)
     mock_get.return_value = []
-    resp = client.get("/api/v1/watchlist")
+    resp = client.get("/api/v1/watchlist", headers=_AUTH_HEADERS)
     assert resp.status_code == 200
     symbols = [item["symbol"] for item in resp.json()["items"]]
     assert "AAPL" not in symbols

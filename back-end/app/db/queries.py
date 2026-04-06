@@ -41,6 +41,20 @@ def get_user_by_id(user_id: str) -> dict | None:
     return result.data[0] if result.data else None
 
 
+def get_user_by_telegram_chat_id(chat_id: str) -> dict | None:
+    """Look up a user by Telegram chat ID."""
+    client = get_client()
+    result = (
+        client.table("users")
+        .select("id, username, telegram_chat_id, is_active")
+        .eq("telegram_chat_id", chat_id)
+        .eq("is_active", True)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
 def update_user_last_login(user_id: str) -> None:
     """Update the last_login timestamp for a user."""
     client = get_client()
@@ -163,9 +177,6 @@ def insert_audit_log(
     metadata: dict | None = None,
 ) -> dict:
     """Write an audit log entry."""
-    # Dev mode safety: "dev-user-id" is not a valid UUID
-    if user_id == "dev-user-id":
-        user_id = None
     client = get_client()
     data = {
         "event_type": event_type,
@@ -220,7 +231,7 @@ _SIGNAL_LIST_COLUMNS = (
     "asset_type, exchange, price_at_signal, target_price, stop_loss, "
     "risk_reward, catalyst, sentiment_score, reasoning, market_regime, "
     "catalyst_type, account_recommendation, signal_style, contrarian_score, "
-    "kelly_recommendation, scan_id, company_name, created_at, updated_at"
+    "kelly_recommendation, scan_id, created_at, updated_at"
 )
 
 
@@ -408,32 +419,51 @@ def get_last_completed_scan() -> dict | None:
 # PORTFOLIO
 # ============================================================
 
-def get_portfolio() -> list[dict]:
-    """Get all portfolio entries."""
+def get_portfolio(user_id: str) -> list[dict]:
+    """Get all portfolio entries for a user."""
     client = get_client()
-    result = client.table("portfolio").select("*").order("created_at", desc=True).limit(200).execute()
+    result = (
+        client.table("portfolio")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .limit(200)
+        .execute()
+    )
     return result.data or []
 
 
-def add_portfolio_item(data: dict) -> dict:
+def add_portfolio_item(user_id: str, data: dict) -> dict:
     """Add an item to the portfolio."""
     client = get_client()
-    result = client.table("portfolio").insert(data).execute()
+    result = client.table("portfolio").insert({**data, "user_id": user_id}).execute()
     return result.data[0] if result.data else {}
 
 
-def update_portfolio_item(item_id: str, data: dict) -> dict:
+def update_portfolio_item(item_id: str, user_id: str, data: dict) -> dict:
     """Update a portfolio item (does not mutate input dict)."""
     client = get_client()
     update_data = {**data, "updated_at": datetime.now(timezone.utc).isoformat()}
-    result = client.table("portfolio").update(update_data).eq("id", item_id).execute()
+    result = (
+        client.table("portfolio")
+        .update(update_data)
+        .eq("id", item_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
     return result.data[0] if result.data else {}
 
 
-def delete_portfolio_item(item_id: str) -> bool:
+def delete_portfolio_item(item_id: str, user_id: str) -> bool:
     """Delete a portfolio item."""
     client = get_client()
-    result = client.table("portfolio").delete().eq("id", item_id).execute()
+    result = (
+        client.table("portfolio")
+        .delete()
+        .eq("id", item_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
     return len(result.data) > 0 if result.data else False
 
 
@@ -441,29 +471,49 @@ def delete_portfolio_item(item_id: str) -> bool:
 # WATCHLIST
 # ============================================================
 
-def get_watchlist() -> list[dict]:
-    """Get all watchlist items."""
+def get_watchlist(user_id: str) -> list[dict]:
+    """Get all watchlist items for a user."""
     client = get_client()
-    result = client.table("watchlist").select("*").order("added_at", desc=True).limit(200).execute()
+    result = (
+        client.table("watchlist")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("added_at", desc=True)
+        .limit(200)
+        .execute()
+    )
     return result.data or []
 
 
-def add_to_watchlist(symbol: str, notes: str | None = None) -> dict:
+def get_all_watchlist_symbols() -> set[str]:
+    """Get all watchlisted symbols across all users (for scan pipeline)."""
+    client = get_client()
+    result = client.table("watchlist").select("symbol").limit(1000).execute()
+    return {row["symbol"] for row in (result.data or [])}
+
+
+def add_to_watchlist(user_id: str, symbol: str, notes: str | None = None) -> dict:
     """Add a ticker to the watchlist."""
     client = get_client()
-    data = {"symbol": symbol.upper(), "notes": notes}
-    result = client.table("watchlist").upsert(data, on_conflict="symbol").execute()
-    logger.info(f"Added {symbol} to watchlist")
+    data = {"user_id": user_id, "symbol": symbol.upper(), "notes": notes}
+    result = client.table("watchlist").upsert(data, on_conflict="user_id,symbol").execute()
+    logger.info(f"Added {symbol} to watchlist for user {user_id}")
     return result.data[0] if result.data else {}
 
 
-def remove_from_watchlist(symbol: str) -> bool:
+def remove_from_watchlist(user_id: str, symbol: str) -> bool:
     """Remove a ticker from the watchlist."""
     client = get_client()
-    result = client.table("watchlist").delete().eq("symbol", symbol.upper()).execute()
+    result = (
+        client.table("watchlist")
+        .delete()
+        .eq("user_id", user_id)
+        .eq("symbol", symbol.upper())
+        .execute()
+    )
     removed = len(result.data) > 0 if result.data else False
     if removed:
-        logger.info(f"Removed {symbol} from watchlist")
+        logger.info(f"Removed {symbol} from watchlist for user {user_id}")
     return removed
 
 
@@ -472,7 +522,11 @@ def remove_from_watchlist(symbol: str) -> bool:
 # ============================================================
 
 def insert_alert(alert_data: dict) -> dict:
-    """Insert an alert record."""
+    """Insert an alert record.
+
+    alert_data should include user_id when created from a user-facing action.
+    System-level alerts (scan pipeline) may omit user_id.
+    """
     client = get_client()
     result = client.table("alerts").insert(alert_data).execute()
     return result.data[0] if result.data else {}
@@ -488,7 +542,7 @@ def update_alert_status(alert_id: str, status: str, sent_at: datetime | None = N
 
 
 def get_pending_alerts() -> list[dict]:
-    """Get alerts that haven't been sent yet."""
+    """Get all pending alerts (system-level, for the dispatcher)."""
     client = get_client()
     result = (
         client.table("alerts")
@@ -501,12 +555,13 @@ def get_pending_alerts() -> list[dict]:
     return result.data or []
 
 
-def get_recent_alerts(limit: int = 5) -> list[dict]:
-    """Get most recent sent alerts."""
+def get_recent_alerts(user_id: str, limit: int = 5) -> list[dict]:
+    """Get most recent sent alerts for a user."""
     client = get_client()
     result = (
         client.table("alerts")
         .select("id, alert_type, message, sent_at, status, created_at")
+        .eq("user_id", user_id)
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
@@ -515,15 +570,43 @@ def get_recent_alerts(limit: int = 5) -> list[dict]:
 
 
 # ============================================================
+# USER SETTINGS
+# ============================================================
+
+def get_user_settings(user_id: str) -> dict:
+    """Get user settings. Creates default if not exists."""
+    client = get_client()
+    result = client.table("user_settings").select("*").eq("user_id", user_id).limit(1).execute()
+    if result.data:
+        return result.data[0]
+    # Create default settings
+    default = {"user_id": user_id, "theme": "midnight", "language": "en"}
+    client.table("user_settings").insert(default).execute()
+    return default
+
+
+def update_user_settings(user_id: str, data: dict) -> dict:
+    """Update user settings."""
+    client = get_client()
+    allowed = {"theme", "language"}
+    clean = {k: v for k, v in data.items() if k in allowed}
+    if not clean:
+        return get_user_settings(user_id)
+    result = client.table("user_settings").upsert({"user_id": user_id, **clean}).execute()
+    return result.data[0] if result.data else clean
+
+
+# ============================================================
 # POSITIONS
 # ============================================================
 
-def get_open_positions() -> list[dict]:
-    """Get all open positions."""
+def get_open_positions(user_id: str) -> list[dict]:
+    """Get all open positions for a user."""
     client = get_client()
     result = (
         client.table("positions")
         .select("*")
+        .eq("user_id", user_id)
         .eq("status", "OPEN")
         .order("entry_date", desc=True)
         .limit(100)
@@ -532,12 +615,27 @@ def get_open_positions() -> list[dict]:
     return result.data or []
 
 
-def get_closed_positions(limit: int = 50) -> list[dict]:
-    """Get closed positions (trade history)."""
+def get_all_open_positions() -> list[dict]:
+    """Get all open positions across all users (for scan pipeline monitoring)."""
     client = get_client()
     result = (
         client.table("positions")
         .select("*")
+        .eq("status", "OPEN")
+        .order("entry_date", desc=True)
+        .limit(500)
+        .execute()
+    )
+    return result.data or []
+
+
+def get_closed_positions(user_id: str, limit: int = 50) -> list[dict]:
+    """Get closed positions (trade history) for a user."""
+    client = get_client()
+    result = (
+        client.table("positions")
+        .select("*")
+        .eq("user_id", user_id)
         .neq("status", "OPEN")
         .order("exit_date", desc=True)
         .limit(limit)
@@ -559,10 +657,10 @@ def get_position_by_id(position_id: str) -> dict | None:
     return result.data[0] if result.data else None
 
 
-def create_position(data: dict) -> dict:
+def create_position(user_id: str, data: dict) -> dict:
     """Create a new open position."""
     client = get_client()
-    result = client.table("positions").insert(data).execute()
+    result = client.table("positions").insert({**data, "user_id": user_id}).execute()
     logger.info(f"Position opened: {data.get('symbol')} x{data.get('shares')} @ ${data.get('entry_price')}")
     return result.data[0] if result.data else {}
 

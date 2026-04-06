@@ -202,7 +202,7 @@ async def update_budget(
         insert_audit_log(
             event_type="BUDGET_UPDATED",
             success=True,
-            user_id=uid if uid != "dev-user-id" else None,
+            user_id=uid,
             ip_address=get_client_ip(request),
             metadata={"changed": changed},
         )
@@ -295,7 +295,7 @@ async def update_ai_config(
     insert_audit_log(
         event_type="CONFIG_UPDATED",
         success=True,
-        user_id=uid if uid != "dev-user-id" else None,
+        user_id=uid,
         ip_address=get_client_ip(request),
         metadata={"changed_keys": list(updates.keys())},
     )

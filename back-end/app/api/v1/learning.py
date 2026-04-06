@@ -132,7 +132,7 @@ async def approve_suggestion(
         client.table("brain_suggestions").update({
             "status": "APPROVED",
             "reviewed_at": datetime.now(timezone.utc).isoformat(),
-            "reviewed_by": user.get("user_id") if user.get("user_id") != "dev-user-id" else None,
+            "reviewed_by": user.get("user_id"),
         }).eq("id", suggestion_id).execute()
 
     await asyncio.to_thread(_approve)
@@ -162,7 +162,7 @@ async def reject_suggestion(
         client.table("brain_suggestions").update({
             "status": "REJECTED",
             "reviewed_at": datetime.now(timezone.utc).isoformat(),
-            "reviewed_by": user.get("user_id") if user.get("user_id") != "dev-user-id" else None,
+            "reviewed_by": user.get("user_id"),
             "rejection_reason": body.reason or "",
         }).eq("id", suggestion_id).execute()
 

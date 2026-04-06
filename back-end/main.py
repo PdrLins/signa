@@ -112,7 +112,12 @@ async def telegram_webhook(request: Request):
             command = parts[0].lstrip("/").split("@")[0]
             args = parts[1] if len(parts) > 1 else ""
 
-            response_text = await handle_command(command, args)
+            # Look up the user by their Telegram chat ID
+            from app.db import queries as db_queries
+            tg_user = db_queries.get_user_by_telegram_chat_id(str(chat_id))
+            user_id = tg_user["id"] if tg_user else ""
+
+            response_text = await handle_command(command, args, user_id=user_id)
 
             if chat_id and response_text:
                 await send_message(str(chat_id), response_text)

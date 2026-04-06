@@ -149,7 +149,7 @@ async def send_watchlist_sell_alert(signal: dict) -> bool:
     return await send_message(settings.telegram_chat_id, message)
 
 
-async def handle_command(command: str, args: str = "") -> str:
+async def handle_command(command: str, args: str = "", user_id: str = "") -> str:
     """Process a Telegram bot command and return response text."""
     from app.services import signal_service, watchlist_service
 
@@ -182,9 +182,9 @@ async def handle_command(command: str, args: str = "") -> str:
             from app.core.utils import validate_ticker
             if not validate_ticker(ticker):
                 return f"❌ Invalid ticker format: {escape(ticker)}"
-            watchlist_service.add_to_watchlist(ticker)
+            watchlist_service.add_to_watchlist(user_id, ticker)
             return f"✅ Added {escape(ticker)} to watchlist"
-        items = watchlist_service.get_watchlist()
+        items = watchlist_service.get_watchlist(user_id)
         if not items:
             return "Watchlist is empty. Use /watch TICKER to add."
         lines = ["<b>📋 Watchlist:</b>\n"]
@@ -196,7 +196,7 @@ async def handle_command(command: str, args: str = "") -> str:
         if not args:
             return "Usage: /remove TICKER"
         ticker = args.strip().upper()
-        removed = watchlist_service.remove_from_watchlist(ticker)
+        removed = watchlist_service.remove_from_watchlist(user_id, ticker)
         return f"✅ Removed {escape(ticker)}" if removed else f"❌ {escape(ticker)} not found"
 
     elif command == "score":
@@ -229,7 +229,7 @@ async def handle_command(command: str, args: str = "") -> str:
 
     elif command == "positions":
         from app.services import position_service
-        positions = position_service.get_open_positions()
+        positions = position_service.get_open_positions(user_id)
         if not positions:
             return "No open positions. Open one from the Signa dashboard."
         lines = ["<b>📊 Open Positions:</b>\n"]
@@ -257,7 +257,7 @@ async def handle_command(command: str, args: str = "") -> str:
         except ValueError:
             return f"Invalid price: {escape(parts[1])}"
         from app.services import position_service
-        positions = position_service.get_open_positions()
+        positions = position_service.get_open_positions(user_id)
         match = [p for p in positions if p.get("symbol") == ticker]
         if not match:
             return f"No open position for {escape(ticker)}"

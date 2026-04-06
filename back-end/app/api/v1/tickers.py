@@ -52,7 +52,7 @@ async def get_ticker_detail(
     latest_signal = signals[0] if signals else None
 
     # Get open position (if any)
-    positions = queries.get_open_positions()
+    positions = queries.get_open_positions(user["user_id"])
     open_position = next((p for p in positions if p.get("symbol") == ticker), None)
 
     return {

@@ -14,7 +14,7 @@ router = APIRouter(prefix="/positions", tags=["Positions"])
 @router.get("")
 async def get_positions(user: dict = Depends(get_current_user)):
     """Get all open positions."""
-    positions = position_service.get_open_positions()
+    positions = position_service.get_open_positions(user["user_id"])
     return {"positions": positions, "count": len(positions)}
 
 
@@ -24,7 +24,7 @@ async def get_position_history(
     user: dict = Depends(get_current_user),
 ):
     """Get closed positions (trade history)."""
-    positions = position_service.get_closed_positions(limit)
+    positions = position_service.get_closed_positions(user["user_id"], limit)
     return {"positions": positions, "count": len(positions)}
 
 
@@ -47,6 +47,7 @@ async def create_position(
 ):
     """Open a new position."""
     position = position_service.open_position(
+        user_id=user["user_id"],
         symbol=body.symbol.upper(),
         entry_price=float(body.entry_price),
         shares=float(body.shares),

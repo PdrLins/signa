@@ -8,6 +8,7 @@ interface ThemeStore {
   theme: Theme
   setTheme: (id: ThemeId) => void
   initialize: () => void
+  loadFromServer: () => void
 }
 
 export const useThemeStore = create<ThemeStore>((set) => ({
@@ -21,6 +22,10 @@ export const useThemeStore = create<ThemeStore>((set) => ({
       console.warn('Failed to persist theme:', e)
     }
     set({ themeId: id, theme: themes[id] })
+    // Sync to server
+    import('@/lib/api').then(({ client }) => {
+      client.put('/stats/user-settings', { theme: id }).catch(() => {})
+    }).catch(() => {})
   },
 
   initialize: () => {
@@ -32,5 +37,18 @@ export const useThemeStore = create<ThemeStore>((set) => ({
     } catch (e) {
       console.warn('Failed to read theme from localStorage:', e)
     }
+  },
+
+  loadFromServer: () => {
+    import('@/lib/api').then(({ client }) => {
+      client.get('/stats/user-settings').then((res) => {
+        const data = res.data as { theme?: string; language?: string }
+        if (data.theme && themes[data.theme as ThemeId]) {
+          const id = data.theme as ThemeId
+          localStorage.setItem(STORAGE_KEY, id)
+          set({ themeId: id, theme: themes[id] })
+        }
+      }).catch(() => {})
+    }).catch(() => {})
   },
 }))

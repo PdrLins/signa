@@ -14,6 +14,7 @@ interface I18nStore {
   t: Translations
   setLocale: (locale: Locale) => void
   initialize: () => void
+  loadFromServer: () => void
 }
 
 export const useI18nStore = create<I18nStore>((set) => ({
@@ -23,11 +24,11 @@ export const useI18nStore = create<I18nStore>((set) => ({
   setLocale: (locale: Locale) => {
     localStorage.setItem(LANG_KEY, locale)
     set({ locale, t: locales[locale] })
-    // Sync to backend so Telegram messages use the same language
-    // Import client dynamically to avoid circular deps
+    // Sync to server (user settings + backend language for Telegram)
     import('@/lib/api').then(({ client: apiClient }) => {
-      apiClient.put('/health/ai-config', { language: locale }).catch((e) => console.warn('Failed to sync language preference:', e))
-    }).catch((e) => console.warn('Failed to sync language preference:', e))
+      apiClient.put('/stats/user-settings', { language: locale }).catch(() => {})
+      apiClient.put('/health/ai-config', { language: locale }).catch(() => {})
+    }).catch(() => {})
   },
 
   initialize: () => {
@@ -35,5 +36,18 @@ export const useI18nStore = create<I18nStore>((set) => ({
     if (saved && locales[saved]) {
       set({ locale: saved, t: locales[saved] })
     }
+  },
+
+  loadFromServer: () => {
+    import('@/lib/api').then(({ client: apiClient }) => {
+      apiClient.get('/stats/user-settings').then((res) => {
+        const data = res.data as { theme?: string; language?: string }
+        if (data.language && locales[data.language as Locale]) {
+          const locale = data.language as Locale
+          localStorage.setItem(LANG_KEY, locale)
+          set({ locale, t: locales[locale] })
+        }
+      }).catch(() => {})
+    }).catch(() => {})
   },
 }))

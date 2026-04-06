@@ -279,8 +279,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             })
 
         # Check watchlist for SELL/AVOID signals — alert immediately
-        watchlist_items = queries.get_watchlist()
-        watchlist_symbols = {item.get("symbol") for item in watchlist_items}
+        watchlist_symbols = queries.get_all_watchlist_symbols()
         for sig in valid_signals:
             sym = sig.get("symbol")
             action = sig.get("action")

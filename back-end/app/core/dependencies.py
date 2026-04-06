@@ -9,8 +9,6 @@ async def get_current_user(request: Request) -> dict:
     The auth middleware already validated the JWT and populated
     request.state.user. This dependency just reads it.
 
-    When AUTH_ENABLED=false, the middleware sets a dev mock user.
-
     Raises:
         HTTPException 401 if no user is set (middleware rejected the request).
     """

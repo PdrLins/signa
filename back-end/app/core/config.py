@@ -128,10 +128,6 @@ class Settings(BaseSettings):
                 "JWT_SECRET_KEY must be set to a secure random value. "
                 "Generate one with: openssl rand -hex 32"
             )
-        if not self.auth_enabled and not self.debug:
-            raise ValueError(
-                "AUTH_ENABLED=false is only allowed when DEBUG=true"
-            )
         if self.auth_enabled and self.brain_token_secret in ("", "generate-with-openssl-rand-hex-32"):
             raise ValueError(
                 "BRAIN_TOKEN_SECRET must be set to a secure random value. "

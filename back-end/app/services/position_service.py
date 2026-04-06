@@ -11,6 +11,7 @@ from app.notifications.telegram_bot import send_message
 
 
 def open_position(
+    user_id: str,
     symbol: str,
     entry_price: float,
     shares: float,
@@ -34,7 +35,7 @@ def open_position(
         "notes": notes,
         "status": "OPEN",
     }
-    return queries.create_position(data)
+    return queries.create_position(user_id, data)
 
 
 def close_position_by_id(position_id: str, exit_price: float) -> dict:
@@ -92,14 +93,14 @@ def close_position_by_id(position_id: str, exit_price: float) -> dict:
     return result
 
 
-def get_open_positions() -> list[dict]:
-    """Get all open positions."""
-    return queries.get_open_positions()
+def get_open_positions(user_id: str) -> list[dict]:
+    """Get all open positions for a user."""
+    return queries.get_open_positions(user_id)
 
 
-def get_closed_positions(limit: int = 50) -> list[dict]:
-    """Get closed positions (trade history)."""
-    return queries.get_closed_positions(limit)
+def get_closed_positions(user_id: str, limit: int = 50) -> list[dict]:
+    """Get closed positions (trade history) for a user."""
+    return queries.get_closed_positions(user_id, limit)
 
 
 def get_position(position_id: str) -> dict | None:
@@ -126,7 +127,7 @@ async def monitor_positions(signals: list[dict]) -> int:
     if not settings.position_monitor_enabled:
         return 0
 
-    positions = queries.get_open_positions()
+    positions = queries.get_all_open_positions()
     if not positions:
         return 0
 

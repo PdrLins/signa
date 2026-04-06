@@ -10,14 +10,25 @@ import { ToastContainer } from '@/components/ui/ToastContainer'
 
 function StoreInitializer() {
   const initTheme = useThemeStore((s) => s.initialize)
+  const loadTheme = useThemeStore((s) => s.loadFromServer)
   const initAuth = useAuthStore((s) => s.initialize)
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const initI18n = useI18nStore((s) => s.initialize)
+  const loadI18n = useI18nStore((s) => s.loadFromServer)
 
   useEffect(() => {
     initTheme()
     initAuth()
     initI18n()
   }, [initTheme, initAuth, initI18n])
+
+  // After auth, load settings from server (overrides localStorage)
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadTheme()
+      loadI18n()
+    }
+  }, [isAuthenticated, loadTheme, loadI18n])
 
   return null
 }

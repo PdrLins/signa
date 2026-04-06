@@ -1,5 +1,5 @@
 -- ============================================================
--- Signa Database Schema — Complete (18 tables)
+-- Signa Database Schema — Complete (19 tables)
 -- Idempotent — safe to re-run at any time.
 -- Run in Supabase SQL Editor.
 -- Last updated: 2026-04-04
@@ -133,6 +133,7 @@ CREATE INDEX IF NOT EXISTS idx_signals_score ON signals(score DESC);
 -- 8. PORTFOLIO
 CREATE TABLE IF NOT EXISTS portfolio (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID REFERENCES users(id) ON DELETE CASCADE,
     symbol          VARCHAR NOT NULL,
     bucket          VARCHAR,
     account_type    VARCHAR,
@@ -147,14 +148,18 @@ CREATE INDEX IF NOT EXISTS idx_portfolio_symbol ON portfolio(symbol);
 -- 9. WATCHLIST
 CREATE TABLE IF NOT EXISTS watchlist (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    symbol      VARCHAR UNIQUE NOT NULL,
+    user_id     UUID REFERENCES users(id) ON DELETE CASCADE,
+    symbol      VARCHAR NOT NULL,
     added_at    TIMESTAMPTZ DEFAULT now(),
-    notes       TEXT
+    notes       TEXT,
+    UNIQUE(user_id, symbol)
 );
+CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id);
 
 -- 10. ALERTS
 CREATE TABLE IF NOT EXISTS alerts (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID REFERENCES users(id) ON DELETE CASCADE,
     signal_id   UUID REFERENCES signals(id) ON DELETE SET NULL,
     alert_type  VARCHAR NOT NULL,
     message     TEXT NOT NULL,
@@ -167,6 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
 -- 11. POSITIONS
 CREATE TABLE IF NOT EXISTS positions (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id             UUID REFERENCES users(id) ON DELETE CASCADE,
     symbol              VARCHAR NOT NULL,
     entry_price         DECIMAL NOT NULL,
     entry_date          TIMESTAMPTZ DEFAULT now(),
@@ -303,9 +309,19 @@ CREATE INDEX IF NOT EXISTS idx_brain_suggestions_status ON brain_suggestions(sta
 CREATE INDEX IF NOT EXISTS idx_brain_suggestions_date ON brain_suggestions(analysis_date DESC);
 
 
--- 17. VIRTUAL TRADES (brain accuracy tracking)
+-- 17. USER SETTINGS (per-user preferences)
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id     UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    theme       VARCHAR DEFAULT 'midnight',
+    language    VARCHAR DEFAULT 'en',
+    updated_at  TIMESTAMPTZ DEFAULT now()
+);
+
+
+-- 18. VIRTUAL TRADES (brain accuracy tracking)
 CREATE TABLE IF NOT EXISTS virtual_trades (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID REFERENCES users(id) ON DELETE CASCADE,
     symbol          VARCHAR NOT NULL,
     action          VARCHAR NOT NULL,
     entry_price     DOUBLE PRECISION,

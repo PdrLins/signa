@@ -1,6 +1,6 @@
 """JWT authentication middleware.
 
-Validates JWT on protected routes. Skips when AUTH_ENABLED=false (dev mode).
+Validates JWT on protected routes.
 Sets request.state.user for downstream dependencies.
 """
 
@@ -31,9 +31,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # Dev mode: set mock user and skip auth
-        if not settings.auth_enabled:
-            request.state.user = {"user_id": "dev-user-id", "username": "dev", "jti": None}
+        # CORS preflight: always allow OPTIONS through
+        if request.method == "OPTIONS":
             return await call_next(request)
 
         # Public paths: no auth needed

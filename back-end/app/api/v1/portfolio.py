@@ -14,7 +14,7 @@ router = APIRouter(prefix="/portfolio", tags=["Portfolio"])
 @router.get("")
 async def get_portfolio(user: dict = Depends(get_current_user)):
     """Get all portfolio positions."""
-    items = queries.get_portfolio()
+    items = queries.get_portfolio(user["user_id"])
     return {"items": items, "count": len(items)}
 
 
@@ -32,7 +32,7 @@ async def add_portfolio_item(
         "avg_cost": float(body.avg_cost) if body.avg_cost else None,
         "currency": body.currency,
     }
-    item = queries.add_portfolio_item(data)
+    item = queries.add_portfolio_item(user["user_id"], data)
     return item
 
 
@@ -48,7 +48,7 @@ async def update_portfolio_item(
         data["shares"] = float(data["shares"])
     if "avg_cost" in data:
         data["avg_cost"] = float(data["avg_cost"])
-    item = queries.update_portfolio_item(str(item_id), data)
+    item = queries.update_portfolio_item(str(item_id), user["user_id"], data)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio item not found")
     return item
@@ -60,7 +60,7 @@ async def delete_portfolio_item(
     user: dict = Depends(get_current_user),
 ):
     """Delete a portfolio position."""
-    deleted = queries.delete_portfolio_item(str(item_id))
+    deleted = queries.delete_portfolio_item(str(item_id), user["user_id"])
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio item not found")
     return {"message": "Portfolio item deleted"}
