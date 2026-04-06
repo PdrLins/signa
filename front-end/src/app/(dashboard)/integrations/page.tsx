@@ -10,7 +10,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Badge } from '@/components/ui/Badge'
-import { Database, Send, Brain, Zap, Sparkles, Clock, RefreshCw, DollarSign } from 'lucide-react'
+import { Database, Send, Brain, Zap, Sparkles, Clock, RefreshCw, DollarSign, Eye } from 'lucide-react'
 
 interface Integration {
   status: string
@@ -48,17 +48,18 @@ const META_STATIC: Record<string, { icon: typeof Brain; color: string }> = {
   gemini: { icon: Sparkles, color: '#4285F4' },
   grok: { icon: Zap, color: '#1DA1F2' },
   scheduler: { icon: Clock, color: '#8B5CF6' },
+  watchdog: { icon: Eye, color: '#F59E0B' },
 }
 
 function useMeta() {
   const it = useI18nStore((s) => s.t).integrations
   const names: Record<string, string> = {
     supabase: it.supabase, telegram: it.telegram, claude: it.claude,
-    gemini: it.gemini, grok: it.grok, scheduler: it.scheduler,
+    gemini: it.gemini, grok: it.grok, scheduler: it.scheduler, watchdog: it.watchdog,
   }
   const descriptions: Record<string, string> = {
     supabase: it.supabaseDesc, telegram: it.telegramDesc, claude: it.claudeDesc,
-    gemini: it.geminiDesc, grok: it.grokDesc, scheduler: it.schedulerDesc,
+    gemini: it.geminiDesc, grok: it.grokDesc, scheduler: it.schedulerDesc, watchdog: it.watchdogDesc,
   }
   return (key: string) => ({
     name: names[key] || key,

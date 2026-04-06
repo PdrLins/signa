@@ -46,15 +46,17 @@ for i in {1..15}; do
   sleep 1
 done
 
-# Build frontend if needed
+# Build frontend with LAN IP so phone/tablet can reach the API
 cd "$FRONTEND"
+export NEXT_PUBLIC_API_URL="http://$LOCAL_IP:8000/api/v1"
+
 if [ ! -f ".next/BUILD_ID" ]; then
-  echo "[Building frontend...]"
+  echo "[Building frontend for $LOCAL_IP...]"
   npm run build --silent 2>/dev/null
 fi
 
 # Start frontend in background (logs to terminal)
-npx next start -H 0.0.0.0 -p 3000 &
+NEXT_PUBLIC_API_URL="http://$LOCAL_IP:8000/api/v1" npx next start -H 0.0.0.0 -p 3000 &
 FRONTEND_PID=$!
 
 echo ""

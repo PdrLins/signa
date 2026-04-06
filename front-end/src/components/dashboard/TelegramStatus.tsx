@@ -65,6 +65,7 @@ export function TelegramStatus() {
       grok: t.integrations.grok,
       gemini: t.integrations.gemini,
       scheduler: t.integrations.scheduler,
+      watchdog: t.integrations.watchdog,
     }
     return names[key] || key
   }

@@ -118,7 +118,7 @@ async def run_watchdog() -> dict:
                     "price": current_price, "entry_price": entry_price,
                     "pnl_pct": round(pnl_total_pct, 2),
                     "sentiment_label": state.last_sentiment.get("label"),
-                    "sentiment_score": state.last_sentiment.get("score"),
+                    "sentiment_score": int(state.last_sentiment.get("score", 50)),
                     "in_watchlist": symbol in watchlist_symbols,
                     "notes": f"Recovered after {state.escalation_count} escalation(s)",
                 })
@@ -150,7 +150,7 @@ async def run_watchdog() -> dict:
             "symbol": symbol, "price": current_price, "entry_price": entry_price,
             "pnl_pct": round(pnl_total_pct, 2), "stop_loss": stop,
             "stop_distance_pct": round(stop_distance_pct, 2) if stop else None,
-            "sentiment_label": sentiment_label, "sentiment_score": sentiment_score,
+            "sentiment_label": sentiment_label, "sentiment_score": int(sentiment_score),
             "in_watchlist": is_in_watchlist,
         }
 

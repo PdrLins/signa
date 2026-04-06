@@ -149,6 +149,11 @@ async def integration_status(user: dict = Depends(get_current_user)):
         "ok": scheduler.running,
     }
 
+    results["watchdog"] = {
+        "status": "active" if settings.watchdog_enabled else "disabled",
+        "ok": settings.watchdog_enabled,
+    }
+
     all_ok = all(r["ok"] for r in results.values())
     return {"status": "healthy" if all_ok else "degraded", "integrations": results}
 
