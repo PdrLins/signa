@@ -301,7 +301,9 @@ function IntegrationCard({ name, integration }: { name: string; integration: Int
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between mb-1">
-            <h3 className="text-sm font-bold" style={{ color: theme.colors.text }}>{meta.name}</h3>
+            <h3 className="text-sm font-bold" style={{ color: theme.colors.text }}>
+              {meta.name}{integration.status === 'local' ? ' (Local)' : ''}
+            </h3>
             <StatusBadge status={integration.status} ok={integration.ok} />
           </div>
           <p className="text-[11px] mb-2" style={{ color: theme.colors.textSub }}>{meta.description}</p>

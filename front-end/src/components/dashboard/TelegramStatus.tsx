@@ -9,7 +9,7 @@ import { client } from '@/lib/api'
 import { useI18nStore } from '@/store/i18nStore'
 import { useToast } from '@/hooks/useToast'
 import Link from 'next/link'
-import { Database, Send, Brain, Zap, Sparkles, Clock } from 'lucide-react'
+import { Database, Send, Brain, Zap, Sparkles, Clock, Eye } from 'lucide-react'
 
 interface Integration {
   status: string
@@ -30,6 +30,7 @@ const LABELS: Record<string, { icon: typeof Send; pingable?: boolean }> = {
   gemini: { icon: Sparkles },
   grok: { icon: Zap },
   scheduler: { icon: Clock },
+  watchdog: { icon: Eye },
 }
 
 function useIntegrations() {
@@ -136,7 +137,9 @@ export function TelegramStatus() {
                     animation: pinging && key === 'telegram' ? 'pulse 1s infinite' : 'none',
                   }}
                 />
-                <span className="text-xs" style={{ color: theme.colors.text }}>{getName(key)}</span>
+                <span className="text-xs" style={{ color: theme.colors.text }}>
+                  {getName(key)}{key === 'claude' && integration.status === 'local' ? ' (local)' : ''}
+                </span>
                 {isPingable && (
                   <span className="text-[9px]" style={{ color: theme.colors.textHint }}>
                     {t.integrations.tapToPing}

@@ -9,7 +9,7 @@ import { client } from '@/lib/api'
 import { WatchlistTable } from '@/components/watchlist/WatchlistTable'
 import { BrainPerformanceWidget } from '@/components/dashboard/DashboardWidgets'
 import { Card } from '@/components/ui/Card'
-import { Database, Send, Brain, Zap, Sparkles, Clock } from 'lucide-react'
+import { Database, Send, Brain, Zap, Sparkles, Clock, Eye } from 'lucide-react'
 
 interface Integration {
   status: string
@@ -23,6 +23,7 @@ const ICONS: Record<string, typeof Brain> = {
   grok: Zap,
   gemini: Sparkles,
   scheduler: Clock,
+  watchdog: Eye,
 }
 
 function ConnectionStatus() {
@@ -65,7 +66,9 @@ function ConnectionStatus() {
               <div key={key} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Icon size={12} style={{ color: integration.ok ? theme.colors.textSub : theme.colors.down }} />
-                  <span className="text-[11px]" style={{ color: theme.colors.text }}>{key}</span>
+                  <span className="text-[11px]" style={{ color: theme.colors.text }}>
+                    {key}{key === 'claude' && integration.status === 'local' ? ' (local)' : ''}
+                  </span>
                 </div>
                 <div className="flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: integration.ok ? theme.colors.up : theme.colors.down }} />
