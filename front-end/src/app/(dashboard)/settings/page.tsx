@@ -20,6 +20,7 @@ const themeIds = Object.keys(themes) as ThemeId[]
 interface AIProviderConfig {
   synthesis: {
     providers: string[]
+    claude_local?: boolean
     available: Record<string, { configured: boolean; model: string }>
   }
   sentiment: {
@@ -49,11 +50,13 @@ function ProviderList({
   providers,
   available,
   onReorder,
+  localProviders,
 }: {
   label: string
   providers: string[]
   available: Record<string, { configured: boolean; model: string }>
   onReorder: (newOrder: string[]) => void
+  localProviders?: Record<string, boolean>
 }) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
@@ -157,11 +160,21 @@ function ProviderList({
                 <Icon size={14} style={{ color: meta.color }} />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium" style={{ color: theme.colors.text }}>
-                  {meta.name}
-                </p>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-sm font-medium" style={{ color: theme.colors.text }}>
+                    {meta.name}
+                  </p>
+                  {localProviders?.[id] && (
+                    <span
+                      className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded"
+                      style={{ backgroundColor: theme.colors.up + '18', color: theme.colors.up }}
+                    >
+                      Local
+                    </span>
+                  )}
+                </div>
                 <p className="text-[10px]" style={{ color: theme.colors.textSub }}>
-                  {info?.model || t.settings.notConfigured} {configured ? '' : t.settings.noApiKey}
+                  {localProviders?.[id] ? 'CLI — $0 cost' : (info?.model || t.settings.notConfigured)} {!localProviders?.[id] && !configured ? t.settings.noApiKey : ''}
                 </p>
               </div>
               <span
@@ -301,6 +314,7 @@ export default function SettingsPage() {
               providers={synthProviders}
               available={aiConfig.synthesis.available}
               onReorder={(p) => { setSynthProviders(p); setDirty(true) }}
+              localProviders={aiConfig.synthesis.claude_local ? { claude: true } : undefined}
             />
             <ProviderList
               label={t.settings.marketSentiment}

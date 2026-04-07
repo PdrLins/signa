@@ -81,6 +81,24 @@ async def integration_status(user: dict = Depends(get_current_user)):
             return "telegram", {"status": "error", "ok": False}
 
     async def _check_claude() -> tuple[str, dict]:
+        # Local CLI mode — check that `claude` binary exists, no API call
+        if settings.claude_local:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "claude", "--version",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+                if proc.returncode == 0:
+                    version = stdout.decode().strip()
+                    return "claude", {"status": "local", "ok": True, "model": f"CLI ({version})", "detail": "Running via Claude Code CLI — $0 cost"}
+                return "claude", {"status": "cli_error", "ok": False, "detail": "Claude CLI returned non-zero exit code"}
+            except FileNotFoundError:
+                return "claude", {"status": "cli_not_found", "ok": False, "detail": "claude command not found in PATH"}
+            except Exception as e:
+                return "claude", {"status": "error", "ok": False, "detail": str(e)}
+
         if not settings.anthropic_api_key:
             return "claude", {"status": "not_configured", "ok": False}
         try:
@@ -223,8 +241,9 @@ async def get_ai_config(user: dict = Depends(get_current_user)):
     return {
         "synthesis": {
             "providers": settings.synthesis_providers,
+            "claude_local": settings.claude_local,
             "available": {
-                "claude": {"configured": bool(settings.anthropic_api_key)},
+                "claude": {"configured": bool(settings.anthropic_api_key) or settings.claude_local},
                 "gemini": {"configured": bool(settings.gemini_api_key)},
             },
         },

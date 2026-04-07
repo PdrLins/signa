@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     trusted_proxies: list[str] = ["127.0.0.1", "::1"]
 
     # --- Claude ---
+    claude_local: bool = False  # True = use local Claude CLI (no API tokens)
     claude_model: str = "claude-sonnet-4-20250514"
     claude_max_tokens: int = 1024
 

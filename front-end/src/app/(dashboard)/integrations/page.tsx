@@ -90,7 +90,7 @@ function BudgetBar({ pct, color }: { pct: number; color: string }) {
   )
 }
 
-function BudgetCard({ budget }: { budget: BudgetData }) {
+function BudgetCard({ budget, claudeLocal }: { budget: BudgetData; claudeLocal?: boolean }) {
   const theme = useTheme()
   const toast = useToast()
   const queryClient = useQueryClient()
@@ -142,6 +142,8 @@ function BudgetCard({ budget }: { budget: BudgetData }) {
               const meta = getMeta(p)
               const Icon = meta.icon
 
+              const isLocal = p === 'claude' && claudeLocal
+
               return (
                 <div key={p} className="space-y-1.5">
                   <div className="flex items-center justify-between">
@@ -150,7 +152,15 @@ function BudgetCard({ budget }: { budget: BudgetData }) {
                       <span className="text-xs font-semibold" style={{ color: theme.colors.text }}>
                         {meta.name}
                       </span>
-                      {pb.is_free_tier && (
+                      {isLocal && (
+                        <span
+                          className="text-[9px] px-1.5 py-0.5 rounded-full font-bold"
+                          style={{ backgroundColor: theme.colors.up + '15', color: theme.colors.up }}
+                        >
+                          LOCAL
+                        </span>
+                      )}
+                      {!isLocal && pb.is_free_tier && (
                         <span
                           className="text-[9px] px-1.5 py-0.5 rounded-full font-bold"
                           style={{ backgroundColor: theme.colors.up + '15', color: theme.colors.up }}
@@ -161,12 +171,12 @@ function BudgetCard({ budget }: { budget: BudgetData }) {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-mono" style={{ color: theme.colors.textSub }}>
-                        {pb.daily_calls} {it.callsToday}
+                        {isLocal ? 'CLI — $0' : `${pb.daily_calls} ${it.callsToday}`}
                       </span>
                     </div>
                   </div>
 
-                  {!pb.is_free_tier && (
+                  {!isLocal && !pb.is_free_tier && (
                     <>
                       <BudgetBar pct={pb.budget_pct_used} color={meta.color} />
                       <div className="flex items-center justify-between">
@@ -354,6 +364,17 @@ export default function IntegrationsPage() {
     staleTime: 30_000,
   })
 
+  const { data: aiConfig } = useQuery<{ synthesis: { claude_local?: boolean } }>({
+    queryKey: ['ai-config'],
+    queryFn: async () => {
+      const res = await client.get('/health/ai-config')
+      return res.data as { synthesis: { claude_local?: boolean } }
+    },
+    staleTime: 60_000,
+  })
+
+  const claudeLocal = aiConfig?.synthesis?.claude_local ?? false
+
   const entries = data ? Object.entries(data.integrations) : []
   const okCount = entries.filter(([, v]) => v.ok).length
   const totalCount = entries.length
@@ -385,7 +406,7 @@ export default function IntegrationsPage() {
       {budgetLoading ? (
         <Skeleton width="100%" height={200} borderRadius={14} />
       ) : budget ? (
-        <BudgetCard budget={budget} />
+        <BudgetCard budget={budget} claudeLocal={claudeLocal} />
       ) : null}
 
       {/* Integration Cards */}
@@ -398,7 +419,11 @@ export default function IntegrationsPage() {
       ) : (
         <div className="space-y-3">
           {entries.map(([name, integration]) => (
-            <IntegrationCard key={name} name={name} integration={integration} />
+            <IntegrationCard
+              key={name}
+              name={name}
+              integration={name === 'claude' && claudeLocal ? { ...integration, status: 'local', ok: true, detail: 'Running via Claude Code CLI — $0 cost' } : integration}
+            />
           ))}
         </div>
       )}

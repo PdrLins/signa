@@ -28,7 +28,20 @@ async def synthesize_signal(
     budget = await _get_budget()
 
     for provider in providers:
-        # Budget check
+        # Local CLI mode — skip budget entirely ($0 cost)
+        if provider == "claude" and settings.claude_local:
+            try:
+                from app.ai.claude_local_client import synthesize_signal as claude_local_synth
+                result = await claude_local_synth(ticker, technical_data, fundamental_data, macro_data, grok_data)
+                if not result.get("error"):
+                    result["_provider"] = "claude-local"
+                    return result
+                logger.debug(f"Claude Local failed for {ticker}: {result.get('error')}, trying next...")
+            except Exception as e:
+                logger.warning(f"Claude Local synthesis error for {ticker}: {e}")
+            continue
+
+        # Budget check for paid providers
         allowed, reason = await budget.can_call(provider, "synthesis")
         if not allowed:
             logger.warning(f"Budget blocked {provider} synthesis for {ticker}: {reason}")
