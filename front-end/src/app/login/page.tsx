@@ -24,7 +24,14 @@ export default function LoginPage() {
   const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const [countdown, setCountdown] = useState(120)
   const [attempts, setAttempts] = useState(0)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const reason = params.get('reason')
+      if (reason === 'expired') return t.login.sessionExpired ?? 'Your session has expired. Please log in again.'
+    }
+    return ''
+  })
   const [loading, setLoading] = useState(false)
 
   const otpRefs = useRef<(HTMLInputElement | null)[]>([])

@@ -54,7 +54,7 @@ async def send_message(chat_id: str, text: str, parse_mode: str = "HTML", urgent
 async def send_otp_message(chat_id: str, otp_code: str) -> bool:
     """Send an OTP verification code via Telegram."""
     from app.notifications.messages import msg
-    return await send_message(chat_id, msg("otp", otp_code=escape(otp_code)))
+    return await send_message(chat_id, msg("otp", otp_code=escape(otp_code)), urgent=True)
 
 
 async def send_gem_alert(signal: dict) -> bool:
