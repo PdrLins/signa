@@ -57,7 +57,12 @@ LAST_BUILD_TIME=$(stat -f '%m' "$LAST_BUILD" 2>/dev/null || echo "0")
 
 if [ ! -f "$LAST_BUILD" ] || [ "$NEWEST_SRC" -gt "$LAST_BUILD_TIME" ]; then
   echo "[Building frontend for $LOCAL_IP...]"
-  npm run build --silent 2>/dev/null
+  if ! npm run build; then
+    echo ""
+    echo "✗ Frontend build failed. See errors above."
+    kill $BACKEND_PID 2>/dev/null
+    exit 1
+  fi
 else
   echo "[Frontend up to date, skipping build]"
 fi

@@ -9,7 +9,6 @@ import {
   LayoutDashboard,
   TrendingUp,
   Star,
-  Briefcase,
   Settings,
   Menu,
   Brain,
