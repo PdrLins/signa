@@ -68,10 +68,10 @@ export interface DailyStats {
 
 export interface ScanTodayRecord {
   id: string | null
-  scan_type: 'PRE_MARKET' | 'MORNING' | 'MIDDAY' | 'PRE_CLOSE' | 'AFTER_CLOSE'
+  scan_type: 'PRE_MARKET' | 'MORNING' | 'MIDDAY' | 'PRE_CLOSE' | 'AFTER_CLOSE' | 'MANUAL'
   label: string
   scheduled_time: string
-  status: 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED' | 'CLOSED'
+  status: 'PENDING' | 'RUNNING' | 'QUEUED' | 'COMPLETE' | 'FAILED' | 'CLOSED'
   tickers_scanned: number
   signals_found: number
   gems_found: number
