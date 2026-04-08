@@ -43,6 +43,19 @@ async def get_gem_signals(
     return {"signals": gems, "count": len(gems)}
 
 
+@router.get("/track-record")
+async def get_track_record(
+    user: dict = Depends(get_current_user),
+):
+    """Historical signal track record — win rates by score range.
+
+    Shows "When brain gave BUY at 75+, win rate was X%" etc.
+    Computed from virtual_trades (closed positions with known outcomes).
+    """
+    record = await asyncio.to_thread(signal_service.get_track_record)
+    return record
+
+
 @router.get("/{ticker}")
 async def get_ticker_signals(
     ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10}$"),

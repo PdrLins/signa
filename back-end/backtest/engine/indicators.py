@@ -70,6 +70,18 @@ def compute_indicators(df: pd.DataFrame, as_of_date: str) -> dict | None:
     atr_s = ta.atr(high, low, close, length=14)
     atr = _last(atr_s)
 
+    # ADX 14 (trend strength)
+    adx_df = ta.adx(high, low, close, length=14)
+    adx = None
+    if adx_df is not None and not adx_df.empty:
+        adx_col = [c for c in adx_df.columns if 'ADX' in c and 'DM' not in c]
+        if adx_col:
+            adx = _last(adx_df[adx_col[0]])
+
+    # Multi-period momentum (3m, 6m)
+    momentum_3m = ((current_close / float(close.iloc[-63])) - 1) if len(close) >= 63 else None
+    momentum_6m = ((current_close / float(close.iloc[-126])) - 1) if len(close) >= 126 else None
+
     # Validate critical values
     if rsi is None or macd_line is None or sma50 is None:
         logger.debug(f"Critical indicator is NaN (rsi={rsi}, macd={macd_line}, sma50={sma50})")
@@ -92,6 +104,9 @@ def compute_indicators(df: pd.DataFrame, as_of_date: str) -> dict | None:
         "volume_ratio": _round(volume_ratio),
         "momentum_5d": _round(momentum_5d),
         "momentum_20d": _round(momentum_20d),
+        "momentum_3m": _round(momentum_3m),
+        "momentum_6m": _round(momentum_6m),
+        "adx": _round(adx),
         "atr": _round(atr),
     }
 

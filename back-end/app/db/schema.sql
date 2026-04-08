@@ -2,7 +2,7 @@
 -- Signa Database Schema — Complete (19 tables)
 -- Idempotent — safe to re-run at any time.
 -- Run in Supabase SQL Editor.
--- Last updated: 2026-04-04
+-- Last updated: 2026-04-06
 -- ============================================================
 
 
@@ -124,6 +124,8 @@ CREATE TABLE IF NOT EXISTS signals (
     grok_data         JSONB DEFAULT '{}'::jsonb,
     signal_style      VARCHAR,
     contrarian_score  INT,
+    probability_vs_spy DOUBLE PRECISION,
+    factor_labels     JSONB,
     kelly_recommendation JSONB DEFAULT '{}'::jsonb,
     scan_id           UUID REFERENCES scans(id) ON DELETE SET NULL,
     created_at        TIMESTAMPTZ DEFAULT now(),
@@ -133,6 +135,8 @@ CREATE INDEX IF NOT EXISTS idx_signals_symbol_date ON signals(symbol, created_at
 CREATE INDEX IF NOT EXISTS idx_signals_scan ON signals(scan_id);
 CREATE INDEX IF NOT EXISTS idx_signals_gem ON signals(is_gem, created_at DESC) WHERE is_gem = TRUE;
 CREATE INDEX IF NOT EXISTS idx_signals_score ON signals(score DESC);
+CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_signals_action_date ON signals(action, created_at DESC);
 
 -- 8. PORTFOLIO
 CREATE TABLE IF NOT EXISTS portfolio (

@@ -5,6 +5,7 @@ Challenge/Verify: JWT only.
 All other endpoints: JWT + brain_token (X-Brain-Token header).
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -160,10 +161,35 @@ async def get_brain_insights(ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10
         signal_style, fund, tech, target, stop, price,
     )
 
+    # Add track record for this score range
+    track_record = None
+    try:
+        from app.services.signal_service import get_track_record
+        record = await asyncio.to_thread(get_track_record)
+        for r in record.get("ranges", []):
+            label = r["score_range"]
+            raw = label.replace("+", "").replace("<", "").replace(">", "")
+            parts = raw.split("-")
+            lo = int(parts[0])
+            hi = int(parts[-1]) if len(parts) > 1 else 101
+            if label.startswith("<"):
+                lo = 0
+            if lo <= score < hi or (label.endswith("+") and score >= lo):
+                track_record = {
+                    "score_range": r["score_range"],
+                    "trades": r["trades"],
+                    "win_rate": r["win_rate"],
+                    "avg_return_pct": r["avg_return_pct"],
+                }
+                break
+    except Exception as e:
+        logger.warning(f"Track record lookup failed for {ticker}: {e}")
+
     return {
         "ticker": ticker_upper,
         "summary": summary,
         "key_points": key_points,
+        "track_record": track_record,
         "knowledge": [
             {
                 "concept": k.get("key_concept", "").replace("_", " ").title(),

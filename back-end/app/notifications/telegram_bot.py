@@ -32,8 +32,12 @@ def _telegram_url(method: str) -> str:
     return f"https://api.telegram.org/bot{settings.telegram_bot_token}/{method}"
 
 
-async def send_message(chat_id: str, text: str, parse_mode: str = "HTML") -> bool:
+async def send_message(chat_id: str, text: str, parse_mode: str = "HTML", urgent: bool = False) -> bool:
     """Send a message via Telegram Bot API."""
+    from app.notifications.messages import is_quiet_hours
+    if not urgent and is_quiet_hours():
+        logger.debug(f"Telegram message suppressed (quiet hours): {text[:50]}...")
+        return False
     try:
         client = _get_http_client()
         resp = await client.post(

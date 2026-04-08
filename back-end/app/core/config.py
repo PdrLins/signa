@@ -79,10 +79,19 @@ class Settings(BaseSettings):
         "fundamentals": 0.10,
     }
 
+    # ETF scoring uses lower dividend weight since many great ETFs don't pay dividends
+    etf_weights: dict = {
+        "fundamental_health": 0.40,
+        "macro": 0.30,
+        "dividend_reliability": 0.15,
+        "sentiment": 0.15,
+    }
+
     # --- Pre-filter ---
     min_volume: int = 200_000
     min_abs_change: float = 0.01
     max_candidates: int = 50
+    discovery_min_market_cap: int = 5_000_000_000  # $5B minimum for discovered tickers
 
     # --- Two-Pass Scanning ---
     ai_candidate_limit: int = 15  # Top N candidates get AI analysis
@@ -101,11 +110,18 @@ class Settings(BaseSettings):
 
     # --- Virtual Portfolio ---
     virtual_trade_max_days: int = 30  # Auto-close virtual trades after N days
+    brain_max_open: int = 20          # Max simultaneous brain positions
 
     # --- Brain Watchdog ---
     watchdog_enabled: bool = True
     watchdog_pnl_alert_pct: float = 2.0       # Alert if P&L drops this % in one interval
     watchdog_stop_proximity_pct: float = 2.0  # Alert if price within this % of stop
+    watchdog_min_notify_pct: float = 0.5      # Don't send Telegram for moves smaller than this %
+
+    # --- Notification Quiet Hours ---
+    notify_quiet_start: int = 18  # 6 PM ET (18:00) -- no notifications after this hour
+    notify_quiet_end: int = 6     # 6 AM ET (06:00) -- notifications resume
+    notify_quiet_enabled: bool = True
 
     # --- Brain Editor ---
     brain_token_secret: str = ""  # Separate secret for brain tokens

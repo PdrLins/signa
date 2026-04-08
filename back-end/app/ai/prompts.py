@@ -155,6 +155,16 @@ def format_macro(macro_data: dict) -> str:
         lines.append(f"- Unemployment: {macro_data['unemployment_rate']:.1f}%")
     if macro_data.get("vix") is not None:
         lines.append(f"- VIX: {macro_data['vix']:.1f}")
+    fg = macro_data.get("fear_greed")
+    if fg and isinstance(fg, dict) and fg.get("score") is not None:
+        lines.append(f"- Fear & Greed Index: {fg['score']:.0f}/100 ({fg.get('label', 'Unknown')})")
+    pulse = macro_data.get("macro_pulse")
+    if pulse and isinstance(pulse, dict) and pulse.get("trends"):
+        lines.append(f"- Market Pulse: {pulse.get('summary', 'N/A')}")
+        for trend in pulse["trends"][:3]:
+            topic = trend.get("topic", "")
+            impact = trend.get("impact", "NEUTRAL")
+            lines.append(f"  * {topic} [{impact}]")
     return "\n".join(lines)
 
 

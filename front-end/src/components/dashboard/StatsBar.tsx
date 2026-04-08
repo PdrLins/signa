@@ -14,8 +14,8 @@ export function StatsBar() {
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {Array.from({ length: 4 }).map((_, i) => (
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={i} width="100%" height={100} borderRadius={14} />
         ))}
       </div>
@@ -25,7 +25,7 @@ export function StatsBar() {
   if (!stats) return null
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
       <StatCard
         label={t.stats.gems}
         value={stats.gems_today}
@@ -50,6 +50,18 @@ export function StatsBar() {
         value={`$${stats.ai_cost_today.toFixed(2)}`}
         sub={t.stats.today}
         valueColor={theme.colors.warning}
+      />
+      <StatCard
+        label={t.stats.fearGreed}
+        value={stats.fear_greed ? `${stats.fear_greed.score.toFixed(0)}` : t.stats.noData}
+        sub={stats.fear_greed?.label ?? t.stats.noData}
+        valueColor={
+          !stats.fear_greed ? theme.colors.textSub
+          : stats.fear_greed.score <= 25 ? theme.colors.down
+          : stats.fear_greed.score <= 45 ? theme.colors.warning
+          : stats.fear_greed.score >= 55 ? theme.colors.up
+          : theme.colors.textSub
+        }
       />
     </div>
   )

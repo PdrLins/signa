@@ -29,9 +29,24 @@ TSX_TICKERS = [
     "TFII.TO", "WFG.TO", "RBA.TO",
     # Cannabis
     "WEED.TO", "ACB.TO", "TLRY.TO", "CRON.TO", "OGI.TO",
-    # ETFs
-    "XIU.TO", "XIC.TO", "VFV.TO", "ZDV.TO", "XEI.TO",
-    "ZWC.TO", "XDIV.TO", "VDY.TO",
+    # ETFs — All-in-one
+    "XEQT.TO", "XGRO.TO", "XBAL.TO", "VEQT.TO", "VGRO.TO", "VBAL.TO",
+    # ETFs — Canadian Equity
+    "XIU.TO", "XIC.TO", "VCN.TO", "ZCN.TO",
+    # ETFs — US / S&P 500
+    "VFV.TO", "ZSP.TO", "XUS.TO",
+    # ETFs — Dividend / Income
+    "XEI.TO", "ZDV.TO", "VDY.TO", "CDZ.TO", "XDIV.TO",
+    # ETFs — Covered Call
+    "ZWC.TO", "ZWB.TO",
+    # ETFs — Tech / Growth
+    "TEC.TO", "QQC-F.TO",
+    # ETFs — International
+    "XEF.TO", "VIU.TO", "ZEA.TO",
+    # ETFs — Bonds
+    "ZAG.TO", "VAB.TO", "XBB.TO",
+    # ETFs — Sector
+    "XEG.TO", "ZEB.TO", "XRE.TO",
 ]
 
 NYSE_TICKERS = [
@@ -145,6 +160,32 @@ def get_exchange(ticker: str) -> str:
     return "NYSE"
 
 
+# Known ETF tickers across all exchanges
+_ETF_TICKERS = {
+    # TSX ETFs
+    "XEQT.TO", "XGRO.TO", "XBAL.TO", "VEQT.TO", "VGRO.TO", "VBAL.TO",
+    "XIU.TO", "XIC.TO", "VCN.TO", "ZCN.TO",
+    "VFV.TO", "ZSP.TO", "XUS.TO",
+    "XEI.TO", "ZDV.TO", "VDY.TO", "CDZ.TO", "XDIV.TO",
+    "ZWC.TO", "ZWB.TO",
+    "TEC.TO", "QQC-F.TO",
+    "XEF.TO", "VIU.TO", "ZEA.TO",
+    "ZAG.TO", "VAB.TO", "XBB.TO",
+    "XEG.TO", "ZEB.TO", "XRE.TO",
+    # US ETFs
+    "QQQ", "SPY", "TQQQ", "SQQQ",
+}
+
+
+def get_asset_class(ticker: str) -> str:
+    """Classify a ticker as ETF, CRYPTO, or STOCK."""
+    if ticker.endswith("-USD"):
+        return "CRYPTO"
+    if ticker in _ETF_TICKERS:
+        return "ETF"
+    return "STOCK"
+
+
 def get_ticker_count() -> int:
     """Total unique tickers in the universe."""
     return len(get_all_tickers())
@@ -174,10 +215,15 @@ def discover_tickers() -> list[str]:
         try:
             result = yf.screen(query)
             quotes = result.get("quotes", []) if isinstance(result, dict) else []
+            from app.core.config import settings
             for q in quotes:
                 symbol = q.get("symbol", "")
                 # Skip OTC, warrants, preferred shares, non-US/CA
                 if not symbol or "." in symbol and not symbol.endswith(".TO"):
+                    continue
+                # Skip small/micro caps — discovery works best with established names
+                market_cap = q.get("marketCap", 0) or 0
+                if market_cap < settings.discovery_min_market_cap:
                     continue
                 if symbol not in core:
                     discovered.add(symbol)

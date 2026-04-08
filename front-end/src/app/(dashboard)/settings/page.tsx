@@ -37,6 +37,15 @@ interface AIProviderConfig {
     score_buy_risk: number
     score_hold: number
   }
+  watchdog?: {
+    min_notify_pct: number
+    pnl_alert_pct: number
+    stop_proximity_pct: number
+    brain_max_open: number
+    notify_quiet_enabled: boolean
+    notify_quiet_start: number
+    notify_quiet_end: number
+  }
 }
 
 const PROVIDER_META: Record<string, { name: string; icon: typeof Brain; color: string }> = {
@@ -220,6 +229,12 @@ export default function SettingsPage() {
   const [scoreBuySafe, setScoreBuySafe] = useState(62)
   const [scoreBuyRisk, setScoreBuyRisk] = useState(65)
   const [scoreHold, setScoreHold] = useState(55)
+  const [wdMinNotify, setWdMinNotify] = useState(0.5)
+  const [wdPnlAlert, setWdPnlAlert] = useState(2.0)
+  const [brainMaxOpen, setBrainMaxOpen] = useState(20)
+  const [quietEnabled, setQuietEnabled] = useState(true)
+  const [quietStart, setQuietStart] = useState(18)
+  const [quietEnd, setQuietEnd] = useState(6)
   const [dirty, setDirty] = useState(false)
   const [confirmSave, setConfirmSave] = useState(false)
 
@@ -237,6 +252,14 @@ export default function SettingsPage() {
         setScoreBuyRisk(aiConfig.thresholds.score_buy_risk)
         setScoreHold(aiConfig.thresholds.score_hold)
       }
+      if (aiConfig.watchdog) {
+        setWdMinNotify(aiConfig.watchdog.min_notify_pct)
+        setWdPnlAlert(aiConfig.watchdog.pnl_alert_pct)
+        setBrainMaxOpen(aiConfig.watchdog.brain_max_open)
+        setQuietEnabled(aiConfig.watchdog.notify_quiet_enabled)
+        setQuietStart(aiConfig.watchdog.notify_quiet_start)
+        setQuietEnd(aiConfig.watchdog.notify_quiet_end)
+      }
     }
   }, [aiConfig])
 
@@ -251,13 +274,19 @@ export default function SettingsPage() {
         score_buy_safe: scoreBuySafe,
         score_buy_risk: scoreBuyRisk,
         score_hold: scoreHold,
+        watchdog_min_notify_pct: wdMinNotify,
+        watchdog_pnl_alert_pct: wdPnlAlert,
+        brain_max_open: brainMaxOpen,
+        notify_quiet_enabled: quietEnabled,
+        notify_quiet_start: quietStart,
+        notify_quiet_end: quietEnd,
       })
       toast.show(t.settings.configSaved, 'success')
       setDirty(false)
     } catch {
       toast.show(t.settings.configSaveFailed, 'error')
     }
-  }, [synthProviders, sentProviders, aiEnabled, aiLimit, maxCandidates, scoreBuySafe, scoreBuyRisk, scoreHold, toast, t])
+  }, [synthProviders, sentProviders, aiEnabled, aiLimit, maxCandidates, scoreBuySafe, scoreBuyRisk, scoreHold, wdMinNotify, wdPnlAlert, brainMaxOpen, quietEnabled, quietStart, quietEnd, toast, t])
 
   const handleLogout = () => {
     logout()
@@ -478,6 +507,124 @@ export default function SettingsPage() {
             <p className="text-[9px] mt-1" style={{ color: theme.colors.textHint }}>
               {t.settings.belowScoreAvoid}
             </p>
+          </div>
+        </div>
+      </Card>
+
+      {/* Watchdog */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+            {t.settings.watchdog ?? 'Brain Watchdog'}
+          </p>
+        </div>
+        <div className="space-y-5">
+          {/* Min notification threshold */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm font-medium" style={{ color: theme.colors.text }}>
+                {t.settings.minNotifyThreshold ?? 'Min Alert Threshold'}
+              </p>
+              <span className="text-sm font-bold tabular-nums" style={{ color: theme.colors.warning }}>
+                {wdMinNotify.toFixed(1)}%
+              </span>
+            </div>
+            <input
+              type="range" min={0} max={3} step={0.1} value={wdMinNotify}
+              onChange={(e) => { setWdMinNotify(Number(e.target.value)); setDirty(true) }}
+              className="w-full"
+            />
+            <div className="flex justify-between">
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>0% ({t.settings.allAlerts ?? 'All alerts'})</span>
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>3% ({t.settings.significantOnly ?? 'Significant only'})</span>
+            </div>
+            <p className="text-[9px] mt-1" style={{ color: theme.colors.textHint }}>
+              {t.settings.minNotifyDesc ?? 'Moves smaller than this are logged but won\'t send Telegram notifications.'}
+            </p>
+          </div>
+
+          {/* P&L alert threshold */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm font-medium" style={{ color: theme.colors.text }}>
+                {t.settings.pnlAlertThreshold ?? 'Interval Drop Alert'}
+              </p>
+              <span className="text-sm font-bold tabular-nums" style={{ color: theme.colors.down }}>
+                -{wdPnlAlert.toFixed(1)}%
+              </span>
+            </div>
+            <input
+              type="range" min={0.5} max={5} step={0.5} value={wdPnlAlert}
+              onChange={(e) => { setWdPnlAlert(Number(e.target.value)); setDirty(true) }}
+              className="w-full"
+            />
+            <div className="flex justify-between">
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>0.5% ({t.settings.sensitive ?? 'Sensitive'})</span>
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>5% ({t.settings.relaxed ?? 'Relaxed'})</span>
+            </div>
+            <p className="text-[9px] mt-1" style={{ color: theme.colors.textHint }}>
+              {t.settings.pnlAlertDesc ?? 'Triggers concern when a position drops this much in a single 15-min interval.'}
+            </p>
+          </div>
+
+          {/* Max brain positions */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm font-medium" style={{ color: theme.colors.text }}>
+                {t.settings.maxBrainPositions ?? 'Max Brain Positions'}
+              </p>
+              <span className="text-sm font-bold tabular-nums" style={{ color: theme.colors.primary }}>
+                {brainMaxOpen}
+              </span>
+            </div>
+            <input
+              type="range" min={5} max={50} step={1} value={brainMaxOpen}
+              onChange={(e) => { setBrainMaxOpen(Number(e.target.value)); setDirty(true) }}
+              className="w-full"
+            />
+            <div className="flex justify-between">
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>5 ({t.settings.conservative ?? 'Conservative'})</span>
+              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>50 ({t.settings.aggressive ?? 'Aggressive'})</span>
+            </div>
+            <p className="text-[9px] mt-1" style={{ color: theme.colors.textHint }}>
+              {t.settings.maxBrainDesc ?? 'Maximum concurrent brain auto-picks. When full, the brain rotates out weaker positions for stronger signals.'}
+            </p>
+          </div>
+
+          {/* Quiet Hours */}
+          <div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium" style={{ color: theme.colors.text }}>
+                  {t.settings.quietHours ?? 'Quiet Hours'}
+                </p>
+                <p className="text-[10px]" style={{ color: theme.colors.textSub }}>
+                  {t.settings.quietHoursDesc ?? 'Block Telegram notifications during these hours.'}
+                </p>
+              </div>
+              <button
+                onClick={() => { setQuietEnabled(!quietEnabled); setDirty(true) }}
+                className="w-11 h-6 rounded-full transition-all relative"
+                style={{ backgroundColor: quietEnabled ? theme.colors.primary : theme.colors.border }}
+              >
+                <div
+                  className="w-5 h-5 rounded-full bg-white absolute top-0.5 transition-all"
+                  style={{ left: quietEnabled ? 22 : 2 }}
+                />
+              </button>
+            </div>
+            {quietEnabled && (
+              <div
+                className="mt-2 flex items-center gap-3 rounded-lg px-3 py-2"
+                style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}` }}
+              >
+                <span className="text-[11px] font-medium" style={{ color: theme.colors.textSub }}>
+                  {(t.settings.quietHoursRange ?? '{start} PM - {end} AM ET')
+                    .replace('{start}', String(quietStart > 12 ? quietStart - 12 : quietStart))
+                    .replace('{end}', String(quietEnd > 12 ? quietEnd - 12 : quietEnd))}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </Card>

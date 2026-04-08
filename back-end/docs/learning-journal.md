@@ -134,11 +134,172 @@ Impact on pending suggestions:
 
 | Suggestion | Confidence | Decision | Rationale |
 |-----------|-----------|----------|-----------|
-| low_confidence_guard (40->50%) | 80% | APPROVE | Backtest shows too many marginal BUYs |
-| discovery_market_cap_filter ($5B+) | 70% | APPROVE | Day 1 found 80 tickers, 0 scored 72+ |
+| low_confidence_guard (40->50%) | 80% | APPLIED | Backtest shows too many marginal BUYs |
+| discovery_market_cap_filter ($5B+) | 70% | APPLIED | Day 1 found 80 tickers, 0 scored 72+ |
 | tech_only_score_calibration (+10) | 75% | WAIT | See if forced AI on open positions is enough first |
 | watchdog_cooldown (3 holds -> hourly) | 65% | WAIT | Only 1 day of data |
 | brain_bucket_diversification | 50% | REJECT | Brain naturally picks quality, don't force it |
+
+---
+
+## Day 2 -- April 7, 2026
+
+### Environment
+- Market: VOLATILE (VIX ~26.5)
+- Fear & Greed: 21.4 (Extreme Fear)
+- Scans: 13 (5 scheduled + 8 manual during development)
+- Signals: 522 total (31 BUY, 226 HOLD, 265 AVOID)
+- Budget: Claude $0.18, Grok $0.02, Total $0.20
+- Brain positions: 11 open (was 10, added AVGO), 2 closed total
+- Universe: expanded to 282 tickers (added 34 Canadian ETFs)
+
+### Portfolio Performance (End of Day 2)
+- **Realized P&L: -2.2%** (HUM +0.8%, PYPL -3.0%)
+- **Unrealized P&L: +0.46% avg** (+6.0% total across 13 positions)
+- **Winners: 10/13** (77% of open positions are green)
+- **Best position: VLO +3.7%**
+- **Worst position: CCO.TO -2.2%** (under watchdog monitoring)
+
+### Incidents
+
+**1. PYPL watchdog exit (-3.0%)**
+- What: PYPL entered at score 72 (lowest brain pick), gradually dropped to -3.0%. Watchdog detected slow bleed at -3%, fetched sentiment, sentiment was bearish, auto-sold.
+- Root cause: Marginal entry (score 72 is the minimum threshold). PYPL had weak fundamentals for the bucket it was in.
+- Lesson: Score 72 picks have higher failure rate. Consider raising BRAIN_MIN_SCORE to 73-74 to reduce marginal entries.
+- Status: CLOSED (watchdog worked correctly)
+- Verdict: CORRECT EXIT. The -3.0% loss was better than holding to the stop at $43 (-7.1%).
+
+**2. discovered_set bug crashed all AI signals**
+- What: After code refactoring, `_process_candidate()` became a module-level function but still referenced `discovered_set` via closure. All 15 AI-analyzed signals failed silently.
+- Root cause: Variable scoping -- `discovered_set` was defined in `run_scan()` but not passed as parameter.
+- Fix: Added `discovered_set` as explicit parameter to `_process_candidate()`.
+- Status: APPLIED
+- Verdict: FIXED
+
+**3. CNN Fear & Greed HTTP 418**
+- What: CNN blocked our generic "Mozilla/5.0" User-Agent, returning HTTP 418 ("I'm a teapot").
+- Fix: Updated to full Chrome User-Agent string.
+- Status: APPLIED
+- Verdict: WORKING (F&G = 21.4, Extreme Fear)
+
+**4. Supabase HTTP/2 disconnections (recurring)**
+- What: Multiple 500 errors from stale HTTP/2 connections dropping. stats, virtual-portfolio, and positions-summary endpoints affected.
+- Fix: Added `@with_retry` decorator that catches RemoteProtocolError, resets client, retries once.
+- Status: APPLIED
+- Verdict: SIGNIFICANTLY REDUCED (not eliminated)
+
+**5. Stuck scans from code reloads**
+- What: 9 scans stuck in RUNNING status from server restarts during development, blocking new scan triggers.
+- Fix: Manual cleanup (set to FAILED), no code change needed.
+- Status: RESOLVED
+- Verdict: Expected during development, not a production issue
+
+**6. Hardcoded open_trades[:10] limit**
+- What: Brain performance page showed 9 positions when 11 existed. The `get_virtual_summary()` function had `open_trades[:10]` hardcoded from when max was 10.
+- Fix: Removed the slice, now enriches all open trades.
+- Status: APPLIED
+- Verdict: FIXED
+
+### Features Shipped (Day 2)
+
+**Brain Intelligence:**
+1. Quality factor scoring (Fama-French QMJ) -- +6 bonus for high-quality SAFE_INCOME
+2. Momentum factor scoring (UMD) -- +6 bonus for strong 3m/6m trend on HIGH_RISK
+3. Short squeeze detection -- up to +20 bonus for high short float + bullish momentum
+4. ADX indicator (trend strength) for dynamic strategy selection
+5. SMA200 overextension blocker (>50% above = blocked)
+6. Crypto volatility scaling (half Kelly, 8% max stop)
+7. Portfolio rotation (replace weakest with stronger when full, +5 threshold)
+8. Composite concern rule (weakest + losing + held 1d+ = auto-escalate)
+9. Force-sell on catastrophic events (-8% total, score < 50, SELL signal + negative P&L)
+10. Watchdog slow bleed detection (-3% total)
+11. Watchdog cooldown (3 bullish holds -> 1hr pause)
+12. ETF-specific scoring weights (15% dividend instead of 35%)
+13. Fear & Greed Index in scoring + AI prompts
+14. VIX term structure (contango/backwardation)
+15. Intermarket signals (gold, oil, copper/gold ratio)
+16. PEAD earnings drift module (new file)
+17. Brain Telegram notifications (buy/sell/force-sell)
+
+**Frontend:**
+1. Market status floating pill (top-right, hover for details)
+2. ETF badge on signal cards
+3. Asset type filter (Stock/ETF/Crypto)
+4. Sub-score pills on signal detail page
+5. Probability chip ("70% vs SPY") on signal cards
+6. Fear & Greed in stats bar
+7. Track record table on brain performance page
+8. Short interest in fundamentals grid
+9. Settings: Watchdog section (min notify, P&L alert, max positions sliders)
+10. How It Works: 7 new sections + updated card/detail reading guides
+
+**Performance:**
+1. All stats endpoints wrapped in asyncio.to_thread (was blocking event loop)
+2. Supabase retry-on-disconnect decorator
+3. Overview signals 200 -> 50, sidebar 200 -> 50
+4. Price cache TTL 5min -> 10min
+5. Stats cache TTL 30s -> 120s
+6. Virtual portfolio + charts: 5-min TTL cache added
+7. New DB indexes: signals(created_at DESC), signals(action, created_at DESC)
+
+**Infrastructure:**
+1. 34 Canadian ETFs added to universe (XEQT, VEQT, VFV, TEC, etc.)
+2. Asset class detection (STOCK/ETF/CRYPTO)
+3. Brain knowledge: 13 new entries seeded
+4. Backtest regression tracker (`python -m backtest.compare_runs`)
+5. Backtest scorer ported: quality, momentum, short squeeze, SMA200 guard
+
+### Backtest Comparison (Day 2 vs Day 1)
+
+| Metric | Day 1 Baseline | Day 2 (Phase 1) | Change |
+|--------|---------------|-----------------|--------|
+| 10d Win Rate | 56.8% | 58.4% | +1.6% |
+| 10d Avg Return | +0.57% | +0.75% | +0.18% |
+| 20d Win Rate | 59.9% | 61.5% | +1.6% |
+| 20d Avg Return | +1.59% | +1.89% | +0.30% |
+| SAFE_INCOME WR | 59.1% | 60.1% | +1.0% |
+| HIGH_RISK WR | 53.8% | 55.8% | +2.0% |
+| Signals 70+ | 1,810 | 2,882 | +59% |
+| Signals 80+ | 0 | 30 | New tier |
+
+### Patterns Observed
+
+**1. All brain picks are still SAFE_INCOME**
+- 11/11 positions are SAFE_INCOME. Zero HIGH_RISK. Same as Day 1.
+- VIX at 26.5 (VOLATILE regime) reduces HIGH_RISK scores by 15%, making them harder to reach 72+.
+- This is the regime system working correctly -- conservative in volatile markets.
+
+**2. AVGO is the standout**
+- Scored 77-79 across 4 scans. Strong fundamentals, momentum in sweet spot.
+- Brain correctly identified and picked it.
+
+**3. Fear & Greed at 21 (Extreme Fear) is contrarian bullish**
+- Historical data: F&G below 25 has preceded market rallies ~70% of the time.
+- The brain's macro score incorporates this, but current positions are all SAFE_INCOME which is appropriate for extreme fear.
+
+**4. Watchdog noise on IFC.TO continues**
+- 24 events today, mostly HOLD_THROUGH_DIP. Cooldown should reduce this.
+- IFC.TO is a Contrarian pick hovering near thresholds -- the brain correctly holds.
+
+**5. PYPL was the only loss**
+- Entry score 72 (minimum). Lost -3.0%.
+- Lesson: marginal picks (72) fail more often than strong picks (75+).
+
+### Metrics to Track Tomorrow
+- [ ] Did the composite concern rule catch any positions early?
+- [ ] Is the watchdog cooldown reducing IFC.TO noise?
+- [ ] Are ETFs getting scanned and scored correctly (XEQT in watchlist)?
+- [ ] Does portfolio rotation trigger when a new 77+ signal appears and brain is full?
+- [ ] Net P&L trajectory -- are we heading toward +1-2% monthly?
+- [ ] Does Fear & Greed persist in stats bar across sessions?
+
+### Learnings for Brain
+
+1. **Score 72 picks have higher failure rate** -- PYPL was the only loss, and it was the lowest entry score. Consider raising BRAIN_MIN_SCORE to 73.
+2. **Slow bleed detection works** -- PYPL was caught at -3.0% instead of hitting stop at -7.1%. Saved ~4% loss.
+3. **The brain is conservative in volatile markets** -- all SAFE_INCOME picks, which is correct behavior.
+4. **10/13 positions are winners** (77%) -- the brain's stock picking is working, the issue was one marginal entry.
+5. **VLO +3.7% is covering PYPL's -3.0% loss** -- diversification across 11 positions means one bad pick doesn't kill the portfolio.
 
 ---
 

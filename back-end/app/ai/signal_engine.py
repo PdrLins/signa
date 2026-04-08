@@ -27,6 +27,7 @@ def compute_score(
     synthesis: dict,
     bucket: str,
     market_regime: str = "TRENDING",
+    asset_type: str = "STOCK",
 ) -> tuple[int, dict]:
     """Compute the composite score using bucket-specific weights.
 
@@ -71,10 +72,15 @@ def compute_score(
             catalyst_type = "PRE_EARNINGS"
 
     if bucket == "SAFE_INCOME":
-        weights = {**settings.safe_income_weights}
+        # ETFs get reduced dividend weight -- great ETFs like XEQT don't pay much
+        if asset_type == "ETF":
+            weights = {**settings.etf_weights}
+        else:
+            weights = {**settings.safe_income_weights}
         dividend_score = _score_dividend_reliability(fundamental_data)
         fundamental_score = _score_fundamentals(fundamental_data, bucket)
         macro_score = _score_macro(macro_data)
+        quality_score = _score_quality(fundamental_data)
 
         # Dynamic sentiment weight for low-mention tickers
         if grok_mention_count < 100:
@@ -92,16 +98,23 @@ def compute_score(
             + raw_sentiment_score * weights["sentiment"]
         )
 
+        # Quality bonus for SAFE_INCOME (high-quality companies deserve a boost)
+        quality_bonus = max(0, (quality_score - 60) * 0.15)  # Up to +6 points
+        total = total + quality_bonus
+
         breakdown = {
             "dividend_reliability": round(dividend_score * weights["dividend_reliability"], 1),
             "fundamental_health": round(fundamental_score * weights["fundamental_health"], 1),
             "macro": round(macro_score * weights["macro"], 1),
             "sentiment": round(raw_sentiment_score * weights["sentiment"], 1),
+            "quality_score": round(quality_score, 1),
+            "quality_bonus": round(quality_bonus, 1),
         }
     else:
         weights = {**settings.high_risk_weights}
         catalyst_score = _score_catalyst(synthesis)
         technical_score = _score_technical_momentum(technical_data)
+        momentum_factor_score = _score_momentum_factor(technical_data)
         fundamental_score = _score_fundamentals(fundamental_data, bucket)
 
         # Dynamic sentiment weight for low-mention tickers
@@ -120,11 +133,23 @@ def compute_score(
             + fundamental_score * weights["fundamentals"]
         )
 
+        # Short squeeze bonus (additive, not weighted)
+        squeeze_bonus = _score_short_squeeze(fundamental_data, technical_data)
+        if squeeze_bonus > 0:
+            total = total + squeeze_bonus
+
+        # Momentum factor bonus (strong 3m+6m trend = higher conviction)
+        momentum_bonus = max(0, (momentum_factor_score - 60) * 0.15)  # Up to +6 points
+        total = total + momentum_bonus
+
         breakdown = {
             "sentiment": round(raw_sentiment_score * weights["sentiment"], 1),
             "catalyst": round(catalyst_score * weights["catalyst"], 1),
             "technical_momentum": round(technical_score * weights["technical_momentum"], 1),
             "fundamentals": round(fundamental_score * weights["fundamentals"], 1),
+            "short_squeeze_bonus": squeeze_bonus,
+            "momentum_factor_score": round(momentum_factor_score, 1),
+            "momentum_bonus": round(momentum_bonus, 1),
         }
 
     score = max(0, min(100, total))
@@ -307,6 +332,11 @@ def check_blockers(
     if rsi is not None and rsi > 75:
         reasons.append(f"RSI overbought at {rsi:.0f} (>75 has inverted win rate)")
 
+    # 6. SMA200 overextension — backtest shows tickers >50% above SMA200 fail most BUYs
+    sma200_dist = technical_data.get("vs_sma200")
+    if sma200_dist is not None and sma200_dist > 50:
+        reasons.append(f"Extreme overextension: {sma200_dist:.0f}% above SMA200 (>50% has inverted returns)")
+
     is_blocked = len(reasons) > 0
     if is_blocked:
         logger.warning(f"Signal BLOCKED: {', '.join(reasons)}")
@@ -370,6 +400,210 @@ def _score_dividend_reliability(fund_data: dict) -> float:
     return max(0, min(100, score))
 
 
+def _score_short_squeeze(fund_data: dict, technical_data: dict) -> float:
+    """Bonus score for short squeeze potential (0-20).
+
+    High short float + bullish momentum = squeeze catalyst.
+    Only applies as a bonus, never penalizes.
+    """
+    short_float = fund_data.get("short_percent_of_float")
+    if short_float is None or short_float < 0.05:
+        return 0
+
+    bonus = 0
+    # High short interest (>10%)
+    if short_float >= 0.20:
+        bonus += 12
+    elif short_float >= 0.10:
+        bonus += 8
+    else:
+        bonus += 4
+
+    # Bullish momentum confirmation
+    rsi = technical_data.get("rsi")
+    macd_hist = technical_data.get("macd_histogram")
+    if rsi is not None and 50 <= rsi <= 70 and macd_hist is not None and macd_hist > 0:
+        bonus += 8
+
+    return min(20, bonus)
+
+
+def _score_quality(fund_data: dict) -> float:
+    """Score company quality (0-100) — Fama-French QMJ inspired.
+
+    Quality = profitability + earnings stability + low leverage.
+    High-quality companies have persistent alpha with lower drawdowns.
+    """
+    score = 50.0
+
+    # Profitability (ROE proxy via profit margins)
+    margin = fund_data.get("profit_margin") or fund_data.get("profitMargins")
+    if margin is not None:
+        if margin > 0.25:
+            score += 15
+        elif margin > 0.15:
+            score += 10
+        elif margin > 0.08:
+            score += 5
+        elif margin < 0:
+            score -= 15
+
+    # Earnings growth stability
+    eg = fund_data.get("eps_growth")
+    rg = fund_data.get("revenue_growth")
+    if eg is not None and rg is not None:
+        if eg > 0.10 and rg > 0.05:
+            score += 10  # Growing on both lines
+        elif eg > 0 and rg > 0:
+            score += 5
+        elif eg < -0.10:
+            score -= 10
+
+    # Low leverage
+    dte = fund_data.get("debt_to_equity")
+    if dte is not None:
+        if dte < 30:
+            score += 10
+        elif dte < 80:
+            score += 5
+        elif dte > 200:
+            score -= 10
+
+    # Forward P/E below trailing P/E = earnings acceleration
+    fpe = fund_data.get("forward_pe")
+    pe = fund_data.get("pe_ratio")
+    if fpe is not None and pe is not None and pe > 0:
+        if fpe < pe * 0.85:
+            score += 10  # Strong earnings acceleration
+        elif fpe < pe:
+            score += 5
+
+    return max(0, min(100, score))
+
+
+def _score_momentum_factor(technical_data: dict) -> float:
+    """Score momentum factor (0-100) — Fama-French UMD inspired.
+
+    Uses 3-month and 6-month returns. Momentum winners (positive 3m+6m)
+    keep winning on 1-12 month horizon. Strongest documented factor.
+    """
+    score = 50.0
+
+    mom_3m = technical_data.get("momentum_3m")
+    mom_6m = technical_data.get("momentum_6m")
+
+    if mom_3m is not None:
+        if mom_3m > 15:
+            score += 15
+        elif mom_3m > 5:
+            score += 10
+        elif mom_3m > 0:
+            score += 3
+        elif mom_3m < -15:
+            score -= 15
+        elif mom_3m < -5:
+            score -= 10
+        elif mom_3m < 0:
+            score -= 3
+
+    if mom_6m is not None:
+        if mom_6m > 20:
+            score += 10
+        elif mom_6m > 10:
+            score += 5
+        elif mom_6m < -20:
+            score -= 10
+        elif mom_6m < -10:
+            score -= 5
+
+    # ADX confirmation: strong trend makes momentum more reliable
+    adx = technical_data.get("adx")
+    if adx is not None:
+        if adx > 30:
+            score += 5  # Strong trend confirmation
+        elif adx < 15:
+            score -= 5  # No trend = momentum unreliable
+
+    return max(0, min(100, score))
+
+
+# ============================================================
+# PROBABILITY VS BENCHMARK
+# ============================================================
+
+# Derived from backtest: 18,759 signals across ~18 months (tech-only, no AI).
+# Maps score ranges to 20-day probability of beating SPY.
+# AI-analyzed signals add ~5% to win rate over tech-only baseline.
+_PROB_VS_SPY = {
+    "SAFE_INCOME": {
+        (80, 101): 68.0,
+        (70, 80): 64.5,
+        (65, 70): 62.2,
+        (60, 65): 58.4,
+        (55, 60): 54.0,
+        (0, 55): 48.0,
+    },
+    "HIGH_RISK": {
+        (80, 101): 62.0,
+        (70, 80): 59.5,
+        (65, 70): 56.7,
+        (60, 65): 53.6,
+        (55, 60): 50.5,
+        (0, 55): 45.0,
+    },
+}
+
+
+def compute_probability_vs_spy(score: int, bucket: str, has_ai: bool = False) -> float:
+    """Compute probability of beating SPY in 20 days based on backtest data.
+
+    Returns a percentage (e.g. 62.2 means "62.2% chance of beating SPY").
+    AI-analyzed signals get a +5% boost over tech-only baseline.
+    """
+    table = _PROB_VS_SPY.get(bucket, _PROB_VS_SPY["HIGH_RISK"])
+    prob = 50.0  # default: coin flip
+    for (lo, hi), p in table.items():
+        if lo <= score < hi:
+            prob = p
+            break
+    if has_ai:
+        prob = min(85.0, prob + 5.0)
+    return round(prob, 1)
+
+
+# ============================================================
+# FACTOR IMPACT LABELS
+# ============================================================
+
+def compute_factor_labels(breakdown: dict, bucket: str, asset_type: str = "STOCK") -> dict:
+    """Convert raw sub-scores into qualitative labels: Strong / Neutral / Weak.
+
+    Thresholds: weighted contribution >= 60% of max -> Strong, >= 35% -> Neutral, else Weak.
+    """
+    if bucket == "SAFE_INCOME":
+        factors = ["dividend_reliability", "fundamental_health", "macro", "sentiment"]
+        if asset_type == "ETF":
+            max_weights = {"fundamental_health": 40, "macro": 30, "dividend_reliability": 15, "sentiment": 15}
+        else:
+            max_weights = {"dividend_reliability": 35, "fundamental_health": 30, "macro": 25, "sentiment": 10}
+    else:
+        factors = ["sentiment", "catalyst", "technical_momentum", "fundamentals"]
+        max_weights = {"sentiment": 35, "catalyst": 30, "technical_momentum": 25, "fundamentals": 10}
+
+    labels = {}
+    for factor in factors:
+        weighted_val = breakdown.get(factor, 0)
+        max_possible = max_weights.get(factor, 25)
+        pct_of_max = (weighted_val / max_possible * 100) if max_possible > 0 else 0
+        if pct_of_max >= 60:
+            labels[factor] = "Strong"
+        elif pct_of_max >= 35:
+            labels[factor] = "Neutral"
+        else:
+            labels[factor] = "Weak"
+    return labels
+
+
 def _score_fundamentals(fund_data: dict, bucket: str) -> float:
     """Score fundamentals (0-100) — tuned from backtest."""
     score = 50.0
@@ -423,9 +657,10 @@ def _score_fundamentals(fund_data: dict, bucket: str) -> float:
 
 
 def _score_macro(macro_data: dict) -> float:
-    """Score macro environment (0-100) — includes VIX."""
+    """Score macro environment (0-100) — includes VIX and Fear & Greed Index."""
     env = macro_data.get("environment", "neutral")
     vix = macro_data.get("vix")
+    fear_greed = macro_data.get("fear_greed")
 
     env_score = 50
     if env == "favorable":
@@ -447,7 +682,15 @@ def _score_macro(macro_data: dict) -> float:
         else:
             vix_score = 20
 
-    return env_score * 0.6 + vix_score * 0.4
+    # Fear & Greed Index: 0 = Extreme Fear, 100 = Extreme Greed
+    # Maps directly to a 0-100 score (higher = more bullish macro)
+    fg_score = 50
+    if fear_greed and isinstance(fear_greed, dict):
+        fg_val = fear_greed.get("score")
+        if fg_val is not None:
+            fg_score = max(0, min(100, float(fg_val)))
+
+    return env_score * 0.45 + vix_score * 0.30 + fg_score * 0.25
 
 
 def _score_sentiment(grok_data: dict) -> float:

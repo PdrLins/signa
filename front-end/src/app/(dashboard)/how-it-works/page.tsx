@@ -238,6 +238,8 @@ export default function HowItWorksPage() {
                   <Li>{h.readingCard4}</Li>
                   <Li>{h.readingCard5}</Li>
                   <Li>{h.readingCard6}</Li>
+                  <Li>{h.readingCard7}</Li>
+                  <Li>{h.readingCard8}</Li>
                 </ul>
               </Section>
             </Card>
@@ -255,6 +257,9 @@ export default function HowItWorksPage() {
                   <Li>{h.readingDetail6}</Li>
                   <Li>{h.readingDetail7}</Li>
                   <Li>{h.readingDetail8}</Li>
+                  <Li>{h.readingDetail9}</Li>
+                  <Li>{h.readingDetail10}</Li>
+                  <Li>{h.readingDetail11}</Li>
                 </ul>
                 <div
                   className="mt-3 rounded-xl px-4 py-3"
@@ -500,6 +505,62 @@ export default function HowItWorksPage() {
                 <div className="mt-3">
                   <P>{h.wdNote}</P>
                 </div>
+              </Section>
+            </Card>
+
+            {/* Watchdog Cooldown */}
+            <Card>
+              <Section title={h.wdCooldownTitle}>
+                <P>{h.wdCooldownDesc}</P>
+              </Section>
+            </Card>
+
+            {/* Fear & Greed Index */}
+            <Card>
+              <Section title={h.fearGreedTitle}>
+                <P>{h.fearGreedDesc}</P>
+              </Section>
+            </Card>
+
+            {/* Probability vs SPY */}
+            <Card>
+              <Section title={h.probVsSpyTitle}>
+                <P>{h.probVsSpyDesc}</P>
+              </Section>
+            </Card>
+
+            {/* Factor Impact Labels */}
+            <Card>
+              <Section title={h.factorLabelsTitle}>
+                <P>{h.factorLabelsDesc}</P>
+              </Section>
+            </Card>
+
+            {/* Short Interest */}
+            <Card>
+              <Section title={h.shortInterestTitle}>
+                <P>{h.shortInterestDesc}</P>
+              </Section>
+            </Card>
+
+            {/* Crypto Position Sizing */}
+            <Card>
+              <Section title={h.cryptoScalingTitle}>
+                <P>{h.cryptoScalingDesc}</P>
+              </Section>
+            </Card>
+
+            {/* Brain Radar */}
+            <Card>
+              <Section title={h.brainRadarTitle}>
+                <P>{h.brainRadarDesc}</P>
+              </Section>
+            </Card>
+
+            {/* Track Record */}
+            <Card>
+              <Section title={h.trackRecordTitle}>
+                <P>{h.trackRecordDesc}</P>
               </Section>
             </Card>
 

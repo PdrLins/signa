@@ -2,7 +2,7 @@ export interface Signal {
   id: string
   symbol: string
   name: string | null
-  asset_type: 'EQUITY' | 'CRYPTO' | null
+  asset_type: 'STOCK' | 'ETF' | 'CRYPTO' | null
   exchange: 'TSX' | 'NYSE' | 'NASDAQ' | 'CRYPTO' | null
   action: 'BUY' | 'HOLD' | 'SELL' | 'AVOID'
   status: 'CONFIRMED' | 'WEAKENING' | 'CANCELLED' | 'UPGRADED'
@@ -31,6 +31,8 @@ export interface Signal {
   catalyst_type: string | null
   signal_style: 'MOMENTUM' | 'CONTRARIAN' | 'NEUTRAL' | null
   contrarian_score: number | null
+  probability_vs_spy: number | null
+  factor_labels: Record<string, 'Strong' | 'Neutral' | 'Weak'> | null
   is_discovered?: boolean
   scan_id: string | null
   created_at: string
@@ -61,6 +63,7 @@ export interface DailyStats {
   ai_cost_today: number
   claude_cost: number
   grok_cost: number
+  fear_greed: { score: number; label: string } | null
 }
 
 export interface ScanTodayRecord {

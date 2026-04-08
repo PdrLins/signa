@@ -131,7 +131,7 @@ class BacktestSimulator:
                 return None
 
             # 8. Determine signal (bucket-aware thresholds)
-            signal = determine_signal(score, bucket, self.config.get("signal_thresholds"))
+            signal = determine_signal(score, bucket, self.config.get("signal_thresholds"), indicators)
 
             # 9. Check GEM conditions
             is_gem, gem_reason = check_gem_conditions(score_result, indicators, fundamentals)

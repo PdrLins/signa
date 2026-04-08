@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
 from app.core.cache import stats_cache
-from app.db.supabase import get_client
+from app.db.supabase import get_client, with_retry
 
 
 # Scan schedule (ET times) — used to compute next_scan_time
@@ -19,8 +20,9 @@ _SCHEDULE = [
 ]
 
 
+@with_retry
 def get_daily_stats() -> dict:
-    """Compute aggregated daily stats. Cached for 30s."""
+    """Compute aggregated daily stats. Cached for 120s."""
     cached = stats_cache.get("daily_stats")
     if cached is not None:
         return cached
@@ -63,21 +65,47 @@ def get_daily_stats() -> dict:
         )
         tickers_scanned = sum(s.get("tickers_scanned", 0) for s in scans_result.data or [])
 
-        # Next scan time
+        # Next scan time (pure computation, no DB)
         next_scan = _compute_next_scan_time()
+
+        # Run the two remaining DB-bound helpers in parallel
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            win_rate_future = pool.submit(_get_virtual_win_rate)
+            ai_cost_future = pool.submit(_get_ai_cost_today)
+            win_rate = win_rate_future.result()
+            ai_cost = ai_cost_future.result()
+
+        # Fear & Greed from latest signal's macro_data (no extra API call needed)
+        fear_greed = None
+        try:
+            fg_result = (
+                db.table("signals")
+                .select("macro_data")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if fg_result.data:
+                macro = fg_result.data[0].get("macro_data") or {}
+                fg = macro.get("fear_greed")
+                if fg and isinstance(fg, dict):
+                    fear_greed = fg
+        except Exception:
+            pass
 
         result = {
             "gems_today": gems_today,
             "gems_yesterday": gems_yesterday,
-            "win_rate_30d": _get_virtual_win_rate(),
+            "win_rate_30d": win_rate,
             "tickers_scanned": tickers_scanned,
             "discovered_today": discovered_today,
             "next_scan_time": next_scan,
-            "ai_cost_today": _get_ai_cost_today(),
+            "ai_cost_today": ai_cost,
             "claude_cost": 0.0,
             "grok_cost": 0.0,
+            "fear_greed": fear_greed,
         }
-        stats_cache.set("daily_stats", result, ttl=30)
+        stats_cache.set("daily_stats", result, ttl=120)
         return result
     except Exception:
         logger.exception("Failed to compute daily stats")
@@ -91,6 +119,7 @@ def get_daily_stats() -> dict:
             "ai_cost_today": 0.0,
             "claude_cost": 0.0,
             "grok_cost": 0.0,
+            "fear_greed": None,
         }
 
 

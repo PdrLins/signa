@@ -10,7 +10,27 @@ import { Badge } from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Brain, Target, ShieldAlert, Clock, Eye, RefreshCw } from 'lucide-react'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useI18nStore } from '@/store/i18nStore'
+
+// ── Track record types ──
+
+interface TrackRecordRange {
+  score_range: string
+  trades: number
+  win_rate: number
+  avg_return_pct: number
+}
+
+interface TrackRecordData {
+  ranges: TrackRecordRange[]
+  total_trades: number
+  overall_win_rate: number
+  by_source: {
+    brain: { ranges: TrackRecordRange[]; total_trades: number; win_rate: number }
+    watchlist: { ranges: TrackRecordRange[]; total_trades: number; win_rate: number }
+  }
+}
 
 // ── Types ──
 
@@ -128,13 +148,18 @@ function getEventTypeColor(eventType: string, theme: ReturnType<typeof useTheme>
 
 export default function BrainPerformancePage() {
   const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
   const queryClient = useQueryClient()
   const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null)
+  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [refreshInterval, setRefreshInterval] = useState(15)
+  const [countdown, setCountdown] = useState(15)
 
   const { data, isLoading, isFetching } = useQuery<VirtualSummary>({
     queryKey: ['stats', 'virtual-portfolio'],
     queryFn: async () => (await client.get<VirtualSummary>('/stats/virtual-portfolio')).data,
     staleTime: 30_000,
+    refetchInterval: autoRefresh ? refreshInterval * 1000 : false,
   })
 
   const { data: watchdogEvents } = useQuery<WatchdogEvent[]>({
@@ -148,6 +173,31 @@ export default function BrainPerformancePage() {
     queryFn: async () => (await client.get('/signals?limit=200')).data,
     staleTime: 60_000,
   })
+
+  const { data: trackRecord } = useQuery<TrackRecordData>({
+    queryKey: ['signals', 'track-record'],
+    queryFn: async () => (await client.get('/signals/track-record')).data,
+    staleTime: 60_000,
+  })
+
+  // Auto-refresh countdown
+  useEffect(() => {
+    if (!autoRefresh) return
+    setCountdown(refreshInterval)
+    const timer = setInterval(() => {
+      setCountdown((c) => {
+        if (c <= 1) return refreshInterval
+        return c - 1
+      })
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [autoRefresh, refreshInterval])
+
+  const handleRefresh = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['stats', 'virtual-portfolio'] })
+    queryClient.invalidateQueries({ queryKey: ['stats', 'watchdog-events'] })
+    setCountdown(refreshInterval)
+  }, [queryClient, refreshInterval])
 
   // Symbols with recent watchdog events — must be before early return (Rules of Hooks)
   const recentEvents = data?.watchdog?.recent_events
@@ -198,18 +248,31 @@ export default function BrainPerformancePage() {
             Autonomous picks proving the brain&apos;s accuracy with real market data.
           </p>
         </div>
-        <button
-          onClick={() => {
-            queryClient.invalidateQueries({ queryKey: ['stats', 'virtual-portfolio'] })
-            queryClient.invalidateQueries({ queryKey: ['stats', 'watchdog-events'] })
-          }}
-          disabled={isFetching}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-opacity hover:opacity-80 disabled:opacity-50 shrink-0"
-          style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.textSub }}
-        >
-          <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
-          {isFetching ? 'Refreshing...' : 'Refresh'}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Auto-refresh toggle */}
+          <button
+            onClick={() => setAutoRefresh(!autoRefresh)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold transition-all"
+            style={{
+              backgroundColor: autoRefresh ? theme.colors.primary + '15' : theme.colors.surfaceAlt,
+              color: autoRefresh ? theme.colors.primary : theme.colors.textHint,
+              border: `1px solid ${autoRefresh ? theme.colors.primary + '30' : theme.colors.border}`,
+            }}
+            aria-label="Toggle auto-refresh"
+          >
+            {autoRefresh ? `${countdown}s` : 'Auto'}
+          </button>
+          {/* Manual refresh */}
+          <button
+            onClick={handleRefresh}
+            disabled={isFetching}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-opacity hover:opacity-80 disabled:opacity-50"
+            style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.textSub }}
+          >
+            <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
+            {isFetching ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* Content + Sidebar */}
@@ -539,6 +602,61 @@ export default function BrainPerformancePage() {
             )}
           </Card>
 
+          {/* Track Record by Score Range */}
+          {trackRecord && trackRecord.total_trades > 0 && (
+            <Card>
+              <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>
+                {t.brainPerf.trackRecord}
+              </p>
+              <p className="text-[10px] mb-4" style={{ color: theme.colors.textHint }}>
+                {t.brainPerf.trackRecordDesc} ({trackRecord.total_trades} {t.brainPerf.trades.toLowerCase()})
+              </p>
+
+              {/* Table header */}
+              <div className="grid grid-cols-4 gap-2 pb-2 mb-1" style={{ borderBottom: `1px solid ${theme.colors.border}` }}>
+                <p className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.brainPerf.scoreRange}</p>
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-center" style={{ color: theme.colors.textHint }}>{t.brainPerf.trades}</p>
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-center" style={{ color: theme.colors.textHint }}>{t.stats.winRate}</p>
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-right" style={{ color: theme.colors.textHint }}>{t.brainPerf.avgReturn}</p>
+              </div>
+
+              {/* Table rows */}
+              <div className="space-y-0.5">
+                {trackRecord.ranges.map((row) => (
+                  <div
+                    key={row.score_range}
+                    className="grid grid-cols-4 gap-2 py-2 rounded-lg px-1"
+                    style={{ backgroundColor: row.trades > 0 ? theme.colors.surfaceAlt : 'transparent' }}
+                  >
+                    <p className="text-[11px] font-semibold tabular-nums" style={{ color: theme.colors.text }}>{row.score_range}</p>
+                    <p className="text-[11px] tabular-nums text-center" style={{ color: theme.colors.textSub }}>{row.trades}</p>
+                    <p className="text-[11px] font-semibold tabular-nums text-center" style={{
+                      color: row.trades === 0 ? theme.colors.textHint : row.win_rate >= 60 ? theme.colors.up : row.win_rate >= 50 ? theme.colors.warning : theme.colors.down,
+                    }}>
+                      {row.trades === 0 ? '\u2014' : `${row.win_rate.toFixed(0)}%`}
+                    </p>
+                    <p className="text-[11px] font-semibold tabular-nums text-right" style={{
+                      color: row.trades === 0 ? theme.colors.textHint : row.avg_return_pct >= 0 ? theme.colors.up : theme.colors.down,
+                    }}>
+                      {row.trades === 0 ? '\u2014' : `${row.avg_return_pct >= 0 ? '+' : ''}${row.avg_return_pct.toFixed(1)}%`}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Overall summary */}
+              <div className="grid grid-cols-4 gap-2 pt-2 mt-1 px-1" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
+                <p className="text-[11px] font-bold" style={{ color: theme.colors.text }}>{t.brainPerf.overall}</p>
+                <p className="text-[11px] font-bold tabular-nums text-center" style={{ color: theme.colors.text }}>{trackRecord.total_trades}</p>
+                <p className="text-[11px] font-bold tabular-nums text-center" style={{
+                  color: trackRecord.overall_win_rate >= 60 ? theme.colors.up : trackRecord.overall_win_rate >= 50 ? theme.colors.warning : theme.colors.down,
+                }}>
+                  {trackRecord.overall_win_rate.toFixed(0)}%
+                </p>
+                <p className="text-[11px] text-right" style={{ color: theme.colors.textHint }}></p>
+              </div>
+            </Card>
+          )}
 
         </div>
         <div className="sticky top-6 hidden lg:block">

@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo } from 'react'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { useTheme } from '@/hooks/useTheme'
@@ -67,7 +68,7 @@ function ConnectionStatus() {
                 <div className="flex items-center gap-2">
                   <Icon size={12} style={{ color: integration.ok ? theme.colors.textSub : theme.colors.down }} />
                   <span className="text-[11px]" style={{ color: theme.colors.text }}>
-                    {key}{key === 'claude' && integration.status === 'local' ? ' (local)' : ''}
+                    {key}{key === 'claude' && integration.status === 'local' ? ` ${t.signal.local}` : ''}
                   </span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -85,7 +86,18 @@ function ConnectionStatus() {
 export function Sidebar() {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
-  const { data: signals } = useAllSignals({ limit: 200 })
+  const { data: signals } = useAllSignals({ limit: 50 })
+
+  // Top brain-quality picks: BUY signals scored 72+, up to 3 per asset type
+  const brainPicks = useMemo(() => {
+    if (!signals) return []
+    const buys = signals
+      .filter((s) => s.action === 'BUY' && s.score >= 72)
+      .sort((a, b) => b.score - a.score)
+    const equity = buys.filter((s) => s.asset_type !== 'CRYPTO').slice(0, 3)
+    const crypto = buys.filter((s) => s.asset_type === 'CRYPTO').slice(0, 3)
+    return [...equity, ...crypto]
+  }, [signals])
 
   return (
     <aside className="hidden lg:flex flex-col gap-3 w-[300px] shrink-0">
@@ -95,6 +107,30 @@ export function Sidebar() {
         </h3>
         <WatchlistTable signals={signals} compact />
       </Card>
+      {brainPicks.length > 0 && (
+        <Card>
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: theme.colors.textSub }}>
+            {t.overview.brainRadar ?? 'Brain Radar'}
+          </h3>
+          <div className="flex flex-wrap gap-1.5">
+            {brainPicks.map((sig) => (
+              <Link key={sig.id} href={`/signals/${sig.symbol}`}>
+                <div
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-md transition-opacity hover:opacity-80"
+                  style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}` }}
+                >
+                  <span className="text-[11px] font-semibold" style={{ color: theme.colors.text }}>
+                    {sig.symbol}
+                  </span>
+                  <span className="text-[10px] font-bold tabular-nums" style={{ color: theme.colors.up }}>
+                    {sig.score}
+                  </span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </Card>
+      )}
       <BrainPerformanceWidget />
       <ConnectionStatus />
     </aside>
