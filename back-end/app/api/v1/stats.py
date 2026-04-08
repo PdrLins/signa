@@ -56,6 +56,17 @@ async def get_virtual_portfolio(user: dict = Depends(get_current_user)):
     return await asyncio.to_thread(get_virtual_summary)
 
 
+@router.get("/brain-tier-breakdown")
+async def get_brain_tier_breakdown_route(user: dict = Depends(get_current_user)):
+    """Get brain trade performance grouped by entry tier (1/2/3).
+
+    Used by the dashboard widget to show win rate per trust tier so
+    the user can validate whether the tiered model is profitable.
+    """
+    from app.services.virtual_portfolio import get_brain_tier_breakdown
+    return await asyncio.to_thread(get_brain_tier_breakdown)
+
+
 @router.get("/virtual-portfolio/charts")
 async def get_virtual_portfolio_charts(user: dict = Depends(get_current_user)):
     """Get chart data for brain performance page.

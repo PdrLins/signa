@@ -6,7 +6,7 @@ import { useI18nStore } from '@/store/i18nStore'
 import { useAllSignals } from '@/hooks/useSignals'
 import { StatsBar } from '@/components/dashboard/StatsBar'
 import { QuickActions } from '@/components/dashboard/QuickActions'
-import { BudgetWidget, AlertsWidget, PortfolioWidget, BrainPerformanceWidget } from '@/components/dashboard/DashboardWidgets'
+import { BudgetWidget, AlertsWidget, PortfolioWidget, BrainPerformanceWidget, BrainTierBreakdownWidget } from '@/components/dashboard/DashboardWidgets'
 import { SignalList } from '@/components/signals/SignalList'
 import { WatchlistTable } from '@/components/watchlist/WatchlistTable'
 import { ScanSchedule } from '@/components/dashboard/ScanSchedule'
@@ -76,6 +76,9 @@ export default function OverviewPage() {
 
       {/* Brain Performance — full width */}
       <BrainPerformanceWidget />
+
+      {/* Brain Trust Tier Breakdown — full width */}
+      <BrainTierBreakdownWidget />
 
       {/* Dashboard Widgets: Budget + Alerts + Portfolio */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">

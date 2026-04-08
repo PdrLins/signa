@@ -243,6 +243,7 @@ _MESSAGES = {
         "en": (
             "<b>Brain BUY -- {symbol}</b>\n\n"
             "Score: <b>{score}/100</b> | Bucket: {bucket}\n"
+            "Tier: <b>T{tier}</b> ({trust}% position size)\n"
             "Entry: ${price} | Target: ${target} | Stop: ${stop}\n"
             "R/R: {rr}x\n\n"
             "Brain auto-picked this ticker.\n"
@@ -252,6 +253,7 @@ _MESSAGES = {
         "pt": (
             "<b>Brain COMPRA -- {symbol}</b>\n\n"
             "Score: <b>{score}/100</b> | Bucket: {bucket}\n"
+            "Tier: <b>T{tier}</b> ({trust}% do tamanho)\n"
             "Entrada: ${price} | Alvo: ${target} | Stop: ${stop}\n"
             "R/R: {rr}x\n\n"
             "Brain selecionou este ticker automaticamente.\n"
@@ -275,6 +277,78 @@ _MESSAGES = {
             "Motivo: {reason}\n"
             "Score entrada: {entry_score} | Score saida: {exit_score}\n\n"
             "{verdict}\n"
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">Ver no Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
+        ),
+    },
+    "budget_threshold": {
+        "en": (
+            "<b>💰 AI Budget Alert -- {provider}</b>\n\n"
+            "Spending: <b>${spend}</b> of ${limit} ({pct}%)\n"
+            "Threshold crossed: <b>{threshold}%</b>\n\n"
+            "{threshold_msg}\n"
+            "<i>{timestamp}</i>"
+        ),
+        "pt": (
+            "<b>💰 Alerta de Orcamento IA -- {provider}</b>\n\n"
+            "Gasto: <b>${spend}</b> de ${limit} ({pct}%)\n"
+            "Limite atingido: <b>{threshold}%</b>\n\n"
+            "{threshold_msg}\n"
+            "<i>{timestamp}</i>"
+        ),
+    },
+    "ai_failure_rate": {
+        "en": (
+            "<b>⚠ AI Failure Rate High</b>\n\n"
+            "Scan: <b>{scan_type}</b>\n"
+            "Failed: <b>{failed}/{total}</b> AI candidates ({pct}%)\n"
+            "Top errors: {errors}\n\n"
+            "Brain trust may be reduced this scan. Investigate provider health.\n"
+            "<i>{timestamp}</i>"
+        ),
+        "pt": (
+            "<b>⚠ Taxa de Falha IA Alta</b>\n\n"
+            "Scan: <b>{scan_type}</b>\n"
+            "Falhou: <b>{failed}/{total}</b> candidatos IA ({pct}%)\n"
+            "Erros principais: {errors}\n\n"
+            "Confianca do brain pode estar reduzida neste scan. Investigue saude dos providers.\n"
+            "<i>{timestamp}</i>"
+        ),
+    },
+    "brain_pending_review": {
+        "en": (
+            "<b>⚠ Brain Flagged for Review -- {symbol}</b>\n\n"
+            "Pre-market signal turned <b>{action}</b> (score {entry_score} → {exit_score})\n"
+            "Reason: {reason}\n\n"
+            "Market is closed. Will re-check at open (9:30am ET):\n"
+            "• Still bad → sell at open\n"
+            "• Recovered → keep position\n\n"
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">View on Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
+        ),
+        "pt": (
+            "<b>⚠ Brain Sinalizado para Revisao -- {symbol}</b>\n\n"
+            "Sinal pre-market virou <b>{action}</b> (score {entry_score} → {exit_score})\n"
+            "Motivo: {reason}\n\n"
+            "Mercado fechado. Vai re-checar na abertura (9:30am ET):\n"
+            "• Ainda ruim → vende na abertura\n"
+            "• Recuperou → mantem posicao\n\n"
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">Ver no Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
+        ),
+    },
+    "brain_review_cleared": {
+        "en": (
+            "<b>✅ Brain Review Cleared -- {symbol}</b>\n\n"
+            "Signal recovered to <b>{action}</b> (score {entry_score} → {exit_score})\n"
+            "Pre-market scare was a false alarm. Position kept.\n\n"
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">View on Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
+        ),
+        "pt": (
+            "<b>✅ Revisao do Brain Limpa -- {symbol}</b>\n\n"
+            "Sinal recuperou para <b>{action}</b> (score {entry_score} → {exit_score})\n"
+            "Susto pre-market foi alarme falso. Posicao mantida.\n\n"
             '<a href="https://ca.finance.yahoo.com/quote/{symbol}">Ver no Yahoo Finance</a>\n'
             "<i>{timestamp}</i>"
         ),

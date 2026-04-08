@@ -272,6 +272,104 @@ async def handle_command(command: str, args: str = "", user_id: str = "") -> str
             return f"✅ Closed {escape(ticker)} @ ${price:.2f}\nP&L: {'+' if float(pnl) >= 0 else ''}{float(pnl):.1f}% (${float(amt):+.2f})"
         return f"Failed to close position for {escape(ticker)}"
 
+    elif command == "forcesell":
+        # Manual override for pending review positions: confirm sell at next open.
+        # Uses the sentinel pending_review_action="FORCE_SELL" so process_pending_reviews
+        # can detect it reliably without parsing the reason text.
+        if not args:
+            return "Usage: /forcesell TICKER\nForces a flagged position to sell at next market open."
+        ticker = args.strip().upper()
+        from app.db.supabase import get_client as _get_db
+        _db = _get_db()
+        try:
+            flagged = (
+                _db.table("virtual_trades")
+                .select("id, symbol, source, pending_review_action, pending_review_score, entry_score")
+                .eq("status", "OPEN")
+                .eq("symbol", ticker)
+                .not_.is_("pending_review_at", "null")
+                .execute()
+            )
+            rows = flagged.data or []
+            if not rows:
+                return f"❌ {escape(ticker)} is not flagged for review"
+            for row in rows:
+                _db.table("virtual_trades").update({
+                    "pending_review_action": "FORCE_SELL",
+                    "pending_review_reason": "User forced sell via Telegram /forcesell",
+                }).eq("id", row["id"]).execute()
+            return (
+                f"✅ {escape(ticker)} marked to <b>force sell</b> at next market open.\n"
+                f"The next scan during 9:30am-4:00pm ET will execute the sell."
+            )
+        except Exception as e:
+            logger.warning(f"/forcesell error: {e}")
+            return f"❌ Failed to mark {escape(ticker)} for force sell"
+
+    elif command == "keep":
+        # Manual override for pending review positions: clear the flag (keep position)
+        if not args:
+            return "Usage: /keep TICKER\nClears a pending review flag — brain keeps the position."
+        ticker = args.strip().upper()
+        from app.db.supabase import get_client as _get_db
+        _db = _get_db()
+        try:
+            flagged = (
+                _db.table("virtual_trades")
+                .select("id, symbol")
+                .eq("status", "OPEN")
+                .eq("symbol", ticker)
+                .not_.is_("pending_review_at", "null")
+                .execute()
+            )
+            rows = flagged.data or []
+            if not rows:
+                return f"❌ {escape(ticker)} is not flagged for review"
+            for row in rows:
+                _db.table("virtual_trades").update({
+                    "pending_review_at": None,
+                    "pending_review_action": None,
+                    "pending_review_score": None,
+                    "pending_review_reason": None,
+                }).eq("id", row["id"]).execute()
+            return (
+                f"✅ {escape(ticker)} review flag cleared. Position kept.\n"
+                f"Brain will continue normal monitoring."
+            )
+        except Exception as e:
+            logger.warning(f"/keep error: {e}")
+            return f"❌ Failed to clear flag for {escape(ticker)}"
+
+    elif command == "review":
+        # List all positions currently flagged for review
+        from app.db.supabase import get_client as _get_db
+        _db = _get_db()
+        try:
+            flagged = (
+                _db.table("virtual_trades")
+                .select("symbol, source, entry_score, pending_review_action, pending_review_score, pending_review_reason")
+                .eq("status", "OPEN")
+                .not_.is_("pending_review_at", "null")
+                .execute()
+            )
+            rows = flagged.data or []
+            if not rows:
+                return "No positions flagged for review."
+            lines = ["<b>⚠ Positions Flagged for Review:</b>\n"]
+            for r in rows:
+                sym = escape(str(r.get("symbol", "?")))
+                act = escape(str(r.get("pending_review_action", "?")))
+                es = r.get("entry_score", 0) or 0
+                ps = r.get("pending_review_score", 0) or 0
+                src = escape(str(r.get("source", "?")))
+                lines.append(f"• <b>{sym}</b> [{src}] — {act} (score {es}→{ps})")
+            lines.append("\nUse /forcesell TICKER to confirm sell at open")
+            lines.append("Use /keep TICKER to clear the flag and keep")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.warning(f"/review error: {e}")
+            return "❌ Failed to fetch flagged positions"
+
     elif command in ("start", "help"):
         from app.notifications.messages import msg
         return msg("bot_help")

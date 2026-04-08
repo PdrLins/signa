@@ -472,6 +472,90 @@ export default function HowItWorksPage() {
               </Section>
             </Card>
 
+            {/* Brain Rules & Mechanism */}
+            <Card>
+              <Section title={h.brainRulesTitle}>
+                <P>{h.brainRulesIntro}</P>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.brainTieredTitle}
+                  </h3>
+                  <P>{h.brainTieredDesc}</P>
+                  <ul className="space-y-1.5 mt-2">
+                    <Li>{h.brainTier1}</Li>
+                    <Li>{h.brainTier2}</Li>
+                    <Li>{h.brainTier3}</Li>
+                    <Li>{h.brainTierFailed}</Li>
+                  </ul>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.brainMarketHoursTitle}
+                  </h3>
+                  <P>{h.brainMarketHoursDesc}</P>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.brainPreMarketReviewTitle}
+                  </h3>
+                  <P>{h.brainPreMarketReviewDesc}</P>
+                  <ul className="space-y-1.5 mt-2">
+                    <Li>{h.brainReviewFlow1}</Li>
+                    <Li>{h.brainReviewFlow2}</Li>
+                    <Li>{h.brainReviewFlow3}</Li>
+                    <Li>{h.brainReviewFlow4}</Li>
+                  </ul>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.brainTelegramCommandsTitle}
+                  </h3>
+                  <P>{h.brainTelegramCommandsDesc}</P>
+                  <ul className="space-y-1.5 mt-2">
+                    <Li>{h.brainCmd1}</Li>
+                    <Li>{h.brainCmd2}</Li>
+                    <Li>{h.brainCmd3}</Li>
+                  </ul>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.brainAIChainTitle}
+                  </h3>
+                  <P>{h.brainAIChainDesc}</P>
+                  <ul className="space-y-1.5 mt-2">
+                    <Li>{h.brainAIChain1}</Li>
+                    <Li>{h.brainAIChain2}</Li>
+                    <Li>{h.brainAIChain3}</Li>
+                    <Li>{h.brainAIChain4}</Li>
+                  </ul>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.brainAlertsTitle}
+                  </h3>
+                  <P>{h.brainAlertsDesc}</P>
+                  <ul className="space-y-1.5 mt-2">
+                    <Li>{h.brainAlert1}</Li>
+                    <Li>{h.brainAlert2}</Li>
+                    <Li>{h.brainAlert3}</Li>
+                  </ul>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.brainScoreDropGuardTitle}
+                  </h3>
+                  <P>{h.brainScoreDropGuardDesc}</P>
+                </div>
+              </Section>
+            </Card>
+
             {/* Virtual Portfolio */}
             <Card>
               <Section title={h.virtualPortfolioTitle}>

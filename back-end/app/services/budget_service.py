@@ -1,7 +1,81 @@
-"""AI Budget Service — tracks spending per provider with daily/monthly limits.
+"""AI Budget Service — runaway-cost protection for paid AI providers.
 
-Stores usage in-memory (fast checks) and persists to Supabase (survives restarts).
-When a provider's budget is exhausted, calls are blocked and fallback kicks in.
+============================================================
+WHAT THIS MODULE IS
+============================================================
+
+Signa uses paid AI APIs (Claude, Grok). Without limits, a bug in the
+scanner could blow through hundreds of dollars in a single afternoon —
+imagine an infinite retry loop on a 500 error, or a regex bug that
+sends 50K-character prompts. This module is the spending circuit
+breaker.
+
+It enforces TWO independent caps per provider:
+  • DAILY     — default $1.00 across all providers
+  • MONTHLY   — default $5.00 per provider (Claude=$5, Grok=$5,
+                Gemini=$0/unlimited because it's free tier)
+
+Every paid AI call goes through `can_call()` BEFORE being made. If
+the call would push spending over either limit, it returns False and
+`provider.synthesize_signal` (or `analyze_sentiment`) skips that
+provider and falls through to the next in the chain.
+
+After each successful call, `record_call()` updates the running totals,
+fires Telegram alerts at 70/90/100% thresholds, and persists the call
+to the `ai_usage` DB table for audit / dashboard reporting.
+
+============================================================
+TIERED ALERT SYSTEM
+============================================================
+
+Each threshold (70%, 90%, 100%) fires AT MOST ONCE per provider per
+month. The dedup is in-memory (`_alert_sent`), so a process restart
+could cause one duplicate alert per month per threshold (acceptable
+trade-off for avoiding DB writes on the hot path).
+
+The alerts say:
+  •  70% — "Heads up — budget at 70%. Plan ahead before it runs out."
+  •  90% — "Approaching limit. Consider increasing budget or reducing scans."
+  • 100% — "Provider blocked. Brain will fall back to next provider in chain."
+
+100% is the most important: that's when the brain effectively goes
+blind on this provider until the user takes action.
+
+============================================================
+STORAGE MODEL
+============================================================
+
+  In-memory dicts (`_daily_usage`, `_monthly_usage`, `_daily_calls`):
+    Fast O(1) read for `can_call`. Loaded from DB on startup, updated
+    on every `record_call`. Daily entries are pruned to the last 7
+    days to prevent unbounded growth.
+
+  DB (`ai_usage` table):
+    One row per call: provider, call_type, ticker, estimated_cost,
+    success, created_at. Used for the dashboard's "AI Cost Today"
+    widget and for audit / debugging.
+
+  Singleton pattern:
+    `BudgetService.get_instance()` returns the one shared instance.
+    The instance is created on first call and persists for the
+    lifetime of the process. The async lock prevents two coroutines
+    from each creating their own instance during cold start.
+
+============================================================
+COST ESTIMATES
+============================================================
+
+Estimated per-call costs (validated against real usage):
+
+  Claude synthesis (Sonnet 4):  $0.012  (1200 in + 800 out tokens)
+  Gemini synthesis (2.0-flash): $0.000  (free tier)
+  Grok sentiment (grok-3-mini): $0.0002 (400 in + 600 out tokens)
+  Gemini sentiment (2.0-flash): $0.000  (free tier)
+
+If actual usage diverges from these, update COST_ESTIMATES at the
+top of this file. The dashboard's "AI Cost Today" reflects these
+estimates, not real billing — cross-check with provider invoices
+monthly.
 """
 
 import asyncio
@@ -46,6 +120,10 @@ class BudgetService:
         self._monthly_usage: dict[str, dict[str, float]] = {}
         # {provider: {date_str: call_count}}
         self._daily_calls: dict[str, dict[str, int]] = {}
+        # Track which budget alert thresholds have already been sent this month
+        # so we don't spam Telegram on every call. Resets at start of new month.
+        # Format: {f"{provider}:{month_str}": set([70, 90, 100])}
+        self._alert_sent: dict[str, set[int]] = {}
         self._data_lock = asyncio.Lock()
         self._initialized = False
 
@@ -193,14 +271,62 @@ class BudgetService:
         except Exception as e:
             logger.debug(f"Failed to persist AI usage: {e}")
 
-        # Log warning when approaching limits
+        # Tiered budget alerts: log warning + Telegram at 70%, 90%, 100%.
+        # Each threshold fires at most once per provider per month.
         monthly_spend = self.get_monthly_spend(provider)
         provider_limit = getattr(settings, f"budget_{provider}_monthly_usd", settings.budget_monthly_limit_usd)
-        if provider_limit > 0 and monthly_spend / provider_limit > 0.8:
-            logger.warning(
-                f"Budget alert: {provider} at {monthly_spend/provider_limit:.0%} "
-                f"of monthly limit (${monthly_spend:.3f}/${provider_limit:.2f})"
+        if provider_limit > 0:
+            pct = (monthly_spend / provider_limit) * 100
+            await self._maybe_send_threshold_alert(provider, monthly_spend, provider_limit, pct)
+
+    async def _maybe_send_threshold_alert(
+        self, provider: str, monthly_spend: float, provider_limit: float, pct: float
+    ) -> None:
+        """Send a Telegram alert when budget crosses 70%, 90%, or 100% — once per month."""
+        thresholds_crossed = [t for t in (70, 90, 100) if pct >= t]
+        if not thresholds_crossed:
+            return
+        highest_crossed = max(thresholds_crossed)
+
+        month_key = f"{provider}:{self._month()}"
+        sent = self._alert_sent.setdefault(month_key, set())
+        if highest_crossed in sent:
+            return  # Already alerted for this threshold this month
+
+        sent.add(highest_crossed)
+        # Also mark all lower thresholds as sent (in case we jumped past them)
+        for t in thresholds_crossed:
+            sent.add(t)
+
+        logger.warning(
+            f"Budget alert: {provider} at {pct:.0f}% of monthly limit "
+            f"(${monthly_spend:.3f}/${provider_limit:.2f})"
+        )
+
+        # Send Telegram alert (best-effort, don't block the call recording)
+        try:
+            from app.notifications.messages import msg
+            from app.notifications.telegram_bot import send_message
+            if highest_crossed >= 100:
+                threshold_msg = "Provider blocked. Brain will fall back to next provider in chain."
+            elif highest_crossed >= 90:
+                threshold_msg = "Approaching limit. Consider increasing budget or reducing scans."
+            else:
+                threshold_msg = "Heads up — budget at 70%. Plan ahead before it runs out."
+            await send_message(
+                settings.telegram_chat_id,
+                msg(
+                    "budget_threshold",
+                    provider=provider,
+                    pct=str(int(pct)),
+                    spend=f"{monthly_spend:.2f}",
+                    limit=f"{provider_limit:.2f}",
+                    threshold=str(highest_crossed),
+                    threshold_msg=threshold_msg,
+                ),
             )
+        except Exception as e:
+            logger.debug(f"Failed to send budget alert: {e}")
 
     def _cleanup_old_daily(self, provider: str):
         """Remove daily entries older than _MAX_DAILY_HISTORY days."""

@@ -14,7 +14,14 @@ dist/
 downloads/
 eggs/
 .eggs/
+# `lib/` was inherited from the Python .gitignore template — Python projects
+# sometimes use `lib/` for compiled artifacts. We don't, and the bare rule
+# silently caught `front-end/src/lib/` (axios client, i18n, constants, utils)
+# so every fix to those files was being dropped by git. Restored with an
+# explicit negation for the frontend source dir.
 lib/
+!front-end/src/lib/
+!front-end/src/lib/**
 lib64/
 parts/
 sdist/

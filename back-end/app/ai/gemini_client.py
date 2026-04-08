@@ -1,6 +1,46 @@
-"""Google Gemini client — used as fallback for both synthesis and sentiment.
+"""Google Gemini client — free-tier fallback for synthesis AND sentiment.
 
-Uses the google-genai SDK (Gemini 2.0 Flash free tier).
+============================================================
+WHAT THIS MODULE IS
+============================================================
+
+Gemini sits at the BOTTOM of both AI fallback chains:
+
+  Synthesis: Claude Local → Claude API → Gemini  ← here
+  Sentiment: Grok → Gemini  ← here
+
+The Gemini 2.0 Flash free tier allows 1,500 requests/day at $0 cost,
+which is more than enough headroom for Signa's 60 synthesis calls/day.
+This makes Gemini a reliable last-resort that doesn't burn budget.
+
+The trade-off is quality: Gemini is less sophisticated than Claude
+for nuanced financial analysis, and it has NO live X/Twitter access
+(unlike Grok), so its sentiment analysis falls back to recent web
+content rather than real-time social media. The brain reflects this
+quality difference by treating low-confidence Gemini synthesis the
+same as low-confidence Claude synthesis (Tier 2 instead of Tier 1).
+
+============================================================
+RATE LIMITING
+============================================================
+
+Despite the 1,500/day cap, Gemini has a per-MINUTE rate limit too
+(15 req/min for 2.0-flash). When the entire scan pipeline cascades
+to Gemini (e.g., Claude API outage + Claude Local broken), the burst
+of ~15 parallel synthesis calls would hit the rate limit.
+
+This module uses an asyncio.Semaphore(5) + 1-second delay between
+calls to keep the rate well under the limit. The downside is slower
+fallback runs (~3 seconds extra per scan); the upside is no 429s.
+
+============================================================
+RESPONSE SCHEMA
+============================================================
+
+Both `synthesize_signal` and `analyze_sentiment` return the same dict
+shapes as their Claude/Grok counterparts so the router can swap them
+transparently. See `claude_client.py` for the synthesis schema and
+`grok_client.py` for the sentiment schema.
 """
 
 import asyncio
@@ -16,6 +56,7 @@ from app.ai.prompts import (
     clean_json_response,
     format_fundamentals,
     format_macro,
+    format_options_flow,
     format_sentiment,
     format_technicals,
 )
@@ -84,6 +125,7 @@ async def synthesize_signal(
         fundamentals=format_fundamentals(fundamental_data),
         macro=format_macro(macro_data),
         sentiment=format_sentiment(grok_data),
+        options_flow=format_options_flow(grok_data),
         market_regime=grok_data.get("_market_regime", "TRENDING") if isinstance(grok_data, dict) else "TRENDING",
         regime_note=grok_data.get("_regime_note", "") if isinstance(grok_data, dict) else "",
         catalyst_context=grok_data.get("_catalyst_context", "No specific catalyst detected") if isinstance(grok_data, dict) else "No specific catalyst detected",

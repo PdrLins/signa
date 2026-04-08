@@ -17,7 +17,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { PriceChart } from '@/components/charts/PriceChart'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { formatPrice } from '@/lib/utils'
-import { ArrowLeft, Star, TrendingUp, TrendingDown, Brain, BookOpen } from 'lucide-react'
+import { ArrowLeft, Star, TrendingUp, TrendingDown, Minus, Brain, BookOpen } from 'lucide-react'
 
 export default function TickerDetailPage() {
   const params = useParams()
@@ -64,8 +64,9 @@ export default function TickerDetailPage() {
   const fundamentals = detail?.fundamentals as Record<string, string | number | null> | undefined
   const currentPrice = detail?.current_price as number | undefined
 
-  // Scoring weights
+  // Scoring weights — ETFs use reduced dividend weight (15% vs 35%)
   const isHighRisk = latest?.bucket === 'HIGH_RISK'
+  const isEtf = latest?.asset_type === 'ETF'
   const weights = useMemo(() => isHighRisk
     ? [
         { label: t.signal.sentimentXTwitter, pct: 35, color: theme.colors.primary },
@@ -73,12 +74,19 @@ export default function TickerDetailPage() {
         { label: t.signal.technicalMomentum, pct: 25, color: theme.colors.warning },
         { label: t.signal.fundamentals, pct: 10, color: theme.colors.textSub },
       ]
+    : isEtf
+    ? [
+        { label: t.signal.fundamentalHealth, pct: 40, color: theme.colors.primary },
+        { label: t.signal.macroConditions, pct: 30, color: theme.colors.warning },
+        { label: t.signal.dividendReliability, pct: 15, color: theme.colors.up },
+        { label: t.signal.sentiment, pct: 15, color: theme.colors.textSub },
+      ]
     : [
         { label: t.signal.dividendReliability, pct: 35, color: theme.colors.up },
         { label: t.signal.fundamentalHealth, pct: 30, color: theme.colors.primary },
         { label: t.signal.macroConditions, pct: 25, color: theme.colors.warning },
         { label: t.signal.sentiment, pct: 10, color: theme.colors.textSub },
-      ], [isHighRisk, t, theme])
+      ], [isHighRisk, isEtf, t, theme])
 
   if (loadingDetail) {
     return (
@@ -536,7 +544,9 @@ export default function TickerDetailPage() {
             {signalHistory.map((sig) => (
               <div key={sig.id} className="flex items-center justify-between py-1.5" style={{ borderBottom: `1px solid ${theme.colors.border}` }}>
                 <div className="flex items-center gap-2">
-                  {sig.action === 'BUY' ? <TrendingUp size={14} style={{ color: theme.colors.up }} /> : <TrendingDown size={14} style={{ color: theme.colors.down }} />}
+                  {sig.action === 'BUY' ? <TrendingUp size={14} style={{ color: theme.colors.up }} />
+                    : sig.action === 'HOLD' ? <Minus size={14} style={{ color: theme.colors.warning }} />
+                    : <TrendingDown size={14} style={{ color: theme.colors.down }} />}
                   <span className="text-xs font-medium" style={{ color: theme.colors.text }}>{sig.action}</span>
                   <span className="text-[11px]" style={{ color: theme.colors.textSub }}>{t.signal.score} {sig.score}</span>
                 </div>

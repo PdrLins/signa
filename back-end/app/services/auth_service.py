@@ -41,7 +41,7 @@ async def login(
     from app.db.supabase import get_client
     db = get_client()
 
-    user = queries.get_user_by_username(username)
+    user = queries.get_user_by_username(username.lower())
 
     # ── Check DB lockout ──
     if user:
