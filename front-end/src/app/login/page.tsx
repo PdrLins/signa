@@ -207,16 +207,24 @@ export default function LoginPage() {
       <div className="flex-1 flex items-center justify-center px-6">
         <div className="w-full max-w-[380px]">
           {/* Mobile header */}
-          <div className="lg:hidden mb-12">
-            <h1
-              className="text-[32px] font-bold tracking-tight leading-none"
-              style={{ color: theme.colors.text }}
+          <div className="lg:hidden mb-8">
+            <div
+              className="rounded-2xl px-6 py-8 mb-6 relative overflow-hidden"
+              style={{
+                background: 'linear-gradient(165deg, #0a0a0a 0%, #141414 50%, #1a1a1a 100%)',
+              }}
             >
-              Signa
-            </h1>
-            <p className="text-[15px] mt-2 font-medium" style={{ color: theme.colors.textSub }}>
-              {t.login.subtitle}
-            </p>
+              <div
+                className="absolute -top-20 -right-20 w-48 h-48 rounded-full opacity-[0.07]"
+                style={{ backgroundColor: theme.colors.primary }}
+              />
+              <h1 className="text-[28px] font-bold text-white tracking-tight leading-none relative z-10">
+                Signa
+              </h1>
+              <p className="text-white/70 mt-2 text-sm font-medium relative z-10">
+                {t.login.subtitle}
+              </p>
+            </div>
           </div>
 
           {step === 1 ? (
@@ -305,7 +313,7 @@ export default function LoginPage() {
                     type="submit"
                     disabled={!username.trim() || !password.trim() || loading}
                     className="w-full rounded-xl px-5 py-3.5 text-sm font-semibold text-white transition-all hover:opacity-90 active:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ backgroundColor: '#111' }}
+                    style={{ backgroundColor: theme.colors.text }}
                   >
                     {loading ? t.login.signingIn : t.login.continue}
                   </button>
@@ -328,9 +336,9 @@ export default function LoginPage() {
               <div className="flex items-center gap-3 mb-2">
                 <div
                   className="w-10 h-10 rounded-xl flex items-center justify-center"
-                  style={{ backgroundColor: '#11111114' }}
+                  style={{ backgroundColor: `${theme.colors.text}14` }}
                 >
-                  <Shield size={18} style={{ color: '#333' }} />
+                  <Shield size={18} style={{ color: theme.colors.textSub }} />
                 </div>
                 <div>
                   <h2
@@ -358,12 +366,12 @@ export default function LoginPage() {
                       onChange={(e) => handleOtpChange(i, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(i, e)}
                       aria-label={`Digit ${i + 1}`}
-                      className="w-12 h-14 text-center text-lg font-bold rounded-xl outline-none transition-all duration-200"
+                      className="w-11 h-13 sm:w-12 sm:h-14 text-center text-lg font-bold rounded-xl outline-none transition-all duration-200"
                       style={{
-                        backgroundColor: digit ? '#11111110' : theme.colors.surfaceAlt,
+                        backgroundColor: digit ? `${theme.colors.text}10` : theme.colors.surfaceAlt,
                         color: theme.colors.text,
-                        border: `1.5px solid ${digit ? '#333' : theme.colors.border}`,
-                        boxShadow: digit ? '0 0 0 3px rgba(0,0,0,0.05)' : 'none',
+                        border: `1.5px solid ${digit ? theme.colors.textSub : theme.colors.border}`,
+                        boxShadow: digit ? `0 0 0 3px ${theme.colors.text}0D` : 'none',
                       }}
                     />
                   ))}
@@ -393,7 +401,7 @@ export default function LoginPage() {
                   type="submit"
                   disabled={otp.join('').length !== 6 || loading}
                   className="w-full rounded-xl px-5 py-3.5 text-sm font-semibold text-white transition-all hover:opacity-90 active:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: '#111' }}
+                  style={{ backgroundColor: theme.colors.text }}
                 >
                   {loading ? t.login.verifying : t.login.verify}
                 </button>
@@ -404,7 +412,7 @@ export default function LoginPage() {
                   disabled={countdown > 0}
                   className="w-full text-center text-sm font-medium transition-opacity"
                   style={{
-                    color: countdown > 0 ? theme.colors.textHint : '#333',
+                    color: countdown > 0 ? theme.colors.textHint : theme.colors.textSub,
                     opacity: countdown > 0 ? 0.4 : 1,
                     cursor: countdown > 0 ? 'not-allowed' : 'pointer',
                   }}
