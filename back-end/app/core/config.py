@@ -122,6 +122,7 @@ class Settings(BaseSettings):
     notify_quiet_start: int = 18  # 6 PM ET (18:00) -- no notifications after this hour
     notify_quiet_end: int = 6     # 6 AM ET (06:00) -- notifications resume
     notify_quiet_enabled: bool = True
+    watchdog_weekend_crypto: bool = False     # Run watchdog on weekends for crypto positions
 
     # --- Brain Editor ---
     brain_token_secret: str = ""  # Separate secret for brain tokens

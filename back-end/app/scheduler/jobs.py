@@ -144,12 +144,33 @@ async def catch_up_missed_scans():
 
 
 async def brain_watchdog():
-    """Every 15 min during market hours -- monitor open brain positions."""
+    """Every 15 min during market hours -- monitor open brain positions.
+
+    When concerned about any position, schedules a follow-up check in 5 min
+    for faster sentiment confirmation.
+    """
     from app.services.watchdog_service import run_watchdog
 
     try:
         result = await run_watchdog()
         if result.get("concerned"):
             logger.info(f"Watchdog: {result}")
+            try:
+                from app.scheduler.runner import get_scheduler
+                from datetime import datetime, timedelta, timezone as tz
+                from apscheduler.triggers.date import DateTrigger
+                sched = get_scheduler()
+                if sched and sched.running:
+                    run_at = datetime.now(tz.utc) + timedelta(minutes=5)
+                    sched.add_job(
+                        brain_watchdog,
+                        DateTrigger(run_date=run_at),
+                        id="watchdog_followup",
+                        name="Watchdog follow-up (5 min, one-shot)",
+                        replace_existing=True,
+                    )
+                    logger.info("Watchdog: scheduled 5-min follow-up due to concerned positions")
+            except Exception as e:
+                logger.debug(f"Watchdog follow-up scheduling failed: {e}")
     except Exception as e:
         logger.error(f"Brain watchdog failed: {e}")
