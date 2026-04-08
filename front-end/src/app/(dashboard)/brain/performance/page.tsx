@@ -152,7 +152,7 @@ export default function BrainPerformancePage() {
   const queryClient = useQueryClient()
   const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(false)
-  const [refreshInterval, setRefreshInterval] = useState(15)
+  const [refreshInterval] = useState(15)
   const [countdown, setCountdown] = useState(15)
 
   const { data, isLoading, isFetching } = useQuery<VirtualSummary>({
