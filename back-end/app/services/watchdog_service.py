@@ -479,6 +479,10 @@ async def _close_virtual_trade(db, trade: dict, exit_price: float, exit_reason: 
         .order("created_at", desc=True).limit(1).execute()
     exit_score = sig.data[0].get("score") if sig.data else None
 
+    # Status guard: never mutate an already-closed row. The watchdog runs
+    # off a snapshot loaded earlier in the cycle — if a parallel scan
+    # already closed this trade, the OPEN filter makes this a no-op
+    # instead of overwriting the prior close.
     db.table("virtual_trades").update({
         "status": "CLOSED",
         "exit_price": exit_price,
@@ -488,4 +492,4 @@ async def _close_virtual_trade(db, trade: dict, exit_price: float, exit_reason: 
         "pnl_amount": round(pnl_amount, 2),
         "is_win": pnl_pct > 0,
         "exit_reason": exit_reason,
-    }).eq("id", trade["id"]).execute()
+    }).eq("id", trade["id"]).eq("status", "OPEN").execute()

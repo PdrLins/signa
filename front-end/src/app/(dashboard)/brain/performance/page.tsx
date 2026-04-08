@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { client } from '@/lib/api'
-import { relativeTime } from '@/lib/utils'
+import { relativeTime, DEFAULT_TIMEZONE, formatPrice } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -75,6 +75,10 @@ interface ClosedTrade {
   exit_reason?: string
   entry_score?: number
   exit_score?: number
+  entry_date?: string
+  exit_date?: string
+  entry_price?: number
+  exit_price?: number
 }
 
 interface WatchdogEvent {
@@ -101,6 +105,21 @@ interface VirtualSummary extends TrackStats {
   watchlist: TrackStats
   brain: TrackStats
   watchdog?: WatchdogSummary
+}
+
+// Format an ISO timestamp as a short ET date, e.g. "Apr 6". Used so users
+// can verify closed-trade entry/exit against external sources like yfinance.
+function fmtShortDate(iso?: string): string {
+  if (!iso) return '--'
+  try {
+    return new Date(iso).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      timeZone: DEFAULT_TIMEZONE,
+    })
+  } catch {
+    return '--'
+  }
 }
 
 // ── Small components ──
@@ -578,21 +597,26 @@ export default function BrainPerformancePage() {
               <div className="space-y-1.5">
                 {brainClosed.map((rc, i) => (
                   <Link key={i} href={`/signals/${rc.symbol}`}>
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg transition-opacity hover:opacity-80" style={{ backgroundColor: theme.colors.surfaceAlt }}>
-                      <div className="flex items-center gap-2">
-                        {rc.is_win
-                          ? <TrendingUp size={14} style={{ color: theme.colors.up }} />
-                          : <TrendingDown size={14} style={{ color: theme.colors.down }} />
-                        }
-                        <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{rc.symbol}</span>
-                        <ExitReasonBadge reason={rc.exit_reason} theme={theme} />
-                        {rc.entry_score != null && (
-                          <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textHint }}>
-                            {rc.entry_score}{rc.exit_score != null ? ` → ${rc.exit_score}` : ''}
-                          </span>
-                        )}
+                    <div className="flex items-start justify-between py-2 px-3 rounded-lg transition-opacity hover:opacity-80" style={{ backgroundColor: theme.colors.surfaceAlt }}>
+                      <div className="flex flex-col gap-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          {rc.is_win
+                            ? <TrendingUp size={14} style={{ color: theme.colors.up }} />
+                            : <TrendingDown size={14} style={{ color: theme.colors.down }} />
+                          }
+                          <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{rc.symbol}</span>
+                          <ExitReasonBadge reason={rc.exit_reason} theme={theme} />
+                          {rc.entry_score != null && (
+                            <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textHint }}>
+                              {rc.entry_score}{rc.exit_score != null ? ` → ${rc.exit_score}` : ''}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] tabular-nums pl-[22px]" style={{ color: theme.colors.textHint }}>
+                          {fmtShortDate(rc.entry_date)} {formatPrice(rc.entry_price)} → {fmtShortDate(rc.exit_date)} {formatPrice(rc.exit_price)}
+                        </div>
                       </div>
-                      <span className="text-[13px] font-bold tabular-nums" style={{ color: rc.is_win ? theme.colors.up : theme.colors.down }}>
+                      <span className="text-[13px] font-bold tabular-nums shrink-0" style={{ color: rc.is_win ? theme.colors.up : theme.colors.down }}>
                         {rc.pnl_pct >= 0 ? '+' : ''}{rc.pnl_pct.toFixed(1)}%
                       </span>
                     </div>

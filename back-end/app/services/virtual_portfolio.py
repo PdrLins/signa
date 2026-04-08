@@ -201,6 +201,7 @@ from loguru import logger
 
 from app.core.cache import TTLCache
 from app.core.config import settings
+from app.db import queries
 from app.db.supabase import get_client, with_retry
 from app.services.price_cache import _fetch_prices_batch
 
@@ -693,23 +694,26 @@ def process_virtual_trades(
     all_open = open_result.data or []
 
     # Two parallel sets keep O(1) "is this symbol already held?" checks for
-    # both tracks. We also pre-compute the weakest brain position now so the
-    # rotation logic doesn't need to re-scan the list per signal.
+    # both tracks. The rotation block recomputes the weakest brain position
+    # JUST IN TIME from `open_brain` (rather than caching it upfront), so a
+    # SELL or rotation earlier in the same scan can't leave us with a stale
+    # reference pointing at an already-closed row. The previous design
+    # cached `weakest_brain` here and tried to keep it in sync — that's the
+    # bug that allowed the rotation logic to overwrite already-closed rows
+    # with new is_win values computed from a fresh live price.
     open_watchlist: set[str] = set()
     open_brain: set[str] = set()
     brain_open_count = 0
-    weakest_brain: dict | None = None
-    weakest_brain_score = 999  # Sentinel: any real score is lower
     for r in all_open:
         if r.get("source") == "brain":
             open_brain.add(r["symbol"])
             brain_open_count += 1
-            es = r.get("entry_score", 0) or 0
-            if es < weakest_brain_score:
-                weakest_brain_score = es
-                weakest_brain = r
         else:
             open_watchlist.add(r["symbol"])
+
+    # Resolve once: brain runs single-tenant, every insert is stamped with
+    # this user_id so the rows are correctly attributed and queryable.
+    brain_user_id = queries.get_brain_user_id()
 
     now = datetime.now(timezone.utc).isoformat()
     market_open = _is_us_market_open()
@@ -782,6 +786,10 @@ def process_virtual_trades(
                 is_win = pnl_pct > 0
                 source = pos.get("source", "watchlist")
 
+                # Status guard: the .eq("status", "OPEN") prevents this UPDATE
+                # from ever mutating an already-closed row. Belt-and-braces
+                # against the SELL→rotation race that previously allowed a
+                # later signal to overwrite a closed trade's pnl/is_win.
                 db.table("virtual_trades").update({
                     "status": "CLOSED",
                     "exit_price": price,
@@ -792,8 +800,19 @@ def process_virtual_trades(
                     "pnl_amount": round(pnl_amount, 2),
                     "is_win": is_win,
                     "exit_reason": "SIGNAL",
-                }).eq("id", pos["id"]).execute()
+                }).eq("id", pos["id"]).eq("status", "OPEN").execute()
                 sells += 1
+
+                # Refresh in-memory state so the rotation block later in this
+                # scan doesn't pick this just-closed position as a rotation
+                # target. Without this, `weakest_brain` (now recomputed lazily)
+                # would still see the row in `open_brain` and could re-update
+                # the closed row.
+                if source == "brain":
+                    open_brain.discard(symbol)
+                    brain_open_count = max(0, brain_open_count - 1)
+                else:
+                    open_watchlist.discard(symbol)
 
                 emoji = "✅" if is_win else "❌"
                 logger.info(
@@ -822,9 +841,21 @@ def process_virtual_trades(
             logger.debug(f"Virtual BUY skipped for {symbol}: US market closed")
             continue
 
-        # Track 1: Watchlist picks (score 62+) — only on explicit BUY action
-        if action == "BUY" and is_watchlisted and score >= 62 and symbol not in open_watchlist:
+        # Track 1: Watchlist picks (score 62+) — only on explicit BUY action.
+        # Dedup against BOTH tracks so a symbol opened by either track in a
+        # previous scan (or earlier in this scan) blocks the other from also
+        # opening it. Previously the two tracks were independent, which is
+        # why PNC and SLF.TO ended up with two rows each (watchlist + brain)
+        # on the same Apr 6 scan.
+        if (
+            action == "BUY"
+            and is_watchlisted
+            and score >= 62
+            and symbol not in open_watchlist
+            and symbol not in open_brain
+        ):
             db.table("virtual_trades").insert({
+                "user_id": brain_user_id,
                 "symbol": symbol,
                 "action": "BUY",
                 "entry_price": price,
@@ -838,6 +869,7 @@ def process_virtual_trades(
                 "stop_loss": sig.get("stop_loss"),
             }).execute()
             buys += 1
+            open_watchlist.add(symbol)  # block any further inserts this scan
             logger.info(f"Virtual BUY [watchlist]: {symbol} @ ${price:.2f} (score {score})")
 
         # ── Track 2: Brain auto-picks via the tiered trust model ──
@@ -850,7 +882,11 @@ def process_virtual_trades(
         #
         # See `_eval_brain_trust_tier` and the file header for the rules.
         brain_tier, trust_multiplier, tier_reason = _eval_brain_trust_tier(sig)
-        if brain_tier > 0 and symbol not in open_brain:
+        if (
+            brain_tier > 0
+            and symbol not in open_brain
+            and symbol not in open_watchlist  # dedup with watchlist track
+        ):
             # ── Rotation: brain at max capacity, only rotate if the new
             # ── signal is meaningfully better (+5 points) than the weakest
             # ── currently-held brain position.
@@ -859,9 +895,27 @@ def process_virtual_trades(
             # We use entry_score as the tie-breaker; higher entry_score
             # implied a more confident initial decision.
             if brain_open_count >= settings.brain_max_open:
-                if weakest_brain and score >= weakest_brain_score + 5:
-                    weakest = weakest_brain
-                    weakest_score = weakest_brain_score
+                # Recompute the weakest brain position from the LIVE state
+                # of `open_brain` (which reflects any SELLs and rotations
+                # that happened earlier in this scan). The previous design
+                # cached `weakest_brain` upfront and tried to keep it in
+                # sync, which was bug-prone — a SELL flow earlier in the
+                # scan could leave a stale reference pointing at a
+                # just-closed row, and the rotation would then overwrite
+                # the closed row's pnl/is_win with new values.
+                weakest = None
+                weakest_score = 999
+                for r in all_open:
+                    if r.get("source") != "brain":
+                        continue
+                    if r.get("symbol") not in open_brain:
+                        continue  # already closed earlier this scan
+                    es = r.get("entry_score", 0) or 0
+                    if es < weakest_score:
+                        weakest_score = es
+                        weakest = r
+
+                if weakest and score >= weakest_score + 5:
                     w_symbol = weakest["symbol"]
                     w_entry = float(weakest["entry_price"])
                     # Use the LIVE price for the rotated-out position so the
@@ -871,6 +925,10 @@ def process_virtual_trades(
                     w_current, _ = w_prices.get(w_symbol, (None, None))
                     w_exit_price = w_current if w_current else price
                     w_pnl = ((w_exit_price - w_entry) / w_entry) * 100 if w_entry > 0 else 0
+                    # Status guard prevents this UPDATE from ever mutating
+                    # an already-closed row. Combined with the lazy-recompute
+                    # of `weakest` above, the rotation flow can no longer
+                    # overwrite a closed trade's financial fields.
                     db.table("virtual_trades").update({
                         "status": "CLOSED",
                         "exit_price": w_exit_price,
@@ -880,7 +938,7 @@ def process_virtual_trades(
                         "pnl_amount": round(w_exit_price - w_entry, 2),
                         "is_win": w_pnl > 0,
                         "exit_reason": "ROTATION",
-                    }).eq("id", weakest["id"]).execute()
+                    }).eq("id", weakest["id"]).eq("status", "OPEN").execute()
                     open_brain.discard(w_symbol)
                     brain_open_count -= 1
                     logger.info(
@@ -893,27 +951,6 @@ def process_virtual_trades(
                         "entry_score": str(weakest_score), "exit_score": str(score),
                         "verdict": f"Replaced by stronger pick {symbol}.",
                     }))
-                    # Recompute the weakest brain position for the next
-                    # rotation candidate this scan. We use `open_brain`
-                    # (which we just updated via .discard) as the source
-                    # of truth for "still open" — this correctly excludes
-                    # ALL previously-rotated symbols this scan, not just
-                    # the most recent one. Earlier versions of this code
-                    # only filtered the most-recently-rotated symbol,
-                    # which was a bug if multiple rotations happened in
-                    # one scan (the second rotation could re-pick a
-                    # symbol that had already been closed).
-                    weakest_brain = None
-                    weakest_brain_score = 999
-                    for r in all_open:
-                        if r.get("source") != "brain":
-                            continue
-                        if r.get("symbol") not in open_brain:
-                            continue  # already rotated out earlier this scan
-                        es = r.get("entry_score", 0) or 0
-                        if es < weakest_brain_score:
-                            weakest_brain_score = es
-                            weakest_brain = r
                 else:
                     continue  # No room and new signal isn't strong enough
             # ── Compute target & stop for the new position ──
@@ -942,6 +979,7 @@ def process_virtual_trades(
                         stop = round(max_crypto_stop, 2)
 
                 db.table("virtual_trades").insert({
+                    "user_id": brain_user_id,
                     "symbol": symbol,
                     "action": "BUY",
                     "entry_price": price,
@@ -958,6 +996,7 @@ def process_virtual_trades(
                 }).execute()
                 buys += 1
                 brain_open_count += 1
+                open_brain.add(symbol)  # block any further inserts this scan
                 logger.info(
                     f"Virtual BUY [brain] T{brain_tier}: {symbol} @ ${price:.2f} "
                     f"(score {score}, tier={tier_reason}, trust={trust_multiplier:.0%})"
@@ -1176,6 +1215,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
 
         exit_score = current_scores.get(symbol)
 
+        # Status guard: never mutate an already-closed row.
         db.table("virtual_trades").update({
             "status": "CLOSED",
             "exit_price": current_price,
@@ -1185,7 +1225,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
             "pnl_amount": round(pnl_amount, 2),
             "is_win": is_win,
             "exit_reason": exit_reason,
-        }).eq("id", trade["id"]).execute()
+        }).eq("id", trade["id"]).eq("status", "OPEN").execute()
 
         emoji = "✅" if is_win else "❌"
         logger.info(

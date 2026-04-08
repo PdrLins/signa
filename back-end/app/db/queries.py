@@ -487,10 +487,60 @@ def get_watchlist(user_id: str) -> list[dict]:
 
 
 def get_all_watchlist_symbols() -> set[str]:
-    """Get all watchlisted symbols across all users (for scan pipeline)."""
+    """Get watchlisted symbols for the brain user.
+
+    Signa is currently single-tenant: the brain operates on behalf of one
+    user (resolved via `get_brain_user_id`), so this returns only that
+    user's watchlist. The function name is kept for backwards compatibility
+    with existing call sites — the "all" used to mean "all users" before
+    we added per-user scoping. Returning all users' symbols was the bug
+    that caused stale `source='watchlist'` virtual_trades when symbols left
+    the watchlist between scans.
+    """
+    user_id = get_brain_user_id()
+    if not user_id:
+        return set()
     client = get_client()
-    result = client.table("watchlist").select("symbol").limit(1000).execute()
+    result = (
+        client.table("watchlist")
+        .select("symbol")
+        .eq("user_id", user_id)
+        .limit(1000)
+        .execute()
+    )
     return {row["symbol"] for row in (result.data or [])}
+
+
+_brain_user_id_cache: str | None = None
+
+
+def get_brain_user_id() -> str | None:
+    """Resolve the user_id the brain operates on behalf of.
+
+    Single-tenant for now — returns the oldest user in the users table.
+    Cached for the lifetime of the process; if the user is deleted/recreated
+    you must restart the process. Returns None when the users table is empty
+    (which only happens during a fresh install before signup).
+
+    Used by `place_virtual_trades` to stamp `user_id` on every virtual_trades
+    insert, and by `get_all_watchlist_symbols` to scope the watchlist read.
+    """
+    global _brain_user_id_cache
+    if _brain_user_id_cache is not None:
+        return _brain_user_id_cache
+    client = get_client()
+    result = (
+        client.table("users")
+        .select("id")
+        .order("created_at")
+        .limit(1)
+        .execute()
+    )
+    if result.data:
+        _brain_user_id_cache = result.data[0]["id"]
+        return _brain_user_id_cache
+    logger.warning("get_brain_user_id: no users in table — virtual_trades will be inserted without user_id")
+    return None
 
 
 def add_to_watchlist(user_id: str, symbol: str, notes: str | None = None) -> dict:

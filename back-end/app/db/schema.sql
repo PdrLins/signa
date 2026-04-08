@@ -368,7 +368,13 @@ CREATE TABLE IF NOT EXISTS virtual_trades (
     pending_review_action  VARCHAR,     -- SELL, AVOID, or FORCE_SELL (sentinel for /forcesell user override)
     pending_review_score   INT,
     pending_review_reason  TEXT,
-    created_at      TIMESTAMPTZ DEFAULT now()
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    -- updated_at lets us prove that a closed row was never mutated after close.
+    -- Pair with the trigger below + status='OPEN' guards in app code.
+    -- Audit invariant: for any CLOSED row, updated_at should equal exit_date
+    -- (within trigger granularity). If updated_at > exit_date, the row was
+    -- mutated after close — that's a bug.
+    updated_at      TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_virtual_trades_symbol ON virtual_trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_virtual_trades_status ON virtual_trades(status);
@@ -382,6 +388,7 @@ ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS pending_review_score INT;
 ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS pending_review_reason TEXT;
 ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS entry_tier INT;
 ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS trust_multiplier DOUBLE PRECISION;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
 CREATE INDEX IF NOT EXISTS idx_virtual_trades_entry_tier ON virtual_trades(entry_tier) WHERE entry_tier IS NOT NULL;
 
 
@@ -470,6 +477,8 @@ DROP TRIGGER IF EXISTS trg_investment_rules_updated ON investment_rules;
 CREATE TRIGGER trg_investment_rules_updated BEFORE UPDATE ON investment_rules FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 DROP TRIGGER IF EXISTS trg_signal_knowledge_updated ON signal_knowledge;
 CREATE TRIGGER trg_signal_knowledge_updated BEFORE UPDATE ON signal_knowledge FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS virtual_trades_updated_at ON virtual_trades;
+CREATE TRIGGER virtual_trades_updated_at BEFORE UPDATE ON virtual_trades FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 
 -- ============================================================
