@@ -72,8 +72,11 @@ export default function SignalsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- t.signals refs are stable across renders
   }, [scanId, queryClient, toast])
 
+  const [scanCooldown, setScanCooldown] = useState(false)
   const handleScanNow = useCallback(async () => {
-    if (scanning) return
+    if (scanning || scanCooldown) return
+    setScanCooldown(true)
+    setTimeout(() => setScanCooldown(false), 5000) // 5s cooldown between scans
     try {
       const res = await scansApi.trigger('MANUAL')
       setScanId(res.scan_id)
@@ -81,21 +84,23 @@ export default function SignalsPage() {
     } catch {
       toast.show(t.signals.scanFailed, 'error')
     }
-  }, [scanning, toast, t])
+  }, [scanning, scanCooldown, toast, t])
 
   const filters: SignalFilters = {}
   if (bucket === 'SAFE_INCOME' || bucket === 'HIGH_RISK') filters.bucket = bucket
   if (minScore > 0) filters.min_score = minScore
 
-  const { data: allSignals, isLoading, isError, error } = useAllSignals(
-    Object.keys(filters).length ? filters : undefined
-  )
+  const filtersWithLimit: SignalFilters = { ...filters, limit: 50 }
+  const { data: allSignals, isLoading, isError, error } = useAllSignals(filtersWithLimit)
 
   // Client-side filters (asset type + signal style + action + search)
   const filtered = useMemo(() => {
     if (!allSignals) return undefined
     return allSignals.filter((s: Signal) => {
-      if (assetType !== 'All' && s.asset_type !== assetType) return false
+      if (assetType !== 'All') {
+        const at = s.asset_type as string
+        if (assetType === 'STOCK' ? (at !== 'STOCK' && at !== 'EQUITY') : at !== assetType) return false
+      }
       if (signalStyle !== 'All' && s.signal_style !== signalStyle) return false
       if (actionFilter !== 'All' && s.action !== actionFilter) return false
       if (debouncedSearch && !s.symbol.toLowerCase().startsWith(debouncedSearch.toLowerCase())) return false
@@ -154,7 +159,7 @@ export default function SignalsPage() {
     return t.signals.todayAt.replace('{time}', timeStr)
   }
 
-  const assetOptions = ['All', 'EQUITY', 'CRYPTO']
+  const assetOptions = ['All', 'STOCK', 'ETF', 'CRYPTO']
   const styleOptions = ['All', 'MOMENTUM', 'CONTRARIAN']
   const bucketOptions = ['All', 'SAFE_INCOME', 'HIGH_RISK']
   const actionOptions = ['All', 'BUY', 'HOLD', 'AVOID', 'SELL']
@@ -202,7 +207,7 @@ export default function SignalsPage() {
             </p>
           )}
         </div>
-        <Button onClick={handleScanNow} disabled={scanning}>
+        <Button onClick={handleScanNow} disabled={scanning || scanCooldown}>
           {scanning ? t.signals.scanning : t.signals.scanNow}
         </Button>
       </div>
@@ -308,7 +313,7 @@ export default function SignalsPage() {
                   color: isActive ? theme.colors.text : theme.colors.textSub,
                 }}
               >
-                {opt === 'EQUITY' ? t.signals.stocks : opt === 'CRYPTO' ? t.signals.crypto : t.signals.all}
+                {opt === 'STOCK' ? t.signals.stocks : opt === 'ETF' ? t.signal.etf : opt === 'CRYPTO' ? t.signals.crypto : t.signals.all}
               </button>
             )
           })}
@@ -428,7 +433,8 @@ export default function SignalsPage() {
         topPickId={topPickId}
         emptyMessage={
           assetType === 'CRYPTO' ? t.signals.noCrypto
-          : assetType === 'EQUITY' ? t.signals.noEquity
+          : assetType === 'STOCK' ? t.signals.noEquity
+          : assetType === 'ETF' ? t.signals.noEquity
           : undefined
         }
       />

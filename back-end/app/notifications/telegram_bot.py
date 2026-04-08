@@ -32,8 +32,12 @@ def _telegram_url(method: str) -> str:
     return f"https://api.telegram.org/bot{settings.telegram_bot_token}/{method}"
 
 
-async def send_message(chat_id: str, text: str, parse_mode: str = "HTML") -> bool:
+async def send_message(chat_id: str, text: str, parse_mode: str = "HTML", urgent: bool = False) -> bool:
     """Send a message via Telegram Bot API."""
+    from app.notifications.messages import is_quiet_hours
+    if not urgent and is_quiet_hours():
+        logger.debug(f"Telegram message suppressed (quiet hours): {text[:50]}...")
+        return False
     try:
         client = _get_http_client()
         resp = await client.post(
@@ -50,7 +54,7 @@ async def send_message(chat_id: str, text: str, parse_mode: str = "HTML") -> boo
 async def send_otp_message(chat_id: str, otp_code: str) -> bool:
     """Send an OTP verification code via Telegram."""
     from app.notifications.messages import msg
-    return await send_message(chat_id, msg("otp", otp_code=escape(otp_code)))
+    return await send_message(chat_id, msg("otp", otp_code=escape(otp_code)), urgent=True)
 
 
 async def send_gem_alert(signal: dict) -> bool:

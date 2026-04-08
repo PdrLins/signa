@@ -324,6 +324,116 @@ def _score_macro(macro: dict) -> float:
 
 
 # ============================================================
+# PHASE 1 FACTORS — quality, momentum factor, short squeeze, SMA200 guard
+# ============================================================
+
+def _score_quality(fundamentals: dict) -> float:
+    """Quality factor (Fama-French QMJ) — profitability + stability + low leverage."""
+    score = 50.0
+    margin = fundamentals.get("profit_margin")
+    if margin is not None:
+        if margin > 0.25:
+            score += 15
+        elif margin > 0.15:
+            score += 10
+        elif margin > 0.08:
+            score += 5
+        elif margin < 0:
+            score -= 15
+
+    dte = fundamentals.get("debt_to_equity")
+    if dte is not None:
+        if dte < 30:
+            score += 10
+        elif dte < 80:
+            score += 5
+        elif dte > 200:
+            score -= 10
+
+    eg = fundamentals.get("eps_growth")
+    rg = fundamentals.get("revenue_growth")
+    if eg is not None and rg is not None:
+        if eg > 0.10 and rg > 0.05:
+            score += 10
+        elif eg > 0 and rg > 0:
+            score += 5
+        elif eg < -0.10:
+            score -= 10
+
+    return max(0, min(100, score))
+
+
+def _score_momentum_factor(indicators: dict) -> float:
+    """Momentum factor (Fama-French UMD) — 3m/6m returns + ADX confirmation."""
+    score = 50.0
+    mom_3m = indicators.get("momentum_3m")
+    mom_6m = indicators.get("momentum_6m")
+
+    if mom_3m is not None:
+        m3 = mom_3m * 100  # Convert to percentage
+        if m3 > 15:
+            score += 15
+        elif m3 > 5:
+            score += 10
+        elif m3 > 0:
+            score += 3
+        elif m3 < -15:
+            score -= 15
+        elif m3 < -5:
+            score -= 10
+        elif m3 < 0:
+            score -= 3
+
+    if mom_6m is not None:
+        m6 = mom_6m * 100
+        if m6 > 20:
+            score += 10
+        elif m6 > 10:
+            score += 5
+        elif m6 < -20:
+            score -= 10
+        elif m6 < -10:
+            score -= 5
+
+    adx = indicators.get("adx")
+    if adx is not None:
+        if adx > 30:
+            score += 5
+        elif adx < 15:
+            score -= 5
+
+    return max(0, min(100, score))
+
+
+def _score_short_squeeze(fundamentals: dict, indicators: dict) -> float:
+    """Short squeeze bonus (0-20) for HIGH_RISK."""
+    short_float = fundamentals.get("short_percent_of_float")
+    if short_float is None or short_float < 0.05:
+        return 0
+
+    bonus = 0
+    if short_float >= 0.20:
+        bonus += 12
+    elif short_float >= 0.10:
+        bonus += 8
+    else:
+        bonus += 4
+
+    rsi = indicators.get("rsi")
+    macd_hist = indicators.get("macd_hist")
+    if rsi is not None and 50 <= rsi <= 70 and macd_hist is not None and macd_hist > 0:
+        bonus += 8
+
+    return min(20, bonus)
+
+
+def _check_sma200_overextension(indicators: dict) -> bool:
+    """Returns True if ticker is >50% above SMA200 (should block BUY)."""
+    vs_sma200 = indicators.get("vs_sma200")
+    return vs_sma200 is not None and vs_sma200 > 0.50
+
+
+# ============================================================
 # MAIN SCORING FUNCTIONS
 # ============================================================
 
@@ -363,6 +473,11 @@ def score_safe_income(indicators: dict, fundamentals: dict, macro: dict) -> dict
         + technical_score * 0.30
     )
 
+    # Quality bonus (up to +6 points for high-quality companies)
+    quality_score = _score_quality(fundamentals)
+    quality_bonus = max(0, (quality_score - 60) * 0.15)
+    total = total + quality_bonus
+
     return {
         "total_score": round(total, 1),
         "bucket": "SAFE_INCOME",
@@ -371,6 +486,7 @@ def score_safe_income(indicators: dict, fundamentals: dict, macro: dict) -> dict
             "fundamental": round(fundamental_score, 1),
             "macro": round(macro_score, 1),
             "technical": round(technical_score, 1),
+            "quality_bonus": round(quality_bonus, 1),
         },
     }
 
@@ -420,6 +536,15 @@ def score_high_risk(indicators: dict, fundamentals: dict, macro: dict) -> dict:
         + macro_score * 0.20
     )
 
+    # Short squeeze bonus (up to +20 for high short float + bullish momentum)
+    squeeze_bonus = _score_short_squeeze(fundamentals, indicators)
+    total = total + squeeze_bonus
+
+    # Momentum factor bonus (up to +6 for strong 3m+6m trend)
+    mom_factor = _score_momentum_factor(indicators)
+    momentum_bonus = max(0, (mom_factor - 60) * 0.15)
+    total = total + momentum_bonus
+
     return {
         "total_score": round(total, 1),
         "bucket": "HIGH_RISK",
@@ -428,6 +553,8 @@ def score_high_risk(indicators: dict, fundamentals: dict, macro: dict) -> dict:
             "momentum": round(momentum_score, 1),
             "fundamental": round(fundamental_score, 1),
             "macro": round(macro_score, 1),
+            "squeeze_bonus": round(squeeze_bonus, 1),
+            "momentum_bonus": round(momentum_bonus, 1),
         },
     }
 
@@ -440,6 +567,7 @@ def determine_signal(
     score: float,
     bucket: str = "",
     thresholds: dict | None = None,
+    indicators: dict | None = None,
 ) -> str:
     """Convert score to signal action with bucket-aware thresholds.
 
@@ -463,6 +591,10 @@ def determine_signal(
     # Bucket-specific ceilings
     if bucket == "SAFE_INCOME":
         ceiling = min(ceiling, 70)
+
+    # SMA200 overextension guard
+    if indicators and _check_sma200_overextension(indicators):
+        return "AVOID"
 
     if score >= buy and score <= ceiling:
         return "BUY"

@@ -182,6 +182,7 @@ async def get_fundamentals(ticker: str) -> dict:
             "pre_market_price": info.get("preMarketPrice"),
             "pre_market_change": info.get("preMarketChange"),
             "pre_market_change_pct": info.get("preMarketChangePercent"),
+            "short_percent_of_float": _normalize_pct(info.get("shortPercentOfFloat")),
         }
         price_cache.set(cache_key, result, ttl=300)
         return result

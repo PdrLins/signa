@@ -109,7 +109,7 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
                 {isTopPick && (
                   <span
                     className="text-[9px] font-bold px-1.5 py-0.5 rounded-md"
-                    style={{ backgroundColor: '#f59e0b18', color: '#f59e0b' }}
+                    style={{ backgroundColor: theme.colors.warning + '18', color: theme.colors.warning }}
                   >
                     {t.signals.topPick}
                   </span>
@@ -119,7 +119,7 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
                     className="text-[9px] font-bold px-1.5 py-0.5 rounded-md"
                     style={{ backgroundColor: theme.colors.primary + '18', color: theme.colors.primary }}
                   >
-                    Discovered
+                    {t.signal.discovered}
                   </span>
                 )}
                 <button
@@ -153,9 +153,22 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
                 <span className="text-[12px]" style={{ color: theme.colors.textSub }}>
                   {signal.exchange ?? (signal.asset_type === 'CRYPTO' ? t.signal.crypto : t.signal.equity)}
                 </span>
+                {signal.asset_type === 'ETF' && (
+                  <span
+                    className="text-[9px] font-bold px-1 py-0.5 rounded"
+                    style={{ backgroundColor: theme.colors.primary + '15', color: theme.colors.primary }}
+                  >
+                    {t.signal.etf}
+                  </span>
+                )}
                 {(signal.fundamental_data?.company_name as string) && (
                   <span className="text-[11px] truncate max-w-[160px]" style={{ color: theme.colors.textHint }}>
                     · {(signal.fundamental_data?.company_name as string).slice(0, 30)}
+                  </span>
+                )}
+                {(signal.fundamental_data?.sector as string) && (
+                  <span className="text-[10px] truncate max-w-[120px]" style={{ color: theme.colors.textHint }}>
+                    · {signal.fundamental_data?.sector as string}
                   </span>
                 )}
               </div>
@@ -199,12 +212,20 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
               {signal.action}
             </Badge>
             {signal.signal_style === 'CONTRARIAN' && (
-              <Badge variant="upgraded">CONTRARIAN</Badge>
+              <Badge variant="upgraded">{t.signal.contrarian}</Badge>
             )}
             {signal.signal_style === 'MOMENTUM' && (
-              <Badge variant="confirmed">MOMENTUM</Badge>
+              <Badge variant="confirmed">{t.signal.momentum}</Badge>
             )}
             <Badge variant={getStatusVariant(signal.status)}>{signal.status}</Badge>
+            {signal.probability_vs_spy != null && signal.probability_vs_spy > 50 && (
+              <span
+                className="text-[9px] font-bold px-1.5 py-0.5 rounded-md tabular-nums"
+                style={{ backgroundColor: theme.colors.up + '12', color: theme.colors.up }}
+              >
+                {signal.probability_vs_spy.toFixed(0)}% {t.signal.vsSpy}
+              </span>
+            )}
             {signal.account_recommendation && (
               <Badge variant={signal.account_recommendation === 'TFSA' ? 'safe' : 'risk'}>
                 {signal.account_recommendation}

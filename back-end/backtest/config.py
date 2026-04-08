@@ -1,22 +1,40 @@
 """Backtest configuration."""
 
 BACKTEST_CONFIG = {
-    "start_date": "2024-04-05",
+    "start_date": "2021-04-05",
     "end_date": "2026-04-05",
     "tickers": {
         "US": [
-            "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL",
-            "META", "TSLA", "JPM", "JNJ", "V",
-            "PFE", "BAC", "XOM", "WMT", "UNH",
+            # Mega Cap
+            "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA",
+            # Financials
+            "JPM", "BAC", "GS", "V", "MA", "PNC", "SCHW",
+            # Healthcare
+            "JNJ", "UNH", "PFE", "ABBV", "LLY",
+            # Consumer / Industrial
+            "WMT", "HD", "CAT", "GE", "HON",
+            # Energy
+            "XOM", "COP", "VLO",
+            # Tech / Semis
+            "AVGO", "AMD", "CRM", "ADBE", "QCOM",
         ],
         "TSX": [
-            "SHOP.TO", "RY.TO", "TD.TO", "BNS.TO", "CNR.TO",
-            "ENB.TO", "SU.TO", "BMO.TO", "CP.TO", "MFC.TO",
-            "DGS.TO", "BCE.TO", "T.TO", "CM.TO", "BAM.TO",
+            # Banks
+            "RY.TO", "TD.TO", "BNS.TO", "BMO.TO", "CM.TO", "NA.TO",
+            # Energy / Resources
+            "ENB.TO", "SU.TO", "CNQ.TO", "CP.TO", "CNR.TO",
+            # Insurance / Financials
+            "MFC.TO", "SLF.TO", "IFC.TO",
+            # Telecom / Utilities
+            "BCE.TO", "T.TO", "FTS.TO",
+            # Tech
+            "SHOP.TO", "CSU.TO",
+            # ETFs
+            "XEQT.TO", "VFV.TO", "XIU.TO", "XIC.TO", "ZEB.TO", "TEC.TO",
         ],
         "CRYPTO": [
             "BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD",
-            "ADA-USD", "AVAX-USD", "DOGE-USD", "LINK-USD", "MATIC-USD",
+            "ADA-USD", "AVAX-USD", "DOGE-USD", "LINK-USD",
         ],
     },
     "signal_thresholds": {

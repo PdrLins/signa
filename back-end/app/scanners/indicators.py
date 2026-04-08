@@ -89,6 +89,16 @@ def compute_indicators(df: pd.DataFrame) -> dict:
         if atr_series is not None and not atr_series.empty and pd.notna(atr_series.iloc[-1]):
             result["atr"] = round(float(atr_series.iloc[-1]), 4)
 
+        # ADX (14-period) — trend strength indicator
+        # ADX > 25 = strong trend (favor momentum), ADX < 20 = range-bound (favor mean reversion)
+        adx_series = ta.adx(high, low, close, length=14)
+        if adx_series is not None and not adx_series.empty:
+            adx_col = [c for c in adx_series.columns if 'ADX' in c and 'DM' not in c]
+            if adx_col:
+                adx_val = adx_series[adx_col[0]].iloc[-1]
+                if pd.notna(adx_val):
+                    result["adx"] = round(float(adx_val), 2)
+
         # vs SMA percentages
         if "sma_50" in result and result["sma_50"] > 0:
             result["vs_sma50"] = round(((current_price - result["sma_50"]) / result["sma_50"]) * 100, 2)
@@ -100,6 +110,12 @@ def compute_indicators(df: pd.DataFrame) -> dict:
             result["momentum_5d"] = round(((current_price - float(close.iloc[-6])) / float(close.iloc[-6])) * 100, 2)
         if len(close) >= 21:
             result["momentum_20d"] = round(((current_price - float(close.iloc[-21])) / float(close.iloc[-21])) * 100, 2)
+
+        # Multi-period momentum for factor scoring
+        if len(close) >= 63:  # ~3 months
+            result["momentum_3m"] = round(((current_price - float(close.iloc[-63])) / float(close.iloc[-63])) * 100, 2)
+        if len(close) >= 126:  # ~6 months
+            result["momentum_6m"] = round(((current_price - float(close.iloc[-126])) / float(close.iloc[-126])) * 100, 2)
 
         # Volume ratio (current vs 20-day average)
         if not volume.empty and len(volume) >= 20:

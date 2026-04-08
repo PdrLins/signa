@@ -24,6 +24,7 @@ export default function TickerDetailPage() {
   const ticker = (params.ticker as string)?.toUpperCase() ?? ''
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
+  const locale = useI18nStore((s) => s.locale)
   const toast = useToast()
   const { data: watchlist } = useWatchlist()
   const addTicker = useAddTicker()
@@ -106,7 +107,7 @@ export default function TickerDetailPage() {
             )}
             {latest?.is_discovered && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ backgroundColor: theme.colors.primary + '18', color: theme.colors.primary }}>
-                Discovered
+                {t.signal.discovered}
               </span>
             )}
             <button
@@ -139,7 +140,7 @@ export default function TickerDetailPage() {
             <p className="text-[13px]" style={{ color: theme.colors.text }}>{detail.company_name as string}</p>
           )}
           <p className="text-[11px]" style={{ color: theme.colors.textSub }}>
-            {detail?.exchange as string ?? ''} &middot; {(detail?.asset_type as string) === 'CRYPTO' ? t.signal.crypto : t.signal.equity}
+            {detail?.exchange as string ?? ''} &middot; {(detail?.asset_type as string) === 'CRYPTO' ? t.signal.crypto : (detail?.asset_type as string) === 'ETF' ? t.signal.etf : t.signal.equity}
           </p>
         </div>
         <div className="text-right">
@@ -245,8 +246,8 @@ export default function TickerDetailPage() {
               <Badge variant={latest.action === 'BUY' ? 'buy' : latest.action === 'SELL' ? 'sell' : latest.action === 'AVOID' ? 'avoid' : 'hold'}>
                 {latest.action}
               </Badge>
-              {latest.signal_style === 'CONTRARIAN' && <Badge variant="upgraded">CONTRARIAN</Badge>}
-              {latest.signal_style === 'MOMENTUM' && <Badge variant="confirmed">MOMENTUM</Badge>}
+              {latest.signal_style === 'CONTRARIAN' && <Badge variant="upgraded">{t.signal.contrarian}</Badge>}
+              {latest.signal_style === 'MOMENTUM' && <Badge variant="confirmed">{t.signal.momentum}</Badge>}
               <Badge variant={latest.status === 'CONFIRMED' ? 'confirmed' : latest.status === 'WEAKENING' ? 'weakening' : latest.status === 'UPGRADED' ? 'upgraded' : 'cancelled'}>
                 {latest.status}
               </Badge>
@@ -276,6 +277,49 @@ export default function TickerDetailPage() {
             </div>
           </div>
 
+          {/* Sub-score pills */}
+          {latest.factor_labels && (() => {
+            const factorNames: Record<string, string> = {
+              dividend_reliability: t.signal.factorDividendReliability,
+              fundamental_health: t.signal.factorFundamentalHealth,
+              macro: t.signal.factorMacro,
+              sentiment: t.signal.factorSentiment,
+              catalyst: t.signal.factorCatalyst,
+              technical_momentum: t.signal.factorTechnicalMomentum,
+              fundamentals: t.signal.factorFundamentals,
+            }
+            return (
+              <div className="flex flex-wrap gap-1.5 mb-4">
+                {Object.entries(latest.factor_labels as Record<string, string>).map(([factor, label]) => {
+                  const color = label === 'Strong' ? theme.colors.up
+                    : label === 'Weak' ? theme.colors.down
+                    : theme.colors.textSub
+                  return (
+                    <span
+                      key={factor}
+                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: color + '12', color }}
+                    >
+                      {factorNames[factor] || factor}: {label}
+                    </span>
+                  )
+                })}
+              </div>
+            )
+          })()}
+
+          {/* Probability vs SPY */}
+          {latest.probability_vs_spy != null && latest.probability_vs_spy > 50 && (
+            <div className="mb-4">
+              <span
+                className="text-[11px] font-bold px-2.5 py-1 rounded-lg tabular-nums"
+                style={{ backgroundColor: theme.colors.up + '10', color: theme.colors.up }}
+              >
+                {latest.probability_vs_spy.toFixed(0)}% {t.signal.vsSpyChance ?? 'chance of beating SPY (20d)'}
+              </span>
+            </div>
+          )}
+
           {/* Confidence + Regime */}
           {(latest.confidence > 0 || latest.market_regime) && (
             <div className="flex items-center gap-4 mb-4">
@@ -287,7 +331,7 @@ export default function TickerDetailPage() {
               )}
               {latest.market_regime && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>Regime</p>
+                  <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.regime}</p>
                   <Badge variant={latest.market_regime === 'TRENDING' ? 'confirmed' : latest.market_regime === 'VOLATILE' ? 'hold' : 'cancelled'}>
                     {latest.market_regime}
                   </Badge>
@@ -383,6 +427,7 @@ export default function TickerDetailPage() {
               { label: t.signal.revenueGrowth, key: 'revenue_growth', suffix: '%' },
               { label: t.signal.debtEquity, key: 'debt_to_equity' },
               { label: t.signal.betaLabel, key: 'beta' },
+              { label: t.signal.shortInterest ?? 'Short Interest', key: 'short_percent_of_float', suffix: '%' },
             ].map(({ label, key, suffix }) => {
               const val = fundamentals[key]
               if (val === null || val === undefined) return null
@@ -498,7 +543,7 @@ export default function TickerDetailPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-xs tabular-nums" style={{ color: theme.colors.textSub }}>{formatPrice(sig.price_at_signal)}</span>
                   <span className="text-[10px]" style={{ color: theme.colors.textHint }}>
-                    {new Date(sig.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    {new Date(sig.created_at).toLocaleDateString(locale === 'pt' ? 'pt-BR' : 'en-US', { month: 'short', day: 'numeric' })}
                   </span>
                 </div>
               </div>

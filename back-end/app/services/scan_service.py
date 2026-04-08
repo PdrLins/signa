@@ -10,6 +10,8 @@ from app.ai import provider as ai_provider
 from app.ai.signal_engine import (
     check_blockers,
     check_gem,
+    compute_factor_labels,
+    compute_probability_vs_spy,
     compute_score,
     determine_status,
     score_to_action,
@@ -21,7 +23,7 @@ from app.scanners import indicators, macro_scanner, market_scanner
 from app.scanners.prefilter import prefilter_candidates
 
 # Ticker universe — hardcoded for now, could move to DB
-from app.scanners.universe import get_all_tickers, get_exchange
+from app.scanners.universe import get_all_tickers, get_asset_class, get_exchange
 
 
 async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
@@ -101,7 +103,8 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
 
         screening_data = await market_scanner.get_bulk_screening(all_tickers)
         _update_progress(10, "filtering")
-        candidates = prefilter_candidates(screening_data)
+        watchlist_symbols = queries.get_all_watchlist_symbols()
+        candidates = prefilter_candidates(screening_data, watchlist_symbols)
         logger.info(f"Candidates after pre-filter: {len(candidates)}")
 
         queries.update_scan(scan_id, candidates=len(candidates), tickers_scanned=len(all_tickers))
@@ -109,6 +112,15 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
 
         # Phase 2: Macro snapshot (15-20%)
         macro_data = await macro_scanner.get_macro_snapshot()
+
+        # Macro news pulse -- only on first scan of the day to save Grok tokens
+        if scan_type in ("PRE_MARKET", "MANUAL"):
+            try:
+                from app.ai.macro_pulse import get_macro_pulse
+                pulse = await get_macro_pulse()
+                macro_data["macro_pulse"] = pulse
+            except Exception as e:
+                logger.debug(f"Macro pulse skipped: {e}")
 
         # Layer 0 — Market regime (runs ONCE per scan, not per ticker)
         from app.signals.regime import get_market_regime
@@ -263,6 +275,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 result = await _process_candidate(
                     ticker, macro_data, screening_data, previous_signals,
                     scan_id, semaphore, market_regime, _knowledge_block,
+                    discovered_set,
                 )
                 return result
             except Exception as e:
@@ -286,7 +299,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             signal_data = {
                 "scan_id": scan_id,
                 "symbol": ticker,
-                "asset_type": "CRYPTO" if exchange == "CRYPTO" else "EQUITY",
+                "asset_type": get_asset_class(ticker),
                 "exchange": exchange,
                 "action": action,
                 "status": status,
@@ -309,7 +322,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 "catalyst_type": None,
                 "account_recommendation": _recommend_account(bucket, exchange),
                 "company_name": fundamental_data.get("company_name") if fundamental_data else None,
-                "is_discovered": ticker in discovered_set,
+                "is_discovered": ticker in (discovered_set or set()),
             }
             valid_signals.append(signal_data)
 
@@ -335,8 +348,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 "sent_at": datetime.now(timezone.utc).isoformat(),
             })
 
-        # Check watchlist for SELL/AVOID signals — alert immediately
-        watchlist_symbols = queries.get_all_watchlist_symbols()
+        # Check watchlist for SELL/AVOID signals -- alert immediately
         for sig in valid_signals:
             sym = sig.get("symbol")
             action = sig.get("action")
@@ -367,10 +379,13 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 logger.info(f"Virtual portfolio: {vt_result['buys']} buys, {vt_result['sells']} sells")
 
             # Check stop/target/time exits on all open virtual trades
-            from app.services.virtual_portfolio import check_virtual_exits
+            from app.services.virtual_portfolio import check_virtual_exits, flush_brain_notifications
             vt_exits = check_virtual_exits()
             if any(vt_exits.values()):
                 logger.info(f"Virtual exits: {vt_exits}")
+
+            # Send brain buy/sell Telegram notifications
+            await flush_brain_notifications()
 
         # Phase 8: Monitor positions (95-100%)
         _update_progress(95, "monitoring", "Checking positions...")
@@ -425,6 +440,7 @@ async def _process_candidate(
     semaphore: asyncio.Semaphore,
     market_regime: str = "TRENDING",
     knowledge_block: str = "",
+    discovered_set: set | None = None,
 ) -> dict:
     """Process a single candidate ticker through the full pipeline.
 
@@ -470,9 +486,10 @@ async def _process_candidate(
         )
 
         # Score (with regime context)
+        asset_class = get_asset_class(ticker)
         score, breakdown = compute_score(
             technical_data, fundamental_data, macro_data,
-            grok_data, synthesis, bucket, market_regime,
+            grok_data, synthesis, bucket, market_regime, asset_class,
         )
 
         # Check blockers
@@ -494,8 +511,8 @@ async def _process_candidate(
         else:
             action = score_to_action(score, bucket)
 
-        # Low confidence guard: if AI confidence < 40, downgrade BUY to HOLD
-        if action == "BUY" and confidence < 40 and confidence > 0:
+        # Low confidence guard: if AI confidence < 50, downgrade BUY to HOLD
+        if action == "BUY" and confidence < 50 and confidence > 0:
             logger.info(f"{ticker}: BUY downgraded to HOLD (low AI confidence {confidence}%)")
             action = "HOLD"
 
@@ -516,7 +533,7 @@ async def _process_candidate(
         signal_data = {
             "scan_id": scan_id,
             "symbol": ticker,
-            "asset_type": "CRYPTO" if exchange == "CRYPTO" else "EQUITY",
+            "asset_type": get_asset_class(ticker),
             "exchange": exchange,
             "action": action,
             "status": status,
@@ -541,7 +558,9 @@ async def _process_candidate(
             "signal_style": signal_style,
             "contrarian_score": contrarian["contrarian_score"] if contrarian["is_contrarian"] else None,
             "company_name": fundamental_data.get("company_name") if fundamental_data else None,
-            "is_discovered": ticker in discovered_set,
+            "is_discovered": ticker in (discovered_set or set()),
+            "probability_vs_spy": compute_probability_vs_spy(score, bucket, has_ai=bool(synthesis.get("reasoning"))),
+            "factor_labels": compute_factor_labels(breakdown, bucket, asset_class),
         }
 
         # Kelly position sizing (if actionable)
@@ -574,8 +593,8 @@ def _classify_bucket(ticker: str, screening: dict) -> str:
         return "HIGH_RISK"
 
     safe_suffixes = ["-UN.TO", "-B.TO", "-A.TO"]
-    safe_etfs = {"XIU.TO", "XIC.TO", "VFV.TO", "ZDV.TO", "XEI.TO", "ZWC.TO",
-                 "XDIV.TO", "VDY.TO", "QQQ", "SPY", "O", "PLD", "AMT"}
+    from app.scanners.universe import _ETF_TICKERS
+    safe_etfs = _ETF_TICKERS | {"O", "PLD", "AMT", "SPY"}
 
     if ticker in safe_etfs or any(ticker.endswith(s) for s in safe_suffixes):
         return "SAFE_INCOME"

@@ -42,6 +42,7 @@ def calculate_kelly(
     fractional: float = FRACTIONAL_KELLY,
     max_pct: float = MAX_POSITION_PCT,
     regime: str = "TRENDING",
+    asset_type: str = "EQUITY",
 ) -> dict:
     """Calculate recommended position size using fractional Kelly Criterion.
 
@@ -121,6 +122,14 @@ def calculate_kelly(
     elif regime == "CRISIS":
         recommended = min(recommended, 0.05)
         regime_note = "Capped at 5% - crisis regime"
+
+    # Crypto volatility scaling — crypto swings 3-5x more than equities
+    if asset_type == "CRYPTO":
+        recommended = recommended * 0.5
+        if regime_note:
+            regime_note += "; Halved for crypto volatility"
+        else:
+            regime_note = "Halved for crypto volatility"
 
     return {
         "full_kelly_pct": round(full_kelly * 100, 2),

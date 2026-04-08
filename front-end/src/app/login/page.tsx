@@ -24,7 +24,14 @@ export default function LoginPage() {
   const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const [countdown, setCountdown] = useState(120)
   const [attempts, setAttempts] = useState(0)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const reason = params.get('reason')
+      if (reason === 'expired') return t.login.sessionExpired ?? 'Your session has expired. Please log in again.'
+    }
+    return ''
+  })
   const [loading, setLoading] = useState(false)
 
   const otpRefs = useRef<(HTMLInputElement | null)[]>([])
@@ -53,7 +60,12 @@ export default function LoginPage() {
       setCountdown(30)
       setAttempts(0)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.login.invalidCredentials)
+      const msg = err instanceof Error ? err.message : ''
+      if (msg.includes('locked') || msg.includes('Lock')) {
+        setError(t.login.accountLocked)
+      } else {
+        setError(t.login.invalidCredentials)
+      }
     } finally {
       setLoading(false)
     }
@@ -100,7 +112,8 @@ export default function LoginPage() {
         localStorage.setItem('signa-last-login', res.last_login)
       }
       router.push('/overview')
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : ''
       const newAttempts = attempts + 1
       setAttempts(newAttempts)
       if (newAttempts >= 3) {
@@ -108,6 +121,9 @@ export default function LoginPage() {
         setOtp(['', '', '', '', '', ''])
         setSessionToken('')
         setError(t.login.tooManyAttempts)
+      } else if (msg.includes('expired') || msg.includes('Expired')) {
+        setError(t.login.codeExpired ?? 'Code expired. Request a new one.')
+        setOtp(['', '', '', '', '', ''])
       } else {
         setError(t.login.invalidCode.replace('{remaining}', String(3 - newAttempts)).replace('{s}', 3 - newAttempts > 1 ? 's' : ''))
         setOtp(['', '', '', '', '', ''])

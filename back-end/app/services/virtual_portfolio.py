@@ -11,14 +11,17 @@ from datetime import datetime, timezone
 
 from loguru import logger
 
+from app.core.cache import TTLCache
 from app.core.config import settings
-from app.db.supabase import get_client
+from app.db.supabase import get_client, with_retry
 from app.services.price_cache import _fetch_prices_batch
 
 
 # Brain auto-pick criteria: only the strongest signals
 BRAIN_MIN_SCORE = 72
-BRAIN_MAX_OPEN = 10  # Max simultaneous brain positions
+
+# Queued notifications (sent async after sync function returns)
+_pending_notifications: list[tuple[str, dict]] = []
 
 
 def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> dict:
@@ -26,6 +29,7 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
 
     Called at the end of each scan. Handles both watchlist and brain-auto tracks.
     """
+    _pending_notifications.clear()  # Prevent stale buildup from previous runs
     db = get_client()
     buys = 0
     sells = 0
@@ -41,10 +45,16 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
     open_watchlist = set()   # symbols with open watchlist positions
     open_brain = set()       # symbols with open brain positions
     brain_open_count = 0
+    weakest_brain = None     # pre-computed for rotation
+    weakest_brain_score = 999
     for r in all_open:
         if r.get("source") == "brain":
             open_brain.add(r["symbol"])
             brain_open_count += 1
+            es = r.get("entry_score", 0) or 0
+            if es < weakest_brain_score:
+                weakest_brain_score = es
+                weakest_brain = r
         else:
             open_watchlist.add(r["symbol"])
 
@@ -107,6 +117,16 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
                     f"Virtual SELL [{source}]: {emoji} {symbol} @ ${price:.2f} "
                     f"(entry ${entry_price:.2f}, P&L {pnl_pct:+.1f}%, score {entry_score}->{score})"
                 )
+
+                # Queue Telegram notification for brain sells
+                if source == "brain":
+                    verdict = f"{emoji} {'Win' if is_win else 'Loss'} -- brain learning from this outcome."
+                    _pending_notifications.append(("brain_sell", {
+                        "symbol": symbol, "price": f"{price:.2f}",
+                        "pnl": f"{pnl_pct:+.1f}", "reason": f"Signal changed to {action}",
+                        "entry_score": str(entry_score), "exit_score": str(score),
+                        "verdict": verdict,
+                    }))
             continue
 
         if action != "BUY":
@@ -132,9 +152,72 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
 
         # Track 2: Brain auto-picks (score 72+, limited slots)
         # Brain picks independently — watchlisted tickers can also be brain picks
-        if score >= BRAIN_MIN_SCORE and brain_open_count < BRAIN_MAX_OPEN and symbol not in open_brain:
-            # Only pick if it has AI analysis (target/stop filled)
-            if sig.get("target_price") and sig.get("stop_loss"):
+        # Portfolio rotation: if full, replace weakest position if new signal is stronger
+        if score >= BRAIN_MIN_SCORE and symbol not in open_brain:
+            if brain_open_count >= settings.brain_max_open:
+                # Only rotate if new signal is meaningfully better (+5 points) than weakest
+                if weakest_brain and score >= weakest_brain_score + 5:
+                    weakest = weakest_brain
+                    weakest_score = weakest_brain_score
+                    w_symbol = weakest["symbol"]
+                    w_entry = float(weakest["entry_price"])
+                    # Get actual current price for the position being closed
+                    w_prices = _fetch_prices_batch([w_symbol])
+                    w_current, _ = w_prices.get(w_symbol, (None, None))
+                    w_exit_price = w_current if w_current else price  # fallback to signal price
+                    w_pnl = ((w_exit_price - w_entry) / w_entry) * 100 if w_entry > 0 else 0
+                    # Close the weakest position
+                    db.table("virtual_trades").update({
+                        "status": "CLOSED",
+                        "exit_price": w_exit_price,
+                        "exit_date": now,
+                        "exit_score": score,
+                        "pnl_pct": round(w_pnl, 2),
+                        "pnl_amount": round(w_exit_price - w_entry, 2),
+                        "is_win": w_pnl > 0,
+                        "exit_reason": "ROTATION",
+                    }).eq("id", weakest["id"]).execute()
+                    open_brain.discard(w_symbol)
+                    brain_open_count -= 1
+                    logger.info(
+                        f"Virtual ROTATION: closed {w_symbol} (score {weakest_score}, P&L {w_pnl:+.1f}%) "
+                        f"to make room for {symbol} (score {score})"
+                    )
+                    _pending_notifications.append(("brain_sell", {
+                        "symbol": w_symbol, "price": f"{w_exit_price:.2f}",
+                        "pnl": f"{w_pnl:+.1f}", "reason": f"Rotated out for {symbol} (score {score})",
+                        "entry_score": str(weakest_score), "exit_score": str(score),
+                        "verdict": f"Replaced by stronger pick {symbol}.",
+                    }))
+                    # Update pre-computed weakest for next iteration
+                    weakest_brain = None
+                    weakest_brain_score = 999
+                    for r in all_open:
+                        if r.get("source") == "brain" and r.get("symbol") != w_symbol:
+                            es = r.get("entry_score", 0) or 0
+                            if es < weakest_brain_score:
+                                weakest_brain_score = es
+                                weakest_brain = r
+                else:
+                    continue  # No room and not strong enough to rotate
+            target = sig.get("target_price")
+            stop = sig.get("stop_loss")
+
+            # For tech-only signals without AI target/stop, compute from ATR
+            if not target or not stop:
+                atr = (sig.get("technical_data") or {}).get("atr")
+                if atr and price:
+                    # Target = price + 2*ATR, Stop = price - 1.5*ATR (1.33 R/R)
+                    target = round(price + 2 * float(atr), 2)
+                    stop = round(price - 1.5 * float(atr), 2)
+
+            if target and stop:
+                # Crypto: tighten stop to 8% below entry (vs default which can be wider)
+                if sig.get("asset_type") == "CRYPTO" or symbol.endswith("-USD"):
+                    max_crypto_stop = price * 0.92  # 8% max drawdown
+                    if float(stop) < max_crypto_stop:
+                        stop = round(max_crypto_stop, 2)
+
                 db.table("virtual_trades").insert({
                     "symbol": symbol,
                     "action": "BUY",
@@ -145,12 +228,21 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
                     "bucket": sig.get("bucket"),
                     "signal_style": sig.get("signal_style"),
                     "source": "brain",
-                    "target_price": sig.get("target_price"),
-                    "stop_loss": sig.get("stop_loss"),
+                    "target_price": target,
+                    "stop_loss": stop,
                 }).execute()
                 buys += 1
                 brain_open_count += 1
                 logger.info(f"Virtual BUY [brain]: {symbol} @ ${price:.2f} (score {score})")
+
+                # Queue Telegram notification (sent after function returns)
+                rr = round(float(target - price) / float(price - stop), 1) if stop and price > stop else 0
+                _pending_notifications.append(("brain_buy", {
+                    "symbol": symbol, "score": str(score),
+                    "bucket": sig.get("bucket", ""),
+                    "price": f"{price:.2f}", "target": f"{float(target):.2f}",
+                    "stop": f"{float(stop):.2f}", "rr": f"{rr}",
+                }))
 
                 # Auto-add discovered tickers to the tickers table
                 # so they keep getting scanned in future scans
@@ -169,6 +261,20 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
     return {"buys": buys, "sells": sells}
 
 
+async def flush_brain_notifications():
+    """Send all queued brain buy/sell notifications via Telegram."""
+    if not _pending_notifications:
+        return
+    from app.notifications.messages import msg
+    from app.notifications.telegram_bot import send_message
+    for key, kwargs in list(_pending_notifications):
+        try:
+            await send_message(settings.telegram_chat_id, msg(key, **kwargs))
+        except Exception as e:
+            logger.debug(f"Brain notification failed ({key}): {e}")
+    _pending_notifications.clear()
+
+
 def check_virtual_exits() -> dict:
     """Check open virtual trades for stop/target hits and time-based exits.
 
@@ -180,13 +286,13 @@ def check_virtual_exits() -> dict:
 
     open_result = (
         db.table("virtual_trades")
-        .select("id, symbol, entry_price, entry_date, source, target_price, stop_loss")
+        .select("id, symbol, entry_price, entry_score, entry_date, source, target_price, stop_loss")
         .eq("status", "OPEN")
         .execute()
     )
     open_trades = open_result.data or []
     if not open_trades:
-        return {"stops_hit": 0, "targets_hit": 0, "expired": 0}
+        return {"stops_hit": 0, "targets_hit": 0, "profit_takes": 0, "expired": 0}
 
     # Batch-fetch current prices
     symbols = list({t["symbol"] for t in open_trades})
@@ -211,6 +317,7 @@ def check_virtual_exits() -> dict:
     stops_hit = 0
     targets_hit = 0
     expired = 0
+    profit_takes = 0
 
     for trade in open_trades:
         symbol = trade["symbol"]
@@ -222,6 +329,7 @@ def check_virtual_exits() -> dict:
 
         target = float(trade["target_price"]) if trade.get("target_price") else None
         stop = float(trade["stop_loss"]) if trade.get("stop_loss") else None
+        pnl_pct = ((current_price - entry_price) / entry_price) * 100
 
         # Parse entry_date for age check
         entry_date_str = trade.get("entry_date", "")
@@ -231,7 +339,7 @@ def check_virtual_exits() -> dict:
         except (ValueError, TypeError):
             days_held = 0
 
-        # Determine exit reason (priority: stop > target > time)
+        # Determine exit reason (priority: stop > target > profit_take > time)
         exit_reason = None
         if stop and current_price <= stop:
             exit_reason = "STOP_HIT"
@@ -239,14 +347,24 @@ def check_virtual_exits() -> dict:
         elif target and current_price >= target:
             exit_reason = "TARGET_HIT"
             targets_hit += 1
+        # Profit-taking: lock in gains at +3%+ after 2+ days (let thesis play out first)
+        elif pnl_pct >= 3.0 and days_held >= 2:
+            exit_reason = "PROFIT_TAKE"
+            profit_takes += 1
+            logger.info(f"Virtual PROFIT TAKE: {symbol} at +{pnl_pct:.1f}% (locking in gains)")
+            _pending_notifications.append(("brain_sell", {
+                "symbol": symbol, "price": f"{current_price:.2f}",
+                "pnl": f"{pnl_pct:+.1f}", "reason": "Profit take at +3%",
+                "entry_score": str(trade.get("entry_score", 0)),
+                "exit_score": str(current_scores.get(symbol, 0)),
+                "verdict": "Gains locked in. Goal: make profit.",
+            }))
         elif days_held >= max_days:
             exit_reason = "TIME_EXPIRED"
             expired += 1
 
         if not exit_reason:
             continue
-
-        pnl_pct = ((current_price - entry_price) / entry_price) * 100
         pnl_amount = current_price - entry_price
         is_win = pnl_pct > 0
         source = trade.get("source", "watchlist")
@@ -270,18 +388,27 @@ def check_virtual_exits() -> dict:
             f"(entry ${entry_price:.2f}, P&L {pnl_pct:+.1f}%, reason={exit_reason}, exit_score={exit_score})"
         )
 
-    total = stops_hit + targets_hit + expired
+    total = stops_hit + targets_hit + profit_takes + expired
     if total:
-        logger.info(f"Virtual exits: {stops_hit} stops, {targets_hit} targets, {expired} expired")
+        logger.info(f"Virtual exits: {stops_hit} stops, {targets_hit} targets, {profit_takes} profit takes, {expired} expired")
 
-    return {"stops_hit": stops_hit, "targets_hit": targets_hit, "expired": expired}
+    return {"stops_hit": stops_hit, "targets_hit": targets_hit, "profit_takes": profit_takes, "expired": expired}
 
 
+_vp_cache = TTLCache(max_size=2, default_ttl=300)
+
+
+@with_retry
 def get_virtual_summary() -> dict:
     """Get virtual portfolio performance summary for the dashboard.
 
     Includes live P&L for open positions via current price fetch.
+    Cached for 5 minutes to avoid repeated DB + price queries on every page load.
     """
+    cached = _vp_cache.get("summary")
+    if cached is not None:
+        return cached
+
     db = get_client()
 
     # All trades
@@ -388,7 +515,7 @@ def get_virtual_summary() -> dict:
         return enriched
 
     # Enrich open trades with live P&L
-    enriched_open = [_enrich_open_trade(t) for t in open_trades[:10]]
+    enriched_open = [_enrich_open_trade(t) for t in open_trades]
 
     # Calculate aggregate unrealized P&L per source
     def _unrealized_agg(trades: list[dict]) -> float:
@@ -401,7 +528,7 @@ def get_virtual_summary() -> dict:
     watchlist_closed = [t for t in closed_trades if t.get("source") == "watchlist"]
     brain_closed = [t for t in closed_trades if t.get("source") == "brain"]
 
-    return {
+    result = {
         "open_count": len(open_trades),
         "open_trades": enriched_open,
         # Combined stats
@@ -433,6 +560,9 @@ def get_virtual_summary() -> dict:
         "watchdog": _get_watchdog_summary(db, len(brain_open_enriched)),
     }
 
+    _vp_cache.set("summary", result)
+    return result
+
 
 def _get_watchdog_summary(db, positions_monitored: int) -> dict:
     """Get watchdog status for the dashboard."""
@@ -454,11 +584,17 @@ def _get_watchdog_summary(db, positions_monitored: int) -> dict:
         return {"active": settings.watchdog_enabled, "positions_monitored": positions_monitored, "recent_events": []}
 
 
+@with_retry
 def get_virtual_charts() -> dict:
     """Get chart data for the brain performance page.
 
     Returns pre-computed data structures the frontend can render directly.
+    Cached for 5 minutes to avoid repeated DB queries on every page load.
     """
+    cached = _vp_cache.get("charts")
+    if cached is not None:
+        return cached
+
     db = get_client()
 
     # All closed trades for charts
@@ -571,13 +707,16 @@ def get_virtual_charts() -> dict:
             "win_rate": round(wins / window * 100, 1),
         })
 
-    return {
+    result = {
         "pnl_by_bucket": pnl_by_bucket,
         "monthly_returns": monthly_returns,
         "exit_reasons": exit_reasons,
         "score_vs_pnl": score_vs_pnl,
         "win_rate_over_time": win_rate_over_time,
     }
+
+    _vp_cache.set("charts", result)
+    return result
 
 
 def snapshot_virtual_portfolio() -> dict:

@@ -42,6 +42,8 @@ class SignalResponse(BaseModel):
     catalyst_type: Optional[str] = None  # PRE_EARNINGS, PEAD, DIVIDEND, OTHER
     signal_style: Optional[str] = None  # MOMENTUM, CONTRARIAN, NEUTRAL
     contrarian_score: Optional[int] = None
+    probability_vs_spy: Optional[float] = None  # "62% chance of beating SPY in 20 days"
+    factor_labels: Optional[dict] = None  # {"dividend_reliability": "Strong", "macro": "Neutral", ...}
     scan_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

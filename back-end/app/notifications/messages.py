@@ -168,17 +168,25 @@ _MESSAGES = {
     "watchdog_warning": {
         "en": (
             "<b>Signa Watchdog</b>\n\n"
-            "{symbol} dropped {change}% since last check.\n"
+            "{symbol} -- P&L: {pnl}% (total)\n"
             "Now: ${price} | Stop: ${stop}\n"
-            "Sentiment: {sentiment}\n\n"
-            "Brain is monitoring closely."
+            "Sentiment: {sentiment}\n"
+            "Reason: {reason}\n"
+            "{context}\n\n"
+            "Brain is monitoring closely.\n"
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">View on Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
         ),
         "pt": (
             "<b>Signa Watchdog</b>\n\n"
-            "{symbol} caiu {change}% desde a \u00faltima verifica\u00e7\u00e3o.\n"
+            "{symbol} -- P&L: {pnl}% (total)\n"
             "Agora: ${price} | Stop: ${stop}\n"
-            "Sentimento: {sentiment}\n\n"
-            "O brain est\u00e1 monitorando de perto."
+            "Sentimento: {sentiment}\n"
+            "Motivo: {reason}\n"
+            "{context}\n\n"
+            "O brain esta monitorando de perto.\n"
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">Ver no Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
         ),
     },
     "watchdog_exit": {
@@ -187,14 +195,20 @@ _MESSAGES = {
             "{symbol} closed @ ${price}\n"
             "P&L: {pnl}%\n"
             "Reason: bearish sentiment + price drop\n"
-            "Sentiment: {sentiment}"
+            "Sentiment: {sentiment}\n"
+            '{context}\n'
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">View on Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
         ),
         "pt": (
             "<b>Signa Watchdog -- Brain Vendeu</b>\n\n"
             "{symbol} fechado @ ${price}\n"
             "P&L: {pnl}%\n"
-            "Motivo: sentimento bearish + queda de pre\u00e7o\n"
-            "Sentimento: {sentiment}"
+            "Motivo: sentimento bearish + queda de preco\n"
+            "Sentimento: {sentiment}\n"
+            '{context}\n'
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">Ver no Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
         ),
     },
     "watchdog_user_warning": {
@@ -225,6 +239,66 @@ _MESSAGES = {
             "quer vender sua posi\u00e7\u00e3o real tamb\u00e9m."
         ),
     },
+    "brain_buy": {
+        "en": (
+            "<b>Brain BUY -- {symbol}</b>\n\n"
+            "Score: <b>{score}/100</b> | Bucket: {bucket}\n"
+            "Entry: ${price} | Target: ${target} | Stop: ${stop}\n"
+            "R/R: {rr}x\n\n"
+            "Brain auto-picked this ticker.\n"
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">View on Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
+        ),
+        "pt": (
+            "<b>Brain COMPRA -- {symbol}</b>\n\n"
+            "Score: <b>{score}/100</b> | Bucket: {bucket}\n"
+            "Entrada: ${price} | Alvo: ${target} | Stop: ${stop}\n"
+            "R/R: {rr}x\n\n"
+            "Brain selecionou este ticker automaticamente.\n"
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">Ver no Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
+        ),
+    },
+    "brain_sell": {
+        "en": (
+            "<b>Brain SELL -- {symbol}</b>\n\n"
+            "Exit: ${price} | P&L: {pnl}%\n"
+            "Reason: {reason}\n"
+            "Entry score: {entry_score} | Exit score: {exit_score}\n\n"
+            "{verdict}\n"
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">View on Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
+        ),
+        "pt": (
+            "<b>Brain VENDA -- {symbol}</b>\n\n"
+            "Saida: ${price} | P&L: {pnl}%\n"
+            "Motivo: {reason}\n"
+            "Score entrada: {entry_score} | Score saida: {exit_score}\n\n"
+            "{verdict}\n"
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">Ver no Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
+        ),
+    },
+    "watchdog_force_sell": {
+        "en": (
+            "<b>Signa Watchdog -- FORCE SELL</b>\n\n"
+            "{symbol} force-closed @ ${price}\n"
+            "P&L: {pnl}%\n"
+            "Reason: {reason}\n\n"
+            "This was an emergency exit -- no sentiment check needed.\n"
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">View on Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
+        ),
+        "pt": (
+            "<b>Signa Watchdog -- VENDA FORCADA</b>\n\n"
+            "{symbol} fechado forcadamente @ ${price}\n"
+            "P&L: {pnl}%\n"
+            "Motivo: {reason}\n\n"
+            "Esta foi uma saida de emergencia -- sem verificacao de sentimento.\n"
+            '<a href="https://ca.finance.yahoo.com/quote/{symbol}">Ver no Yahoo Finance</a>\n'
+            "<i>{timestamp}</i>"
+        ),
+    },
     "brain_otp": {
         "en": (
             "🧠 <b>Signa Brain Editor</b>\n\n"
@@ -248,7 +322,31 @@ def msg(key: str, **kwargs) -> str:
     """Get a translated message template and format it."""
     lang = settings.language if settings.language in ("en", "pt") else "en"
     template = _MESSAGES.get(key, {}).get(lang, _MESSAGES.get(key, {}).get("en", key))
+    # Auto-inject timestamp if not provided
+    if "timestamp" not in kwargs:
+        from datetime import datetime
+        import pytz
+        et = datetime.now(pytz.timezone("America/New_York"))
+        kwargs["timestamp"] = et.strftime("%b %d, %I:%M %p ET")
+    # Default context to empty string
+    if "context" not in kwargs:
+        kwargs["context"] = ""
     try:
         return template.format(**kwargs) if kwargs else template
     except KeyError:
         return template
+
+
+def is_quiet_hours() -> bool:
+    """Check if current time is within notification quiet hours."""
+    if not settings.notify_quiet_enabled:
+        return False
+    from datetime import datetime
+    import pytz
+    et = datetime.now(pytz.timezone("America/New_York"))
+    hour = et.hour
+    start = settings.notify_quiet_start
+    end = settings.notify_quiet_end
+    if start > end:  # e.g., 18-6 spans midnight
+        return hour >= start or hour < end
+    return start <= hour < end

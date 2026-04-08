@@ -14,7 +14,7 @@ from loguru import logger
 
 from app.core.cache import TTLCache
 
-_cache = TTLCache(max_size=500, default_ttl=300)
+_cache = TTLCache(max_size=500, default_ttl=600)  # 10 min — signal prices don't need sub-minute freshness
 
 
 def _get_cached(symbol: str) -> tuple[bool, Optional[float], Optional[float]]:

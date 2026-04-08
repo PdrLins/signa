@@ -22,6 +22,12 @@ class AIConfigUpdateRequest(BaseModel):
     score_buy_safe: Optional[int] = Field(None, ge=55, le=85)
     score_buy_risk: Optional[int] = Field(None, ge=55, le=85)
     score_hold: Optional[int] = Field(None, ge=40, le=65)
+    watchdog_min_notify_pct: Optional[float] = Field(None, ge=0, le=5.0)
+    watchdog_pnl_alert_pct: Optional[float] = Field(None, ge=0.5, le=10.0)
+    brain_max_open: Optional[int] = Field(None, ge=5, le=50)
+    notify_quiet_enabled: Optional[bool] = None
+    notify_quiet_start: Optional[int] = Field(None, ge=0, le=23)
+    notify_quiet_end: Optional[int] = Field(None, ge=0, le=23)
 
 
 class BudgetUpdateRequest(BaseModel):
@@ -264,6 +270,15 @@ async def get_ai_config(user: dict = Depends(get_current_user)):
             "score_buy_risk": settings.score_buy_risk,
             "score_hold": settings.score_hold,
         },
+        "watchdog": {
+            "min_notify_pct": settings.watchdog_min_notify_pct,
+            "pnl_alert_pct": settings.watchdog_pnl_alert_pct,
+            "stop_proximity_pct": settings.watchdog_stop_proximity_pct,
+            "brain_max_open": settings.brain_max_open,
+            "notify_quiet_enabled": settings.notify_quiet_enabled,
+            "notify_quiet_start": settings.notify_quiet_start,
+            "notify_quiet_end": settings.notify_quiet_end,
+        },
     }
 
 
@@ -314,6 +329,20 @@ async def update_ai_config(
     if body.score_hold is not None:
         settings.score_hold = body.score_hold
 
+    # Watchdog config
+    if body.watchdog_min_notify_pct is not None:
+        settings.watchdog_min_notify_pct = body.watchdog_min_notify_pct
+    if body.watchdog_pnl_alert_pct is not None:
+        settings.watchdog_pnl_alert_pct = body.watchdog_pnl_alert_pct
+    if body.brain_max_open is not None:
+        settings.brain_max_open = body.brain_max_open
+    if body.notify_quiet_enabled is not None:
+        settings.notify_quiet_enabled = body.notify_quiet_enabled
+    if body.notify_quiet_start is not None:
+        settings.notify_quiet_start = body.notify_quiet_start
+    if body.notify_quiet_end is not None:
+        settings.notify_quiet_end = body.notify_quiet_end
+
     # Audit log config changes
     uid = user.get("user_id")
     insert_audit_log(
@@ -336,5 +365,14 @@ async def update_ai_config(
             "score_buy_safe": settings.score_buy_safe,
             "score_buy_risk": settings.score_buy_risk,
             "score_hold": settings.score_hold,
+        },
+        "watchdog": {
+            "min_notify_pct": settings.watchdog_min_notify_pct,
+            "pnl_alert_pct": settings.watchdog_pnl_alert_pct,
+            "stop_proximity_pct": settings.watchdog_stop_proximity_pct,
+            "brain_max_open": settings.brain_max_open,
+            "notify_quiet_enabled": settings.notify_quiet_enabled,
+            "notify_quiet_start": settings.notify_quiet_start,
+            "notify_quiet_end": settings.notify_quiet_end,
         },
     }
