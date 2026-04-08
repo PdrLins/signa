@@ -101,6 +101,10 @@ CREATE TABLE IF NOT EXISTS signals (
     status            VARCHAR DEFAULT 'CONFIRMED',
     score             INT DEFAULT 0 CHECK (score >= 0 AND score <= 100),
     confidence        INT DEFAULT 0 CHECK (confidence >= 0 AND confidence <= 100),
+    -- AI synthesis status: validated/low_confidence/failed/skipped
+    -- More honest than inferring from confidence==0 (which conflated failure
+    -- with intentional skipping). Used by the brain auto-buy guard.
+    ai_status         VARCHAR DEFAULT 'skipped',
     is_gem            BOOLEAN DEFAULT FALSE,
     is_discovered     BOOLEAN DEFAULT FALSE,
     bucket            VARCHAR,
@@ -137,6 +141,9 @@ CREATE INDEX IF NOT EXISTS idx_signals_gem ON signals(is_gem, created_at DESC) W
 CREATE INDEX IF NOT EXISTS idx_signals_score ON signals(score DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_action_date ON signals(action, created_at DESC);
+
+-- Migration for existing installs (safe to re-run):
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS ai_status VARCHAR DEFAULT 'skipped';
 
 -- 8. PORTFOLIO
 CREATE TABLE IF NOT EXISTS portfolio (
@@ -349,11 +356,48 @@ CREATE TABLE IF NOT EXISTS virtual_trades (
     target_price    DOUBLE PRECISION,
     stop_loss       DOUBLE PRECISION,
     exit_reason     VARCHAR,            -- SIGNAL, STOP_HIT, TARGET_HIT, TIME_EXPIRED
+    -- Brain tiered trust model: which tier triggered this buy and what
+    -- position size multiplier was applied. NULL for non-brain (watchlist)
+    -- trades. Used to analyze win rate by tier and tune the model.
+    entry_tier         INT,             -- 1=validated, 2=low_confidence, 3=tech_only
+    trust_multiplier   DOUBLE PRECISION, -- 1.0 (full size) or 0.5 (half size)
+    -- Pre-market review flag: when an equity gets a SELL/AVOID signal outside
+    -- market hours, the position is flagged here. The first scan after open
+    -- re-checks the signal: if still bad → execute sell, if recovered → clear.
+    pending_review_at      TIMESTAMPTZ,
+    pending_review_action  VARCHAR,     -- SELL, AVOID, or FORCE_SELL (sentinel for /forcesell user override)
+    pending_review_score   INT,
+    pending_review_reason  TEXT,
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_virtual_trades_symbol ON virtual_trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_virtual_trades_status ON virtual_trades(status);
 CREATE INDEX IF NOT EXISTS idx_virtual_trades_source ON virtual_trades(source);
+CREATE INDEX IF NOT EXISTS idx_virtual_trades_pending_review ON virtual_trades(pending_review_at) WHERE pending_review_at IS NOT NULL;
+
+-- Migration for existing installs (safe to re-run):
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS pending_review_at TIMESTAMPTZ;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS pending_review_action VARCHAR;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS pending_review_score INT;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS pending_review_reason TEXT;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS entry_tier INT;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS trust_multiplier DOUBLE PRECISION;
+CREATE INDEX IF NOT EXISTS idx_virtual_trades_entry_tier ON virtual_trades(entry_tier) WHERE entry_tier IS NOT NULL;
+
+
+-- 18b. AI RETRY QUEUE (tickers whose AI synthesis failed — retry on next scan)
+-- When synthesis errors out (transient API issue, timeout, all providers down),
+-- the ticker is added here. The next scan prepends these to the AI candidate
+-- list so good signals don't get lost to one-off failures.
+CREATE TABLE IF NOT EXISTS ai_retry_queue (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    symbol          VARCHAR NOT NULL UNIQUE,
+    failure_count   INT DEFAULT 1,
+    last_failed_at  TIMESTAMPTZ DEFAULT now(),
+    last_error      TEXT,
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_retry_queue_failed_at ON ai_retry_queue(last_failed_at DESC);
 
 
 -- 19. VIRTUAL SNAPSHOTS (daily equity curve for performance charts)

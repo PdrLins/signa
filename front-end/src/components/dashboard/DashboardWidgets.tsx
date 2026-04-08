@@ -406,3 +406,136 @@ export function BrainPerformanceWidget() {
     </Link>
   )
 }
+
+
+// ─── Brain Tier Breakdown ─────────────────────────────
+
+interface BrainTier {
+  tier: 1 | 2 | 3
+  label: string
+  trust_pct: number
+  open_count: number
+  closed_count: number
+  win_rate: number
+  avg_pnl_pct: number
+  best_pnl_pct: number | null
+  worst_pnl_pct: number | null
+}
+
+interface BrainTierBreakdown {
+  tiers: BrainTier[]
+  total_brain_trades: number
+  trades_with_tier: number
+}
+
+export function BrainTierBreakdownWidget() {
+  const theme = useTheme()
+  // Note: i18n keys for this widget are not yet in en.json/pt.json (gitignored).
+  // Hardcoded English strings until they're added — TODO: i18n.
+
+  const { data, isLoading } = useQuery<BrainTierBreakdown>({
+    queryKey: ['stats', 'brain-tier-breakdown'],
+    queryFn: async () => (await client.get<BrainTierBreakdown>('/stats/brain-tier-breakdown')).data,
+    staleTime: 60_000,
+  })
+
+  if (isLoading) return <Card><Skeleton width="100%" height={120} /></Card>
+  if (!data) return null
+
+  const hasAnyTierData = data.trades_with_tier > 0
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-1.5">
+          <Brain size={14} style={{ color: theme.colors.primary }} />
+          <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+            Brain Trust Tiers
+          </span>
+        </div>
+        {data.trades_with_tier > 0 && (
+          <span className="text-[10px]" style={{ color: theme.colors.textHint }}>
+            {data.trades_with_tier} tracked
+          </span>
+        )}
+      </div>
+
+      {!hasAnyTierData ? (
+        <p className="text-[11px] leading-relaxed" style={{ color: theme.colors.textHint }}>
+          No tier data yet. The brain will start tracking tiers as new trades open under the tiered trust model.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {data.tiers.map((tier) => {
+            const tierColor = tier.tier === 1
+              ? theme.colors.up
+              : tier.tier === 2
+              ? theme.colors.primary
+              : theme.colors.warning
+            const totalCount = tier.open_count + tier.closed_count
+            const isActive = totalCount > 0
+            const winRatePct = Math.round(tier.win_rate * 100)
+            const winRateColor = tier.closed_count === 0
+              ? theme.colors.textSub
+              : tier.win_rate >= 0.6
+              ? theme.colors.up
+              : tier.win_rate >= 0.5
+              ? theme.colors.warning
+              : theme.colors.down
+            return (
+              <div
+                key={tier.tier}
+                className="flex items-center gap-3 py-1.5 px-2 rounded-lg"
+                style={{
+                  backgroundColor: isActive ? tierColor + '08' : 'transparent',
+                  border: `1px solid ${isActive ? tierColor + '20' : theme.colors.border + '40'}`,
+                }}
+              >
+                {/* Tier badge */}
+                <div
+                  className="flex items-center justify-center w-8 h-8 rounded-md shrink-0"
+                  style={{ backgroundColor: tierColor + '15' }}
+                >
+                  <span className="text-[11px] font-bold tabular-nums" style={{ color: tierColor }}>
+                    T{tier.tier}
+                  </span>
+                </div>
+
+                {/* Label + size */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-semibold truncate" style={{ color: theme.colors.text }}>
+                    {tier.label}
+                  </p>
+                  <p className="text-[9px]" style={{ color: theme.colors.textHint }}>
+                    {tier.trust_pct}% size · {tier.open_count} open · {tier.closed_count} closed
+                  </p>
+                </div>
+
+                {/* Win rate + avg P&L */}
+                <div className="text-right shrink-0">
+                  <p className="text-[12px] font-bold tabular-nums" style={{ color: winRateColor }}>
+                    {tier.closed_count === 0 ? '—' : `${winRatePct}%`}
+                  </p>
+                  <p
+                    className="text-[9px] tabular-nums"
+                    style={{
+                      color: tier.closed_count === 0
+                        ? theme.colors.textHint
+                        : tier.avg_pnl_pct >= 0
+                        ? theme.colors.up
+                        : theme.colors.down,
+                    }}
+                  >
+                    {tier.closed_count === 0
+                      ? '—'
+                      : `${tier.avg_pnl_pct >= 0 ? '+' : ''}${tier.avg_pnl_pct.toFixed(1)}% avg`}
+                  </p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </Card>
+  )
+}

@@ -46,6 +46,10 @@ class BudgetService:
         self._monthly_usage: dict[str, dict[str, float]] = {}
         # {provider: {date_str: call_count}}
         self._daily_calls: dict[str, dict[str, int]] = {}
+        # Track which budget alert thresholds have already been sent this month
+        # so we don't spam Telegram on every call. Resets at start of new month.
+        # Format: {f"{provider}:{month_str}": set([70, 90, 100])}
+        self._alert_sent: dict[str, set[int]] = {}
         self._data_lock = asyncio.Lock()
         self._initialized = False
 
@@ -193,14 +197,62 @@ class BudgetService:
         except Exception as e:
             logger.debug(f"Failed to persist AI usage: {e}")
 
-        # Log warning when approaching limits
+        # Tiered budget alerts: log warning + Telegram at 70%, 90%, 100%.
+        # Each threshold fires at most once per provider per month.
         monthly_spend = self.get_monthly_spend(provider)
         provider_limit = getattr(settings, f"budget_{provider}_monthly_usd", settings.budget_monthly_limit_usd)
-        if provider_limit > 0 and monthly_spend / provider_limit > 0.8:
-            logger.warning(
-                f"Budget alert: {provider} at {monthly_spend/provider_limit:.0%} "
-                f"of monthly limit (${monthly_spend:.3f}/${provider_limit:.2f})"
+        if provider_limit > 0:
+            pct = (monthly_spend / provider_limit) * 100
+            await self._maybe_send_threshold_alert(provider, monthly_spend, provider_limit, pct)
+
+    async def _maybe_send_threshold_alert(
+        self, provider: str, monthly_spend: float, provider_limit: float, pct: float
+    ) -> None:
+        """Send a Telegram alert when budget crosses 70%, 90%, or 100% — once per month."""
+        thresholds_crossed = [t for t in (70, 90, 100) if pct >= t]
+        if not thresholds_crossed:
+            return
+        highest_crossed = max(thresholds_crossed)
+
+        month_key = f"{provider}:{self._month()}"
+        sent = self._alert_sent.setdefault(month_key, set())
+        if highest_crossed in sent:
+            return  # Already alerted for this threshold this month
+
+        sent.add(highest_crossed)
+        # Also mark all lower thresholds as sent (in case we jumped past them)
+        for t in thresholds_crossed:
+            sent.add(t)
+
+        logger.warning(
+            f"Budget alert: {provider} at {pct:.0f}% of monthly limit "
+            f"(${monthly_spend:.3f}/${provider_limit:.2f})"
+        )
+
+        # Send Telegram alert (best-effort, don't block the call recording)
+        try:
+            from app.notifications.messages import msg
+            from app.notifications.telegram_bot import send_message
+            if highest_crossed >= 100:
+                threshold_msg = "Provider blocked. Brain will fall back to next provider in chain."
+            elif highest_crossed >= 90:
+                threshold_msg = "Approaching limit. Consider increasing budget or reducing scans."
+            else:
+                threshold_msg = "Heads up — budget at 70%. Plan ahead before it runs out."
+            await send_message(
+                settings.telegram_chat_id,
+                msg(
+                    "budget_threshold",
+                    provider=provider,
+                    pct=str(int(pct)),
+                    spend=f"{monthly_spend:.2f}",
+                    limit=f"{provider_limit:.2f}",
+                    threshold=str(highest_crossed),
+                    threshold_msg=threshold_msg,
+                ),
             )
+        except Exception as e:
+            logger.debug(f"Failed to send budget alert: {e}")
 
     def _cleanup_old_daily(self, provider: str):
         """Remove daily entries older than _MAX_DAILY_HISTORY days."""

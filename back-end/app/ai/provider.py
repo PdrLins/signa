@@ -23,56 +23,76 @@ async def synthesize_signal(
     macro_data: dict,
     grok_data: dict,
 ) -> dict:
-    """Route synthesis to the first available provider within budget."""
+    """Route synthesis to the first available provider within budget.
+
+    Fallback chain when claude_local=True:
+        Claude Local CLI ($0)  →  Claude API (paid)  →  Gemini (free tier)
+    Fallback chain when claude_local=False:
+        Claude API (paid)  →  Gemini (free tier)
+
+    Previous bug: when claude_local was enabled and the CLI failed, the paid
+    Claude API was skipped entirely (the `continue` jumped to gemini). Now
+    Claude Local failure properly cascades to the paid Claude API first.
+    """
     providers = settings.synthesis_providers
     budget = await _get_budget()
 
     for provider in providers:
-        # Local CLI mode — skip budget entirely ($0 cost)
-        if provider == "claude" and settings.claude_local:
+        if provider == "claude":
+            # Tier 1: Claude Local CLI (free, retried internally)
+            if settings.claude_local:
+                try:
+                    from app.ai.claude_local_client import synthesize_signal as claude_local_synth
+                    result = await claude_local_synth(ticker, technical_data, fundamental_data, macro_data, grok_data)
+                    if not result.get("error"):
+                        result["_provider"] = "claude-local"
+                        return result
+                    logger.warning(
+                        f"Claude Local exhausted retries for {ticker}: {result.get('error')} "
+                        f"— falling through to paid Claude API"
+                    )
+                except Exception as e:
+                    logger.warning(f"Claude Local synthesis error for {ticker}: {e} — falling through to paid Claude API")
+
+            # Tier 2: Paid Claude API (always tried after local fails OR when local disabled)
+            allowed, reason = await budget.can_call("claude", "synthesis")
+            if not allowed:
+                logger.warning(f"Budget blocked Claude API synthesis for {ticker}: {reason}")
+            elif settings.anthropic_api_key:
+                try:
+                    from app.ai.claude_client import synthesize_signal as claude_synth
+                    result = await claude_synth(ticker, technical_data, fundamental_data, macro_data, grok_data)
+                    if not result.get("error"):
+                        result["_provider"] = "claude"
+                        await budget.record_call("claude", "synthesis", ticker, success=True)
+                        return result
+                    logger.warning(f"Claude API failed for {ticker}: {result.get('error')} — trying next provider")
+                    await budget.record_call("claude", "synthesis", ticker, success=False)
+                except Exception as e:
+                    logger.warning(f"Claude API synthesis error for {ticker}: {e}")
+            continue
+
+        elif provider == "gemini":
+            allowed, reason = await budget.can_call("gemini", "synthesis")
+            if not allowed:
+                logger.warning(f"Budget blocked Gemini synthesis for {ticker}: {reason}")
+                continue
+            if not settings.gemini_api_key:
+                continue
             try:
-                from app.ai.claude_local_client import synthesize_signal as claude_local_synth
-                result = await claude_local_synth(ticker, technical_data, fundamental_data, macro_data, grok_data)
-                if not result.get("error"):
-                    result["_provider"] = "claude-local"
-                    return result
-                logger.debug(f"Claude Local failed for {ticker}: {result.get('error')}, trying next...")
-            except Exception as e:
-                logger.warning(f"Claude Local synthesis error for {ticker}: {e}")
-            continue
-
-        # Budget check for paid providers
-        allowed, reason = await budget.can_call(provider, "synthesis")
-        if not allowed:
-            logger.warning(f"Budget blocked {provider} synthesis for {ticker}: {reason}")
-            continue
-
-        try:
-            if provider == "claude" and settings.anthropic_api_key:
-                from app.ai.claude_client import synthesize_signal as claude_synth
-                result = await claude_synth(ticker, technical_data, fundamental_data, macro_data, grok_data)
-                if not result.get("error"):
-                    result["_provider"] = "claude"
-                    await budget.record_call("claude", "synthesis", ticker, success=True)
-                    return result
-                logger.debug(f"Claude failed for {ticker}: {result.get('error')}, trying next...")
-                await budget.record_call("claude", "synthesis", ticker, success=False)
-
-            elif provider == "gemini" and settings.gemini_api_key:
                 from app.ai.gemini_client import synthesize_signal as gemini_synth
                 result = await gemini_synth(ticker, technical_data, fundamental_data, macro_data, grok_data)
                 if not result.get("error"):
                     result["_provider"] = "gemini"
                     await budget.record_call("gemini", "synthesis", ticker, success=True)
                     return result
-                logger.debug(f"Gemini failed for {ticker}: {result.get('error')}, trying next...")
-
-        except Exception as e:
-            logger.warning(f"Provider {provider} synthesis error for {ticker}: {e}")
+                logger.warning(f"Gemini synthesis failed for {ticker}: {result.get('error')}")
+            except Exception as e:
+                logger.warning(f"Gemini synthesis error for {ticker}: {e}")
             continue
 
     # All providers failed or over budget — return generic fallback
-    logger.warning(f"All synthesis providers failed/blocked for {ticker}")
+    logger.error(f"All synthesis providers failed/blocked for {ticker}")
     return {
         "signal": "HOLD",
         "confidence": 0,

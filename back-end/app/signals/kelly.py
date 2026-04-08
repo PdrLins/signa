@@ -43,6 +43,7 @@ def calculate_kelly(
     max_pct: float = MAX_POSITION_PCT,
     regime: str = "TRENDING",
     asset_type: str = "EQUITY",
+    trust_multiplier: float = 1.0,
 ) -> dict:
     """Calculate recommended position size using fractional Kelly Criterion.
 
@@ -52,6 +53,17 @@ def calculate_kelly(
         score: Signal score (0-100). Used to derive win_rate if not provided.
         fractional: Fraction of full Kelly to use (default 0.25).
         max_pct: Maximum position size as percentage (default 0.15 = 15%).
+        trust_multiplier: Tier-based scaling for AI confidence (default 1.0).
+            Halves position size for low-trust signals (low_confidence or
+            tech-only). 1.0 = full size, 0.5 = half size, etc.
+
+            Currently the production scan_service flow only calls this for
+            BUY signals (which always have ai_status="validated"), so the
+            default 1.0 is used in practice. The brain's tier 2/3 auto-buys
+            track tier and trust_multiplier on the virtual_trades row directly
+            without computing a per-trade Kelly. This parameter is exposed so
+            that if the brain ever computes its own per-position Kelly, the
+            tier-aware scaling is one line of integration away.
 
     Returns:
         Dict with full_kelly_pct, recommended_pct, win_rate, risk_reward,
@@ -130,6 +142,12 @@ def calculate_kelly(
             regime_note += "; Halved for crypto volatility"
         else:
             regime_note = "Halved for crypto volatility"
+
+    # Trust tier scaling — reduces size for low-confidence or tech-only signals
+    if trust_multiplier != 1.0:
+        recommended = recommended * trust_multiplier
+        trust_note = f"Trust multiplier {trust_multiplier:.0%}"
+        regime_note = f"{regime_note}; {trust_note}" if regime_note else trust_note
 
     return {
         "full_kelly_pct": round(full_kelly * 100, 2),

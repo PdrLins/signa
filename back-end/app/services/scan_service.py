@@ -229,6 +229,38 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
 
             ai_tickers = {x[0] for x in ai_candidates}
 
+            # AI retry queue: prepend tickers whose synthesis failed last scan.
+            # Gives transient failures (CLI hiccup, API timeout) a second chance
+            # without losing the signal entirely.
+            from app.services.ai_retry_queue import cleanup_stale, get_retry_tickers
+            # Drop entries older than RETRY_STALE_HOURS to keep the table small
+            try:
+                cleanup_stale()
+            except Exception as e:
+                logger.debug(f"AI retry queue cleanup failed: {e}")
+            retry_rows = get_retry_tickers(limit=5)
+            if retry_rows:
+                pre_score_index = {r[0]: r for r in pre_scores}
+                added = 0
+                for retry_row in retry_rows:
+                    rt_sym = retry_row["symbol"]
+                    if rt_sym in ai_tickers:
+                        continue  # Already in this scan's AI candidates
+                    rt_pre = pre_score_index.get(rt_sym)
+                    if rt_pre is None:
+                        # Ticker not in this scan's pre-scored pool — skip it.
+                        # Likely it dropped out of the pre-filter (low volume etc).
+                        continue
+                    ai_candidates.append(rt_pre)
+                    ai_tickers.add(rt_sym)
+                    added += 1
+                    logger.info(
+                        f"AI retry: re-attempting {rt_sym} "
+                        f"(failure_count={retry_row.get('failure_count', '?')})"
+                    )
+                if added:
+                    logger.info(f"AI retry queue: added {added} tickers to AI candidates")
+
             # Guard: force AI analysis on tickers with open brain positions
             # Prevents false AVOID/SELL from tech-only scoring on held positions
             from app.db.supabase import get_client as _get_db
@@ -287,6 +319,48 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         ai_results = await asyncio.gather(*ai_tasks)
         valid_signals.extend(s for s in ai_results if isinstance(s, dict))
 
+        # AI failure rate guard: alert if >50% of AI candidates failed synthesis.
+        # This catches systemic issues (CLI dead, API key revoked, all providers
+        # over budget) before the brain operates blind for hours.
+        ai_total = len(ai_candidates)
+        ai_failed = sum(
+            1 for s in ai_results
+            if isinstance(s, dict) and s.get("ai_status") == "failed"
+        ) + errors_count  # exception-thrown candidates also count as failures
+        if ai_total > 0 and ai_failed / ai_total > 0.5:
+            failure_pct = int((ai_failed / ai_total) * 100)
+            logger.error(
+                f"AI failure rate critical: {ai_failed}/{ai_total} ({failure_pct}%) "
+                f"failed synthesis this scan"
+            )
+            # Best-effort Telegram alert (don't break the scan if it fails)
+            try:
+                from app.notifications.messages import msg
+                from app.notifications.telegram_bot import send_message
+                # Build a brief error breakdown from failed signals
+                error_samples = []
+                for s in ai_results:
+                    if isinstance(s, dict) and s.get("ai_status") == "failed":
+                        reason = (s.get("reasoning") or "")[:60]
+                        if reason and reason not in error_samples:
+                            error_samples.append(reason)
+                        if len(error_samples) >= 2:
+                            break
+                errors_text = "; ".join(error_samples) if error_samples else "see logs"
+                await send_message(
+                    settings.telegram_chat_id,
+                    msg(
+                        "ai_failure_rate",
+                        scan_type=scan_type,
+                        failed=str(ai_failed),
+                        total=str(ai_total),
+                        pct=str(failure_pct),
+                        errors=errors_text[:200],
+                    ),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send AI failure rate alert: {e}")
+
         # ── Generate tech-only signals for skipped candidates ──
         _update_progress(80, "saving", "Building tech-only signals...")
         for ticker, quick_score, bucket, technical_data, fundamental_data in skip_candidates:
@@ -305,6 +379,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 "status": status,
                 "score": quick_score,
                 "confidence": 0,
+                "ai_status": "skipped",
                 "is_gem": False,
                 "bucket": bucket,
                 "price_at_signal": technical_data.get("current_price"),
@@ -373,19 +448,45 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
 
         # Phase 7: Virtual portfolio tracking
         if valid_signals:
-            from app.services.virtual_portfolio import process_virtual_trades
-            vt_result = process_virtual_trades(valid_signals, watchlist_symbols)
+            from app.services.virtual_portfolio import (
+                check_virtual_exits,
+                flush_brain_notifications,
+                new_notification_queue,
+                process_pending_reviews,
+                process_virtual_trades,
+            )
+
+            # Create a scan-local brain notification queue. All virtual_portfolio
+            # functions in this scan append into this queue, and flush drains it
+            # at the end. This is per-scan state — concurrent scans get
+            # independent queues, so notifications can never be mixed between
+            # scans, lost, or duplicated across runs.
+            brain_notifications = new_notification_queue()
+
+            # First: process any positions flagged for review during prior
+            # pre-market scans. If their fresh signal is still SELL/AVOID, the
+            # flag is cleared so the SELL flow below can execute. If recovered,
+            # the flag is cleared and a "review cleared" notification is queued.
+            review_result = process_pending_reviews(valid_signals, brain_notifications)
+            if review_result["cleared"] or review_result["confirmed"]:
+                logger.info(
+                    f"Pending reviews: {review_result['cleared']} cleared, "
+                    f"{review_result['confirmed']} confirmed for sell"
+                )
+
+            vt_result = process_virtual_trades(valid_signals, watchlist_symbols, brain_notifications)
             if vt_result["buys"] or vt_result["sells"]:
                 logger.info(f"Virtual portfolio: {vt_result['buys']} buys, {vt_result['sells']} sells")
 
             # Check stop/target/time exits on all open virtual trades
-            from app.services.virtual_portfolio import check_virtual_exits, flush_brain_notifications
-            vt_exits = check_virtual_exits()
+            vt_exits = check_virtual_exits(brain_notifications)
             if any(vt_exits.values()):
                 logger.info(f"Virtual exits: {vt_exits}")
 
-            # Send brain buy/sell Telegram notifications
-            await flush_brain_notifications()
+            # Send all queued brain Telegram notifications for this scan
+            sent_count = await flush_brain_notifications(brain_notifications)
+            if sent_count:
+                logger.info(f"Brain: sent {sent_count} Telegram notifications")
 
         # Phase 8: Monitor positions (95-100%)
         _update_progress(95, "monitoring", "Checking positions...")
@@ -490,6 +591,26 @@ async def _process_candidate(
             ticker, technical_data, fundamental_data, macro_data, grok_data,
         )
 
+        # Classify AI status — honest data instead of inferring from confidence==0
+        # validated     = AI ran, confidence >= 50
+        # low_confidence = AI ran, confidence < 50 (but > 0)
+        # failed        = AI tried, all providers errored or over budget
+        synthesis_confidence = synthesis.get("confidence", 0) or 0
+        if synthesis.get("error"):
+            ai_status = "failed"
+        elif synthesis_confidence >= 50:
+            ai_status = "validated"
+        else:
+            ai_status = "low_confidence"
+
+        # Update AI retry queue based on synthesis result
+        from app.services import ai_retry_queue
+        if ai_status == "failed":
+            ai_retry_queue.record_failure(ticker, error=str(synthesis.get("error", "")))
+        else:
+            # AI ran (any confidence) — clear from retry queue if it was there
+            ai_retry_queue.clear_success(ticker)
+
         # Score (with regime context)
         asset_class = get_asset_class(ticker)
         score, breakdown = compute_score(
@@ -516,10 +637,14 @@ async def _process_candidate(
         else:
             action = score_to_action(score, bucket)
 
-        # Low confidence guard: if AI confidence < 50, downgrade BUY to HOLD
-        if action == "BUY" and confidence < 50 and confidence > 0:
-            logger.info(f"{ticker}: BUY downgraded to HOLD (low AI confidence {confidence}%)")
-            action = "HOLD"
+        # AI quality guard: downgrade BUY to HOLD when AI is unreliable
+        if action == "BUY":
+            if ai_status == "failed":
+                logger.warning(f"{ticker}: BUY downgraded to HOLD (AI synthesis failed — all providers errored)")
+                action = "HOLD"
+            elif ai_status == "low_confidence":
+                logger.info(f"{ticker}: BUY downgraded to HOLD (low AI confidence {confidence}%)")
+                action = "HOLD"
 
         # Check GEM (blocked signals can't be GEMs)
         is_gem, gem_conditions = check_gem(score, grok_data, synthesis)
@@ -544,6 +669,7 @@ async def _process_candidate(
             "status": status,
             "score": score,
             "confidence": synthesis.get("confidence", 0),
+            "ai_status": ai_status,
             "is_gem": is_gem,
             "bucket": bucket,
             "price_at_signal": current_price,

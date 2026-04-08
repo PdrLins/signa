@@ -63,6 +63,36 @@ async def run_watchdog() -> dict:
     if not open_trades:
         return {"positions": 0, "alerts": 0, "closes": 0}
 
+    # Track ALL open symbols (not just the ones we'll iterate this run) so the
+    # state cleanup below doesn't accidentally drop state for equities just
+    # because we're in pre-market. Equity state should persist across
+    # market-closed periods.
+    all_open_symbols = {t["symbol"] for t in open_trades}
+
+    # Market hours guard: only equity positions are skipped when market is closed.
+    # Crypto positions still get monitored 24/7. The scheduler should already only
+    # call this during market hours, but this guard protects against scheduler drift,
+    # manual triggers, or weekend runs (when crypto-only watchdog is enabled).
+    from app.services.virtual_portfolio import _is_us_market_open
+    market_open = _is_us_market_open()
+    if not market_open:
+        # Filter out equities — only watch crypto outside market hours
+        crypto_trades = [t for t in open_trades if (t.get("symbol") or "").endswith("-USD")]
+        if not crypto_trades:
+            # Still cleanup state for genuinely-closed positions
+            stale_keys = set(_state.keys()) - all_open_symbols
+            for k in stale_keys:
+                del _state[k]
+            logger.debug("Watchdog: market closed and no crypto positions, skipping")
+            return {"positions": 0, "alerts": 0, "closes": 0, "skipped_equity": len(open_trades)}
+        skipped_equity = len(open_trades) - len(crypto_trades)
+        if skipped_equity:
+            logger.info(
+                f"Watchdog: market closed, monitoring {len(crypto_trades)} crypto only "
+                f"(skipped {skipped_equity} equity positions)"
+            )
+        open_trades = crypto_trades
+
     # Get watchlist for overlap detection
     watchlist_symbols = queries.get_all_watchlist_symbols()
 
@@ -70,8 +100,10 @@ async def run_watchdog() -> dict:
     symbols = list({t["symbol"] for t in open_trades})
     prices = await asyncio.to_thread(_fetch_prices_batch, symbols)
 
-    # Cleanup stale state entries (symbols no longer in open positions)
-    stale_keys = set(_state.keys()) - set(symbols)
+    # Cleanup stale state entries — based on ALL currently-open symbols (not
+    # just the ones being processed this run). This preserves equity state
+    # across market-closed runs while still cleaning up genuinely-closed positions.
+    stale_keys = set(_state.keys()) - all_open_symbols
     for k in stale_keys:
         del _state[k]
 

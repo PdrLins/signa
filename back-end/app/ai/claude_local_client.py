@@ -51,8 +51,14 @@ async def synthesize_signal(
     fundamental_data: dict,
     macro_data: dict,
     grok_data: dict,
+    max_retries: int = 3,
 ) -> dict:
-    """Call Claude via local CLI to synthesize all data into a final signal."""
+    """Call Claude via local CLI to synthesize all data into a final signal.
+
+    Retries on transient failures (timeout, empty response, JSON parse error,
+    CLI exit error). Does NOT retry FileNotFoundError since the binary missing
+    won't fix itself. Backoff: 2^attempt seconds between attempts.
+    """
 
     prompt = CLAUDE_SYNTHESIS_PROMPT.format(
         ticker=ticker,
@@ -66,69 +72,92 @@ async def synthesize_signal(
         knowledge_block=grok_data.get("_knowledge_block", "") if isinstance(grok_data, dict) else "",
     )
 
-    try:
-        logger.info(f"Claude Local [{ticker}] — calling CLI...")
+    last_error = ""
 
-        process = await asyncio.create_subprocess_exec(
-            "claude", "-p", prompt,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(),
-            timeout=120,  # 2 min timeout
-        )
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"Claude Local [{ticker}] — calling CLI (attempt {attempt}/{max_retries})...")
 
-        if process.returncode != 0:
-            error_msg = stderr.decode().strip() if stderr else f"Exit code {process.returncode}"
-            logger.error(f"Claude Local [{ticker}] CLI error: {error_msg}")
-            return _error_response(ticker, f"CLI error: {error_msg}")
+            process = await asyncio.create_subprocess_exec(
+                "claude", "-p", prompt,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=120,  # 2 min timeout
+            )
 
-        raw_output = stdout.decode().strip()
-        if not raw_output:
-            logger.error(f"Claude Local [{ticker}] empty response")
-            return _error_response(ticker, "Empty CLI response")
+            if process.returncode != 0:
+                error_msg = stderr.decode().strip() if stderr else f"Exit code {process.returncode}"
+                last_error = f"CLI error: {error_msg}"
+                logger.warning(f"Claude Local [{ticker}] {last_error} (attempt {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt)
+                continue
 
-        content = clean_json_response(raw_output)
-        data = json.loads(content)
+            raw_output = stdout.decode().strip()
+            if not raw_output:
+                last_error = "Empty CLI response"
+                logger.warning(f"Claude Local [{ticker}] {last_error} (attempt {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt)
+                continue
 
-        raw_signal = data.get("signal", "HOLD").upper()
-        if raw_signal not in ("BUY", "HOLD", "SELL", "AVOID"):
-            raw_signal = "HOLD"
+            content = clean_json_response(raw_output)
+            data = json.loads(content)
 
-        result = {
-            "signal": raw_signal,
-            "confidence": _safe_int(data.get("confidence"), 50),
-            "reasoning": data.get("reasoning", ""),
-            "risk_factors": data.get("risk_factors", []),
-            "catalyst": data.get("catalyst"),
-            "catalyst_date": data.get("catalyst_date"),
-            "red_flags": data.get("red_flags", []),
-            "risk_reward_ratio": data.get("risk_reward_ratio"),
-            "target_price": data.get("target_price"),
-            "stop_loss": data.get("stop_loss"),
-            "sentiment_weight": _safe_int(data.get("sentiment_weight"), 0),
-            "error": None,
-        }
+            raw_signal = data.get("signal", "HOLD").upper()
+            if raw_signal not in ("BUY", "HOLD", "SELL", "AVOID"):
+                raw_signal = "HOLD"
 
-        logger.debug(
-            f"Claude Local [{ticker}] → {result['signal']} "
-            f"confidence={result['confidence']} rr={result['risk_reward_ratio']}"
-        )
-        return result
+            result = {
+                "signal": raw_signal,
+                "confidence": _safe_int(data.get("confidence"), 50),
+                "reasoning": data.get("reasoning", ""),
+                "risk_factors": data.get("risk_factors", []),
+                "catalyst": data.get("catalyst"),
+                "catalyst_date": data.get("catalyst_date"),
+                "red_flags": data.get("red_flags", []),
+                "risk_reward_ratio": data.get("risk_reward_ratio"),
+                "target_price": data.get("target_price"),
+                "stop_loss": data.get("stop_loss"),
+                "sentiment_weight": _safe_int(data.get("sentiment_weight"), 0),
+                "error": None,
+            }
 
-    except asyncio.TimeoutError:
-        logger.error(f"Claude Local [{ticker}] timed out after 120s")
-        return _error_response(ticker, "CLI timeout (120s)")
+            logger.debug(
+                f"Claude Local [{ticker}] → {result['signal']} "
+                f"confidence={result['confidence']} rr={result['risk_reward_ratio']} "
+                f"(attempt {attempt})"
+            )
+            return result
 
-    except json.JSONDecodeError as e:
-        logger.error(f"Claude Local [{ticker}] JSON parse error: {e}")
-        return _error_response(ticker, f"JSON parse error: {e}")
+        except asyncio.TimeoutError:
+            last_error = "CLI timeout (120s)"
+            logger.warning(f"Claude Local [{ticker}] {last_error} (attempt {attempt}/{max_retries})")
+            if attempt < max_retries:
+                await asyncio.sleep(2 ** attempt)
+            continue
 
-    except FileNotFoundError:
-        logger.error("Claude CLI not found — is 'claude' installed and in PATH?")
-        return _error_response(ticker, "Claude CLI not found in PATH")
+        except json.JSONDecodeError as e:
+            last_error = f"JSON parse error: {e}"
+            logger.warning(f"Claude Local [{ticker}] {last_error} (attempt {attempt}/{max_retries})")
+            if attempt < max_retries:
+                await asyncio.sleep(2 ** attempt)
+            continue
 
-    except Exception as e:
-        logger.error(f"Claude Local [{ticker}] unexpected error: {e}")
-        return _error_response(ticker, f"Unexpected: {e}")
+        except FileNotFoundError:
+            # Binary missing — retrying won't help, fail fast
+            logger.error("Claude CLI not found — is 'claude' installed and in PATH?")
+            return _error_response(ticker, "Claude CLI not found in PATH")
+
+        except Exception as e:
+            last_error = f"Unexpected: {e}"
+            logger.warning(f"Claude Local [{ticker}] {last_error} (attempt {attempt}/{max_retries})")
+            if attempt < max_retries:
+                await asyncio.sleep(2 ** attempt)
+            continue
+
+    logger.error(f"Claude Local [{ticker}] failed after {max_retries} attempts — {last_error}")
+    return _error_response(ticker, f"Failed after {max_retries} retries: {last_error}")

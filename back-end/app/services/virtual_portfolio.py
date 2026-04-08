@@ -8,6 +8,7 @@ After 1-2 weeks, compare which track performs better.
 """
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
@@ -17,19 +18,314 @@ from app.db.supabase import get_client, with_retry
 from app.services.price_cache import _fetch_prices_batch
 
 
-# Brain auto-pick criteria: only the strongest signals
+# Brain auto-pick criteria: tiered trust model
+#
+# Tier 1 (full position):  ai_status="validated"     + score >= 72
+#                          AI ran with confidence >= 50, normal high-conviction
+#
+# Tier 2 (half position):  ai_status="low_confidence" + score >= 80 + clean blockers
+#                          AI ran but unsure — higher score bar compensates
+#
+# Tier 3 (half position):  ai_status="skipped"        + score >= 82 + technical
+#                          confirmation (RSI sweet spot 50-65, MACD positive,
+#                          volume confirmation, no overextension)
+#                          Tech-only candidate, but the technicals are pristine
+#
+# Failed AI is NEVER auto-bought — it's a transient issue that should retry.
 BRAIN_MIN_SCORE = 72
+BRAIN_TIER2_MIN_SCORE = 80
+BRAIN_TIER3_MIN_SCORE = 82
 
-# Queued notifications (sent async after sync function returns)
-_pending_notifications: list[tuple[str, dict]] = []
+
+# A scan-local queue of brain Telegram notifications. Each scan creates one of
+# these via new_notification_queue() and threads it through every brain
+# function for that scan. We DO NOT use a module-level singleton because:
+#   1. Concurrent scans (manual + scheduled overlap) would mix notifications
+#      between scans, causing duplicates, lost messages, or wrong-ticker alerts.
+#   2. Explicit queue passing makes the data flow visible from the function
+#      signature instead of relying on hidden global state.
+#   3. It makes the functions independently testable.
+#
+# The queue holds (template_key, kwargs_dict) tuples that flush_brain_notifications()
+# will format and send via Telegram at the end of the scan.
+BrainNotificationQueue = list[tuple[str, dict]]
 
 
-def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> dict:
+def new_notification_queue() -> BrainNotificationQueue:
+    """Create a fresh brain notification queue for a single scan run.
+
+    The caller (scan_service) creates one queue per scan and threads it through
+    all the brain functions. flush_brain_notifications drains it at the end.
+    """
+    return []
+
+
+def _is_us_market_open() -> bool:
+    """Check if US equity markets are currently open.
+
+    Regular session: Mon-Fri, 9:30am-4:00pm ET. Brain should not auto-buy
+    equities outside these hours since the trade wouldn't actually fill —
+    it makes virtual tracking more realistic. Crypto is exempt (24/7).
+    """
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    if now_et.weekday() >= 5:  # Saturday=5, Sunday=6
+        return False
+    minutes = now_et.hour * 60 + now_et.minute
+    return 570 <= minutes < 960  # 9:30am (570) to 4:00pm (960)
+
+
+def _eval_brain_trust_tier(sig: dict) -> tuple[int, float, str]:
+    """Evaluate which brain trust tier a signal qualifies for.
+
+    Returns (tier, trust_multiplier, reason). Tier 0 means do not auto-buy.
+
+    Important: this is called BEFORE checking the user-facing `action` field
+    because tier 2/3 signals will already have been downgraded from BUY to
+    HOLD by the AI quality guard in scan_service. The brain has its own,
+    stricter criteria and decides independently.
+
+    Tier 2 is implicitly protected by blockers because the AI synthesis path
+    runs check_blockers and would set action=AVOID; AVOID never reaches the
+    brain tier check (the SELL/AVOID branch in process_virtual_trades catches
+    it first). Tier 3 is NOT protected by blockers because the tech-only path
+    skips check_blockers entirely, so we re-check the most critical blockers
+    here (hostile macro, plus the RSI/volume/SMA constraints below).
+    """
+    score = sig.get("score", 0) or 0
+    ai_status = sig.get("ai_status", "skipped")
+    technical_data = sig.get("technical_data") or {}
+
+    # Failed AI is never auto-bought — it's a transient failure that should retry
+    if ai_status == "failed":
+        return 0, 0.0, "ai_failed"
+
+    # Tier 1: validated AI + standard score threshold
+    if ai_status == "validated" and score >= BRAIN_MIN_SCORE:
+        return 1, 1.0, "validated"
+
+    # Tier 2: low confidence AI + higher score bar
+    # The AI ran (so we know it didn't blow up on red flags) but isn't sure.
+    # Score >= 80 means tech/fund/macro all agree, compensating for low AI conviction.
+    if ai_status == "low_confidence" and score >= BRAIN_TIER2_MIN_SCORE:
+        return 2, 0.5, "low_confidence_high_score"
+
+    # Tier 3: tech-only signal + very high score + technical confirmation
+    # AI was never run (below top 15), so we require pristine technicals as a
+    # substitute AND re-check the macro blocker (which the tech-only path
+    # skips). Other blockers (RSI overbought, low volume, SMA overextension)
+    # are implicitly enforced by the technical confirmation thresholds below.
+    if ai_status == "skipped" and score >= BRAIN_TIER3_MIN_SCORE:
+        # Hostile macro is a hard blocker — never auto-buy in a bad regime,
+        # regardless of how good the technicals look on the individual ticker.
+        macro_data = sig.get("macro_data") or {}
+        if macro_data.get("environment") == "hostile":
+            return 0, 0.0, "tier3_blocked_hostile_macro"
+
+        rsi = technical_data.get("rsi")
+        macd_hist = technical_data.get("macd_histogram")
+        volume_zscore = technical_data.get("volume_zscore")
+        vs_sma200 = technical_data.get("vs_sma200")
+        sma_cross = technical_data.get("sma_cross")
+
+        # Required technical confirmation:
+        # 1. RSI in sweet spot (50-65) — not overbought, not falling
+        # 2. MACD histogram positive — momentum building
+        # 3. Volume confirmation (z-score 1.0-2.5) — real participation, not panic
+        # 4. Not extremely overextended above SMA200 (< 30% gap)
+        rsi_ok = rsi is not None and 50 <= rsi <= 65
+        macd_ok = macd_hist is not None and macd_hist > 0
+        volume_ok = volume_zscore is not None and 1.0 <= volume_zscore <= 2.5
+        sma_ok = vs_sma200 is not None and vs_sma200 < 30
+        # Bonus: golden cross within window (not strictly required but boosts confidence)
+
+        confirmations = sum([rsi_ok, macd_ok, volume_ok, sma_ok])
+        if confirmations >= 3:
+            reason = f"tech_only_confirmed_{confirmations}of4"
+            if sma_cross == "golden_cross":
+                reason += "_goldencross"
+            return 3, 0.5, reason
+
+    return 0, 0.0, f"no_tier_{ai_status}_score{score}"
+
+
+def _flag_positions_for_review(
+    db, all_open: list, symbol: str, action: str, score: int,
+    reason: str, now_iso: str, notifications: BrainNotificationQueue,
+) -> None:
+    """Mark open positions for review when a SELL signal hits outside hours.
+
+    Avoids re-flagging positions already pending review. Queues a Telegram
+    alert per newly-flagged brain position into the scan-local queue.
+    """
+    for pos in all_open:
+        if pos["symbol"] != symbol:
+            continue
+        if pos.get("pending_review_at"):
+            continue  # Already flagged, don't spam alerts
+        entry_score = pos.get("entry_score", 0) or 0
+        try:
+            db.table("virtual_trades").update({
+                "pending_review_at": now_iso,
+                "pending_review_action": action,
+                "pending_review_score": score,
+                "pending_review_reason": (reason or "")[:500],
+            }).eq("id", pos["id"]).execute()
+        except Exception as e:
+            logger.warning(f"Failed to flag {symbol} for review: {e}")
+            continue
+        logger.warning(
+            f"Virtual REVIEW FLAGGED: {symbol} signal turned {action} "
+            f"({entry_score}->{score}) — will re-check at market open"
+        )
+        # Only notify for brain positions (watchlist track is just data collection)
+        if pos.get("source") == "brain":
+            notifications.append(("brain_pending_review", {
+                "symbol": symbol,
+                "action": action,
+                "entry_score": str(entry_score),
+                "exit_score": str(score),
+                "reason": reason[:200] if reason else "Signal deteriorated overnight",
+            }))
+
+
+def process_pending_reviews(
+    signals: list[dict],
+    notifications: BrainNotificationQueue,
+) -> dict:
+    """Process positions flagged for review at the previous pre-market scan.
+
+    Called by scan_service at the start of each in-hours scan. For every
+    position with pending_review_at set:
+    - If the fresh signal is still SELL/AVOID → execute the sell (handled
+      naturally by the regular SELL flow in process_virtual_trades on the
+      same scan run, since the flag is cleared first)
+    - If the fresh signal recovered → clear the flag and notify
+
+    Args:
+        signals: List of fresh signals from the current scan
+        notifications: Scan-local queue to append brain Telegram notifications to.
+
+    Returns dict with cleared and confirmed counts.
+    """
+    if not _is_us_market_open():
+        return {"cleared": 0, "confirmed": 0}
+
+    db = get_client()
+    flagged_result = (
+        db.table("virtual_trades")
+        .select("id, symbol, entry_score, source, pending_review_action, "
+                "pending_review_score, pending_review_reason, target_price, stop_loss, "
+                "bucket, signal_style")
+        .eq("status", "OPEN")
+        .not_.is_("pending_review_at", "null")
+        .execute()
+    )
+    flagged = flagged_result.data or []
+    if not flagged:
+        return {"cleared": 0, "confirmed": 0}
+
+    # Index fresh signals by symbol for O(1) lookup
+    by_symbol: dict[str, dict] = {}
+    for sig in signals:
+        sym = sig.get("symbol")
+        if sym:
+            by_symbol[sym] = sig
+
+    cleared = 0
+    confirmed = 0
+    notified_recovered: set[str] = set()  # Dedupe per-symbol "review cleared" notifications
+    for pos in flagged:
+        symbol = pos["symbol"]
+        fresh = by_symbol.get(symbol)
+        if not fresh:
+            # No fresh signal for this ticker — leave the flag, retry next scan
+            continue
+
+        fresh_action = fresh.get("action")
+        fresh_score = fresh.get("score", 0)
+        entry_score = pos.get("entry_score", 0) or 0
+        # Detect a user-forced sell via the sentinel value set by /forcesell.
+        # This is more robust than parsing the reason text.
+        forced = pos.get("pending_review_action") == "FORCE_SELL"
+
+        # User-forced sell from /forcesell command: override the fresh signal
+        # so process_virtual_trades sees a SELL action this scan and executes.
+        # Also flag _review_forced so the SELL flow's score-drop guard
+        # (which protects against AI methodology change false-AVOIDs)
+        # doesn't accidentally block the user's explicit override.
+        if forced:
+            fresh["action"] = "SELL"
+            fresh["_review_forced"] = True
+            fresh_action = "SELL"
+            logger.warning(
+                f"Virtual REVIEW FORCED SELL: {symbol} (user override via /forcesell) "
+                f"— executing this scan"
+            )
+
+        if fresh_action in ("SELL", "AVOID"):
+            # Confirmed: clear the review flag. The regular SELL flow in
+            # process_virtual_trades (which runs right after this on the same
+            # scan, on the SAME `signals` list reference) will see the SELL
+            # action and execute the sell since market is now open. We clear
+            # the flag here so a future scan doesn't see a stale flag and
+            # skip the SELL flow with another flagging operation.
+            try:
+                db.table("virtual_trades").update({
+                    "pending_review_at": None,
+                    "pending_review_action": None,
+                    "pending_review_score": None,
+                    "pending_review_reason": None,
+                }).eq("id", pos["id"]).execute()
+            except Exception as e:
+                logger.warning(f"Failed to clear review flag for {symbol}: {e}")
+            confirmed += 1
+            logger.warning(
+                f"Virtual REVIEW CONFIRMED: {symbol} still {fresh_action} "
+                f"at open ({entry_score}->{fresh_score}) — will sell this scan"
+            )
+        else:
+            # Recovered: clear the flag and notify
+            try:
+                db.table("virtual_trades").update({
+                    "pending_review_at": None,
+                    "pending_review_action": None,
+                    "pending_review_score": None,
+                    "pending_review_reason": None,
+                }).eq("id", pos["id"]).execute()
+            except Exception as e:
+                logger.warning(f"Failed to clear review flag for {symbol}: {e}")
+                continue
+            cleared += 1
+            logger.info(
+                f"Virtual REVIEW CLEARED: {symbol} recovered to {fresh_action} "
+                f"({entry_score}->{fresh_score}) — keeping position"
+            )
+            if pos.get("source") == "brain" and symbol not in notified_recovered:
+                notified_recovered.add(symbol)
+                notifications.append(("brain_review_cleared", {
+                    "symbol": symbol,
+                    "action": fresh_action,
+                    "entry_score": str(entry_score),
+                    "exit_score": str(fresh_score),
+                }))
+
+    return {"cleared": cleared, "confirmed": confirmed}
+
+
+def process_virtual_trades(
+    signals: list[dict],
+    watchlist_symbols: set[str],
+    notifications: BrainNotificationQueue,
+) -> dict:
     """Process scan results to update virtual portfolio.
 
     Called at the end of each scan. Handles both watchlist and brain-auto tracks.
+
+    Args:
+        signals: Fresh signals from the current scan.
+        watchlist_symbols: Symbols on the user's watchlist.
+        notifications: Scan-local queue to append brain Telegram notifications to.
     """
-    _pending_notifications.clear()  # Prevent stale buildup from previous runs
     db = get_client()
     buys = 0
     sells = 0
@@ -37,7 +333,7 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
     # Get current open virtual positions (both sources)
     open_result = (
         db.table("virtual_trades")
-        .select("id, symbol, entry_price, entry_date, entry_score, source")
+        .select("id, symbol, entry_price, entry_date, entry_score, source, pending_review_at")
         .eq("status", "OPEN")
         .execute()
     )
@@ -59,6 +355,7 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
             open_watchlist.add(r["symbol"])
 
     now = datetime.now(timezone.utc).isoformat()
+    market_open = _is_us_market_open()
 
     for sig in signals:
         symbol = sig.get("symbol")
@@ -71,9 +368,20 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
         price = float(price)
 
         is_watchlisted = symbol in watchlist_symbols
+        is_crypto = sig.get("asset_type") == "CRYPTO" or (symbol or "").endswith("-USD")
 
         # ── SELL: close all open positions for this symbol ──
         if action in ("SELL", "AVOID"):
+            # Pre-market SELLs on equities can't fill — flag the position for
+            # review at market open instead. The first scan after 9:30am ET
+            # re-checks: still bad → execute, recovered → clear flag.
+            if not is_crypto and not market_open:
+                _flag_positions_for_review(
+                    db, all_open, symbol, action, score,
+                    sig.get("reasoning") or f"Pre-market signal turned {action}",
+                    now, notifications,
+                )
+                continue
             for pos in all_open:
                 if pos["symbol"] != symbol:
                     continue
@@ -84,7 +392,9 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
                 # Guard: if score dropped 25+ points, don't auto-close.
                 # This usually means the ticker lost AI analysis (tech-only fallback)
                 # rather than a real deterioration. Wait for next scan to confirm.
-                if score_drop >= 25 and score < 50:
+                # Exception: user-forced sells from /forcesell bypass this guard
+                # since the user has explicitly accepted the risk.
+                if score_drop >= 25 and score < 50 and not sig.get("_review_forced"):
                     source = pos.get("source", "watchlist")
                     logger.warning(
                         f"Virtual SELL BLOCKED [{source}]: {symbol} score dropped "
@@ -92,6 +402,11 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
                         f"Likely methodology change, not real signal. Waiting for confirmation."
                     )
                     continue
+                if sig.get("_review_forced"):
+                    logger.warning(
+                        f"Virtual SELL [user-forced]: {symbol} bypassing score-drop guard "
+                        f"({entry_score} -> {score}, -{score_drop}pts)"
+                    )
 
                 entry_price = float(pos["entry_price"])
                 pnl_pct = ((price - entry_price) / entry_price) * 100
@@ -121,7 +436,7 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
                 # Queue Telegram notification for brain sells
                 if source == "brain":
                     verdict = f"{emoji} {'Win' if is_win else 'Loss'} -- brain learning from this outcome."
-                    _pending_notifications.append(("brain_sell", {
+                    notifications.append(("brain_sell", {
                         "symbol": symbol, "price": f"{price:.2f}",
                         "pnl": f"{pnl_pct:+.1f}", "reason": f"Signal changed to {action}",
                         "entry_score": str(entry_score), "exit_score": str(score),
@@ -129,11 +444,18 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
                     }))
             continue
 
-        if action != "BUY":
+        # By here, action is not SELL/AVOID (handled above with continue).
+        # It can be BUY, HOLD, or anything else. Brain will evaluate via tier logic.
+
+        # Skip BUYs on equities when US market is closed — the trade wouldn't
+        # actually fill at the scan price (e.g. 6am pre-market scan). Crypto
+        # trades 24/7 so it's always allowed.
+        if not is_crypto and not market_open:
+            logger.debug(f"Virtual BUY skipped for {symbol}: US market closed")
             continue
 
-        # Track 1: Watchlist picks (score 62+)
-        if is_watchlisted and score >= 62 and symbol not in open_watchlist:
+        # Track 1: Watchlist picks (score 62+) — only on explicit BUY action
+        if action == "BUY" and is_watchlisted and score >= 62 and symbol not in open_watchlist:
             db.table("virtual_trades").insert({
                 "symbol": symbol,
                 "action": "BUY",
@@ -150,10 +472,18 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
             buys += 1
             logger.info(f"Virtual BUY [watchlist]: {symbol} @ ${price:.2f} (score {score})")
 
-        # Track 2: Brain auto-picks (score 72+, limited slots)
-        # Brain picks independently — watchlisted tickers can also be brain picks
-        # Portfolio rotation: if full, replace weakest position if new signal is stronger
-        if score >= BRAIN_MIN_SCORE and symbol not in open_brain:
+        # Track 2: Brain auto-picks via tiered trust model
+        # The brain evaluates the signal independently of the user-facing action.
+        # Tier 1 (validated)     → score >= 72, full position
+        # Tier 2 (low_confidence) → score >= 80 + clean blockers, half position
+        # Tier 3 (skipped tech)   → score >= 82 + tech confirmation, half position
+        # Failed AI is never auto-bought (handled by tier eval).
+        #
+        # This intentionally bypasses the user-facing `action` field because
+        # tier 2/3 signals were downgraded to HOLD by the AI quality guard.
+        # The brain has stricter criteria but can still act on them.
+        brain_tier, trust_multiplier, tier_reason = _eval_brain_trust_tier(sig)
+        if brain_tier > 0 and symbol not in open_brain:
             if brain_open_count >= settings.brain_max_open:
                 # Only rotate if new signal is meaningfully better (+5 points) than weakest
                 if weakest_brain and score >= weakest_brain_score + 5:
@@ -183,7 +513,7 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
                         f"Virtual ROTATION: closed {w_symbol} (score {weakest_score}, P&L {w_pnl:+.1f}%) "
                         f"to make room for {symbol} (score {score})"
                     )
-                    _pending_notifications.append(("brain_sell", {
+                    notifications.append(("brain_sell", {
                         "symbol": w_symbol, "price": f"{w_exit_price:.2f}",
                         "pnl": f"{w_pnl:+.1f}", "reason": f"Rotated out for {symbol} (score {score})",
                         "entry_score": str(weakest_score), "exit_score": str(score),
@@ -230,18 +560,25 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
                     "source": "brain",
                     "target_price": target,
                     "stop_loss": stop,
+                    "entry_tier": brain_tier,
+                    "trust_multiplier": trust_multiplier,
                 }).execute()
                 buys += 1
                 brain_open_count += 1
-                logger.info(f"Virtual BUY [brain]: {symbol} @ ${price:.2f} (score {score})")
+                logger.info(
+                    f"Virtual BUY [brain] T{brain_tier}: {symbol} @ ${price:.2f} "
+                    f"(score {score}, tier={tier_reason}, trust={trust_multiplier:.0%})"
+                )
 
                 # Queue Telegram notification (sent after function returns)
                 rr = round(float(target - price) / float(price - stop), 1) if stop and price > stop else 0
-                _pending_notifications.append(("brain_buy", {
+                notifications.append(("brain_buy", {
                     "symbol": symbol, "score": str(score),
                     "bucket": sig.get("bucket", ""),
                     "price": f"{price:.2f}", "target": f"{float(target):.2f}",
                     "stop": f"{float(stop):.2f}", "rr": f"{rr}",
+                    "tier": str(brain_tier),
+                    "trust": f"{int(trust_multiplier * 100)}",
                 }))
 
                 # Auto-add discovered tickers to the tickers table
@@ -261,25 +598,37 @@ def process_virtual_trades(signals: list[dict], watchlist_symbols: set[str]) -> 
     return {"buys": buys, "sells": sells}
 
 
-async def flush_brain_notifications():
-    """Send all queued brain buy/sell notifications via Telegram."""
-    if not _pending_notifications:
-        return
+async def flush_brain_notifications(notifications: BrainNotificationQueue) -> int:
+    """Send all queued brain buy/sell notifications via Telegram.
+
+    Drains the scan-local notification queue. Each entry is a (template_key,
+    kwargs) tuple. Returns the count of notifications sent (best-effort —
+    individual send failures are logged and skipped).
+    """
+    if not notifications:
+        return 0
     from app.notifications.messages import msg
     from app.notifications.telegram_bot import send_message
-    for key, kwargs in list(_pending_notifications):
+    sent = 0
+    # Iterate a copy in case any handler mutates the queue
+    for key, kwargs in list(notifications):
         try:
             await send_message(settings.telegram_chat_id, msg(key, **kwargs))
+            sent += 1
         except Exception as e:
             logger.debug(f"Brain notification failed ({key}): {e}")
-    _pending_notifications.clear()
+    notifications.clear()
+    return sent
 
 
-def check_virtual_exits() -> dict:
+def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
     """Check open virtual trades for stop/target hits and time-based exits.
 
     Called after each scan cycle. Fetches current prices via price_cache
     and closes trades that hit their stop, target, or max age.
+
+    Args:
+        notifications: Scan-local queue to append brain Telegram notifications to.
     """
     db = get_client()
     max_days = settings.virtual_trade_max_days
@@ -314,6 +663,7 @@ def check_virtual_exits() -> dict:
 
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
+    market_open = _is_us_market_open()
     stops_hit = 0
     targets_hit = 0
     expired = 0
@@ -325,6 +675,14 @@ def check_virtual_exits() -> dict:
         current_price, _ = prices.get(symbol, (None, None))
 
         if current_price is None:
+            continue
+
+        # Equity exits (stop/target/profit-take) can't fill when market is
+        # closed, and the cached price would be stale. Skip non-crypto exits
+        # entirely outside market hours — the next in-hours exit check will
+        # catch them. Crypto continues normally (24/7 markets).
+        is_crypto = symbol.endswith("-USD")
+        if not is_crypto and not market_open:
             continue
 
         target = float(trade["target_price"]) if trade.get("target_price") else None
@@ -352,7 +710,7 @@ def check_virtual_exits() -> dict:
             exit_reason = "PROFIT_TAKE"
             profit_takes += 1
             logger.info(f"Virtual PROFIT TAKE: {symbol} at +{pnl_pct:.1f}% (locking in gains)")
-            _pending_notifications.append(("brain_sell", {
+            notifications.append(("brain_sell", {
                 "symbol": symbol, "price": f"{current_price:.2f}",
                 "pnl": f"{pnl_pct:+.1f}", "reason": "Profit take at +3%",
                 "entry_score": str(trade.get("entry_score", 0)),
@@ -399,6 +757,106 @@ _vp_cache = TTLCache(max_size=2, default_ttl=300)
 
 
 @with_retry
+def get_brain_tier_breakdown() -> dict:
+    """Get brain trade performance broken down by entry tier.
+
+    Returns counts, win rate, and avg P&L for each tier (1=validated,
+    2=low_confidence, 3=tech_only). Includes both open and closed trades.
+    Cached for 5 minutes.
+
+    Returns:
+        {
+            "tiers": [
+                {
+                    "tier": 1,
+                    "label": "Validated",
+                    "trust_pct": 100,
+                    "open_count": int,
+                    "closed_count": int,
+                    "win_rate": float (0-1),
+                    "avg_pnl_pct": float,
+                    "best_pnl_pct": float | None,
+                    "worst_pnl_pct": float | None,
+                },
+                ...
+            ],
+            "total_brain_trades": int,
+            "trades_with_tier": int,
+        }
+    """
+    cached = _vp_cache.get("tier_breakdown")
+    if cached is not None:
+        return cached
+
+    db = get_client()
+    try:
+        result = (
+            db.table("virtual_trades")
+            .select("entry_tier, status, is_win, pnl_pct")
+            .eq("source", "brain")
+            .execute()
+        )
+        rows = result.data or []
+    except Exception as e:
+        logger.warning(f"Failed to fetch tier breakdown: {e}")
+        return {"tiers": [], "total_brain_trades": 0, "trades_with_tier": 0}
+
+    tier_meta = {
+        1: {"label": "Validated AI", "trust_pct": 100},
+        2: {"label": "Low Confidence", "trust_pct": 50},
+        3: {"label": "Tech-Only Confirmed", "trust_pct": 50},
+    }
+
+    # Bucket rows by tier
+    by_tier: dict[int, dict] = {
+        1: {"open": 0, "closed": [], "wins": 0},
+        2: {"open": 0, "closed": [], "wins": 0},
+        3: {"open": 0, "closed": [], "wins": 0},
+    }
+    trades_with_tier = 0
+    for row in rows:
+        tier = row.get("entry_tier")
+        if tier not in (1, 2, 3):
+            continue
+        trades_with_tier += 1
+        if row.get("status") == "OPEN":
+            by_tier[tier]["open"] += 1
+        else:
+            pnl = row.get("pnl_pct")
+            if pnl is not None:
+                by_tier[tier]["closed"].append(float(pnl))
+            if row.get("is_win"):
+                by_tier[tier]["wins"] += 1
+
+    tiers_out = []
+    for tier_num in (1, 2, 3):
+        bucket = by_tier[tier_num]
+        closed_count = len(bucket["closed"])
+        win_rate = (bucket["wins"] / closed_count) if closed_count > 0 else 0.0
+        avg_pnl = (sum(bucket["closed"]) / closed_count) if closed_count > 0 else 0.0
+        best = max(bucket["closed"]) if bucket["closed"] else None
+        worst = min(bucket["closed"]) if bucket["closed"] else None
+        tiers_out.append({
+            "tier": tier_num,
+            "label": tier_meta[tier_num]["label"],
+            "trust_pct": tier_meta[tier_num]["trust_pct"],
+            "open_count": bucket["open"],
+            "closed_count": closed_count,
+            "win_rate": round(win_rate, 4),
+            "avg_pnl_pct": round(avg_pnl, 2),
+            "best_pnl_pct": round(best, 2) if best is not None else None,
+            "worst_pnl_pct": round(worst, 2) if worst is not None else None,
+        })
+
+    summary = {
+        "tiers": tiers_out,
+        "total_brain_trades": len(rows),
+        "trades_with_tier": trades_with_tier,
+    }
+    _vp_cache.set("tier_breakdown", summary, ttl=300)
+    return summary
+
+
 def get_virtual_summary() -> dict:
     """Get virtual portfolio performance summary for the dashboard.
 
