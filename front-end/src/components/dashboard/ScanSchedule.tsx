@@ -15,10 +15,16 @@ export function ScanSchedule() {
   const statusColor: Record<string, string> = {
     COMPLETE: theme.colors.up,
     RUNNING: theme.colors.primary,
+    QUEUED: theme.colors.primary,
     FAILED: theme.colors.down,
     CLOSED: theme.colors.textHint,
     PENDING: theme.colors.warning,
   }
+  // Statuses that should pulse the dot (an active scan in progress).
+  // Both RUNNING and QUEUED count — QUEUED is the brief moment between the
+  // user clicking Scan Now and the worker picking the job up, and we want
+  // the visual feedback immediately so it doesn't look frozen.
+  const isActive = (status: string) => status === 'RUNNING' || status === 'QUEUED'
 
   const isWeekend = scans?.length ? scans[0].status === 'CLOSED' : false
 
@@ -55,19 +61,25 @@ export function ScanSchedule() {
         <div className="space-y-2">
           {scans.map((scan) => {
             const dotColor = statusColor[scan.status] || theme.colors.textHint
+            // MANUAL scans come from the backend with an empty label so the
+            // frontend can supply a translated one. All scheduled slots use
+            // their server-supplied label as before.
+            const displayLabel = scan.scan_type === 'MANUAL'
+              ? (t.scans.manualScan ?? 'Manual scan')
+              : scan.label
 
             return (
-              <div key={scan.scan_type} className="flex items-center justify-between">
+              <div key={`${scan.scan_type}-${scan.id ?? 'slot'}`} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span
                     className="w-2 h-2 rounded-full"
                     style={{
                       backgroundColor: dotColor,
-                      animation: scan.status === 'RUNNING' ? 'pulse 1.5s infinite' : 'none',
+                      animation: isActive(scan.status) ? 'pulse 1.5s infinite' : 'none',
                     }}
                   />
                   <span className="text-xs" style={{ color: theme.colors.text }}>
-                    {scan.label}
+                    {displayLabel}
                   </span>
                   {scan.status === 'COMPLETE' && scan.duration_seconds != null && (
                     <span className="text-[9px] tabular-nums" style={{ color: theme.colors.up }}>

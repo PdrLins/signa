@@ -388,6 +388,7 @@
     "marketsClosed": "Mercados fechados — varreduras voltam na segunda",
     "noScans": "Nenhuma varredura hoje ainda.",
     "failed": "falhou",
+    "manualScan": "Varredura manual",
     "signalCount": "{count} sinais",
     "signalCountGems": "{count} sinais, {gems} GEM"
   },

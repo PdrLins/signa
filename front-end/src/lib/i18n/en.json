@@ -388,6 +388,7 @@
     "marketsClosed": "Markets closed — scans resume Monday",
     "noScans": "No scans today yet.",
     "failed": "failed",
+    "manualScan": "Manual scan",
     "signalCount": "{count} signals",
     "signalCountGems": "{count} signals, {gems} GEM"
   },

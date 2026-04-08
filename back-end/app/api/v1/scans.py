@@ -50,15 +50,27 @@ async def get_scans_today(user: dict = Depends(get_current_user)):
     )
 
     scan_by_type: dict[str, dict] = {}
+    # An active manual scan (Scan Now click) doesn't fit any of the 5
+    # scheduled slots, so we surface it as a synthetic 6th row at the top
+    # of the response while it's running. Without this, the schedule list
+    # has no row to show a RUNNING/QUEUED status on, and the pulse animation
+    # never fires when the user manually triggers a scan.
+    manual_active: dict | None = None
     if is_market_day:
         recent_scans = signal_service.get_scans(limit=50)
         today_scans = [
             s for s in recent_scans
             if s.get("started_at") and s["started_at"] >= today_start.isoformat()
-            and s.get("triggered_by", "scheduler") != "manual"
         ]
         for s in today_scans:
             st = s.get("scan_type")
+            if st == "MANUAL":
+                # Only surface manual scans when they're actively running.
+                # Completed manual scans stay hidden so they don't overwrite
+                # the slot for whatever scheduled scan covers the same time.
+                if s.get("status") in ("RUNNING", "QUEUED") and manual_active is None:
+                    manual_active = s
+                continue
             if st and st not in scan_by_type:
                 scan_by_type[st] = s
 
@@ -108,6 +120,24 @@ async def get_scans_today(user: dict = Depends(get_current_user)):
                 label=label,
                 scheduled_time=sched_time,
             ))
+
+    # Prepend the active manual scan (if any) so it shows at the top of
+    # the schedule with a pulsing dot. The label is left blank — the
+    # frontend renders it from i18n (`t.scans.manualScan`) so it stays
+    # bilingual instead of being hardcoded English here.
+    if manual_active:
+        result.insert(0, ScanTodayRecord(
+            id=manual_active.get("id"),
+            scan_type="MANUAL",
+            label="",  # frontend supplies label for MANUAL
+            scheduled_time="",
+            status=manual_active.get("status", "RUNNING"),
+            tickers_scanned=manual_active.get("tickers_scanned", 0),
+            signals_found=manual_active.get("signals_found", 0),
+            gems_found=manual_active.get("gems_found", 0),
+            started_at=manual_active.get("started_at"),
+        ))
+
     return result
 
 
