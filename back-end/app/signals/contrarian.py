@@ -1,13 +1,60 @@
-"""Contrarian signal detector — identifies beaten-down assets with early recovery signs.
+"""Contrarian signal detector — finds beaten-down stocks with early recovery signs.
 
-Based on deep-value investing principles:
-- Price below SMA200 (out of favor)
-- RSI below 45 (oversold or abandoned)
-- Volume above average (smart money accumulating)
-- MACD turning positive (momentum shifting)
+============================================================
+WHAT THIS MODULE IS
+============================================================
 
-Backtest validated: 59.2% win rate (10d), 66.4% for Safe Income.
-Complementary to momentum scoring — catches different opportunities.
+The default Signa scoring is MOMENTUM-biased: it rewards stocks that
+are already going up (RSI 50-65, positive MACD, golden cross, etc.).
+That's the right approach for ~85% of profitable signals — momentum
+is the best-documented factor in quantitative finance.
+
+But the OTHER 15% comes from BUYING THE DIP — picking up beaten-down
+stocks just as they bottom and start to recover. This is "contrarian"
+or "deep-value" investing, and the default momentum-based score
+COMPLETELY MISSES it because momentum is, by definition, negative
+on a stock that's been falling.
+
+This module is a parallel scorer that runs alongside the main
+`compute_score` and looks for the OPPOSITE pattern:
+
+  • Price BELOW SMA200    (the stock is out of favor)
+  • RSI BELOW 45          (it's oversold or abandoned)
+  • Volume ABOVE average  (someone is accumulating quietly)
+  • MACD HISTOGRAM > 0    (the momentum is just starting to turn)
+
+If 3 of 4 conditions hit, the signal style is flagged "CONTRARIAN"
+and `scan_service` allows the brain to BUY at a lower score threshold
+(score >= 55 instead of 72) when contrarian_score is also high.
+
+============================================================
+WHY THE LOWER SCORE THRESHOLD
+============================================================
+
+A contrarian setup will SCORE LOW under the default momentum formula
+(negative momentum = low technical_momentum component). But a low
+score on a contrarian setup is GOOD — it means everyone has given up,
+which is exactly when the value buyer wants in.
+
+The 55 threshold for contrarian + score >= 55 + contrarian_score >= 60
+gives us a workable filter: scores in the 55-71 range with contrarian
+style are the deep-value zone, scores 72+ with contrarian style are
+the "mean-reversion just started, ride it" zone (the brain auto-buys
+both because they show up as BUY actions in the user-facing signal).
+
+============================================================
+BACKTEST PERFORMANCE
+============================================================
+
+Tested on the same Oct 2024 - Apr 2025 dataset as the main scorer:
+
+  • Contrarian signals overall:        59.2% win rate (10-day hold)
+  • Contrarian + SAFE_INCOME bucket:   66.4% win rate
+  • Contrarian + HIGH_RISK bucket:     54.8% win rate
+
+The SAFE_INCOME case is particularly strong — beaten-down dividend
+stocks with smart-money accumulation patterns are a high-conviction
+setup. The brain happily buys these at the lower threshold.
 """
 
 from loguru import logger

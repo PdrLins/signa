@@ -1,11 +1,138 @@
-"""Signal scoring engine — scoring, GEM detection, blocker checks, and status management.
+"""Signal scoring engine — the rules that turn raw data into a 0-100 score.
 
-Tuned from backtest analysis (Oct 2024 → Apr 2025, 30 tickers):
-- RSI 55-65 sweet spot for HIGH_RISK (57.3% win rate)
-- Low volume wins for SAFE_INCOME, moderate volume for HIGH_RISK
-- Momentum +1% to +3% is optimal; >5% is a reversal trap
-- High MACD histogram predicts surges (missed surgers had 3.3 vs 1.5)
-- Score ceiling at 72 — higher scores have INVERTED win rates
+============================================================
+WHAT THIS MODULE IS
+============================================================
+
+This is the heart of Signa's signal generation. Every ticker analyzed by
+the scan pipeline ends up here, and this module decides:
+
+  1. SCORE — a 0-100 composite that summarizes the bullish/bearish case.
+  2. ACTION — BUY / HOLD / SELL / AVOID derived from the score and bucket.
+  3. BLOCKERS — hard-fail conditions that override the score (fraud,
+     hostile macro, overbought RSI, suspicious volume, SMA overextension).
+  4. GEM — a flag for the highest-conviction signals (5 strict conditions).
+  5. STATUS — CONFIRMED / WEAKENING / UPGRADED / CANCELLED relative to
+     the previous signal for the same ticker.
+
+The scoring weights and thresholds were tuned from a 6-month backtest
+(Oct 2024 - Apr 2025, 30 tickers, ~18,000 signals). Key findings that
+shaped the rules:
+
+  • RSI 50-65 is the sweet spot for HIGH_RISK (57.3% win rate).
+    RSI > 75 has an INVERTED win rate (60%+ failure) — auto-blocked.
+    RSI 30-50 is the contrarian zone, handled by `contrarian.py`.
+
+  • SAFE_INCOME wins on LOW volume (institutional accumulation),
+    HIGH_RISK wins on MODERATE volume (z-score 1.0-2.0). Volume z-score
+    > 2.0 is panic / FOMO and is less reliable.
+
+  • Momentum +1% to +3% is optimal. Anything > +5% is a reversal trap
+    (the move has already happened).
+
+  • MACD histogram > 2.0 predicts surges. Missed surgers in the
+    backtest had average histogram 3.3 vs 1.5 for non-surgers.
+
+  • Stocks > 50% above their SMA200 have INVERTED returns
+    (gravity wins). Auto-blocked.
+
+  • Score ceiling at 72 — scores between 72 and 90 are the meaningful
+    BUY zone. Scores > 90 have inverted win rates (overbought trap)
+    and get force-converted to HOLD.
+
+============================================================
+THE TWO BUCKETS
+============================================================
+
+Every signal is classified into one of two buckets, and each bucket has
+its own scoring formula and BUY threshold:
+
+  SAFE_INCOME (dividend stocks, blue-chips, REITs, ETFs)
+  ------------------------------------------------------
+    Stock weights:  35% dividend reliability + 30% fundamental health +
+                    25% macro + 10% sentiment
+    ETF weights:    40% fundamental + 30% macro + 15% dividend + 15% sentiment
+                    (ETFs don't pay individual dividends so the dividend
+                    weight is reduced and reallocated)
+    BUY threshold:  62 (validated at 60.6% win rate by backtest)
+    Bonus:          Quality bonus (up to +6) from Fama-French QMJ-inspired
+                    factors (margins, earnings stability, leverage)
+
+  HIGH_RISK (growth stocks, tech, biotech, crypto, small caps)
+  -----------------------------------------------------------
+    Weights:        35% sentiment + 30% catalyst + 25% technical momentum +
+                    10% fundamentals
+    BUY threshold:  65 (validated at 52.6% win rate by backtest)
+    Bonus:          Short-squeeze bonus (up to +20) when high short
+                    interest combines with bullish momentum.
+                    Momentum factor bonus (up to +6) from 3m+6m returns.
+
+============================================================
+DYNAMIC ADJUSTMENTS
+============================================================
+
+Several adjustments fire on top of the base score:
+
+  Sentiment weight reduction (low-mention tickers)
+    If grok_data.mention_count < 100, the sentiment is unreliable. The
+    sentiment weight collapses from 35% (HIGH_RISK) or 10% (SAFE_INCOME)
+    down to 5%, and the freed weight is given to technical_momentum
+    (HIGH_RISK) or macro (SAFE_INCOME).
+
+  Contrarian sentiment dampening
+    Extreme bullish sentiment (> 85) is dampened by -10 (bubble deflation).
+    Extreme bearish sentiment (< 15) is boosted by +10 (oversold bounce).
+    Only fires when mention_count >= 100 (so the sentiment is meaningful).
+
+  Regime multipliers
+    VOLATILE + HIGH_RISK    → score × 0.85   (15% penalty)
+    CRISIS + HIGH_RISK      → score = 0      (paused entirely)
+    CRISIS + SAFE_INCOME    → score × 0.60   (40% penalty)
+                              UNLESS the catalyst is DIVIDEND or PEAD
+                              (those plays are defensive and OK in crisis)
+
+  Catalyst type detection
+    PEAD (Post-Earnings-Announcement Drift): earnings within 3 days +
+      positive surprise + price hasn't moved more than 10% yet.
+    PRE_EARNINGS: earnings within 30 days, no PEAD.
+    These are mutually exclusive — you can't be both pre-earnings AND
+    post-earnings drift.
+
+============================================================
+BLOCKERS (auto-AVOID, override the score entirely)
+============================================================
+
+ANY of these conditions triggers an immediate AVOID, regardless of how
+high the score is:
+
+  1. Fraud / legal risk in X sentiment or breaking news
+     (keywords: fraud, sec investigation, lawsuit, scam, ponzi,
+     insider trading)
+  2. Hostile macro environment (high VIX + high Fed funds + high CPI)
+  3. Suspiciously low volume (Z-score < -2.0 OR avg < 50K)
+  4. Overbought RSI > 75 (backtest: 60%+ failure rate)
+  5. SMA200 overextension > 50% (backtest: inverted returns)
+
+NOTE: blockers are only checked for AI-analyzed signals. Tech-only
+signals (below the top-15 by pre-score) skip this pass — but the brain
+re-checks the most critical blockers in `_eval_brain_trust_tier` for
+its tier 3 path, so it can't auto-buy a tech-only signal that would
+have been blocked.
+
+============================================================
+GEM CONDITIONS (the highest-conviction signal class)
+============================================================
+
+A signal becomes a GEM only if ALL FIVE of these are true:
+
+  1. Score >= 85
+  2. Catalyst within 30 days (any type)
+  3. Sentiment is bullish AND confidence >= 80%
+  4. No red flags
+  5. Risk/reward ratio >= 3.0x
+
+GEMs are rare (typically 0-3 per day) and trigger an immediate Telegram
+alert separate from the regular scan digest.
 """
 
 from datetime import date
@@ -29,13 +156,60 @@ def compute_score(
     market_regime: str = "TRENDING",
     asset_type: str = "STOCK",
 ) -> tuple[int, dict]:
-    """Compute the composite score using bucket-specific weights.
+    """Compute the 0-100 composite score for one signal.
 
-    Includes:
-    - Dynamic sentiment weighting based on mention count
-    - Contrarian adjustment for extreme sentiment
-    - Regime score multiplier for VOLATILE/CRISIS
-    - Mutual exclusive PEAD vs PRE_EARNINGS catalyst detection
+    This is the main scoring function. Every ticker analyzed by `scan_service`
+    ends up here. The score drives the BUY/HOLD/SELL/AVOID action and feeds
+    the brain's tier evaluation downstream.
+
+    The function is bucket-aware: SAFE_INCOME and HIGH_RISK use different
+    weight formulas (see file header). It also applies several dynamic
+    adjustments on top of the base score:
+
+      • Sentiment weight collapse for low-mention tickers (< 100 mentions
+        → sentiment weight drops from 35%/10% to 5%, freed weight goes
+        to technical_momentum/macro respectively).
+      • Contrarian sentiment dampening (extreme bullish > 85 → -10,
+        extreme bearish < 15 → +10) — only for high-mention tickers.
+      • Catalyst type detection (PEAD vs PRE_EARNINGS, mutually exclusive).
+      • Regime multipliers (VOLATILE × 0.85, CRISIS × 0.60 or 0).
+      • Quality bonus for SAFE_INCOME (Fama-French QMJ-inspired, up to +6).
+      • Short squeeze bonus + momentum factor bonus for HIGH_RISK.
+
+    Args:
+        technical_data: Output of `indicators.compute_indicators` — RSI,
+            MACD, Bollinger Bands, SMA crosses, volume z-score, ATR, ADX.
+        fundamental_data: Output of `market_scanner.get_fundamentals` —
+            P/E, dividend yield, EPS growth, debt ratios, profit margins.
+        macro_data: Output of `macro_scanner.get_macro_snapshot` — Fed
+            funds, VIX, CPI, unemployment, Fear & Greed Index, intermarket
+            signals. Single value per scan, shared across all tickers.
+        grok_data: Output of `provider.analyze_sentiment` — X/Twitter
+            sentiment from Grok or Gemini. Includes mention_count which
+            gates the dynamic sentiment weight collapse.
+        synthesis: Output of `provider.synthesize_signal` — the AI's
+            BUY/HOLD/SELL/AVOID recommendation with confidence, target,
+            stop, R/R ratio, catalyst, red flags. Empty dict for tech-only.
+        bucket: "SAFE_INCOME" or "HIGH_RISK" (set by `_classify_bucket`
+            in scan_service).
+        market_regime: "TRENDING" / "VOLATILE" / "CRISIS" — drives the
+            regime multiplier and the GEM eligibility for SAFE_INCOME.
+        asset_type: "STOCK" / "ETF" / "CRYPTO". Only "ETF" affects scoring
+            (uses ETF-specific weights with reduced dividend weight).
+
+    Returns:
+        (score, breakdown)
+
+        score: 0-100 integer (clamped). 0 means "skip entirely", 90+ means
+            "overbought trap, force HOLD" (handled in `score_to_action`).
+
+        breakdown: Dict of per-component contributions for the UI factor
+            labels and debugging. Keys include:
+              dividend_reliability / fundamental_health / macro / sentiment
+              (SAFE_INCOME) or sentiment / catalyst / technical_momentum /
+              fundamentals (HIGH_RISK), plus quality_bonus, momentum_bonus,
+              short_squeeze_bonus, total, market_regime, regime_adjustment_*,
+              catalyst_type, sentiment_weight_effective, grok_mention_count.
     """
     # ── Null safety ──
     technical_data = technical_data or {}
@@ -186,10 +360,36 @@ def compute_score(
 
 
 def score_to_action(score: int, bucket: str = "") -> str:
-    """Convert a composite score to a signal action.
+    """Convert a 0-100 composite score to a BUY/HOLD/SELL/AVOID action.
 
-    Uses bucket-specific thresholds validated by 2-year backtest.
-    Safe Income at 62+ → 60.6% win rate. High Risk at 65+ → 52.6%.
+    Uses bucket-specific BUY thresholds validated by the 6-month backtest:
+      • SAFE_INCOME at 62+ → 60.6% win rate
+      • HIGH_RISK at 65+   → 52.6% win rate
+
+    Action mapping:
+      score >= buy_threshold AND score <= 90  → BUY
+      score > 90                              → HOLD  (overbought trap —
+                                                       backtest shows
+                                                       inverted returns)
+      score >= 55 AND score < buy_threshold   → HOLD
+      score < 55                              → AVOID
+
+    The 90-ceiling is critical: scores in the 90+ range correlate with
+    overbought conditions where the rally is already exhausted. The
+    backtest showed that 90+ scores have INVERTED win rates compared to
+    scores in the 72-89 range. Force-converting to HOLD prevents the
+    user from chasing tops.
+
+    Args:
+        score: 0-100 composite score from `compute_score`.
+        bucket: "SAFE_INCOME" or "HIGH_RISK". An empty bucket falls back
+            to the generic `score_buy` setting.
+
+    Returns:
+        One of: "BUY", "HOLD", "SELL", "AVOID". Note that this function
+        never returns "SELL" — SELL actions are produced by external
+        signals (deteriorating trends from previous-signal comparisons),
+        not by score thresholds.
     """
     if bucket == "SAFE_INCOME":
         buy_threshold = settings.score_buy_safe
@@ -215,14 +415,42 @@ def score_to_action(score: int, bucket: str = "") -> str:
 # ============================================================
 
 def check_gem(score: int, grok_data: dict, synthesis: dict) -> tuple[bool, list[str]]:
-    """Check if a signal qualifies as a GEM alert.
+    """Decide if a signal qualifies as a GEM alert.
 
-    All 5 conditions must be true:
-    1. Score >= 85
-    2. Catalyst within 30 days
-    3. Grok sentiment bullish with confidence >= 80
-    4. No red flags
-    5. Risk/reward >= 3x
+    GEMs are the highest-conviction signal class. They get a dedicated
+    Telegram alert (separate from the regular scan digest) and are
+    expected to be rare — typically 0-3 per day across the full universe.
+
+    A signal is a GEM only if ALL FIVE conditions are met:
+
+      1. Score >= settings.gem_min_score (default 85)
+      2. Catalyst is set AND its date is within settings.gem_catalyst_days
+         (default 30) — i.e., something concrete happens soon (earnings,
+         product launch, dividend, etc.)
+      3. X/Twitter sentiment label == "bullish" AND confidence >= 80%
+         (so we have high-quality social proof, not just neutral data)
+      4. synthesis.red_flags is empty (no fraud, no insider sells,
+         no regulatory issues)
+      5. risk_reward_ratio >= settings.gem_min_rr_ratio (default 3.0)
+         (the math has to work — at least $3 of upside per $1 of risk)
+
+    The 5-of-5 requirement is intentionally strict. Lowering any of these
+    in the past has produced false-positive GEMs that hurt the user's
+    trust in the alert.
+
+    Args:
+        score: 0-100 composite score from `compute_score`.
+        grok_data: Sentiment dict (label, confidence, themes, etc.)
+        synthesis: AI synthesis dict (catalyst, catalyst_date, red_flags,
+            risk_reward_ratio, target_price, stop_loss, etc.)
+
+    Returns:
+        (is_gem, conditions)
+
+        is_gem: True if all 5 conditions pass.
+        conditions: List of human-readable strings (one per condition)
+            with [PASS]/[FAIL] markers. Used for the Telegram GEM alert
+            body and for debugging when a near-GEM doesn't qualify.
     """
     conditions = []
     passed = 0
@@ -287,14 +515,66 @@ def check_blockers(
     macro_data: dict,
     technical_data: dict,
 ) -> tuple[bool, list[str]]:
-    """Check if any signal blockers are triggered.
+    """Check if any signal blocker fired — auto-AVOID overrides the score.
 
-    Blockers (auto-AVOID regardless of score):
-    1. Fraud allegations on X
-    2. 2+ consecutive earnings misses
-    3. Hostile macro environment
-    4. Suspiciously low volume
-    5. Overbought RSI > 75 (backtest-validated — these fail 60%+ of the time)
+    Blockers exist because the score-based action mapping isn't sufficient
+    on its own. A 78-score ticker with fraud allegations is still a no-go.
+    Each blocker is backtested-validated and reflects a category of
+    failure where the score lies about the underlying risk.
+
+    The 6 blockers, in order of severity:
+
+      1. FRAUD / LEGAL RISK
+         Triggers if any of these keywords appear in the X sentiment
+         summary, top themes, or breaking news:
+           fraud, sec investigation, lawsuit, scam, ponzi, insider trading
+         Why: an earnings beat means nothing if the SEC is closing in.
+
+      2. (Reserved — was "2+ consecutive earnings misses" in earlier
+         versions; removed because the data wasn't reliable enough.)
+
+      3. HOSTILE MACRO ENVIRONMENT
+         Triggers if `macro_data.environment == "hostile"` (set by
+         `macro_scanner.classify_macro_environment` based on VIX + Fed
+         funds + CPI). Why: even great companies fall in bad regimes.
+
+      4. SUSPICIOUSLY LOW VOLUME
+         Two sub-checks:
+           • volume_zscore < -2.0  (today's volume is 2+ std-devs below
+             the 20-day average — institutional desertion)
+           • volume_avg < 50,000   (chronically illiquid — slippage will
+             kill any alpha you think you have)
+
+      5. OVERBOUGHT RSI > 75
+         Backtest validation: tickers with RSI > 75 had a 60%+ failure
+         rate on BUY signals. The momentum is exhausted. Auto-AVOID
+         protects against chasing tops.
+
+      6. SMA200 OVEREXTENSION > 50%
+         Backtest validation: stocks trading more than 50% above their
+         200-day moving average have INVERTED returns over the next
+         20 days. Gravity wins. Auto-AVOID.
+
+    NOTE: This function is NOT called for tech-only signals (those that
+    were below the top-15 by pre-score and skipped AI synthesis). The
+    brain re-checks blockers 4-6 in `_eval_brain_trust_tier` for its
+    Tier 3 path so it can't auto-buy a tech-only signal that would
+    have been blocked here.
+
+    Args:
+        grok_data: Sentiment dict (used for fraud keyword scan).
+        fundamental_data: Fundamentals (currently unused after the
+            earnings-miss blocker was removed; kept in the signature
+            for future use).
+        macro_data: Macro snapshot (used for environment check).
+        technical_data: Technical indicators (used for RSI/volume/SMA).
+
+    Returns:
+        (is_blocked, reasons)
+
+        is_blocked: True if any blocker fired.
+        reasons: List of human-readable blocker descriptions. Shown in
+            the signal's reasoning text and logged as a warning.
     """
     reasons = []
 
@@ -353,7 +633,47 @@ def determine_status(
     current_score: int,
     previous_signal: dict | None,
 ) -> str:
-    """Determine signal status based on comparison with previous signal."""
+    """Decide a signal's STATUS by comparing it to the previous signal for the same ticker.
+
+    The STATUS field tells the user (and the brain) HOW the signal evolved
+    relative to the last scan. Same action twice in a row is "CONFIRMED".
+    A worsening signal is "WEAKENING". A reversal is "CANCELLED". An
+    improving signal is "UPGRADED".
+
+    Status transitions:
+
+      previous = None (first time we see this ticker)
+        → CONFIRMED  (no comparison possible)
+
+      previous BUY → current SELL/AVOID
+        → CANCELLED  (the BUY thesis is dead)
+
+      current_score < previous_score - 15  (lost 15+ points)
+        → WEAKENING  (signal eroding even if action unchanged)
+
+      current_score > previous_score + 10  (gained 10+ points)
+        → UPGRADED   (signal improving)
+
+      previous HOLD → current BUY
+        → UPGRADED   (HOLD that strengthened to a BUY is a meaningful change)
+
+      Otherwise
+        → CONFIRMED  (unchanged or minor drift)
+
+    The 15-point WEAKENING threshold is asymmetric with the 10-point
+    UPGRADED threshold on purpose: we want to surface deterioration
+    earlier than improvement (catching exits is more time-sensitive
+    than catching entries).
+
+    Args:
+        current_action: BUY/HOLD/SELL/AVOID for this scan's signal.
+        current_score: 0-100 score for this scan's signal.
+        previous_signal: The most recent signal record for the same
+            ticker, or None if this is the first time we see it.
+
+    Returns:
+        One of: "CONFIRMED", "WEAKENING", "UPGRADED", "CANCELLED".
+    """
     if previous_signal is None:
         return "CONFIRMED"
 

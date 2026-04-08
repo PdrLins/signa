@@ -1,7 +1,81 @@
-"""AI Budget Service — tracks spending per provider with daily/monthly limits.
+"""AI Budget Service — runaway-cost protection for paid AI providers.
 
-Stores usage in-memory (fast checks) and persists to Supabase (survives restarts).
-When a provider's budget is exhausted, calls are blocked and fallback kicks in.
+============================================================
+WHAT THIS MODULE IS
+============================================================
+
+Signa uses paid AI APIs (Claude, Grok). Without limits, a bug in the
+scanner could blow through hundreds of dollars in a single afternoon —
+imagine an infinite retry loop on a 500 error, or a regex bug that
+sends 50K-character prompts. This module is the spending circuit
+breaker.
+
+It enforces TWO independent caps per provider:
+  • DAILY     — default $1.00 across all providers
+  • MONTHLY   — default $5.00 per provider (Claude=$5, Grok=$5,
+                Gemini=$0/unlimited because it's free tier)
+
+Every paid AI call goes through `can_call()` BEFORE being made. If
+the call would push spending over either limit, it returns False and
+`provider.synthesize_signal` (or `analyze_sentiment`) skips that
+provider and falls through to the next in the chain.
+
+After each successful call, `record_call()` updates the running totals,
+fires Telegram alerts at 70/90/100% thresholds, and persists the call
+to the `ai_usage` DB table for audit / dashboard reporting.
+
+============================================================
+TIERED ALERT SYSTEM
+============================================================
+
+Each threshold (70%, 90%, 100%) fires AT MOST ONCE per provider per
+month. The dedup is in-memory (`_alert_sent`), so a process restart
+could cause one duplicate alert per month per threshold (acceptable
+trade-off for avoiding DB writes on the hot path).
+
+The alerts say:
+  •  70% — "Heads up — budget at 70%. Plan ahead before it runs out."
+  •  90% — "Approaching limit. Consider increasing budget or reducing scans."
+  • 100% — "Provider blocked. Brain will fall back to next provider in chain."
+
+100% is the most important: that's when the brain effectively goes
+blind on this provider until the user takes action.
+
+============================================================
+STORAGE MODEL
+============================================================
+
+  In-memory dicts (`_daily_usage`, `_monthly_usage`, `_daily_calls`):
+    Fast O(1) read for `can_call`. Loaded from DB on startup, updated
+    on every `record_call`. Daily entries are pruned to the last 7
+    days to prevent unbounded growth.
+
+  DB (`ai_usage` table):
+    One row per call: provider, call_type, ticker, estimated_cost,
+    success, created_at. Used for the dashboard's "AI Cost Today"
+    widget and for audit / debugging.
+
+  Singleton pattern:
+    `BudgetService.get_instance()` returns the one shared instance.
+    The instance is created on first call and persists for the
+    lifetime of the process. The async lock prevents two coroutines
+    from each creating their own instance during cold start.
+
+============================================================
+COST ESTIMATES
+============================================================
+
+Estimated per-call costs (validated against real usage):
+
+  Claude synthesis (Sonnet 4):  $0.012  (1200 in + 800 out tokens)
+  Gemini synthesis (2.0-flash): $0.000  (free tier)
+  Grok sentiment (grok-3-mini): $0.0002 (400 in + 600 out tokens)
+  Gemini sentiment (2.0-flash): $0.000  (free tier)
+
+If actual usage diverges from these, update COST_ESTIMATES at the
+top of this file. The dashboard's "AI Cost Today" reflects these
+estimates, not real billing — cross-check with provider invoices
+monthly.
 """
 
 import asyncio

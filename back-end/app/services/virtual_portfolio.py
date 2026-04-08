@@ -1,10 +1,197 @@
-"""Virtual Portfolio — tracks what would happen if you followed the brain's signals.
+"""Virtual Portfolio — the brain (Signa's autonomous trading engine).
 
-Two tracks:
-- "watchlist" — brain tracks your watchlisted tickers (your picks, brain timing)
-- "brain" — brain picks its own best signals (fully autonomous)
+============================================================
+WHAT THIS MODULE IS
+============================================================
 
-After 1-2 weeks, compare which track performs better.
+The "brain" is an autonomous decision engine that opens and closes virtual
+positions based on the signals produced by `scan_service`. It operates with
+no human input — every buy and sell is evaluated against strict rules and
+recorded to the `virtual_trades` table for later performance analysis.
+
+There is no real money at stake. The brain's purpose is to:
+
+  1. Validate the signal scoring model with real trade outcomes (win rate,
+     P&L, time-to-target).
+  2. Surface high-conviction opportunities to the user via Telegram alerts
+     (so they can mirror the brain's decisions in their real broker if they
+     choose to).
+  3. Provide a self-learning feedback loop: the brain's wins and losses
+     feed back into the signal scoring rules over time.
+
+The brain is intentionally CONSERVATIVE. It refuses to act on incomplete
+data, refuses to act outside market hours, refuses to act on signals where
+the AI failed, and refuses to act on positions that have lost the AI's
+confirmation. False negatives (missed opportunities) are preferable to
+false positives (bad trades).
+
+============================================================
+THE TWO TRACKS
+============================================================
+
+Each scan can produce two parallel sets of virtual trades:
+
+  WATCHLIST TRACK (`source = "watchlist"`)
+  ----------------------------------------
+  Tracks what would happen if you bought every BUY signal on a ticker you
+  added to your watchlist. The brain doesn't pick the tickers — you do —
+  but the brain executes the trades on your behalf in the virtual ledger.
+  This is your "what-if-I-had-followed-my-own-list" experiment.
+
+  BRAIN TRACK (`source = "brain"`)
+  --------------------------------
+  Fully autonomous. The brain picks its own tickers from the scan results
+  using the tiered trust model below. It can hold up to `brain_max_open`
+  positions at once and rotates the weakest position out when a stronger
+  signal arrives.
+
+After 1-2 weeks of running both tracks, you can compare them via the
+`get_virtual_summary()` and `get_brain_tier_breakdown()` reports to see
+which approach performs better.
+
+============================================================
+THE TIERED TRUST MODEL  (the brain's auto-buy gate)
+============================================================
+
+The brain only auto-buys signals that meet ONE of these tiers:
+
+  TIER 1 — full position size  (trust_multiplier = 1.0)
+  -----------------------------------------------------
+    Requires:
+      • ai_status == "validated" (AI synthesis succeeded with confidence ≥ 50)
+      • score >= 72  (BRAIN_MIN_SCORE)
+    Rationale: This is the high-conviction default. The AI ran cleanly,
+    blockers were checked, the composite score is strong. Buy at full Kelly.
+
+  TIER 2 — half position size  (trust_multiplier = 0.5)
+  -----------------------------------------------------
+    Requires:
+      • ai_status == "low_confidence" (AI ran, but confidence < 50)
+      • score >= 80  (BRAIN_TIER2_MIN_SCORE)
+      • implicit: blockers passed (otherwise action would be AVOID, which
+        is caught by the SELL/AVOID branch before tier evaluation)
+    Rationale: AI is uncertain but the rest of the signal (tech, fundamentals,
+    macro) all agree at score ≥ 80. The higher score bar compensates for
+    AI uncertainty. Half-size to manage risk.
+
+  TIER 3 — half position size  (trust_multiplier = 0.5)
+  -----------------------------------------------------
+    Requires:
+      • ai_status == "skipped" (tech-only signal, AI never ran because the
+        ticker was below the top-15 by pre-score)
+      • score >= 82  (BRAIN_TIER3_MIN_SCORE)
+      • At least 3 of 4 technical confirmations:
+          - RSI in sweet spot (50-65)
+          - MACD histogram positive
+          - Volume z-score in [1.0, 2.5]
+          - Within 30% of SMA200
+      • Macro environment != "hostile" (re-checked here because tech-only
+        signals skip the regular blocker pass)
+    Rationale: AI never validated this signal, so we substitute pristine
+    technicals + a macro check + a higher score bar. Strict criteria let
+    the brain catch real opportunities the AI quota missed without taking
+    on noise.
+
+  TIER 0 — never auto-buy
+  -----------------------
+    • ai_status == "failed" (AI tried but errored — added to retry queue
+      and re-attempted on the next scan, never auto-bought directly)
+    • Any signal that doesn't meet a tier above
+
+The tier evaluation runs INDEPENDENTLY of the user-facing `action` field.
+Tier 2 and Tier 3 signals will already have been downgraded from BUY to
+HOLD by the AI quality guard in `scan_service` (because their AI status
+isn't "validated"). The brain bypasses that downgrade and applies its
+own stricter criteria — the user-facing UI stays conservative, the brain
+is allowed to act with its tier-aware position sizing.
+
+============================================================
+MARKET HOURS DISCIPLINE
+============================================================
+
+The brain only buys/sells equities during the US regular session:
+  Monday-Friday, 9:30am - 4:00pm ET.
+
+Outside these hours:
+  • New BUY signals on equities are SKIPPED (the trade wouldn't fill).
+  • SELL signals on held equities are FLAGGED FOR REVIEW (see below)
+    instead of being executed.
+  • The watchdog skips equity positions and only monitors crypto.
+
+Crypto is exempt and trades 24/7.
+
+This makes virtual trades realistic — you can compare brain P&L to what
+you'd actually achieve in your broker because every fill price is a real
+in-hours price.
+
+============================================================
+PRE-MARKET REVIEW SYSTEM
+============================================================
+
+Pre-market scans (e.g. the 6am scan) can produce SELL signals on positions
+the brain holds. We can't actually sell at 6am, so:
+
+  1. The position is FLAGGED with `pending_review_at`, `pending_review_action`
+     (SELL or AVOID), `pending_review_score`, `pending_review_reason`.
+  2. An immediate Telegram alert fires: "⚠ Brain Flagged for Review".
+  3. At the first scan after market open (9:30am+ ET), `process_pending_reviews`
+     re-evaluates each flagged position against the FRESH signal:
+       • Still SELL/AVOID → execute the sell, send "Brain SELL" alert.
+       • Recovered to BUY/HOLD → clear the flag, send "Review Cleared" alert.
+       • No fresh signal yet → leave the flag, retry next scan.
+
+The user can also override from Telegram with /forcesell, /keep, /review.
+A /forcesell sets `pending_review_action = "FORCE_SELL"` (a sentinel value)
+which makes the next in-hours scan execute the sell unconditionally,
+bypassing the score-drop guard.
+
+============================================================
+SCORE-DROP GUARD
+============================================================
+
+If a held position's score drops 25+ points to below 50 in a single scan,
+the brain REFUSES to auto-sell. This usually means the AI failed to
+analyze the ticker on this scan (tech-only fallback) rather than a real
+deterioration. The watchdog will catch genuine danger within 15 minutes.
+
+Exception: a user-forced sell from /forcesell bypasses this guard since
+the user has explicitly accepted the risk.
+
+============================================================
+CONCURRENCY MODEL
+============================================================
+
+The brain notification queue is SCAN-LOCAL. Each scan creates a fresh
+`BrainNotificationQueue` via `new_notification_queue()` and threads it
+through every brain function in this module. There is NO module-level
+notification state, so concurrent scans (manual + scheduled overlap)
+cannot mix notifications between scans.
+
+The flow is:
+
+  1. scan_service.run_scan creates `brain_notifications = new_notification_queue()`
+  2. process_pending_reviews(signals, brain_notifications)
+  3. process_virtual_trades(signals, watchlist_symbols, brain_notifications)
+  4. check_virtual_exits(brain_notifications)
+  5. await flush_brain_notifications(brain_notifications)  # drains the queue
+
+Step 5 is the only place that sends Telegram messages — it batches all
+brain alerts at the end of the scan.
+
+============================================================
+STATE OWNERSHIP
+============================================================
+
+  Database (Supabase, source of truth):
+    • virtual_trades — open + closed positions
+    • virtual_snapshots — daily equity curve
+
+  In-memory (per-scan, ephemeral):
+    • BrainNotificationQueue — Telegram alerts queued for the end of scan
+    • _vp_cache — TTL cache for the dashboard summary endpoints (5 min)
+
+There is no in-memory state that survives process restarts. The brain
+fully recovers its state from `virtual_trades` on every scan.
 """
 
 from datetime import datetime, timezone
@@ -18,78 +205,134 @@ from app.db.supabase import get_client, with_retry
 from app.services.price_cache import _fetch_prices_batch
 
 
-# Brain auto-pick criteria: tiered trust model
+# ============================================================
+# CONSTANTS — brain auto-pick score thresholds
+# ============================================================
 #
-# Tier 1 (full position):  ai_status="validated"     + score >= 72
-#                          AI ran with confidence >= 50, normal high-conviction
-#
-# Tier 2 (half position):  ai_status="low_confidence" + score >= 80 + clean blockers
-#                          AI ran but unsure — higher score bar compensates
-#
-# Tier 3 (half position):  ai_status="skipped"        + score >= 82 + technical
-#                          confirmation (RSI sweet spot 50-65, MACD positive,
-#                          volume confirmation, no overextension)
-#                          Tech-only candidate, but the technicals are pristine
-#
-# Failed AI is NEVER auto-bought — it's a transient issue that should retry.
+# These three constants define the score floor for each brain trust tier.
+# See the file header for the full tier model. Tuned from the backtest
+# (Oct 2024 - Apr 2025) — raising any of these reduces buy frequency but
+# increases per-trade win rate. Lowering them does the reverse.
+
 BRAIN_MIN_SCORE = 72
+"""Tier 1 floor — validated AI signals must clear this score to be bought.
+Backtest shows 60.6% win rate at 72+ for SAFE_INCOME, 52.6% for HIGH_RISK."""
+
 BRAIN_TIER2_MIN_SCORE = 80
+"""Tier 2 floor — low-confidence AI signals need a higher score bar (80+)
+to compensate for the AI's uncertainty. The 8-point premium over Tier 1
+is what makes the brain comfortable acting at half-size despite low AI
+conviction."""
+
 BRAIN_TIER3_MIN_SCORE = 82
+"""Tier 3 floor — tech-only signals (AI never ran) need an even higher
+score bar (82+) AND must pass technical confirmation checks AND must not
+be in a hostile macro regime. The 10-point premium over Tier 1 reflects
+the absence of any AI validation."""
 
 
-# A scan-local queue of brain Telegram notifications. Each scan creates one of
-# these via new_notification_queue() and threads it through every brain
-# function for that scan. We DO NOT use a module-level singleton because:
-#   1. Concurrent scans (manual + scheduled overlap) would mix notifications
-#      between scans, causing duplicates, lost messages, or wrong-ticker alerts.
-#   2. Explicit queue passing makes the data flow visible from the function
-#      signature instead of relying on hidden global state.
-#   3. It makes the functions independently testable.
-#
-# The queue holds (template_key, kwargs_dict) tuples that flush_brain_notifications()
-# will format and send via Telegram at the end of the scan.
+# ============================================================
+# TYPES
+# ============================================================
+
 BrainNotificationQueue = list[tuple[str, dict]]
+"""A scan-local queue of brain Telegram notifications.
+
+Format: list of (template_key, kwargs_dict) tuples.
+
+Each scan creates a fresh queue via `new_notification_queue()` and threads
+it through every brain function for that scan run. `flush_brain_notifications()`
+drains it at the end of the scan and sends each entry as a Telegram message.
+
+We DO NOT use a module-level singleton for this state because:
+  1. Concurrent scans (manual + scheduled overlap) would mix notifications
+     between scans, causing duplicates, lost messages, or wrong-ticker alerts.
+  2. Explicit queue passing makes the data flow visible from the function
+     signature instead of relying on hidden global state.
+  3. It makes the brain functions independently testable.
+"""
 
 
 def new_notification_queue() -> BrainNotificationQueue:
     """Create a fresh brain notification queue for a single scan run.
 
-    The caller (scan_service) creates one queue per scan and threads it through
-    all the brain functions. flush_brain_notifications drains it at the end.
+    Called once per scan by `scan_service.run_scan` BEFORE any other brain
+    function. The same queue is then passed to `process_pending_reviews`,
+    `process_virtual_trades`, `check_virtual_exits`, and finally drained
+    by `flush_brain_notifications` at the end of the scan.
+
+    Returns an empty list. The functions append `(template_key, kwargs)`
+    tuples; the flush coroutine sends each one via Telegram.
     """
     return []
 
 
 def _is_us_market_open() -> bool:
-    """Check if US equity markets are currently open.
+    """Return True if the US equity regular session is currently open.
 
-    Regular session: Mon-Fri, 9:30am-4:00pm ET. Brain should not auto-buy
-    equities outside these hours since the trade wouldn't actually fill —
-    it makes virtual tracking more realistic. Crypto is exempt (24/7).
+    Regular session: Monday-Friday, 9:30am-4:00pm ET (no holidays check —
+    a closed-on-holiday scan would just generate no fills, which is
+    correct behavior anyway since real markets would also reject the order).
+
+    The brain uses this to gate equity buy/sell decisions:
+      • Outside hours: equity BUYs are skipped, equity SELLs are flagged
+        for review at the next open.
+      • Crypto is exempt (24/7 market) and ignores this check.
+
+    The watchdog also calls this to skip equity monitoring outside hours.
     """
     now_et = datetime.now(ZoneInfo("America/New_York"))
-    if now_et.weekday() >= 5:  # Saturday=5, Sunday=6
+    if now_et.weekday() >= 5:  # 5=Saturday, 6=Sunday
         return False
     minutes = now_et.hour * 60 + now_et.minute
-    return 570 <= minutes < 960  # 9:30am (570) to 4:00pm (960)
+    # 9:30am = 9*60 + 30 = 570; 4:00pm = 16*60 = 960
+    return 570 <= minutes < 960
 
 
 def _eval_brain_trust_tier(sig: dict) -> tuple[int, float, str]:
-    """Evaluate which brain trust tier a signal qualifies for.
+    """Decide which brain trust tier (if any) a signal qualifies for.
 
-    Returns (tier, trust_multiplier, reason). Tier 0 means do not auto-buy.
+    This is the brain's GATE. Every brain auto-buy goes through this function.
+    See the file header for the full tier model and rationale.
 
-    Important: this is called BEFORE checking the user-facing `action` field
-    because tier 2/3 signals will already have been downgraded from BUY to
-    HOLD by the AI quality guard in scan_service. The brain has its own,
-    stricter criteria and decides independently.
+    Args:
+        sig: A signal dict from the current scan (the same dict shape that
+            `scan_service` builds for `signals` table inserts). The fields
+            we read are: `score`, `ai_status`, `technical_data`, `macro_data`.
 
-    Tier 2 is implicitly protected by blockers because the AI synthesis path
-    runs check_blockers and would set action=AVOID; AVOID never reaches the
-    brain tier check (the SELL/AVOID branch in process_virtual_trades catches
-    it first). Tier 3 is NOT protected by blockers because the tech-only path
-    skips check_blockers entirely, so we re-check the most critical blockers
-    here (hostile macro, plus the RSI/volume/SMA constraints below).
+    Returns:
+        (tier, trust_multiplier, reason)
+
+        tier: 0, 1, 2, or 3. Tier 0 means "do not auto-buy".
+        trust_multiplier: Position size scaling. 1.0 for tier 1, 0.5 for
+            tiers 2/3, 0.0 for tier 0. Recorded on the virtual_trade so
+            you can analyze per-tier returns later.
+        reason: A short human-readable string explaining the decision.
+            Logged with every brain buy and stored for diagnostics.
+
+    Why this is called BEFORE the user-facing action check:
+        Tier 2 and 3 signals will have already been downgraded from BUY to
+        HOLD by the AI quality guard in `scan_service._process_candidate`
+        (because their `ai_status` is not "validated"). The brain bypasses
+        that downgrade because its tier model has stricter criteria that
+        compensate. The user-facing UI stays conservative (HOLD), the
+        brain is allowed to act (with reduced position size).
+
+    Implicit blocker protection:
+        Tier 1 + Tier 2: protected by `check_blockers` from `signal_engine`,
+            because the AI path runs that check and sets action="AVOID" if
+            anything fires. AVOID is caught earlier in `process_virtual_trades`
+            (the SELL/AVOID branch), so it never reaches this function.
+
+        Tier 3: NOT protected by `check_blockers`, because the tech-only
+            signal path in `scan_service` skips that check entirely. We
+            re-check the most critical blockers here:
+                • Hostile macro environment (explicit check below)
+                • Overbought RSI (excluded by the RSI 50-65 sweet-spot filter)
+                • Low volume (excluded by the volume z-score 1.0-2.5 filter)
+                • SMA200 overextension (excluded by the < 30% filter)
+            Fraud blockers don't apply because tech-only signals have empty
+            grok_data, so there's no sentiment text to scan for fraud keywords.
     """
     score = sig.get("score", 0) or 0
     ai_status = sig.get("ai_status", "skipped")
@@ -152,10 +395,33 @@ def _flag_positions_for_review(
     db, all_open: list, symbol: str, action: str, score: int,
     reason: str, now_iso: str, notifications: BrainNotificationQueue,
 ) -> None:
-    """Mark open positions for review when a SELL signal hits outside hours.
+    """Tag held positions of `symbol` as pending review at next market open.
 
-    Avoids re-flagging positions already pending review. Queues a Telegram
-    alert per newly-flagged brain position into the scan-local queue.
+    Called from the SELL/AVOID branch of `process_virtual_trades` when the
+    market is closed and the held position is an equity (so the trade
+    cannot actually fill). The flag tells `process_pending_reviews` to
+    re-evaluate this position the next time the market is open.
+
+    Args:
+        db: Supabase client (passed in to avoid re-fetching).
+        all_open: All currently-open virtual_trades, loaded once at the
+            start of `process_virtual_trades` for in-memory iteration.
+        symbol: Ticker symbol of the position to flag.
+        action: The deteriorated action that triggered the flag — usually
+            "SELL" or "AVOID".
+        score: The fresh signal score that triggered the flag.
+        reason: Human-readable reason (the signal's `reasoning` field).
+            Truncated to 500 chars when stored, 200 when sent over Telegram.
+        now_iso: Current UTC timestamp as ISO-8601 string. Stored in
+            `pending_review_at`.
+        notifications: Scan-local notification queue. A "brain_pending_review"
+            entry is appended for each newly-flagged BRAIN position
+            (watchlist positions are tracked silently — they're data
+            collection only, not actionable).
+
+    Idempotency: positions that ALREADY have a pending_review_at flag are
+    skipped. This prevents alert spam if the user has multiple pre-market
+    scans flag the same position twice in a row (e.g. 6am and 7am scans).
     """
     for pos in all_open:
         if pos["symbol"] != symbol:
@@ -192,20 +458,46 @@ def process_pending_reviews(
     signals: list[dict],
     notifications: BrainNotificationQueue,
 ) -> dict:
-    """Process positions flagged for review at the previous pre-market scan.
+    """Re-evaluate positions flagged for review at a previous pre-market scan.
 
-    Called by scan_service at the start of each in-hours scan. For every
-    position with pending_review_at set:
-    - If the fresh signal is still SELL/AVOID → execute the sell (handled
-      naturally by the regular SELL flow in process_virtual_trades on the
-      same scan run, since the flag is cleared first)
-    - If the fresh signal recovered → clear the flag and notify
+    This function implements step 3 of the pre-market review system (see
+    file header). It runs at the START of every in-hours scan, BEFORE
+    `process_virtual_trades`, on the same `signals` list reference.
+
+    For each position with `pending_review_at` set:
+
+      • The fresh signal for that ticker is looked up in `signals`.
+      • If no fresh signal exists, the flag is left in place (retry next scan).
+      • If `pending_review_action == "FORCE_SELL"` (user override via
+        /forcesell), the fresh signal's `action` is mutated to "SELL"
+        and a `_review_forced` marker is set so the score-drop guard
+        in `process_virtual_trades` knows to bypass itself.
+      • If the fresh signal is still SELL/AVOID → CONFIRMED. The flag is
+        cleared. Because we operate on the SAME `signals` list reference
+        that `process_virtual_trades` will iterate next, the SELL action
+        propagates naturally and the sell executes in the same scan run.
+      • If the fresh signal recovered to BUY/HOLD → CLEARED. The flag is
+        cleared and a "brain_review_cleared" notification is queued.
 
     Args:
-        signals: List of fresh signals from the current scan
-        notifications: Scan-local queue to append brain Telegram notifications to.
+        signals: Fresh signals from the current scan. THIS FUNCTION MUTATES
+            the signal dicts for forced-sell cases (sets `action` and
+            `_review_forced`). The mutation is intentional — the same list
+            reference is then iterated by `process_virtual_trades` which
+            sees the mutated values.
+        notifications: Scan-local queue. Appends `brain_review_cleared`
+            entries for recovered brain positions (deduped by symbol so
+            multiple positions for the same ticker only generate one alert).
 
-    Returns dict with cleared and confirmed counts.
+    Returns:
+        Dict with two counters:
+            cleared: positions whose flag was cleared due to recovery.
+            confirmed: positions whose flag was cleared due to confirmed
+                deterioration (these will be sold by `process_virtual_trades`
+                later in the same scan).
+
+    Returns immediately with zero counts if the market is closed —
+    pending reviews can only be processed during market hours.
     """
     if not _is_us_market_open():
         return {"cleared": 0, "confirmed": 0}
@@ -317,20 +609,81 @@ def process_virtual_trades(
     watchlist_symbols: set[str],
     notifications: BrainNotificationQueue,
 ) -> dict:
-    """Process scan results to update virtual portfolio.
+    """Run the brain's buy/sell decision loop over a scan's fresh signals.
 
-    Called at the end of each scan. Handles both watchlist and brain-auto tracks.
+    This is the heart of the brain. For every signal in `signals`, this
+    function decides:
+      • Should we close any existing positions for this symbol? (SELL/AVOID)
+      • Should we open a new watchlist-track position? (action == BUY +
+        symbol on watchlist + score >= 62)
+      • Should we open a new brain-track position? (tier evaluator returns
+        tier > 0; the brain bypasses the user-facing action field)
+      • If the brain wants to open a new position but is at max capacity,
+        should we rotate out the weakest existing brain position?
+
+    The decision rules are documented in the file header. The most
+    important constraints:
+
+      MARKET HOURS GATE
+        • Equity BUYs and SELLs are skipped/flagged when market is closed.
+        • Crypto BUYs and SELLs proceed regardless (24/7 markets).
+
+      SCORE-DROP GUARD
+        • If a held position's score drops 25+ points to below 50 in a
+          single scan, refuse to auto-sell. Likely AI methodology change,
+          not real deterioration. The watchdog will catch genuine danger.
+        • A user-forced sell (via /forcesell, marked with `_review_forced`
+          on the signal) bypasses this guard.
+
+      BRAIN ROTATION
+        • If `brain_open_count >= settings.brain_max_open` and a stronger
+          signal arrives, the weakest existing brain position is closed
+          to make room IF the new signal is at least 5 points better.
+        • Below the 5-point margin, no rotation happens (avoids churn
+          on small score differences).
+
+      TIER-AWARE BUYS
+        • Tier 1 (validated AI, score >= 72): full position size.
+        • Tier 2 (low_confidence AI, score >= 80): half position size.
+        • Tier 3 (skipped AI tech-only, score >= 82, technical confirmation,
+          non-hostile macro): half position size.
+        • Tier and trust_multiplier are recorded on the virtual_trade row
+          for per-tier performance analysis.
 
     Args:
-        signals: Fresh signals from the current scan.
-        watchlist_symbols: Symbols on the user's watchlist.
-        notifications: Scan-local queue to append brain Telegram notifications to.
+        signals: Fresh signals from the current scan. The signal dicts may
+            have been mutated by `process_pending_reviews` (e.g. forced
+            sells). Read-only otherwise.
+        watchlist_symbols: Symbols currently on the user's watchlist. Used
+            to gate the watchlist track (only symbols here are considered
+            for watchlist-source positions).
+        notifications: Scan-local queue. Brain BUY/SELL events append
+            entries here that `flush_brain_notifications` later sends.
+
+    Returns:
+        Dict with two counters:
+            buys: number of positions opened this scan (sum of watchlist + brain).
+            sells: number of positions closed this scan (signal-driven SELLs;
+                rotations and watchdog closes are NOT counted here).
+
+    Side effects:
+        • DB inserts/updates to virtual_trades.
+        • Appends to the notifications queue.
+        • Auto-upserts discovered tickers to the tickers table when the
+          brain buys a ticker that's not in the universe (so it keeps
+          getting scanned in future runs).
     """
     db = get_client()
     buys = 0
     sells = 0
 
-    # Get current open virtual positions (both sources)
+    # ──────────────────────────────────────────────────────────
+    # PHASE 1 — Snapshot current open positions
+    # ──────────────────────────────────────────────────────────
+    # We load all open virtual_trades ONCE and iterate against the in-memory
+    # snapshot. This avoids N+1 queries inside the per-signal loop. The
+    # snapshot is read-only for lookups; mutations to the DB happen via
+    # targeted updates by row id.
     open_result = (
         db.table("virtual_trades")
         .select("id, symbol, entry_price, entry_date, entry_score, source, pending_review_at")
@@ -338,11 +691,15 @@ def process_virtual_trades(
         .execute()
     )
     all_open = open_result.data or []
-    open_watchlist = set()   # symbols with open watchlist positions
-    open_brain = set()       # symbols with open brain positions
+
+    # Two parallel sets keep O(1) "is this symbol already held?" checks for
+    # both tracks. We also pre-compute the weakest brain position now so the
+    # rotation logic doesn't need to re-scan the list per signal.
+    open_watchlist: set[str] = set()
+    open_brain: set[str] = set()
     brain_open_count = 0
-    weakest_brain = None     # pre-computed for rotation
-    weakest_brain_score = 999
+    weakest_brain: dict | None = None
+    weakest_brain_score = 999  # Sentinel: any real score is lower
     for r in all_open:
         if r.get("source") == "brain":
             open_brain.add(r["symbol"])
@@ -356,6 +713,17 @@ def process_virtual_trades(
 
     now = datetime.now(timezone.utc).isoformat()
     market_open = _is_us_market_open()
+
+    # ──────────────────────────────────────────────────────────
+    # PHASE 2 — Per-signal decision loop
+    # ──────────────────────────────────────────────────────────
+    # For each fresh signal we decide:
+    #   1. SELL/AVOID branch: close held positions for this symbol
+    #      (or flag for review if equity + market closed).
+    #   2. BUY branch (watchlist track): open if explicit BUY + watchlisted.
+    #   3. BUY branch (brain track): open if tier evaluator returns tier > 0.
+    # Each branch is gated by independent rules (market hours, score-drop
+    # guard, tier eval) — see the file header for the full rule set.
 
     for sig in signals:
         symbol = sig.get("symbol")
@@ -472,31 +840,37 @@ def process_virtual_trades(
             buys += 1
             logger.info(f"Virtual BUY [watchlist]: {symbol} @ ${price:.2f} (score {score})")
 
-        # Track 2: Brain auto-picks via tiered trust model
-        # The brain evaluates the signal independently of the user-facing action.
-        # Tier 1 (validated)     → score >= 72, full position
-        # Tier 2 (low_confidence) → score >= 80 + clean blockers, half position
-        # Tier 3 (skipped tech)   → score >= 82 + tech confirmation, half position
-        # Failed AI is never auto-bought (handled by tier eval).
+        # ── Track 2: Brain auto-picks via the tiered trust model ──
+        # The brain evaluates the signal INDEPENDENTLY of the user-facing
+        # `action` field. Tier 2/3 signals were downgraded BUY → HOLD by
+        # the AI quality guard in scan_service, but the brain bypasses
+        # that downgrade because its tier model has stricter criteria
+        # (higher score bar + technical confirmation + macro check) that
+        # compensate for the AI uncertainty.
         #
-        # This intentionally bypasses the user-facing `action` field because
-        # tier 2/3 signals were downgraded to HOLD by the AI quality guard.
-        # The brain has stricter criteria but can still act on them.
+        # See `_eval_brain_trust_tier` and the file header for the rules.
         brain_tier, trust_multiplier, tier_reason = _eval_brain_trust_tier(sig)
         if brain_tier > 0 and symbol not in open_brain:
+            # ── Rotation: brain at max capacity, only rotate if the new
+            # ── signal is meaningfully better (+5 points) than the weakest
+            # ── currently-held brain position.
+            #
+            # The +5 margin avoids constant churn on small score differences.
+            # We use entry_score as the tie-breaker; higher entry_score
+            # implied a more confident initial decision.
             if brain_open_count >= settings.brain_max_open:
-                # Only rotate if new signal is meaningfully better (+5 points) than weakest
                 if weakest_brain and score >= weakest_brain_score + 5:
                     weakest = weakest_brain
                     weakest_score = weakest_brain_score
                     w_symbol = weakest["symbol"]
                     w_entry = float(weakest["entry_price"])
-                    # Get actual current price for the position being closed
+                    # Use the LIVE price for the rotated-out position so the
+                    # recorded P&L is realistic. Fall back to the new signal's
+                    # price only if the live fetch fails (rare).
                     w_prices = _fetch_prices_batch([w_symbol])
                     w_current, _ = w_prices.get(w_symbol, (None, None))
-                    w_exit_price = w_current if w_current else price  # fallback to signal price
+                    w_exit_price = w_current if w_current else price
                     w_pnl = ((w_exit_price - w_entry) / w_entry) * 100 if w_entry > 0 else 0
-                    # Close the weakest position
                     db.table("virtual_trades").update({
                         "status": "CLOSED",
                         "exit_price": w_exit_price,
@@ -519,30 +893,49 @@ def process_virtual_trades(
                         "entry_score": str(weakest_score), "exit_score": str(score),
                         "verdict": f"Replaced by stronger pick {symbol}.",
                     }))
-                    # Update pre-computed weakest for next iteration
+                    # Recompute the weakest brain position for the next
+                    # rotation candidate this scan. We use `open_brain`
+                    # (which we just updated via .discard) as the source
+                    # of truth for "still open" — this correctly excludes
+                    # ALL previously-rotated symbols this scan, not just
+                    # the most recent one. Earlier versions of this code
+                    # only filtered the most-recently-rotated symbol,
+                    # which was a bug if multiple rotations happened in
+                    # one scan (the second rotation could re-pick a
+                    # symbol that had already been closed).
                     weakest_brain = None
                     weakest_brain_score = 999
                     for r in all_open:
-                        if r.get("source") == "brain" and r.get("symbol") != w_symbol:
-                            es = r.get("entry_score", 0) or 0
-                            if es < weakest_brain_score:
-                                weakest_brain_score = es
-                                weakest_brain = r
+                        if r.get("source") != "brain":
+                            continue
+                        if r.get("symbol") not in open_brain:
+                            continue  # already rotated out earlier this scan
+                        es = r.get("entry_score", 0) or 0
+                        if es < weakest_brain_score:
+                            weakest_brain_score = es
+                            weakest_brain = r
                 else:
-                    continue  # No room and not strong enough to rotate
+                    continue  # No room and new signal isn't strong enough
+            # ── Compute target & stop for the new position ──
+            # AI-validated signals (Tier 1, sometimes Tier 2) come with
+            # AI-generated target_price and stop_loss from the synthesis.
+            # Tier 3 (tech-only) signals don't — synthesize the levels from
+            # the ATR (Average True Range) instead. ATR-based levels give
+            # a 1.33 R/R ratio (target = price + 2 ATR, stop = price - 1.5 ATR)
+            # which is conservative but workable.
             target = sig.get("target_price")
             stop = sig.get("stop_loss")
-
-            # For tech-only signals without AI target/stop, compute from ATR
             if not target or not stop:
                 atr = (sig.get("technical_data") or {}).get("atr")
                 if atr and price:
-                    # Target = price + 2*ATR, Stop = price - 1.5*ATR (1.33 R/R)
                     target = round(price + 2 * float(atr), 2)
                     stop = round(price - 1.5 * float(atr), 2)
 
             if target and stop:
-                # Crypto: tighten stop to 8% below entry (vs default which can be wider)
+                # Crypto risk cap: floor the stop at -8% from entry. Without
+                # this, an AI-generated stop could be far wider than is safe
+                # for crypto's volatility, leading to catastrophic losses
+                # before the stop triggers.
                 if sig.get("asset_type") == "CRYPTO" or symbol.endswith("-USD"):
                     max_crypto_stop = price * 0.92  # 8% max drawdown
                     if float(stop) < max_crypto_stop:
@@ -599,11 +992,27 @@ def process_virtual_trades(
 
 
 async def flush_brain_notifications(notifications: BrainNotificationQueue) -> int:
-    """Send all queued brain buy/sell notifications via Telegram.
+    """Drain the scan-local brain notification queue and send each entry via Telegram.
 
-    Drains the scan-local notification queue. Each entry is a (template_key,
-    kwargs) tuple. Returns the count of notifications sent (best-effort —
-    individual send failures are logged and skipped).
+    This is the ONLY function in this module that actually sends Telegram
+    messages. Every other function APPENDS to the queue; this one drains it.
+    Centralising the send means:
+      1. We can batch all brain alerts at the end of a scan in a single
+         async pass instead of awaiting individual sends inside sync code.
+      2. If a previous scan crashed mid-loop, the new scan starts with a
+         fresh queue (because each scan creates its own via
+         `new_notification_queue()`).
+      3. Send failures don't break the scan — each send is wrapped in
+         try/except and we keep going.
+
+    Args:
+        notifications: The scan-local queue threaded through every brain
+            function this scan run. Will be cleared after sending.
+
+    Returns:
+        Count of notifications successfully sent. The queue is always
+        cleared at the end regardless of how many sends succeeded — the
+        same notification should never be sent twice.
     """
     if not notifications:
         return 0
@@ -622,13 +1031,51 @@ async def flush_brain_notifications(notifications: BrainNotificationQueue) -> in
 
 
 def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
-    """Check open virtual trades for stop/target hits and time-based exits.
+    """Close open virtual trades whose stop/target/profit-take/age conditions hit.
 
-    Called after each scan cycle. Fetches current prices via price_cache
-    and closes trades that hit their stop, target, or max age.
+    This is the brain's RISK MANAGEMENT pass. It runs after `process_virtual_trades`
+    on every scan. Where `process_virtual_trades` reacts to fresh SIGNALS,
+    this function reacts to fresh PRICES — a position can hit its stop loss
+    even if the signal hasn't changed.
+
+    Exit conditions, checked in priority order (first match wins):
+
+      1. STOP_HIT      — current_price <= stop_loss
+                         Hard exit. The signal's reasoning is irrelevant —
+                         risk management trumps thesis.
+
+      2. TARGET_HIT    — current_price >= target_price
+                         Take-profit at the planned level. Locks in the
+                         signal's projected gain.
+
+      3. PROFIT_TAKE   — pnl_pct >= 3.0% AND days_held >= 2
+                         A "let it run for a couple days, then lock gains"
+                         heuristic. Prevents giving back gains on signals
+                         that hit a brief +3% spike before reversing.
+                         Only fires if neither stop nor target tripped.
+
+      4. TIME_EXPIRED  — days_held >= virtual_trade_max_days (config)
+                         Closes positions that have been open too long
+                         without hitting their target. Prevents capital
+                         from sitting in stale ideas. P&L is whatever
+                         it is at the time of forced exit.
+
+    Market hours guard:
+      • Equity exits are SKIPPED when the market is closed — the trade
+        wouldn't fill at the cached price (which would be stale anyway).
+        The next in-hours scan picks them up.
+      • Crypto exits proceed regardless (24/7 markets).
 
     Args:
-        notifications: Scan-local queue to append brain Telegram notifications to.
+        notifications: Scan-local queue. PROFIT_TAKE exits queue a
+            "brain_sell" notification. STOP_HIT, TARGET_HIT, and
+            TIME_EXPIRED exits don't notify here — they log only,
+            because the user has already been warned by the watchdog
+            for stops and the target_hit is implied by the original
+            BUY notification.
+
+    Returns:
+        Dict with counters: stops_hit, targets_hit, profit_takes, expired.
     """
     db = get_client()
     max_days = settings.virtual_trade_max_days

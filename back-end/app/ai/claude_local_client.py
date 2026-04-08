@@ -1,7 +1,56 @@
-"""Claude local client — uses Claude Code CLI instead of API tokens.
+"""Claude local client — invokes the Claude CLI binary as a subprocess.
 
-Shells out to `claude -p` for signal synthesis, leveraging the user's
-Pro Max subscription at zero API cost. Same prompt, same response format.
+============================================================
+WHAT THIS MODULE IS
+============================================================
+
+Most AI clients in this project hit a paid HTTP API. This one is
+different: it shells out to the local `claude` CLI binary (installed
+via the user's Pro Max subscription) and gets the same Claude model
+quality at zero marginal cost.
+
+The trade-off is reliability. The CLI is a subprocess, which means:
+  • It can timeout (we cap at 120s)
+  • It can return empty output (transient flake)
+  • It can return malformed JSON (rare but happens)
+  • It can fail with a non-zero exit code
+  • The binary might not even be in PATH on the production server
+
+For all of these EXCEPT "binary not in PATH", we retry. The retry
+strategy is exponential backoff: 2s, 4s, 8s between attempts, up to
+3 attempts total. After 3 failures, we return an error response and
+let `provider.synthesize_signal` cascade to the paid Claude API.
+
+The retry logic was added because users were seeing "all AI providers
+failed" alerts that were actually caused by single transient CLI
+hiccups. With retries, those hiccups never escalate.
+
+============================================================
+WHY THIS EXISTS
+============================================================
+
+The signal pipeline runs ~15 AI synthesis calls per scan, 4 scans per
+day = 60 calls/day. At Claude API rates (~$0.012/call) that's
+~$22/month. Using Claude Local takes that to $0.
+
+Claude Local is the DEFAULT (`settings.claude_local: bool = True`) and
+the paid API is the FALLBACK. This module produces the same response
+schema as `claude_client.py` so they're interchangeable from the
+router's perspective.
+
+============================================================
+ERROR HANDLING
+============================================================
+
+Retried (each attempt waits 2^attempt seconds):
+  • asyncio.TimeoutError    — process took > 120s
+  • Empty stdout            — CLI returned nothing
+  • json.JSONDecodeError    — malformed response
+  • Non-zero exit code      — CLI errored
+  • Generic Exception       — anything else unexpected
+
+NOT retried (fail-fast):
+  • FileNotFoundError       — binary missing, won't fix itself
 """
 
 import asyncio

@@ -1,8 +1,96 @@
-"""AI provider router — tries providers in configured order with automatic fallback.
+"""AI provider router — fallback chain for synthesis + sentiment.
 
-Reads synthesis_providers and sentiment_providers from settings.
-Falls through to the next provider when the current one fails.
-Checks budget limits before each call — skips provider if over budget.
+============================================================
+WHAT THIS MODULE IS
+============================================================
+
+Signa uses three AI providers and falls back between them when one
+fails or runs out of budget. This module is the single entry point for
+the rest of the codebase to call AI — `scan_service` only ever calls
+`provider.synthesize_signal()` and `provider.analyze_sentiment()`,
+never the individual provider clients directly.
+
+The router has two responsibilities:
+
+  1. Iterate through `settings.synthesis_providers` (or
+     `settings.sentiment_providers`) in order and try each one.
+  2. Skip any provider whose budget is exhausted, and fall through
+     to the next on transient failures.
+
+============================================================
+THE SYNTHESIS FALLBACK CHAIN
+============================================================
+
+Configuration: `settings.synthesis_providers = ["claude", "gemini"]`
+plus `settings.claude_local: bool = True`.
+
+When `claude_local=True`, the chain is:
+
+  1. CLAUDE LOCAL CLI (free, $0)
+       Calls `claude -p ...` as a subprocess. Uses the user's Pro Max
+       subscription via the local CLI binary. Up to 3 retries with
+       2s/4s/8s exponential backoff for transient errors (timeout,
+       empty response, JSON parse errors).
+       Failure mode → cascade to step 2.
+
+  2. CLAUDE API (paid, ~$0.012/call)
+       Direct Anthropic API call. Costs real money but more reliable
+       than the CLI. Budget-checked before each call.
+       Failure mode → cascade to step 3.
+
+  3. GEMINI (free tier, $0)
+       Google Gemini 2.0 Flash. Free up to 1500 calls/day. Less
+       sophisticated than Claude but a workable last-resort.
+       Failure mode → return generic error (the brain treats this
+       as ai_status="failed" and queues the ticker for retry).
+
+When `claude_local=False`, the chain skips step 1 and goes straight
+to Claude API → Gemini.
+
+CRITICAL HISTORICAL BUG (now fixed): in an earlier version, when
+claude_local was enabled and the CLI failed, the loop's `continue`
+statement jumped straight to the NEXT iteration of the providers list
+(i.e., gemini), completely skipping the paid Claude API. This left a
+massive reliability gap. The current code lifts both Claude tiers into
+the same iteration so a Claude Local failure properly cascades to the
+Claude API in the same loop body.
+
+============================================================
+THE SENTIMENT FALLBACK CHAIN
+============================================================
+
+Configuration: `settings.sentiment_providers = ["grok", "gemini"]`.
+
+  1. GROK (paid, ~$0.0002/call)
+       Grok-3-mini via xAI API. The ONLY provider with live X/Twitter
+       access — critical for accurate sentiment.
+       Failure mode → cascade to step 2.
+
+  2. GEMINI (free, $0)
+       Google Gemini for sentiment. Doesn't have live social media
+       access but can read recent web content. Lower quality but free.
+
+If both fail, the router returns a neutral fallback (score=50,
+confidence=0) with `error="All providers failed or budget exceeded"`.
+The downstream code treats this as ai_status="failed" and the brain
+queues the ticker for retry.
+
+============================================================
+BUDGET ENFORCEMENT
+============================================================
+
+Every paid provider call goes through `BudgetService.can_call()` BEFORE
+being made. If the daily limit (default $1) or the monthly limit
+(default $5/provider) would be exceeded, the call is skipped and the
+loop falls through to the next provider.
+
+This is what protects the user from runaway costs — even if every
+ticker fails AI synthesis and triggers retries, the budget cap stops
+the bleeding.
+
+After each successful call, `BudgetService.record_call()` updates the
+running totals AND triggers tiered Telegram alerts at 70/90/100% so the
+user can top up before the brain goes blind.
 """
 
 from loguru import logger

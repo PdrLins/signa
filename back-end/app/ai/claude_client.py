@@ -1,6 +1,55 @@
-"""Claude (Anthropic) client for signal synthesis.
+"""Claude (Anthropic) API client — paid synthesis fallback.
 
-Takes all collected data and asks Claude to produce a final investment signal.
+============================================================
+WHAT THIS MODULE IS
+============================================================
+
+This is the second tier in the synthesis fallback chain (see `provider.py`).
+Called when Claude Local CLI has exhausted its retries OR when
+`settings.claude_local=False`. Uses the official Anthropic Python SDK
+to hit the Claude API directly.
+
+Unlike Claude Local (which is free via Pro Max subscription), every
+call here costs money (~$0.012 per synthesis at current Sonnet 4 rates).
+The router's budget service blocks calls that would exceed the daily
+or monthly limit, so this client never has to worry about runaway costs.
+
+============================================================
+WHY BOTH CLAUDE LOCAL AND CLAUDE API EXIST
+============================================================
+
+  • Claude Local: free, slower (subprocess overhead), occasionally flaky
+  • Claude API:   paid, faster, more reliable, has retries built into SDK
+
+In production with claude_local=True, the Claude API is essentially a
+SAFETY NET that catches transient Claude Local failures. Most scans
+never hit it. But on the days it does fire, it prevents the brain from
+operating blind.
+
+============================================================
+RESPONSE SCHEMA
+============================================================
+
+This client returns the same dict shape as `claude_local_client.py`
+and `gemini_client.py` so the router can swap between them transparently:
+
+  {
+    "signal": "BUY" | "HOLD" | "SELL" | "AVOID",
+    "confidence": int (0-100),
+    "reasoning": str (2-3 sentences),
+    "risk_factors": list[str],
+    "catalyst": str | None,
+    "catalyst_date": str | None,  # YYYY-MM-DD
+    "red_flags": list[str],
+    "risk_reward_ratio": float | None,
+    "target_price": float | None,
+    "stop_loss": float | None,
+    "sentiment_weight": int (0-100),
+    "error": str | None,  # set on failure, null on success
+  }
+
+The downstream `_process_candidate` in scan_service classifies any
+response with `error` set as `ai_status="failed"`.
 """
 
 import asyncio

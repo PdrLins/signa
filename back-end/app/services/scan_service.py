@@ -1,4 +1,156 @@
-"""Scan orchestrator — runs the full data pipeline for a scan cycle."""
+"""Scan orchestrator — runs the full Signa data pipeline end-to-end.
+
+============================================================
+WHAT THIS MODULE IS
+============================================================
+
+This is the main entry point for every scan. The brain doesn't run on
+its own — it runs as the final phase of a scan, on the signals this
+module produces. Without scan_service, there are no signals and the
+brain has nothing to act on.
+
+A "scan" is the act of analyzing the entire ticker universe and
+producing a fresh set of signals. Scans run on a schedule (4x/day:
+PRE_MARKET, MORNING, PRE_CLOSE, AFTER_CLOSE) and can also be triggered
+manually via /api/v1/scans/trigger.
+
+This module is INTENTIONALLY large — every step of the pipeline lives
+here so you can read top-to-bottom and understand the full flow without
+hopping between files. The downside is the file is long; the upside is
+the data flow is explicit at every step.
+
+============================================================
+THE 8-PHASE PIPELINE
+============================================================
+
+Every scan runs these phases in order. Progress percentages are
+reported to the scans table for the frontend's progress bar.
+
+  PHASE 1 — Universe loading & pre-filter  (0-15%)
+  -------------------------------------------------
+    • Load ~270 hardcoded tickers from `universe.get_all_tickers()`.
+    • Add brain-discovered tickers from the DB (positions the brain
+      bought that aren't in the core universe).
+    • Add discovered trending tickers via `universe.discover_tickers()`
+      (Yahoo Finance screeners — most active, day gainers, etc.)
+      ONLY for PRE_MARKET / MANUAL scans (rate limit).
+    • Bulk-fetch screening data via `market_scanner.get_bulk_screening`
+      (price, volume, day_change for all tickers in one call).
+    • Filter to top 50 candidates via `prefilter_candidates` based on
+      volume >= 200K, price >= $1, |day_change| >= 1%. Crypto gets
+      5 reserved slots so equities don't crowd them out.
+
+  PHASE 2 — Macro snapshot  (15-20%)
+  -----------------------------------
+    • `macro_scanner.get_macro_snapshot()` runs ONCE per scan and is
+      shared across all candidates. Includes Fed funds, CPI, VIX,
+      Fear & Greed, intermarket signals.
+    • Optional `get_macro_pulse()` for trending news topics
+      (PRE_MARKET / MANUAL scans only).
+    • Classifies the regime as TRENDING / VOLATILE / CRISIS.
+
+  PHASE 3 — Previous signals + brain knowledge  (20%)
+  ----------------------------------------------------
+    • Load the most recent signal for each candidate ticker from the DB
+      (used by `determine_status` to compute CONFIRMED/WEAKENING/etc).
+    • Load the brain knowledge block — score ranges, GEM conditions,
+      blocker rules, regime detection, calibration notes — once per
+      scan, injected into AI prompts.
+
+  PHASE 4a — PASS 1 pre-scoring  (20-45%)
+  ----------------------------------------
+    For every candidate (parallel, semaphore=3 to avoid DNS exhaustion):
+      • Fetch 1-year price history via yfinance
+      • Compute technical indicators (RSI, MACD, SMA, volume z-score, ATR)
+      • Fetch fundamentals (P/E, EPS, dividend yield, market cap)
+      • Quick score using technicals + fundamentals + macro ONLY
+        (no AI yet — this is the cheap pre-score)
+      • Skip HIGH_RISK candidates entirely if regime == "CRISIS"
+    Output: list of (ticker, pre_score, bucket, technical_data, fundamental_data)
+
+  PHASE 4b — Top-N AI candidate selection
+  ----------------------------------------
+    • Sort by pre-score descending.
+    • Reserve at least 5 slots for HIGH_RISK (so sentiment is used).
+    • Pick the top `ai_candidate_limit` (default 15).
+    • PREPEND AI retry queue tickers (failed AI from previous scans).
+    • FORCE-INCLUDE tickers with open brain positions (even if low
+      pre-score) so we don't lose AI analysis on what the brain holds.
+    • Everything else goes to `skip_candidates` (tech-only signals).
+
+  PHASE 4c — PASS 2 full AI synthesis  (45-80%)
+  ---------------------------------------------
+    For every AI candidate (parallel):
+      • Fetch sentiment via Grok / Gemini fallback (HIGH_RISK only —
+        SAFE_INCOME hardcodes neutral to save cost).
+      • Fetch Barchart options flow (free, all candidates).
+      • Run AI synthesis via `provider.synthesize_signal` (Claude Local
+        → Claude API → Gemini fallback chain).
+      • Classify ai_status: validated / low_confidence / failed.
+      • Update AI retry queue (clear on success, add on failure).
+      • Compute final score with all components.
+      • Run blockers check.
+      • Detect contrarian signal style.
+      • Determine action (BUY/HOLD/SELL/AVOID), with low-confidence /
+        failed-AI BUY auto-downgraded to HOLD.
+      • Check GEM conditions.
+      • Determine status vs previous signal.
+      • Build the signal_data dict.
+
+    After Pass 2: check the AI failure rate. If > 50% of AI candidates
+    failed synthesis, send an immediate Telegram alert.
+
+  PHASE 5 — Persist  (85-90%)
+  ----------------------------
+    Batch insert all signal_data rows into the `signals` table.
+
+  PHASE 6 — Alerts  (90-95%)
+  ---------------------------
+    • GEM alerts (one Telegram message per GEM).
+    • Watchlist SELL/AVOID alerts (immediate ping for held positions).
+    • Scan digest (PRE_MARKET and AFTER_CLOSE only).
+
+  PHASE 7 — Brain (virtual portfolio)  (95%)
+  -------------------------------------------
+    This is where the brain runs. The order is critical:
+      1. `new_notification_queue()` — fresh per-scan queue
+      2. `process_pending_reviews(signals, queue)` — handle flagged positions
+         from previous pre-market scans
+      3. `process_virtual_trades(signals, watchlist, queue)` — main
+         buy/sell loop, including the tiered trust model
+      4. `check_virtual_exits(queue)` — stop/target/profit-take/age exits
+      5. `await flush_brain_notifications(queue)` — drain the queue
+
+  PHASE 8 — Position monitoring  (95-100%)
+  -----------------------------------------
+    Compares fresh signals against the user's REAL tracked positions
+    (different from virtual brain positions) and sends alerts for stop
+    hits, target hits, status changes, P&L milestones.
+
+============================================================
+DATA FLOW SUMMARY
+============================================================
+
+  scan_id created in scans table
+       ↓
+  Universe → pre-filter → candidates
+       ↓
+  Pre-score (PASS 1) → top N selection → AI candidates + skip candidates
+       ↓
+  Full AI analysis (PASS 2) → signal_data dicts
+       ↓                              ↓
+  Tech-only signals built              Failed-AI queued for retry
+       ↓                              ↓
+  signals table insert
+       ↓
+  GEM / watchlist SELL alerts
+       ↓
+  Brain (virtual portfolio): pending reviews → buys/sells → exits → flush
+       ↓
+  Position monitor (real user positions)
+       ↓
+  scan_id marked COMPLETE
+"""
 
 import asyncio
 import time
@@ -27,21 +179,42 @@ from app.scanners.universe import get_all_tickers, get_asset_class, get_exchange
 
 
 async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
-    """Execute a full scan cycle.
+    """Execute a complete 8-phase scan cycle from universe load to brain action.
 
-    Steps:
-    1. Load tickers → pre-filter to candidates
-    2. Pull macro snapshot
-    3. For each candidate: technicals, sentiment, synthesis, scoring
-    4. Persist signals to Supabase
-    5. Send GEM alerts + digest via Telegram
+    This is the main entry point for every scan. See the file header for the
+    full phase-by-phase breakdown. The function progresses through each phase
+    sequentially, updating the `scans` table with progress and current_ticker
+    so the frontend's progress bar can poll it.
+
+    Each phase is gated by `if valid_signals:` or similar guards so partial
+    failures don't crash the rest of the scan. Errors during AI synthesis
+    for individual tickers are caught and counted in `errors_count`; if more
+    than half of the AI candidates fail, the AI failure rate alert fires.
+
+    The brain (virtual portfolio) runs in Phase 7. Even though the scan can
+    complete successfully without the brain (e.g. if AI fails for everything),
+    the brain still gets called with an empty queue — it just won't act.
 
     Args:
-        scan_type: PRE_MARKET, MORNING, PRE_CLOSE, AFTER_CLOSE
-        scan_id: Pre-created scan ID (from /trigger endpoint). If None, creates one.
+        scan_type: One of PRE_MARKET, MORNING, PRE_CLOSE, AFTER_CLOSE,
+            MANUAL. The type affects:
+              • PRE_MARKET / MANUAL: discovery scan + macro pulse fetch
+              • PRE_MARKET / AFTER_CLOSE: scan digest Telegram alert
+              • PRE_MARKET specifically: outside market hours, so the
+                brain flags equities for review instead of executing.
+        scan_id: Optional pre-created scan row ID (from `/scans/trigger`).
+            If None, a new row is inserted at the start of the scan.
 
     Returns:
-        The scan_id.
+        The scan_id (existing or newly-created), even on failure.
+
+    Side effects:
+        • DB inserts/updates: scans, signals, virtual_trades, ai_retry_queue,
+          ai_usage, watchdog_events, alerts.
+        • Telegram alerts: GEM, watchlist SELL, scan digest, brain BUY/SELL,
+          brain pending review, brain review cleared, AI failure rate,
+          budget threshold.
+        • Brain notification queue (created fresh per scan, drained at end).
     """
     start_time = time.time()
     logger.info(f"Starting {scan_type} scan...")
@@ -543,9 +716,58 @@ async def _process_candidate(
     knowledge_block: str = "",
     discovered_set: set | None = None,
 ) -> dict:
-    """Process a single candidate ticker through the full pipeline.
+    """Run the FULL Pass-2 pipeline for a single AI candidate ticker.
 
-    Returns a signal dict ready for DB insertion.
+    This is what fires for every ticker that made the top-15 cut for AI
+    analysis. Tech-only signals (the 35 below the cut) take a much
+    cheaper path inline in `run_scan` — they don't go through this
+    function and skip AI synthesis, blockers check, and contrarian
+    detection entirely.
+
+    Steps inside this function:
+
+      1. Classify bucket (SAFE_INCOME or HIGH_RISK)
+      2. Fetch in parallel:
+           - 1y price history (yfinance)
+           - Fundamentals (yfinance .info)
+           - Sentiment (Grok / Gemini fallback) — HIGH_RISK only
+           - Barchart options flow (free, all candidates)
+      3. Compute technical indicators from the price data
+      4. Inject regime context + brain knowledge into grok_data so the
+         AI prompt has the full context
+      5. AI synthesis via the provider fallback chain
+      6. Classify ai_status (validated / low_confidence / failed)
+      7. Update the AI retry queue (clear on success, record on failure)
+      8. Compute the final composite score
+      9. Run blockers check
+     10. Detect contrarian signal style
+     11. Determine action (with low-conf / failed-AI BUY → HOLD downgrade)
+     12. Check GEM conditions (only if not blocked)
+     13. Determine status vs previous signal
+     14. Build signal_data dict with all fields the DB and brain need
+     15. Compute Kelly position sizing (only for action == BUY)
+
+    Args:
+        ticker: The symbol to analyze.
+        macro_data: Shared macro snapshot (same across all candidates).
+        screening_data: Bulk screening data (price, volume, day_change).
+        previous_signals: Map of symbol → previous signal record (used by
+            `determine_status` to compute CONFIRMED/WEAKENING/etc).
+        scan_id: The current scan ID to attribute the signal to.
+        semaphore: Concurrency limit (default 3) to avoid DNS exhaustion
+            from yfinance's threaded fetcher.
+        market_regime: TRENDING / VOLATILE / CRISIS — drives the regime
+            multiplier in `compute_score` and the contextual hint in the
+            AI synthesis prompt.
+        knowledge_block: Brain knowledge text (score ranges, GEM rules,
+            calibration notes) injected into the AI prompt.
+        discovered_set: Symbols that came from `discover_tickers` rather
+            than the core universe — used to set `is_discovered` on the
+            signal record so the UI can flag them.
+
+    Returns:
+        A signal_data dict ready for `queries.insert_signals_batch`.
+        The dict matches the `signals` table schema.
     """
     async with semaphore:
         logger.debug(f"Processing {ticker}...")

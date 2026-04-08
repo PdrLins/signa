@@ -1,12 +1,73 @@
-"""AI retry queue — tracks tickers whose synthesis failed for next-scan retry.
+"""AI retry queue — gives transient AI failures a second chance.
 
-When AI synthesis errors out (transient API issue, CLI timeout, all providers
-down), the ticker lands here. The next scan calls `get_retry_tickers()` and
-prepends them to the AI candidate list so good signals don't get permanently
-lost to a single bad scan.
+============================================================
+WHAT THIS MODULE IS
+============================================================
 
-Failure counts are tracked so a ticker that consistently fails (e.g. delisted,
-permanently broken) eventually drops off after `MAX_FAILURE_COUNT` attempts.
+When the AI synthesis pipeline fails for a ticker, that ticker's signal
+gets `ai_status = "failed"` and the brain refuses to act on it (per the
+tier model in `virtual_portfolio.py`). The brain will only consider
+auto-buying this ticker after AI has successfully run.
+
+But what if the failure was transient — a CLI timeout, a brief API
+outage, all providers having a bad minute? Without this module, that
+ticker's good signal is LOST until the next scheduled scan, which
+might be hours away. By then the entry might be gone.
+
+This module is a tiny persistence layer that remembers failed-AI
+tickers between scans and asks the next scan to retry them. It's
+the difference between "one bad minute kills the day's signals"
+and "one bad minute delays the signals by 90 minutes".
+
+============================================================
+HOW IT WORKS
+============================================================
+
+  1. PASS 2 in `scan_service` runs AI synthesis for each candidate.
+     If the result has `error` set (all providers failed), it calls
+     `record_failure(ticker, error)`.
+
+  2. `record_failure` either inserts a new row (failure_count=1) or
+     increments an existing row's failure_count by 1. When
+     failure_count reaches MAX_FAILURE_COUNT (5), the row is DELETED
+     — at that point we give up, this ticker is probably permanently
+     broken (delisted, ticker change, etc.).
+
+  3. On the NEXT scan, `scan_service` calls `get_retry_tickers(limit=5)`
+     BEFORE building the AI candidate list. The returned tickers are
+     PREPENDED to the candidates, jumping the queue ahead of the
+     normal top-15 selection.
+
+  4. If the retry succeeds (any ai_status other than "failed"),
+     `clear_success(ticker)` removes the row from the queue.
+
+  5. Stale entries (older than RETRY_STALE_HOURS = 24) are cleaned
+     up at the start of each scan via `cleanup_stale()`.
+
+============================================================
+CONCURRENCY SAFETY
+============================================================
+
+`record_failure` does SELECT-then-UPDATE/INSERT, which is not atomic.
+Two concurrent failures for the same ticker could race. The DB has a
+UNIQUE constraint on `symbol`, so the second INSERT would fail with
+a constraint violation; we catch that and retry as an UPDATE. In
+practice scans are serial so this almost never happens, but the
+guard exists for safety.
+
+============================================================
+WHAT THIS DOES NOT DO
+============================================================
+
+This is NOT a general-purpose job queue. It's purpose-built for the
+AI failure case:
+  • No priorities (just oldest-first ordering)
+  • No backoff timing (the next scan is the next attempt)
+  • No worker pools (the scan service is the only consumer)
+  • Auto-drops after 5 attempts (no exponential expiry curves)
+
+If you need anything more sophisticated, build a separate module
+rather than extending this one.
 """
 
 from datetime import datetime, timedelta, timezone

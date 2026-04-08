@@ -1,7 +1,88 @@
 """Kelly Criterion position sizing.
 
-Uses fractional Kelly (25% of full Kelly) for reduced variance.
-Maps signal score to estimated win rate based on backtest data.
+============================================================
+WHAT THIS MODULE IS
+============================================================
+
+When a BUY signal fires, the user (or the brain) needs to decide HOW
+MUCH of their capital to risk on it. This module computes that
+recommended percentage using the Kelly Criterion — a math formula
+from information theory that maximizes long-run growth given a known
+edge.
+
+The formula is:
+
+    f* = (p * b - q) / b
+
+  where:
+    f* = fraction of capital to bet
+    p  = probability of winning (win rate)
+    q  = 1 - p (probability of losing)
+    b  = ratio of win amount to loss amount (risk/reward ratio)
+
+Pure Kelly is too aggressive — it would have you sizing positions at
+40-60% of capital, which destroys you on a bad streak. Signa uses
+FRACTIONAL KELLY (25% of full Kelly) which keeps the long-run growth
+property while drastically cutting drawdown variance.
+
+The output is then capped at MAX_POSITION_PCT (15% of portfolio) so
+no single trade can take down the whole account.
+
+============================================================
+WHERE THE WIN RATE COMES FROM
+============================================================
+
+Kelly needs a win rate. We don't actually know the true win rate of
+any individual signal — but we have backtest data showing the
+empirical win rate at each score range. The `_SCORE_WIN_RATE` table
+maps signal scores to win rates derived from the 6-month backtest
+(Oct 2024 - Apr 2025, ~18,000 signals):
+
+    Score 90+   → 70% win rate
+    Score 85-89 → 65%
+    Score 80-84 → 60%
+    Score 75-79 → 55%
+    Score 70-74 → 52%
+    Score 65-69 → 50% (coin flip)
+    Score 60-64 → 47%
+    Score 50-59 → 42%
+    Score < 50  → 35%
+
+Higher score → higher confidence → larger Kelly fraction → bigger
+recommended position. The mapping is the same for both buckets
+(SAFE_INCOME and HIGH_RISK) because the score is already
+bucket-normalized.
+
+============================================================
+REGIME ADJUSTMENTS
+============================================================
+
+The output is further reduced based on the macro regime:
+
+  TRENDING  → no adjustment (full fractional Kelly)
+  VOLATILE  → × 0.5  (cut size in half during high VIX)
+  CRISIS    → cap at 5% (defensive mode, even strong signals get
+              throttled)
+
+Crypto positions are additionally halved regardless of regime to
+account for crypto's 3-5x higher volatility vs equities.
+
+============================================================
+THE TRUST MULTIPLIER
+============================================================
+
+Calls can pass `trust_multiplier` to scale the final size. This is
+plumbed through for the brain's tiered trust model — Tier 2 and
+Tier 3 brain buys would call with `trust_multiplier=0.5` to halve
+the position size, reflecting their lower confidence.
+
+NOTE: as of writing, `scan_service` only calls `calculate_kelly` for
+signals where `action == "BUY"`, which always have `ai_status =
+"validated"`, so the multiplier defaults to 1.0 in practice. The
+brain's tier 2/3 sizing is currently informational (the tier is
+recorded on the virtual_trade row but no per-position Kelly is
+computed). The parameter exists so future code can wire it up
+without changing this function's signature.
 """
 
 from loguru import logger

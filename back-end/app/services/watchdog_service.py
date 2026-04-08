@@ -1,8 +1,93 @@
-"""Brain Watchdog -- monitors open brain positions between scans.
+"""Brain Watchdog — high-frequency monitor for open brain positions.
 
-Runs every 15 min during market hours. Checks prices, detects trouble,
-escalates to Grok/Gemini sentiment when concerned, and alerts the user
-if a watchlisted ticker is at risk.
+============================================================
+WHAT THIS MODULE IS
+============================================================
+
+The brain (`virtual_portfolio.py`) only acts when scans run — 4 times
+per day at scheduled hours. That's a 1-2 hour gap between checks during
+market hours, which is way too long for risk management on a position
+that's tanking.
+
+The watchdog fills that gap. It runs every 15 minutes during market
+hours and does ONE thing: check open brain positions for trouble,
+escalate when needed, and force-close losers fast.
+
+The watchdog is the BRAKING SYSTEM. The brain is the accelerator.
+Together they make the autonomous loop safe enough to run unattended.
+
+============================================================
+WHAT THE WATCHDOG CHECKS
+============================================================
+
+Every 15 minutes during market hours, for each open brain position:
+
+  1. PRICE DRIFT
+       Compares current price to entry. If down > 2% since entry OR
+       within 2% of stop loss, marks the position as "concerned".
+
+  2. SCORE DETERIORATION
+       Pulls the most recent signal score from the DB. If it dropped
+       10+ points since the brain bought, marks as concerned.
+
+  3. EMERGENCY EXITS (force-close, no sentiment check)
+       Auto-closes the position immediately on any of:
+         • Total P&L <= -8%       (catastrophic loss cap)
+         • Latest score < 50      (signal collapsed to AVOID territory)
+         • Latest action SELL/AVOID + negative P&L (signal flipped + losing)
+
+  4. ESCALATION (concerned but not yet emergency)
+       If the position is concerned but doesn't trigger an emergency exit,
+       fetches a fresh sentiment quote from Grok/Gemini:
+         • Bearish sentiment + negative P&L → close position
+         • Neutral/bullish sentiment → hold and re-check next cycle
+       After 3 consecutive "hold through dip" decisions on the same
+       ticker, enters a 1-hour cooldown to avoid alert spam.
+
+  5. RECOVERY
+       If a previously-concerned position bounces back to entry+,
+       clears the alert level and resumes normal monitoring.
+
+============================================================
+MARKET HOURS GUARD
+============================================================
+
+The watchdog ONLY checks equity positions during US regular session
+(Mon-Fri 9:30am-4:00pm ET). Outside hours:
+
+  • If any open positions are crypto, monitors crypto only.
+  • If no crypto, returns immediately with `skipped_equity` count.
+  • Equity state is PRESERVED across pre-market periods so escalation
+    history (alert_level, consecutive_holds, cooldown_until) doesn't
+    reset just because the market closed for a few hours.
+
+The state preservation is important: without it, a position that hit
+"concerned" at 3:50pm would lose its escalation context overnight and
+be evaluated as fresh at 9:30am the next day, potentially missing
+that it's been deteriorating for several check cycles.
+
+============================================================
+STATE STORAGE
+============================================================
+
+The watchdog uses an IN-MEMORY dict (`_state`) to track per-position
+metadata between checks. This survives across watchdog runs but NOT
+across process restarts. On restart, the state starts fresh and the
+watchdog re-evaluates each position from scratch.
+
+This is intentional — the state is a cache of derived data, not a
+source of truth. The DB has all the persistent information; `_state`
+just remembers things like "we already alerted on this position
+3 times, cool down" so we don't spam Telegram.
+
+============================================================
+COST PROFILE
+============================================================
+
+The watchdog uses Grok sentiment ($0.0002/call) and Gemini (free) only
+when concerned, typically 2-3 sentiment checks per day across all open
+positions. Total cost: ~$0.03/month. Price checks via Yahoo Finance
+are always free.
 """
 
 from __future__ import annotations
@@ -46,7 +131,39 @@ _state: dict[str, WatchdogEntry] = {}
 
 
 async def run_watchdog() -> dict:
-    """Check all open brain positions. Called by the scheduler."""
+    """Run one watchdog cycle — check all open brain positions for trouble.
+
+    Called by the scheduler every 15 minutes during market hours
+    (and optionally on weekends if `weekend_crypto_watchdog` is enabled,
+    in which case only crypto positions are checked).
+
+    Steps:
+      1. Load all open brain positions from `virtual_trades`.
+      2. Capture `all_open_symbols` BEFORE the market-hours filter so
+         the state cleanup doesn't drop equity state during pre-market.
+      3. Apply market-hours filter: equities are skipped outside hours.
+         If filtered to nothing, exit early.
+      4. Batch-fetch current prices via the price cache.
+      5. Batch-fetch latest signal scores in a single DB query.
+      6. For each remaining position:
+           a. Check escalation conditions (price drift, score drop, stop
+              proximity).
+           b. If concerned: check emergency exit conditions; if not,
+              fetch sentiment and decide.
+           c. Update the in-memory `_state` for this ticker.
+           d. Queue any pending watchdog_events for batch insert.
+      7. Insert all queued events to the watchdog_events table.
+
+    Returns:
+        Dict with counters: positions, alerts, closes, concerned (list).
+        Optional `skipped_equity` count when market is closed.
+
+    Side effects:
+        • DB inserts: watchdog_events, virtual_trades updates (for closes).
+        • Telegram alerts: watchdog_force_sell, watchdog_exit,
+          watchdog_warning, watchdog_user_brain_sold.
+        • Mutates `_state` (the per-ticker escalation memory).
+    """
     if not settings.watchdog_enabled:
         return {"skipped": True}
 
