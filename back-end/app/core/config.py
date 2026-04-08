@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     watchdog_pnl_alert_pct: float = 2.0       # Alert if P&L drops this % in one interval
     watchdog_stop_proximity_pct: float = 2.0  # Alert if price within this % of stop
     watchdog_min_notify_pct: float = 0.5      # Don't send Telegram for moves smaller than this %
+    watchdog_weekend_crypto: bool = False     # Run watchdog on weekends for crypto positions
 
     # --- Notification Quiet Hours ---
     notify_quiet_start: int = 18  # 6 PM ET (18:00) -- no notifications after this hour

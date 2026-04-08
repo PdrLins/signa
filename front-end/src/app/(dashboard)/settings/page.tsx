@@ -45,6 +45,7 @@ interface AIProviderConfig {
     notify_quiet_enabled: boolean
     notify_quiet_start: number
     notify_quiet_end: number
+    weekend_crypto: boolean
   }
 }
 
@@ -235,6 +236,7 @@ export default function SettingsPage() {
   const [quietEnabled, setQuietEnabled] = useState(true)
   const [quietStart, setQuietStart] = useState(18)
   const [quietEnd, setQuietEnd] = useState(6)
+  const [weekendCrypto, setWeekendCrypto] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [confirmSave, setConfirmSave] = useState(false)
 
@@ -259,6 +261,7 @@ export default function SettingsPage() {
         setQuietEnabled(aiConfig.watchdog.notify_quiet_enabled)
         setQuietStart(aiConfig.watchdog.notify_quiet_start)
         setQuietEnd(aiConfig.watchdog.notify_quiet_end)
+        setWeekendCrypto(aiConfig.watchdog.weekend_crypto)
       }
     }
   }, [aiConfig])
@@ -280,13 +283,14 @@ export default function SettingsPage() {
         notify_quiet_enabled: quietEnabled,
         notify_quiet_start: quietStart,
         notify_quiet_end: quietEnd,
+        watchdog_weekend_crypto: weekendCrypto,
       })
       toast.show(t.settings.configSaved, 'success')
       setDirty(false)
     } catch {
       toast.show(t.settings.configSaveFailed, 'error')
     }
-  }, [synthProviders, sentProviders, aiEnabled, aiLimit, maxCandidates, scoreBuySafe, scoreBuyRisk, scoreHold, wdMinNotify, wdPnlAlert, brainMaxOpen, quietEnabled, quietStart, quietEnd, toast, t])
+  }, [synthProviders, sentProviders, aiEnabled, aiLimit, maxCandidates, scoreBuySafe, scoreBuyRisk, scoreHold, wdMinNotify, wdPnlAlert, brainMaxOpen, quietEnabled, quietStart, quietEnd, weekendCrypto, toast, t])
 
   const handleLogout = () => {
     logout()
@@ -625,6 +629,28 @@ export default function SettingsPage() {
                 </span>
               </div>
             )}
+          </div>
+
+          {/* Weekend Crypto Watchdog */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium" style={{ color: theme.colors.text }}>
+                {t.settings.weekendCrypto ?? 'Weekend Crypto Watchdog'}
+              </p>
+              <p className="text-[10px]" style={{ color: theme.colors.textSub }}>
+                {t.settings.weekendCryptoDesc ?? 'Monitor crypto positions on weekends (hourly). Crypto trades 24/7.'}
+              </p>
+            </div>
+            <button
+              onClick={() => { setWeekendCrypto(!weekendCrypto); setDirty(true) }}
+              className="w-11 h-6 rounded-full transition-all relative"
+              style={{ backgroundColor: weekendCrypto ? theme.colors.primary : theme.colors.border }}
+            >
+              <div
+                className="w-5 h-5 rounded-full bg-white absolute top-0.5 transition-all"
+                style={{ left: weekendCrypto ? 22 : 2 }}
+              />
+            </button>
           </div>
         </div>
       </Card>

@@ -19,6 +19,11 @@ from app.scheduler.jobs import (
 scheduler = AsyncIOScheduler(timezone=settings.timezone)
 
 
+def get_scheduler() -> AsyncIOScheduler:
+    """Get the scheduler instance."""
+    return scheduler
+
+
 def init_scheduler() -> AsyncIOScheduler:
     """Configure and return the scheduler with all jobs.
 
@@ -88,15 +93,25 @@ def init_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # Every 15 min during market hours (9:30 AM - 5:00 PM ET), then sleep
+    # Every 15 min during market hours (9 AM - 5 PM ET, Mon-Fri)
     if settings.watchdog_enabled:
         scheduler.add_job(
             brain_watchdog,
             CronTrigger(minute="*/15", hour="9-17", day_of_week="mon-fri", timezone=settings.timezone),
             id="brain_watchdog",
-            name="Brain Watchdog (every 15 min, 9AM-5PM)",
+            name="Brain Watchdog (every 15 min, 9AM-5PM Mon-Fri)",
             replace_existing=True,
         )
+
+        # Weekend watchdog for crypto positions (every 60 min, Sat-Sun)
+        if settings.watchdog_weekend_crypto:
+            scheduler.add_job(
+                brain_watchdog,
+                CronTrigger(minute=0, hour="*/1", day_of_week="sat,sun", timezone=settings.timezone),
+                id="brain_watchdog_weekend",
+                name="Brain Watchdog Weekend (hourly, crypto only)",
+                replace_existing=True,
+            )
 
     watchdog_status = "enabled" if settings.watchdog_enabled else "disabled"
     logger.info(
