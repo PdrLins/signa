@@ -16,8 +16,8 @@ import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { PriceChart } from '@/components/charts/PriceChart'
 import { Sidebar } from '@/components/layout/Sidebar'
-import { formatPrice } from '@/lib/utils'
-import { ArrowLeft, Star, TrendingUp, TrendingDown, Minus, Brain, BookOpen } from 'lucide-react'
+import { formatPrice, interpolate } from '@/lib/utils'
+import { ArrowLeft, Star, TrendingUp, TrendingDown, Minus, Brain, BookOpen, Check, X } from 'lucide-react'
 
 export default function TickerDetailPage() {
   const params = useParams()
@@ -373,6 +373,62 @@ export default function TickerDetailPage() {
           </div>
         </Card>
       )}
+
+      {/* Signal Breakdown — plain-English read of each indicator firing */}
+      {(() => {
+        type BreakdownRow = { key: string; tone: 'positive' | 'negative' | 'neutral'; label_value?: Record<string, string | number> }
+        const rows = (latest as unknown as { breakdown?: BreakdownRow[] } | undefined)?.breakdown ?? []
+        if (rows.length === 0) return null
+        const breakdownStrings = (t.signal as unknown as { breakdown?: Record<string, { label?: string; what?: string; why?: string } | string> }).breakdown
+        if (!breakdownStrings || typeof breakdownStrings !== 'object') return null
+
+        const toneIcon = (tone: BreakdownRow['tone']) => {
+          if (tone === 'positive') return <Check size={14} style={{ color: theme.colors.up }} />
+          if (tone === 'negative') return <X size={14} style={{ color: theme.colors.down }} />
+          return <Minus size={14} style={{ color: theme.colors.textHint }} />
+        }
+        const toneColor = (tone: BreakdownRow['tone']) =>
+          tone === 'positive' ? theme.colors.up : tone === 'negative' ? theme.colors.down : theme.colors.textSub
+
+        return (
+          <Card>
+            <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+              {(breakdownStrings.title as string) ?? 'Signal Breakdown'}
+            </p>
+            <p className="text-[11px] mb-3" style={{ color: theme.colors.textHint }}>
+              {(breakdownStrings.subtitle as string) ?? ''}
+            </p>
+            <div className="space-y-2">
+              {rows.map((row, i) => {
+                const ruleStrings = breakdownStrings[row.key] as { label?: string; what?: string; why?: string } | undefined
+                if (!ruleStrings) return null
+                const labelTemplate = ruleStrings.label ?? row.key
+                const label = row.label_value ? interpolate(labelTemplate, row.label_value) : labelTemplate
+                return (
+                  <div
+                    key={`${row.key}-${i}`}
+                    className="flex items-start gap-3 py-2 px-3 rounded-lg"
+                    style={{ backgroundColor: theme.colors.surfaceAlt }}
+                  >
+                    <div className="mt-0.5 shrink-0">{toneIcon(row.tone)}</div>
+                    <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-[180px_1fr_1fr] gap-2 sm:gap-3">
+                      <div className="text-[12px] font-semibold" style={{ color: toneColor(row.tone) }}>
+                        {label}
+                      </div>
+                      <div className="text-[11px]" style={{ color: theme.colors.text }}>
+                        {ruleStrings.what ?? ''}
+                      </div>
+                      <div className="text-[11px]" style={{ color: theme.colors.textSub }}>
+                        {ruleStrings.why ?? ''}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </Card>
+        )
+      })()}
 
       {/* Fundamentals */}
       {fundamentals && Object.keys(fundamentals).length > 0 && (

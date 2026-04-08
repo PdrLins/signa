@@ -226,7 +226,150 @@
     "factorSentiment": "Sentiment",
     "factorCatalyst": "Catalyst",
     "factorTechnicalMomentum": "Technical Momentum",
-    "factorFundamentals": "Fundamentals"
+    "factorFundamentals": "Fundamentals",
+    "breakdown": {
+      "title": "Signal Breakdown",
+      "subtitle": "Plain-English read of what each indicator is saying",
+      "colSignal": "Signal",
+      "colWhat": "What it means",
+      "colWhy": "Why it matters",
+      "empty": "No notable signals firing on this ticker.",
+      "bb_upper": {
+        "label": "Bollinger upper @ {pct}%",
+        "what": "Price is sitting against the top of its 2σ envelope",
+        "why": "Statistically stretched — most reversions happen from here"
+      },
+      "bb_lower": {
+        "label": "Bollinger lower @ {pct}%",
+        "what": "Price is pinned to the bottom of its 2σ envelope",
+        "why": "Often where bottoms form — watch for a reversal candle"
+      },
+      "rsi_overbought": {
+        "label": "RSI {rsi} (overbought)",
+        "what": "Buyers have been in control for too long",
+        "why": "Momentum exhaustion typically precedes a pullback"
+      },
+      "rsi_oversold": {
+        "label": "RSI {rsi} (oversold)",
+        "what": "Sellers have pushed it well below the mean",
+        "why": "Can mean-revert OR keep falling — don't catch a knife"
+      },
+      "rsi_sweet_spot": {
+        "label": "RSI {rsi} (sweet spot)",
+        "what": "Healthy momentum, not overheated",
+        "why": "Backtest shows the highest win rates between 50–65"
+      },
+      "macd_bullish": {
+        "label": "MACD bullish",
+        "what": "MACD line above signal, histogram rising",
+        "why": "Trend is confirming itself — common entry trigger"
+      },
+      "macd_bearish_divergence": {
+        "label": "MACD bearish divergence",
+        "what": "MACD histogram is fading while price is still rising",
+        "why": "Classic late-cycle warning — momentum is leaving the move"
+      },
+      "volume_surge": {
+        "label": "Volume surge ({z}σ)",
+        "what": "Today's volume is well above the 30-day average",
+        "why": "Conviction behind the move — institutional footprint"
+      },
+      "volume_dry": {
+        "label": "Volume drying up ({z}σ)",
+        "what": "Below-average participation",
+        "why": "Lack of buyers makes any move fragile and easy to reverse"
+      },
+      "strong_trend": {
+        "label": "Strong trend (ADX {adx})",
+        "what": "ADX above 25 indicates a directional, persistent trend",
+        "why": "Trends tend to continue — momentum entries work better here"
+      },
+      "golden_cross": {
+        "label": "Golden cross",
+        "what": "50-day moving average crossed above the 200-day",
+        "why": "Long-term uptrend confirmation — a structural buy signal"
+      },
+      "death_cross": {
+        "label": "Death cross",
+        "what": "50-day moving average crossed below the 200-day",
+        "why": "Long-term downtrend confirmation — a structural risk signal"
+      },
+      "pe_rich": {
+        "label": "P/E {pe} (rich)",
+        "what": "Trading at a premium to its earnings",
+        "why": "Little margin for an earnings miss — disappointment hurts more"
+      },
+      "pe_cheap": {
+        "label": "P/E {pe} (cheap)",
+        "what": "Trading at a discount to its earnings",
+        "why": "Margin of safety — downside is partially priced in"
+      },
+      "eps_growth_strong": {
+        "label": "Strong EPS growth",
+        "what": "Earnings are growing at a healthy clip year over year",
+        "why": "Quality compounder — earnings growth drives long-term returns"
+      },
+      "eps_growth_negative": {
+        "label": "EPS shrinking",
+        "what": "Earnings are declining year over year",
+        "why": "Deteriorating fundamentals — multiple compression risk"
+      },
+      "revenue_growth_strong": {
+        "label": "Strong revenue growth",
+        "what": "Top-line is expanding at a healthy clip",
+        "why": "Demand is real — gives the earnings story a foundation"
+      },
+      "high_debt": {
+        "label": "High debt/equity ({de}%)",
+        "what": "Significant leverage on the balance sheet",
+        "why": "Higher fragility in a downturn — interest costs eat margins"
+      },
+      "dividend_attractive": {
+        "label": "Attractive dividend yield",
+        "what": "Pays a meaningful dividend relative to its price",
+        "why": "Income cushion while you wait for the thesis to play out"
+      },
+      "rr_strong": {
+        "label": "Risk/reward {rr}x (strong)",
+        "what": "Upside to target is at least 3× the distance to stop loss",
+        "why": "Asymmetric setup — small losses, big wins when right"
+      },
+      "rr_weak": {
+        "label": "Risk/reward {rr}x (weak)",
+        "what": "Below the 2.0× floor the brain wants for new entries",
+        "why": "Even if it works, the payoff doesn't justify the stop distance"
+      },
+      "regime_volatile": {
+        "label": "Volatile market regime",
+        "what": "VIX 20–30 or S&P caught between SMA50 and SMA200",
+        "why": "Brain is in caution mode — score thresholds raised, sizing reduced"
+      },
+      "regime_crisis": {
+        "label": "Crisis market regime",
+        "what": "VIX above 30 or S&P below SMA200",
+        "why": "Brain pauses high-risk picks entirely; defensive positioning only"
+      },
+      "iv_complacency": {
+        "label": "Options IV {pct} percentile",
+        "what": "Lowest option-pricing in the year",
+        "why": "Market is asleep on this name — textbook complacency tell"
+      },
+      "iv_panic": {
+        "label": "Options IV {pct} percentile",
+        "what": "Highest option-pricing in the year",
+        "why": "Market is panicking — premium-selling opportunity, but risk is real"
+      },
+      "near_52w_high": {
+        "label": "Near 52-week high",
+        "what": "Trading within 5% of its 52-week peak",
+        "why": "Limited overhead room before resistance kicks in"
+      },
+      "near_52w_low": {
+        "label": "Near 52-week low",
+        "what": "Trading within 5% of its 52-week trough",
+        "why": "Possibly oversold or in a downtrend — context matters"
+      }
+    }
   },
   "stats": {
     "gems": "Gems",

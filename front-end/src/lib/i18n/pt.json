@@ -226,7 +226,150 @@
     "factorSentiment": "Sentimento",
     "factorCatalyst": "Catalisador",
     "factorTechnicalMomentum": "Momentum Técnico",
-    "factorFundamentals": "Fundamentos"
+    "factorFundamentals": "Fundamentos",
+    "breakdown": {
+      "title": "Análise do Sinal",
+      "subtitle": "Leitura em português claro do que cada indicador está dizendo",
+      "colSignal": "Indicador",
+      "colWhat": "O que significa",
+      "colWhy": "Por que importa",
+      "empty": "Nenhum sinal relevante disparando para este ticker.",
+      "bb_upper": {
+        "label": "Bollinger superior @ {pct}%",
+        "what": "Preço encostado no topo do envelope de 2σ",
+        "why": "Estatisticamente esticado — a maioria das reversões parte daqui"
+      },
+      "bb_lower": {
+        "label": "Bollinger inferior @ {pct}%",
+        "what": "Preço grudado no fundo do envelope de 2σ",
+        "why": "Costuma ser onde fundos se formam — fique atento a uma reversão"
+      },
+      "rsi_overbought": {
+        "label": "RSI {rsi} (sobrecomprado)",
+        "what": "Compradores no controle há tempo demais",
+        "why": "Exaustão de momentum costuma preceder uma correção"
+      },
+      "rsi_oversold": {
+        "label": "RSI {rsi} (sobrevendido)",
+        "what": "Vendedores empurraram bem abaixo da média",
+        "why": "Pode reverter OU continuar caindo — não pegue faca caindo"
+      },
+      "rsi_sweet_spot": {
+        "label": "RSI {rsi} (zona ideal)",
+        "what": "Momentum saudável, sem sobreaquecer",
+        "why": "Backtest mostra as maiores taxas de acerto entre 50–65"
+      },
+      "macd_bullish": {
+        "label": "MACD altista",
+        "what": "MACD acima do sinal, histograma subindo",
+        "why": "Tendência se confirmando — gatilho comum de entrada"
+      },
+      "macd_bearish_divergence": {
+        "label": "Divergência baixista do MACD",
+        "what": "Histograma do MACD enfraquecendo enquanto o preço ainda sobe",
+        "why": "Aviso clássico de fim de ciclo — momentum está saindo do movimento"
+      },
+      "volume_surge": {
+        "label": "Pico de volume ({z}σ)",
+        "what": "Volume hoje bem acima da média de 30 dias",
+        "why": "Convicção por trás do movimento — pegada institucional"
+      },
+      "volume_dry": {
+        "label": "Volume secando ({z}σ)",
+        "what": "Participação abaixo da média",
+        "why": "Falta de compradores deixa qualquer movimento frágil"
+      },
+      "strong_trend": {
+        "label": "Tendência forte (ADX {adx})",
+        "what": "ADX acima de 25 indica tendência direcional persistente",
+        "why": "Tendências tendem a continuar — entradas de momentum funcionam melhor aqui"
+      },
+      "golden_cross": {
+        "label": "Cruzamento dourado",
+        "what": "Média de 50 dias cruzou acima da média de 200 dias",
+        "why": "Confirmação de tendência de alta de longo prazo — sinal estrutural de compra"
+      },
+      "death_cross": {
+        "label": "Cruzamento da morte",
+        "what": "Média de 50 dias cruzou abaixo da média de 200 dias",
+        "why": "Confirmação de tendência de baixa de longo prazo — sinal estrutural de risco"
+      },
+      "pe_rich": {
+        "label": "P/L {pe} (caro)",
+        "what": "Negociando com prêmio sobre seus lucros",
+        "why": "Pouca margem para um resultado fraco — decepção dói mais"
+      },
+      "pe_cheap": {
+        "label": "P/L {pe} (barato)",
+        "what": "Negociando com desconto sobre seus lucros",
+        "why": "Margem de segurança — parte do downside já está precificada"
+      },
+      "eps_growth_strong": {
+        "label": "Forte crescimento de lucros",
+        "what": "Lucros crescendo em ritmo saudável ano após ano",
+        "why": "Compounder de qualidade — crescimento de lucros impulsiona retornos de longo prazo"
+      },
+      "eps_growth_negative": {
+        "label": "Lucros encolhendo",
+        "what": "Lucros estão caindo ano após ano",
+        "why": "Fundamentos deteriorando — risco de compressão de múltiplo"
+      },
+      "revenue_growth_strong": {
+        "label": "Forte crescimento de receita",
+        "what": "Receita expandindo em ritmo saudável",
+        "why": "Demanda é real — dá base para a história dos lucros"
+      },
+      "high_debt": {
+        "label": "Dívida/patrimônio alta ({de}%)",
+        "what": "Alavancagem significativa no balanço",
+        "why": "Maior fragilidade em queda — juros corroem margem"
+      },
+      "dividend_attractive": {
+        "label": "Dividend yield atraente",
+        "what": "Paga dividendo relevante em relação ao preço",
+        "why": "Renda enquanto a tese se desenvolve"
+      },
+      "rr_strong": {
+        "label": "Risco/retorno {rr}x (forte)",
+        "what": "Upside até o alvo é pelo menos 3× a distância até o stop",
+        "why": "Setup assimétrico — perdas pequenas, ganhos grandes quando acerta"
+      },
+      "rr_weak": {
+        "label": "Risco/retorno {rr}x (fraco)",
+        "what": "Abaixo do piso de 2.0× que o brain quer para entradas novas",
+        "why": "Mesmo se der certo, o retorno não justifica a distância do stop"
+      },
+      "regime_volatile": {
+        "label": "Regime de mercado volátil",
+        "what": "VIX 20–30 ou S&P entre SMA50 e SMA200",
+        "why": "Brain em modo cautela — limiares de score elevados, sizing reduzido"
+      },
+      "regime_crisis": {
+        "label": "Regime de mercado em crise",
+        "what": "VIX acima de 30 ou S&P abaixo da SMA200",
+        "why": "Brain pausa picks de alto risco; só posicionamento defensivo"
+      },
+      "iv_complacency": {
+        "label": "IV de opções percentil {pct}",
+        "what": "Menor precificação de opções do ano",
+        "why": "Mercado dormindo neste papel — clássico sinal de complacência"
+      },
+      "iv_panic": {
+        "label": "IV de opções percentil {pct}",
+        "what": "Maior precificação de opções do ano",
+        "why": "Mercado em pânico — oportunidade de venda de prêmio, mas o risco é real"
+      },
+      "near_52w_high": {
+        "label": "Perto da máxima de 52 semanas",
+        "what": "Negociando dentro de 5% do pico de 52 semanas",
+        "why": "Pouco espaço acima antes de bater na resistência"
+      },
+      "near_52w_low": {
+        "label": "Perto da mínima de 52 semanas",
+        "what": "Negociando dentro de 5% do fundo de 52 semanas",
+        "why": "Possivelmente sobrevendido ou em tendência de queda — contexto importa"
+      }
+    }
   },
   "stats": {
     "gems": "Gems",

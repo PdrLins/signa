@@ -5,6 +5,7 @@ from typing import Optional
 from app.core.cache import TTLCache
 from app.db import queries
 from app.services.price_cache import enrich_signals
+from app.services.signal_breakdown import compute_signal_breakdown
 
 _track_record_cache = TTLCache(max_size=1, default_ttl=3600)
 
@@ -32,9 +33,19 @@ def get_signals(
 
 
 def get_signals_by_ticker(symbol: str, limit: int = 20) -> list[dict]:
-    """Get signal history for a specific ticker."""
+    """Get signal history for a specific ticker.
+
+    The detail page consumes this. Each signal is enriched with a
+    `breakdown` field — a list of plain-English rule rows derived from
+    the signal's technical_data, fundamental_data, and grok_data. See
+    `signal_breakdown.compute_signal_breakdown` for the rule set.
+    Pure derivation, no extra DB queries, no AI cost.
+    """
     signals = queries.get_signals_by_ticker(symbol, limit)
-    return enrich_signals(signals)
+    enriched = enrich_signals(signals)
+    for sig in enriched:
+        sig["breakdown"] = compute_signal_breakdown(sig)
+    return enriched
 
 
 def get_gem_signals(limit: int = 20) -> list[dict]:
