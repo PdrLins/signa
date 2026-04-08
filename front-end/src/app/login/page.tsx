@@ -366,7 +366,7 @@ export default function LoginPage() {
                       onChange={(e) => handleOtpChange(i, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(i, e)}
                       aria-label={`Digit ${i + 1}`}
-                      className="w-11 h-13 sm:w-12 sm:h-14 text-center text-lg font-bold rounded-xl outline-none transition-all duration-200"
+                      className="w-12 h-14 text-center text-lg font-bold rounded-xl outline-none transition-all duration-200"
                       style={{
                         backgroundColor: digit ? `${theme.colors.text}10` : theme.colors.surfaceAlt,
                         color: theme.colors.text,

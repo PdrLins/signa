@@ -14,12 +14,12 @@ from app.db.supabase import get_client
 # ============================================================
 
 def get_user_by_username(username: str) -> dict | None:
-    """Look up a user by username."""
+    """Look up a user by username (case-insensitive)."""
     client = get_client()
     result = (
         client.table("users")
         .select("id, username, password_hash, telegram_chat_id, is_active, last_login, login_attempts, locked_until")
-        .eq("username", username)
+        .ilike("username", username.lower())
         .eq("is_active", True)
         .limit(1)
         .execute()
