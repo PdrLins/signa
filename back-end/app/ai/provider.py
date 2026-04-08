@@ -139,6 +139,17 @@ async def synthesize_signal(
                         f"Claude Local exhausted retries for {ticker}: {result.get('error')} "
                         f"— falling through to paid Claude API"
                     )
+                except (KeyError, TypeError, AttributeError, ImportError, NameError) as e:
+                    # Permanent code bugs (template mismatch, missing import, etc).
+                    # Logged at ERROR so they're impossible to miss — historically a
+                    # silent WARNING here masked a `KeyError: 'options_flow'` that
+                    # caused EVERY synthesis call to silently cascade to the paid
+                    # API, burning thousands of tokens before the user noticed.
+                    logger.error(
+                        f"Claude Local synthesis CODE BUG for {ticker}: {type(e).__name__}: {e} "
+                        f"— this is NOT a transient error and will keep burning tokens via the paid API "
+                        f"until fixed. Check claude_local_client.py vs prompts.py."
+                    )
                 except Exception as e:
                     logger.warning(f"Claude Local synthesis error for {ticker}: {e} — falling through to paid Claude API")
 

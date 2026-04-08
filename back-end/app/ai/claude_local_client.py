@@ -63,6 +63,7 @@ from app.ai.prompts import (
     clean_json_response,
     format_fundamentals,
     format_macro,
+    format_options_flow,
     format_sentiment,
     format_technicals,
 )
@@ -115,6 +116,7 @@ async def synthesize_signal(
         fundamentals=format_fundamentals(fundamental_data),
         macro=format_macro(macro_data),
         sentiment=format_sentiment(grok_data),
+        options_flow=format_options_flow(grok_data),
         market_regime=grok_data.get("_market_regime", "TRENDING") if isinstance(grok_data, dict) else "TRENDING",
         regime_note=grok_data.get("_regime_note", "") if isinstance(grok_data, dict) else "",
         catalyst_context=grok_data.get("_catalyst_context", "No specific catalyst detected") if isinstance(grok_data, dict) else "No specific catalyst detected",
