@@ -44,6 +44,9 @@ CLAUDE_SYNTHESIS_PROMPT = """You are an AI investment analyst. Analyze the follo
 ## X/Twitter Sentiment (from Grok)
 {sentiment}
 
+## Options Flow (from Barchart)
+{options_flow}
+
 ## Market Context
 Current regime: {market_regime}
 {regime_note}
@@ -80,6 +83,9 @@ Based on ALL the data above, produce a JSON response with this exact structure:
 - Be especially cautious about fraud allegations, earnings misses, and hostile macro
 - Factor in X/Twitter sentiment but don't let it dominate for safe income stocks
 - For high risk stocks, sentiment and catalysts should weigh more heavily
+- When options flow data is available, use it to confirm or question the sentiment signal
+- If sentiment and options flow agree (both bullish or both bearish), increase confidence
+- If sentiment and options flow conflict, flag as uncertain and explain the divergence
 - If you detect any red flags (fraud, SEC investigation, insider selling), bias toward AVOID
 - In VOLATILE regime: be more conservative, raise conviction bar for BUY
 - In CRISIS regime: only recommend BUY for dividend/income plays
@@ -186,3 +192,27 @@ def format_sentiment(grok_data: dict) -> str:
     if accounts:
         lines.append(f"- Notable Accounts: {', '.join(accounts)}")
     return "\n".join(lines)
+
+
+def format_options_flow(grok_data: dict) -> str:
+    """Format Barchart options flow data into readable prompt text."""
+    flow = grok_data.get("_options_flow") if isinstance(grok_data, dict) else None
+    if not flow or not isinstance(flow, dict):
+        return "No options flow data available (ticker may be TSX, crypto, or data unavailable)"
+
+    lines = []
+    if flow.get("put_call_ratio") is not None:
+        lines.append(f"- Put/Call Volume Ratio: {flow['put_call_ratio']}")
+    if flow.get("iv_percentile") is not None:
+        lines.append(f"- IV Percentile: {flow['iv_percentile']}%")
+    if flow.get("options_volume") is not None:
+        lines.append(f"- Today's Options Volume: {flow['options_volume']:,.0f}")
+    if flow.get("options_volume_avg_30d") is not None:
+        lines.append(f"- 30-Day Avg Options Volume: {flow['options_volume_avg_30d']:,.0f}")
+    if flow.get("volume_vs_avg") is not None:
+        lines.append(f"- Volume vs 30d Avg: {flow['volume_vs_avg']}x")
+    if flow.get("signal"):
+        lines.append(f"- Options Signal: {flow['signal'].upper()} (strength: {flow.get('signal_strength', 0)})")
+    if flow.get("agreement_note"):
+        lines.append(f"- Note: {flow['agreement_note']}")
+    return "\n".join(lines) if lines else "No options flow data available"

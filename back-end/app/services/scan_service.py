@@ -19,7 +19,7 @@ from app.ai.signal_engine import (
 from app.core.config import settings
 from app.db import queries
 from app.notifications.telegram_bot import send_gem_alert, send_scan_digest, send_watchlist_sell_alert
-from app.scanners import indicators, macro_scanner, market_scanner
+from app.scanners import barchart_scanner, indicators, macro_scanner, market_scanner
 from app.scanners.prefilter import prefilter_candidates
 
 # Ticker universe — hardcoded for now, could move to DB
@@ -453,17 +453,20 @@ async def _process_candidate(
 
         # Fetch data in parallel
         # Skip sentiment for SAFE_INCOME (only 10% weight — not worth the AI cost)
+        # Barchart options flow fetched for HIGH_RISK US equities (free, no API cost)
         if bucket == "SAFE_INCOME":
-            price_df, fundamental_data = await asyncio.gather(
+            price_df, fundamental_data, options_flow = await asyncio.gather(
                 market_scanner.get_price_history(ticker, "1y"),
                 market_scanner.get_fundamentals(ticker),
+                barchart_scanner.get_options_flow(ticker),
             )
             grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [], "summary": "Sentiment skipped for Safe Income (10% weight)"}
         else:
-            price_df, fundamental_data, grok_data = await asyncio.gather(
+            price_df, fundamental_data, grok_data, options_flow = await asyncio.gather(
                 market_scanner.get_price_history(ticker, "1y"),
                 market_scanner.get_fundamentals(ticker),
                 ai_provider.analyze_sentiment(ticker),
+                barchart_scanner.get_options_flow(ticker),
             )
 
         # Compute technicals (CPU-only, no I/O)
@@ -479,6 +482,8 @@ async def _process_candidate(
                 grok_data["_regime_note"] = ""
             if knowledge_block:
                 grok_data["_knowledge_block"] = knowledge_block
+            if options_flow:
+                grok_data["_options_flow"] = options_flow
 
         # AI synthesis with provider fallback chain
         synthesis = await ai_provider.synthesize_signal(

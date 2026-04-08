@@ -694,8 +694,48 @@ def _score_macro(macro_data: dict) -> float:
 
 
 def _score_sentiment(grok_data: dict) -> float:
-    """Pass through sentiment score (already 0-100 from Grok)."""
-    return max(0, min(100, float(grok_data.get("score", 50))))
+    """Score sentiment (0-100) combining Grok/X sentiment with Barchart options flow.
+
+    When Twitter sentiment and options flow agree, boost confidence (+/- 8 points).
+    When they conflict, dampen toward neutral (flag uncertainty for AI synthesis).
+    """
+    base_score = max(0, min(100, float(grok_data.get("score", 50))))
+
+    options_flow = grok_data.get("_options_flow")
+    if not options_flow or not isinstance(options_flow, dict):
+        return base_score
+
+    options_direction = options_flow.get("signal", "neutral")
+    options_strength = options_flow.get("signal_strength", 0)
+
+    if options_direction == "neutral" or options_strength < 10:
+        return base_score
+
+    # Determine sentiment direction from base score
+    if base_score >= 60:
+        sentiment_direction = "bullish"
+    elif base_score <= 40:
+        sentiment_direction = "bearish"
+    else:
+        sentiment_direction = "neutral"
+
+    # Agreement: both point same way → boost conviction
+    if sentiment_direction == options_direction:
+        boost = min(8, options_strength * 0.3)
+        if options_direction == "bullish":
+            return min(100, base_score + boost)
+        else:
+            return max(0, base_score - boost)
+
+    # Conflict: sentiment and options disagree → dampen toward 50 (uncertain)
+    if sentiment_direction != "neutral" and options_direction != sentiment_direction:
+        dampen = min(6, options_strength * 0.2)
+        if base_score > 50:
+            return base_score - dampen
+        else:
+            return base_score + dampen
+
+    return base_score
 
 
 def _score_catalyst(synthesis: dict) -> float:

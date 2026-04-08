@@ -53,14 +53,22 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
   const grokConfidence = (signal.grok_data as Record<string, unknown>)?.confidence as number | undefined
   const hasSentiment = signal.sentiment_score !== null && grokConfidence !== undefined && grokConfidence > 0
 
-  // Scoring weights for display
+  // Scoring weights for display — ETFs use reduced dividend weight
   const isHighRisk = signal.bucket === 'HIGH_RISK'
+  const isEtf = signal.asset_type === 'ETF'
   const weights = isHighRisk
     ? [
         { label: t.signal.sentimentXTwitter, pct: 35, color: theme.colors.primary },
         { label: t.signal.catalyst, pct: 30, color: theme.colors.up },
         { label: t.signal.technicalMomentum, pct: 25, color: theme.colors.warning },
         { label: t.signal.fundamentals, pct: 10, color: theme.colors.textSub },
+      ]
+    : isEtf
+    ? [
+        { label: t.signal.fundamentalHealth, pct: 40, color: theme.colors.primary },
+        { label: t.signal.macroConditions, pct: 30, color: theme.colors.warning },
+        { label: t.signal.dividendReliability, pct: 15, color: theme.colors.up },
+        { label: t.signal.sentiment, pct: 15, color: theme.colors.textSub },
       ]
     : [
         { label: t.signal.dividendReliability, pct: 35, color: theme.colors.up },
@@ -190,8 +198,8 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
           </div>
         </div>
 
-        {/* Row 2: Metrics + Badges */}
-        <div className="flex items-center gap-4 mt-3">
+        {/* Row 2: Score + Metrics + Badges */}
+        <div className="flex items-center gap-3 mt-3">
           <ScoreRing score={signal.score} size={38} />
           <div className="flex items-center gap-4 flex-1 min-w-0">
             <div>
@@ -207,10 +215,12 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
               <p className="text-[13px] font-semibold tabular-nums" style={{ color: theme.colors.primary }}>{signal.risk_reward ? `${signal.risk_reward.toFixed(1)}x` : '--'}</p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Badge variant={signal.action === 'BUY' ? 'buy' : signal.action === 'SELL' ? 'sell' : signal.action === 'AVOID' ? 'avoid' : 'hold'}>
-              {signal.action}
-            </Badge>
+          {/* Action badge always visible inline */}
+          <Badge variant={signal.action === 'BUY' ? 'buy' : signal.action === 'SELL' ? 'sell' : signal.action === 'AVOID' ? 'avoid' : 'hold'}>
+            {signal.action}
+          </Badge>
+          {/* Desktop-only: all badges inline */}
+          <div className="hidden md:flex items-center gap-1.5 shrink-0">
             {signal.signal_style === 'CONTRARIAN' && (
               <Badge variant="upgraded">{t.signal.contrarian}</Badge>
             )}
@@ -232,6 +242,30 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
               </Badge>
             )}
           </div>
+        </div>
+
+        {/* Mobile-only: badges on separate row */}
+        <div className="flex md:hidden items-center flex-wrap gap-1.5 mt-2 pl-[50px]">
+          {signal.signal_style === 'CONTRARIAN' && (
+            <Badge variant="upgraded">{t.signal.contrarian}</Badge>
+          )}
+          {signal.signal_style === 'MOMENTUM' && (
+            <Badge variant="confirmed">{t.signal.momentum}</Badge>
+          )}
+          <Badge variant={getStatusVariant(signal.status)}>{signal.status}</Badge>
+          {signal.probability_vs_spy != null && signal.probability_vs_spy > 50 && (
+            <span
+              className="text-[9px] font-bold px-1.5 py-0.5 rounded-md tabular-nums"
+              style={{ backgroundColor: theme.colors.up + '12', color: theme.colors.up }}
+            >
+              {signal.probability_vs_spy.toFixed(0)}% {t.signal.vsSpy}
+            </span>
+          )}
+          {signal.account_recommendation && (
+            <Badge variant={signal.account_recommendation === 'TFSA' ? 'safe' : 'risk'}>
+              {signal.account_recommendation}
+            </Badge>
+          )}
         </div>
 
         <div className="flex justify-center mt-2">

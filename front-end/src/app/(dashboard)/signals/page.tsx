@@ -21,6 +21,7 @@ export default function SignalsPage() {
   const queryClient = useQueryClient()
   const [bucket, setBucket] = useState<string>('All')
   const [assetType, setAssetType] = useState<string>('All')
+  const [market, setMarket] = useState<string>('All')
   const [signalStyle, setSignalStyle] = useState<string>('All')
   const [actionFilter, setActionFilter] = useState<string>('All')
   const [minScore, setMinScore] = useState<number>(0)
@@ -93,7 +94,7 @@ export default function SignalsPage() {
   const filtersWithLimit: SignalFilters = { ...filters, limit: 50 }
   const { data: allSignals, isLoading, isError, error } = useAllSignals(filtersWithLimit)
 
-  // Client-side filters (asset type + signal style + action + search)
+  // Client-side filters (asset type + market + signal style + action + search)
   const filtered = useMemo(() => {
     if (!allSignals) return undefined
     return allSignals.filter((s: Signal) => {
@@ -101,12 +102,17 @@ export default function SignalsPage() {
         const at = s.asset_type as string
         if (assetType === 'STOCK' ? (at !== 'STOCK' && at !== 'EQUITY') : at !== assetType) return false
       }
+      if (market !== 'All') {
+        const ex = s.exchange as string
+        if (market === 'CA' && ex !== 'TSX') return false
+        if (market === 'US' && ex !== 'NYSE' && ex !== 'NASDAQ') return false
+      }
       if (signalStyle !== 'All' && s.signal_style !== signalStyle) return false
       if (actionFilter !== 'All' && s.action !== actionFilter) return false
       if (debouncedSearch && !s.symbol.toLowerCase().startsWith(debouncedSearch.toLowerCase())) return false
       return true
     })
-  }, [allSignals, assetType, signalStyle, actionFilter, debouncedSearch])
+  }, [allSignals, assetType, market, signalStyle, actionFilter, debouncedSearch])
 
   // Sorting
   const signals = useMemo(() => {
@@ -159,6 +165,7 @@ export default function SignalsPage() {
     return t.signals.todayAt.replace('{time}', timeStr)
   }
 
+  const marketOptions = ['All', 'CA', 'US']
   const assetOptions = ['All', 'STOCK', 'ETF', 'CRYPTO']
   const styleOptions = ['All', 'MOMENTUM', 'CONTRARIAN']
   const bucketOptions = ['All', 'SAFE_INCOME', 'HIGH_RISK']
@@ -296,6 +303,27 @@ export default function SignalsPage() {
             className="bg-transparent outline-none text-[11px] font-medium w-24"
             style={{ color: theme.colors.text }}
           />
+        </div>
+
+        {/* Market */}
+        <div role="group" aria-label="Filter by market" className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5" style={{ backgroundColor: theme.colors.nav }}>
+          {marketOptions.map((opt) => {
+            const isActive = market === opt
+            return (
+              <button
+                key={opt}
+                onClick={() => setMarket(opt)}
+                aria-pressed={isActive}
+                className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all"
+                style={{
+                  backgroundColor: isActive ? theme.colors.navActive : 'transparent',
+                  color: isActive ? theme.colors.text : theme.colors.textSub,
+                }}
+              >
+                {opt === 'CA' ? t.signals.canada : opt === 'US' ? t.signals.us : t.signals.all}
+              </button>
+            )
+          })}
         </div>
 
         {/* Asset type */}

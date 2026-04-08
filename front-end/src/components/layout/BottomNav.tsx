@@ -38,7 +38,9 @@ export function BottomNav() {
     { label: t.nav.overview, href: '/overview', icon: LayoutDashboard },
     { label: t.nav.signals, href: '/signals', icon: TrendingUp },
     { label: t.nav.watchlist, href: '/watchlist', icon: Star },
-    { label: t.nav.portfolio, href: '/portfolio', icon: Briefcase },
+    // TODO: Uncomment when portfolio manual tracking is implemented
+    // { label: t.nav.portfolio, href: '/portfolio', icon: Briefcase },
+    { label: t.nav.brainPerformance, href: '/brain/performance', icon: Activity },
     { label: 'More', href: '#more', icon: Menu },
   ], [t])
 
