@@ -515,6 +515,13 @@ export default function HowItWorksPage() {
               </Section>
             </Card>
 
+            {/* Weekend Crypto Watchdog */}
+            <Card>
+              <Section title={h.weekendCryptoTitle}>
+                <P>{h.weekendCryptoDesc}</P>
+              </Section>
+            </Card>
+
             {/* Fear & Greed Index */}
             <Card>
               <Section title={h.fearGreedTitle}>
