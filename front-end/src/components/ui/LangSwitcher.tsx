@@ -20,7 +20,7 @@ export function LangSwitcher() {
       title={locale === 'en' ? 'Switch to Portuguese' : 'Switch to English'}
       aria-label={locale === 'en' ? 'Switch to Portuguese' : 'Switch to English'}
     >
-      {locale === 'en' ? 'PT' : 'EN'}
+      {locale === 'en' ? '🇧🇷 PT' : '🇨🇦 EN'}
     </button>
   )
 }

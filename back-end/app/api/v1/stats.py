@@ -18,7 +18,7 @@ router = APIRouter(prefix="/stats", tags=["Stats"])
 
 
 class UserSettingsUpdate(BaseModel):
-    theme: Optional[str] = Field(None, pattern=r"^(midnight|arctic|sunset|ocean|forest|lavender)$")
+    theme: Optional[str] = Field(None, pattern=r"^(applestocks|robinhood|wealthsimple|bloomberg|webull|etrade)$")
     language: Optional[str] = Field(None, pattern=r"^(en|pt)$")
 
 
