@@ -50,9 +50,16 @@ done
 cd "$FRONTEND"
 export NEXT_PUBLIC_API_URL="http://$LOCAL_IP:8000/api/v1"
 
-if [ ! -f ".next/BUILD_ID" ]; then
+# Rebuild if source changed since last build, or no build exists
+LAST_BUILD=".next/BUILD_ID"
+NEWEST_SRC=$(find src -name '*.tsx' -o -name '*.ts' -o -name '*.json' 2>/dev/null | xargs stat -f '%m' 2>/dev/null | sort -rn | head -1)
+LAST_BUILD_TIME=$(stat -f '%m' "$LAST_BUILD" 2>/dev/null || echo "0")
+
+if [ ! -f "$LAST_BUILD" ] || [ "$NEWEST_SRC" -gt "$LAST_BUILD_TIME" ]; then
   echo "[Building frontend for $LOCAL_IP...]"
   npm run build --silent 2>/dev/null
+else
+  echo "[Frontend up to date, skipping build]"
 fi
 
 # Start frontend in background (logs to terminal)
