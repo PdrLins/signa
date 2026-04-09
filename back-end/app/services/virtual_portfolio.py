@@ -194,7 +194,7 @@ There is no in-memory state that survives process restarts. The brain
 fully recovers its state from `virtual_trades` on every scan.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -1063,6 +1063,33 @@ def process_virtual_trades(
         else:
             open_watchlist.add(r["symbol"])
 
+    # Re-buy cooldown snapshot: any brain symbol THESIS_INVALIDATED-closed
+    # within `brain_thesis_rebuy_cooldown_minutes` is blocked from re-entry
+    # this scan. Without this, Claude's non-determinism on borderline trades
+    # produces a buy → invalidate → re-buy → invalidate loop within minutes.
+    # Real case (2026-04-09): WING #1 closed at 17:06:04 via THESIS_INVALIDATED;
+    # WING #2 opened at 18:00:16 (54 min later) and immediately bled to -0.95%.
+    # The Day 4 journal explicitly predicted we would need this.
+    cooldown_minutes = settings.brain_thesis_rebuy_cooldown_minutes
+    cooldown_brain_symbols: set[str] = set()
+    if cooldown_minutes > 0:
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=cooldown_minutes)).isoformat()
+        cooldown_rows = (
+            db.table("virtual_trades")
+            .select("symbol, exit_date")
+            .eq("source", "brain")
+            .eq("status", "CLOSED")
+            .eq("exit_reason", "THESIS_INVALIDATED")
+            .gte("exit_date", cutoff)
+            .execute()
+        ).data or []
+        cooldown_brain_symbols = {r["symbol"] for r in cooldown_rows if r.get("symbol")}
+        if cooldown_brain_symbols:
+            logger.info(
+                f"Brain re-buy cooldown active on {len(cooldown_brain_symbols)} symbols "
+                f"({cooldown_minutes}min): {sorted(cooldown_brain_symbols)}"
+            )
+
     # Resolve once: brain runs single-tenant, every insert is stamped with
     # this user_id so the rows are correctly attributed and queryable.
     brain_user_id = queries.get_brain_user_id()
@@ -1254,6 +1281,7 @@ def process_virtual_trades(
             brain_tier > 0
             and symbol not in open_brain
             and symbol not in open_watchlist  # dedup with watchlist track
+            and symbol not in cooldown_brain_symbols  # post-THESIS_INVALIDATED cooldown
         ):
             # ── Rotation: brain at max capacity, only rotate if the new
             # ── signal is meaningfully better (+5 points) than the weakest

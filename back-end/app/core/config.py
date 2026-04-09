@@ -123,6 +123,13 @@ class Settings(BaseSettings):
     # Set to False to revert to pre-Stage-6 behavior (no thesis checks).
     brain_thesis_gate_enabled: bool = True
     brain_thesis_hard_stop_pct: float = -8.0  # catastrophic stop carve-out
+    # Re-buy cooldown after a THESIS_INVALIDATED exit. The brain otherwise
+    # would re-open the same symbol on the next scan if Claude flips back
+    # to BUY (Claude is non-deterministic on borderline trades). Real case
+    # 2026-04-09: WING #1 invalidated in 17s, WING #2 opened 54min later
+    # at +$2.95 from the close, currently bleeding. The Day 4 journal
+    # explicitly named this fix. Set to 0 to disable.
+    brain_thesis_rebuy_cooldown_minutes: int = 60
 
     # --- Brain Watchdog ---
     watchdog_enabled: bool = True
