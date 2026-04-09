@@ -511,6 +511,34 @@ def get_all_watchlist_symbols() -> set[str]:
     return {row["symbol"] for row in (result.data or [])}
 
 
+def get_open_brain_symbols() -> set[str]:
+    """Get the set of symbols the brain currently has open virtual positions in.
+
+    Used by `prefilter_candidates` to ALWAYS include held positions in the
+    candidate list, regardless of day_change/volume filters. Without this,
+    a brain position that's moving < 1% intraday gets filtered out and the
+    Stage 6 thesis tracker has no fresh signal to re-evaluate against — so
+    the position drifts unsupervised until the watchdog catches a price
+    emergency or the catastrophic stop fires at -8%.
+
+    Returns a set of symbol strings (e.g. {"PBR-A", "META", "ASML"}).
+    Returns empty set if no brain positions are open or the brain user is
+    unset.
+    """
+    client = get_client()
+    try:
+        result = (
+            client.table("virtual_trades")
+            .select("symbol")
+            .eq("status", "OPEN")
+            .eq("source", "brain")
+            .execute()
+        )
+        return {row["symbol"] for row in (result.data or [])}
+    except Exception:
+        return set()
+
+
 _brain_user_id_cache: str | None = None
 
 

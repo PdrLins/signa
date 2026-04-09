@@ -277,7 +277,16 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         screening_data = await market_scanner.get_bulk_screening(all_tickers)
         _update_progress(10, "filtering")
         watchlist_symbols = queries.get_all_watchlist_symbols()
-        candidates = prefilter_candidates(screening_data, watchlist_symbols)
+        # Always include held brain positions in the candidate list, even
+        # if they don't meet day_change/volume thresholds. Without this,
+        # quiet-day held positions get filtered out and the Stage 6 thesis
+        # tracker can't re-evaluate them — they drift unsupervised until
+        # the watchdog catches a price emergency. See journal Day 4
+        # afternoon entry for the bug story.
+        held_brain_symbols = queries.get_open_brain_symbols()
+        candidates = prefilter_candidates(
+            screening_data, watchlist_symbols, held_brain_symbols,
+        )
         logger.info(f"Candidates after pre-filter: {len(candidates)}")
 
         queries.update_scan(scan_id, candidates=len(candidates), tickers_scanned=len(all_tickers))
