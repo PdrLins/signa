@@ -8,6 +8,8 @@ import pandas as pd
 import yfinance as yf
 from loguru import logger
 
+from app.core.cache import TTLCache
+
 # Disable yfinance's internal SQLite caching entirely.
 # It corrupts under concurrent async access. We use our own TTLCache instead.
 import os as _os
@@ -16,6 +18,19 @@ try:
     yf.set_tz_cache_location(_os.devnull)
 except Exception:
     pass
+
+# Per-ticker bulk-screening cache. The 5d OHLCV that bulk_screening returns
+# doesn't materially change between back-to-back scans within ~30 minutes,
+# so we cache results across scans and only re-fetch on misses. This makes
+# the second/third/fourth scans of the day skip most of the ~100s yfinance
+# screening cost. The first scan of the day still pays full price.
+_bulk_screening_cache = TTLCache(max_size=2000, default_ttl=1800)  # 30 min
+
+# Concurrency cap for parallel batch downloads. yfinance + DNS + macOS thread
+# pool starts to fall over above ~3 simultaneous in-flight downloads — this
+# is the same DNS-exhaustion ceiling that motivated batch_size=20/threads=False
+# in the first place. Keep this conservative.
+_BULK_BATCH_CONCURRENCY = 3
 
 
 async def get_price_history(ticker: str, period: str = "3mo") -> pd.DataFrame:
@@ -219,59 +234,116 @@ async def get_period_changes(ticker: str) -> dict:
         return {}
 
 
+def _parse_bulk_batch(batch: list[str], data) -> dict[str, dict]:
+    """Parse a single yf.download() result frame into a per-ticker dict."""
+    out: dict[str, dict] = {}
+    for ticker in batch:
+        try:
+            if len(batch) == 1:
+                df = data
+            else:
+                df = data[ticker] if ticker in data.columns.get_level_values(0) else pd.DataFrame()
+
+            if df.empty or len(df) < 2:
+                continue
+
+            last_close = df["Close"].iloc[-1]
+            prev_close = df["Close"].iloc[-2]
+            day_change = (last_close - prev_close) / prev_close if prev_close else 0
+            avg_volume = df["Volume"].mean()
+            last_volume = df["Volume"].iloc[-1]
+
+            out[ticker] = {
+                "price": float(last_close),
+                "volume": float(last_volume),
+                "avg_volume": float(avg_volume),
+                "day_change": float(day_change),
+            }
+        except Exception:
+            continue
+    return out
+
+
+def _download_one_batch(batch: list[str]) -> dict[str, dict]:
+    """Synchronously download + parse one batch of tickers. Runs in a thread."""
+    try:
+        data = yf.download(
+            " ".join(batch), period="5d", group_by="ticker",
+            progress=False, threads=False,
+        )
+        return _parse_bulk_batch(batch, data)
+    except Exception as e:
+        logger.warning(f"Batch download failed for batch of {len(batch)}: {e}")
+        return {}
+
+
 async def get_bulk_screening(tickers: list[str]) -> dict[str, dict]:
     """Fetch quick screening data for many tickers (volume, price change).
 
     Used for pre-filtering the universe down to candidates.
 
+    Performance shape:
+      • Per-ticker TTL cache (30 min) — back-to-back scans within the
+        cache window skip the network entirely for warm tickers. The first
+        scan of the day pays full price; subsequent scans only pay for
+        cache misses.
+      • Parallel batched downloads — uncached tickers are split into
+        batches of 20 and `_BULK_BATCH_CONCURRENCY` (3) batches run
+        concurrently via `asyncio.gather`. `threads=False` is kept inside
+        each `yf.download` call (DNS thread pool exhaustion is real),
+        but we get safe outer-level parallelism by stacking 3 sub-batches.
+
     Returns:
         Dict mapping ticker -> { volume, avg_volume, day_change, price }
     """
-    def _fetch():
-        results = {}
-        batch_size = 20  # Reduced from 50 to prevent DNS thread exhaustion
-        for i in range(0, len(tickers), batch_size):
-            batch = tickers[i:i + batch_size]
-            symbols = " ".join(batch)
-            try:
-                data = yf.download(
-                    symbols, period="5d", group_by="ticker",
-                    progress=False, threads=False,
-                )
-                for ticker in batch:
-                    try:
-                        if len(batch) == 1:
-                            df = data
-                        else:
-                            df = data[ticker] if ticker in data.columns.get_level_values(0) else pd.DataFrame()
+    results: dict[str, dict] = {}
+    misses: list[str] = []
 
-                        if df.empty or len(df) < 2:
-                            continue
+    # 1. Cache lookup
+    for ticker in tickers:
+        cached = _bulk_screening_cache.get(ticker)
+        if cached is not None:
+            results[ticker] = cached
+        else:
+            misses.append(ticker)
 
-                        last_close = df["Close"].iloc[-1]
-                        prev_close = df["Close"].iloc[-2]
-                        day_change = (last_close - prev_close) / prev_close if prev_close else 0
-                        avg_volume = df["Volume"].mean()
-                        last_volume = df["Volume"].iloc[-1]
-
-                        results[ticker] = {
-                            "price": float(last_close),
-                            "volume": float(last_volume),
-                            "avg_volume": float(avg_volume),
-                            "day_change": float(day_change),
-                        }
-                    except Exception:
-                        continue
-            except Exception as e:
-                logger.warning(f"Batch download failed for batch starting at {i}: {e}")
-                continue
+    if not misses:
+        logger.info(f"Bulk screening: {len(results)} tickers from cache, 0 fetched")
         return results
 
+    # 2. Fetch misses in parallel batches
+    batch_size = 20  # safe per-batch ceiling for yfinance with threads=False
+    batches = [misses[i:i + batch_size] for i in range(0, len(misses), batch_size)]
+    sem = asyncio.Semaphore(_BULK_BATCH_CONCURRENCY)
+
+    async def _guarded_download(batch: list[str]) -> dict[str, dict]:
+        async with sem:
+            return await asyncio.to_thread(_download_one_batch, batch)
+
     try:
-        return await asyncio.to_thread(_fetch)
+        batch_results = await asyncio.gather(
+            *[_guarded_download(b) for b in batches], return_exceptions=True,
+        )
     except Exception as e:
-        logger.error(f"Bulk screening failed: {e}")
-        return {}
+        logger.error(f"Bulk screening gather failed: {e}")
+        return results
+
+    # 3. Merge + cache
+    fetched_count = 0
+    for br in batch_results:
+        if isinstance(br, Exception):
+            logger.warning(f"Bulk screening batch raised: {br}")
+            continue
+        for ticker, row in br.items():
+            results[ticker] = row
+            _bulk_screening_cache.set(ticker, row)
+            fetched_count += 1
+
+    logger.info(
+        f"Bulk screening: {len(results) - fetched_count} cached, "
+        f"{fetched_count} fetched, {len(misses) - fetched_count} missing"
+    )
+    return results
 
 
 async def get_current_price(ticker: str) -> Optional[float]:
