@@ -18,7 +18,7 @@ from app.services.knowledge_service import KnowledgeService
 
 
 def record_outcome(
-    signal_id: str,
+    signal_id: str | None,
     symbol: str,
     action: str,
     score: int,
@@ -33,7 +33,13 @@ def record_outcome(
     catalyst_type: str | None = None,
     notes: str | None = None,
 ) -> dict:
-    """Record the outcome of a trade for learning."""
+    """Record the outcome of a trade for learning.
+
+    signal_id is OPTIONAL — virtual brain trades don't track which specific
+    signal triggered them (the brain re-evaluates fresh signals at every scan,
+    so there's no single "the signal" that owns the trade). For real positions
+    that ARE tied to a signal, pass it; for virtual trades pass None.
+    """
     pnl_pct = ((exit_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
     pnl_amount = exit_price - entry_price  # Per-share P&L (consistent unit for cross-trade comparison)
 

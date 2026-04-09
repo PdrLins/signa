@@ -130,13 +130,13 @@ class KnowledgeService:
             key_concepts: List of key_concept values to include.
 
         Returns:
-            Formatted text block suitable for embedding in a prompt.
+            Formatted text block suitable for embedding in a prompt. Now also
+            appends a "Working Hypotheses" section listing active thinking
+            entries (low-confidence observations under test) so Claude sees
+            the brain's tentative learnings alongside its proven knowledge.
         """
         all_knowledge = self.get_active_knowledge()
         selected = [k for k in all_knowledge if k.get("key_concept") in key_concepts]
-
-        if not selected:
-            return ""
 
         lines = []
         for k in selected:
@@ -148,7 +148,82 @@ class KnowledgeService:
                 lines.append(f"Example: {k['example']}")
             lines.append("")
 
-        return "\n".join(lines)
+        thinking_block = self.get_active_thinking_block()
+        if thinking_block:
+            lines.append(thinking_block)
+
+        return "\n".join(lines).strip()
+
+    def get_active_thinking(self) -> list[dict]:
+        """Get all active thinking entries (hypotheses under observation).
+
+        Returns an empty list if the signal_thinking table doesn't exist
+        yet (forward-compatible with environments where the migration
+        hasn't been applied).
+        """
+        cached = _get_cached("thinking_active")
+        if cached is not None:
+            return cached
+
+        client = get_client()
+        try:
+            result = (
+                client.table("signal_thinking")
+                .select("*")
+                .eq("status", "active")
+                .order("created_at", desc=True)
+                .execute()
+            )
+            entries = result.data or []
+        except Exception as e:
+            # Table may not exist yet — log once and return empty
+            if "signal_thinking" in str(e).lower():
+                logger.debug("signal_thinking table not present yet — returning no hypotheses")
+            else:
+                logger.warning(f"Failed to load active thinking entries: {e}")
+            entries = []
+
+        _set_cached("thinking_active", entries)
+        return entries
+
+    def get_active_thinking_block(self) -> str:
+        """Format active thinking entries as a 'Working Hypotheses' markdown block.
+
+        Returns an empty string if there are no active hypotheses. The framing
+        is intentional: Claude is told these are LOW CONFIDENCE observations
+        under test, not validated truth. The supporting/contradicting counts
+        are exposed so Claude can weigh each hypothesis appropriately.
+        """
+        entries = self.get_active_thinking()
+        if not entries:
+            return ""
+
+        lines = ["## Working Hypotheses (under observation — low confidence)"]
+        lines.append(
+            "These are tentative patterns the brain has observed but NOT yet validated. "
+            "Treat them as data to consider, not as rules to follow."
+        )
+        lines.append("")
+        for h in entries:
+            lines.append(f"### {h.get('hypothesis', '(no hypothesis)')}")
+            if h.get("prediction"):
+                lines.append(f"**Prediction:** {h['prediction']}")
+            supporting = h.get("observations_supporting") or 0
+            contradicting = h.get("observations_contradicting") or 0
+            neutral = h.get("observations_neutral") or 0
+            total = supporting + contradicting + neutral
+            lines.append(
+                f"**Evidence so far:** {supporting} supporting, "
+                f"{contradicting} contradicting, {neutral} neutral "
+                f"(total observed: {total})"
+            )
+            if h.get("notes"):
+                lines.append(f"**Notes:** {h['notes']}")
+            lines.append(
+                "_This is a hypothesis under test — weigh accordingly._"
+            )
+            lines.append("")
+        return "\n".join(lines).rstrip()
 
     def get_blocker_rules(self) -> list[dict]:
         """Get all active blocker rules."""

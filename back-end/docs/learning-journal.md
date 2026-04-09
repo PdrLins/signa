@@ -303,6 +303,197 @@ Impact on pending suggestions:
 
 ---
 
+## Day 3 -- April 8, 2026
+
+### Environment
+- Market: VOLATILE (VIX still elevated -- 3rd day running)
+- Scans: 8 (5 scheduled: PRE_MARKET, MORNING, MIDDAY, PRE_CLOSE, AFTER_CLOSE + 3 manual)
+- Signals: 306 total -- 73 BUY, 112 HOLD, 121 AVOID
+- AI status mix: 33 validated, 57 low_confidence, 216 skipped (tech-only)
+- Score distribution: **0 at 82+, 46 at 72-81, 46 at 65-71, 108 at 55-64, 106 below 55**
+- GEMs found: **0** (3rd day in a row)
+- Bucket mix: 268 SAFE_INCOME / 38 HIGH_RISK
+- Brain positions: **5 OPEN, all opened today** (no holdovers from Day 2)
+
+### State Reset Notice
+**virtual_trades was wiped between Day 2 and Day 3.** The 11 brain positions from Day 2 (PNC, AVGO, etc.) no longer exist in the table -- only the 5 positions opened today. No history of yesterday's closes or watchdog events survives. Confirm with user whether this was intentional.
+
+### Today's Brain Picks (live P&L at 19:56 ET)
+
+| Symbol | Entry $ | Live $ | P&L % | Score | Tier | Trust | Entered (ET) |
+|--------|--------:|-------:|------:|------:|-----:|------:|--------------|
+| LTM    |   52.42 |  52.64 | **+0.42%** | 72 | 1 | 1.0 | 10:59 |
+| ASML   | 1417.74 | 1421.51| **+0.27%** | 78 | 1 | 1.0 | 12:03 |
+| LYG    |    5.57 |   5.55 | -0.27% | 73 | 1 | 1.0 | 10:59 |
+| RRX    |  204.94 | 204.21 | -0.36% | 74 | 1 | 1.0 | 12:03 |
+| META   |  627.80 | 612.69 | **-2.41%** | 78 | 1 | 1.0 | 12:59 |
+
+- **Realized P&L today:** +0.00% (0 closed trades)
+- **Unrealized P&L:** avg **-0.47%**, total **-2.35%**
+- **Winners:** 2 / 5 (40%)
+- **Best:** LTM +0.42%   **Worst:** META -2.41%
+
+### Incidents
+
+**1. META slow bleed (-2.41% in 3h since entry)**
+- What: META opened at $627.80 at 12:59 ET (after the 16:56 UTC manual scan). By 14:45 ET it was already at -2.13%. As of 15:55 ET, it's been bouncing between -2.34% and -2.81% for 75 minutes. 13 watchdog ALERT events fired on META alone.
+- Why we bought it: Tier 1 validated AI signal, score 78 (top of today's stack), bullish sentiment 65, MACD histogram **negative (-19.66)**, vs SMA200 -8% (not stretched).
+- What's worrying: We bought a SAFE_INCOME pick whose **MACD histogram was already negative** at entry. The momentum was rolling over before we hit BUY. AI validation didn't catch this -- the score model doesn't penalize negative MACD histogram on the bucket where we land most often.
+- Watchdog action: All 13 events = `action="warned"` -- the slow_bleed_exit threshold (-3.0%) has not yet been crossed. Sentiment stayed bullish (55-75) so the watchdog correctly held instead of panicking.
+- Status: OPEN, monitoring. If META prints -3.0% the brain will likely auto-sell.
+- Verdict: **TBD** -- watchdog rules are working as designed. The question is whether the *entry* should have happened at all.
+
+**2. Late entries -- brain bought mid-day after the move**
+- What: First brain buys at 10:59 ET (90 min after open), last buy at 12:59 ET. The 10:00 ET MORNING scan completed but did not produce brain entries -- the 10:56 ET MANUAL scan did.
+- Why this matters: Buying 90+ minutes into the session means the early-day move is already priced in. By 12:59 ET (META entry), we're in lunchtime chop where reversals start. META's -2.4% bleed began within minutes of entry.
+- Hypothesis: Either (a) the 10:00 ET scan's signals weren't yet BUY (scores climbed during the morning), or (b) tier qualification failed at 10:00 and only passed at 10:56. Need to log scan-by-scan tier evaluations to confirm.
+- Status: NEEDS INVESTIGATION
+- Verdict: TBD
+
+**3. Score ceiling stuck at 78 -- Tier 2 and Tier 3 are dead branches**
+- What: 0 signals at score 82+. 46 signals in the 72-81 band. The brain's Tier 2 (80+, low-confidence AI) and Tier 3 (82+, tech-only) gates produced **zero picks**. Only Tier 1 (validated AI, 72+) is firing.
+- Why this matters: The 3-tier model exists to widen the brain's net. If only Tier 1 ever fires, we're effectively running a 1-tier model and the brain's daily pick count is hard-capped at "however many tickers Claude validated today" (today: 5).
+- Pattern across Days 1-3: zero signals at 80+ score on any day so far. Either the scoring weights need recalibration (the +6 quality bonus and short-squeeze bonus aren't pushing anything past 80), or the universe genuinely lacks 80+ setups in this regime.
+- Status: PATTERN
+- Suggested fix: Inspect why zero signals reach 80+. Check the scorer ceiling logic and whether there's a quiet cap somewhere.
+
+**4. Near-miss cluster at score 67 (16 signals)**
+- What: SEI, LYB, SQQQ, TQQQ, CCL, CUK all clustered at 67 -- five points below the 72 floor. Several are validated AI BUYs.
+- Why this matters: A 5-point gap between "AI says BUY" and "brain agrees" is large. If those tickers later print winners we should know -- the journal already noted "low_confidence_guard" was applied (raised confidence floor 40->50%) on Day 1 which may have pushed scores down.
+- Status: OBSERVATION
+- Suggested fix: Track the 7d outcome of the 67-cluster as a control group. If they outperform our actual picks, the floor is too high.
+
+**5. Watchdog cooldown not visibly reducing META alert spam**
+- What: 13 alerts in 75 minutes = one every ~5 min. Day 2 added a "3 bullish holds -> 1hr cooldown" rule. Either the rule isn't activating on bleed events (only on HOLD_THROUGH_DIP), or the cooldown counter resets when P&L crosses thresholds.
+- Status: NEEDS INVESTIGATION
+- Verdict: TBD
+
+### Patterns Observed
+
+**1. Three-day SAFE_INCOME monoculture continues**
+- Day 1: 10/10 brain picks SAFE_INCOME
+- Day 2: 11/11 brain picks SAFE_INCOME
+- Day 3: 5/5 brain picks SAFE_INCOME
+- 26 brain picks across 3 days, **zero HIGH_RISK**. The VIX-VOLATILE regime adjustment (-15% on HIGH_RISK scores) is too punishing -- it makes the bucket statistically inaccessible during volatile months.
+
+**2. Marginal entries (score 72-74) keep losing**
+- Day 2: PYPL (score 72) closed -3.0%
+- Day 3: LYG (73), RRX (74) currently red; LTM (72) flat
+- Day 3: META (78) is the worst loser today -- score is NOT the protective signal we assumed
+
+**3. AI validation is not catching deteriorating momentum**
+- META was validated at score 78 with `macd_histogram = -19.66`. Negative MACD histogram = momentum is rolling over. The scorer didn't flag it. The AI didn't downgrade it. The brain bought it. Within 2 hours it was -2.4%.
+- This is a **scoring model gap**: SAFE_INCOME bucket weights fundamentals heavily and treats MACD histogram as a tiebreaker, not a blocker. For mega-cap tech (META, ASML), momentum reversal is a much stronger signal than dividend yield.
+
+**4. Brain is buying late, not early**
+- All 5 entries between 10:59 ET and 12:59 ET. The PRE_MARKET scan at 06:00 ET produces signals but the brain can't act outside RTH. By the time market opens, the brain has to re-validate during the MORNING scan -- and apparently the first MORNING scan (10:00 ET) didn't qualify any of today's picks. We need 60+ minutes after open before tier 1 fires. That's a structural lag that costs us the morning move.
+
+**5. Discovery still finds nothing brain-quality**
+- 8 scans, 0 GEMs, 0 picks above score 78. Discovery yield remains at the level Day 1 noted: lots of tickers added, none reach the brain's bar.
+
+### Why Are We Losing? (Day 3 answer to Pedro's question)
+
+We're not losing big -- we're bleeding **-0.47% on average across 5 fresh positions**, with one outsized loser (META -2.41%) dragging the basket. Specifically:
+
+1. **META is the only material loss.** Without META, the basket is approximately flat (+0.02% avg across the other 4). One bad pick is dragging the whole day.
+2. **The bad pick was a "good" score.** META had score 78 (top of today's stack) and validated AI -- it should have been our highest-conviction trade. It's the worst loser. **Score is not predicting outcome.**
+3. **The bad pick had a visible warning sign that we ignored.** MACD histogram = -19.66 at entry. Momentum was already breaking down. The scoring model treats this as ~10% weight; we should treat it as a hard blocker for SAFE_INCOME picks above $200 share price.
+4. **Late entry compounded the damage.** META was bought 3.5h after open, when the bounce had faded.
+
+### Why Didn't We Pick "Better" Things?
+
+We picked **everything we were allowed to pick.** The brain's tier gates produced exactly 5 unique tickers. The bottleneck is upstream:
+
+1. **Scoring ceiling is stuck below 80.** Three days, zero signals at 80+. Tier 2 and Tier 3 contributed zero picks. The brain has only one effective gate (Tier 1) and only acts on whatever Claude validates above 72.
+2. **Universe cap.** 408 tickers scanned, but only 33 got `validated` AI status -- that's the top-15-per-scan cap × 8 scans, minus dedupe and downgrades. Of those 33, only 5 unique symbols passed Tier 1. Widening the AI cap would add candidates.
+3. **Regime suppression.** VOLATILE VIX = HIGH_RISK score penalty = no momentum picks. We've been entirely defensive for 3 days.
+4. **No GEM conditions met.** 0 GEMs across 24 scans (Days 1-3 combined). The 85+ score + bullish sentiment + catalyst combo is statistically rare in this regime.
+
+### What Can We Learn From Today?
+
+**Actionable for Day 4:**
+
+1. **Add a MACD histogram blocker for SAFE_INCOME large caps.** If `share_price > $100` AND `macd_histogram < -5` AND `bucket == SAFE_INCOME` -> downgrade BUY to HOLD. META and ASML would have both been HOLD; only LTM/LYG/RRX would have entered. We'd be holding less, but cleaner.
+2. **Investigate why the 10:00 ET MORNING scan didn't produce brain entries.** Log per-scan tier evaluation results so we can see whether the issue is "signals weren't BUY yet" or "tier eval rejected them at that hour".
+3. **Stop trusting "score 78" as protection.** Three days of data: the worst losers (PYPL, META) had middle-of-the-pack scores, not the lowest. The score-to-outcome correlation is weak in the 72-78 band. Either calibrate the scorer or stop treating 5-point score gaps as meaningful.
+4. **Get the 80+ ceiling unstuck.** Audit the scorer for an unexpected ceiling -- with quality bonus (+6), short squeeze bonus (+up to 20), and momentum bonus (+6), at least *some* tickers should reach 80. None have. Find the cap.
+5. **Confirm the virtual_trades wipe was intentional.** If accidental, we need a backup/audit trail. If intentional, document why.
+
+**Lower-priority observations:**
+
+6. The watchdog correctly held META through 13 -2.x% prints with bullish sentiment. The slow-bleed rule is working. Don't change it.
+7. The "near-miss" cluster at score 67 is worth tracking as a control group -- if those tickers outperform our score-72+ picks over 7 days, the floor is too high.
+8. No HIGH_RISK picks for 3 days running. Either accept that volatile regimes mean defensive-only, or unwind the -15% regime penalty on HIGH_RISK and let the brain take some momentum bets.
+
+### Metrics to Track Tomorrow
+
+- [ ] Did META auto-sell at -3.0% or recover?
+- [ ] Did the 10:00 ET MORNING scan produce brain entries? (Log times of all brain buys)
+- [ ] Any signal score 80+? (Count daily until this changes)
+- [ ] Score distribution for the 67-cluster -- did SEI/LYB/etc. recover to 72+ on Day 4?
+- [ ] Did watchdog cooldown reduce META alert frequency?
+- [ ] Avg P&L of open brain positions at end of Day 4
+
+### Brain Knowledge / Rules Suggestions (Day 3)
+
+| Suggestion | Confidence | Status | Rationale |
+|-----------|-----------|--------|-----------|
+| **Three-witness consensus engine** (replaces tier gate) | **95%** | **APPROVED -- BUILDING NOW** | Day 3 META loss proved single-witness gate is broken |
+| MACD histogram blocker for SAFE_INCOME large caps | 75% | SUBSUMED | Will be encoded as a Math-witness veto inside the consensus engine |
+| Investigate Tier 2/3 starvation (no 80+ signals in 3 days) | 90% | DEFERRED | Consensus engine removes the tier model entirely |
+| Audit late-entry pattern (no brain buys before ~11:00 ET) | 70% | PROPOSED | Costs us the morning move |
+| Unwind HIGH_RISK regime penalty during VOLATILE | 40% | WAIT | 3 days isn't enough; HIGH_RISK lower win rate per backtest |
+| Track score-67 cluster as control group | 60% | PROPOSED | If they outperform, our floor is too high |
+
+### Architectural Insight -- Three-Witness Consensus
+
+Pedro flagged a fundamental architecture problem after seeing today's META loss: **the brain trusts AI as the gatekeeper.** If Claude says "validated", we go to Tier 1 and buy. The math (formulas) and the knowledge (brain rules) are just inputs that fed Claude -- they don't get an independent vote at the gate. That's why META was bought at score 78 even though MACD histogram = -19.66 and Day 2's PYPL lesson said "marginal entries during VOLATILE bleed".
+
+**The principle (saved as `feedback_three_witness_consensus.md` in memory):**
+
+The brain has three independent witnesses for every decision -- AI, Math, Knowledge -- and no single witness should dominate. When witnesses disagree, the disagreement *itself* is the most important data point. The brain must understand *why* they disagree before acting.
+
+Pedro's gun analogy makes the bidirectional point: a man would never normally shoot, but if his kids are being attacked he must -- context overrides default rules. The brain needs the same flexibility:
+
+  - **Veto direction:** when the default rule says BUY but witnesses disagree, the brain holds fire even though the gate would normally let it through. (META today.)
+  - **Override direction:** when the default rule says HOLD (e.g., score below 72 floor) but witnesses align on a hard catalyst, the brain takes a small position even though the gate would normally block it. (Score-67 cluster like SEI/LYB if a catalyst lights up.)
+
+**How META would have been blocked under consensus:**
+
+| Witness | Reading on META | Verdict |
+|---------|------------------|---------|
+| AI (Claude) | Score 78, validated, sentiment bullish 65 | BUY |
+| Math (MACD histogram) | -19.66 -- momentum rolled over | AVOID |
+| Math (vs SMA200) | -8% -- below trend, weak structure | AVOID |
+| Knowledge (PYPL pattern) | Marginal-pick bleed in VOLATILE regime | AVOID |
+
+3 of 4 readings against. Consensus engine vetoes. We'd be holding 4 positions today instead of 5, and the bleeding one would be the one we didn't take.
+
+**Build plan:**
+
+1. New module `back-end/app/ai/consensus.py` -- `evaluate_consensus(sig: dict) -> ConsensusResult` returning `(action, position_size_multiplier, witness_votes, reasoning)`.
+2. Three witness functions:
+   - `_ai_witness(sig)` -- reads `ai_status`, Claude confidence, sentiment score from grok_data
+   - `_math_witness(sig)` -- reads technical_data (RSI, MACD histogram + direction, vs_sma200, volume z-score, ADX) and applies hard vetoes
+   - `_knowledge_witness(sig)` -- queries `signal_knowledge` and recent `virtual_trades` outcomes for matching patterns
+3. Decision matrix:
+   - 3/3 agree positive -> full position, lower score floor to 70
+   - 2/3 agree positive AND no strong negative -> half position
+   - 2/3 agree positive AND one strong negative -> BLOCK (the META fix)
+   - 1/3 agree -> BLOCK
+   - 2/3 disagree but Math screams positive (vol z-score >= 2 + RSI sweet spot + catalyst <= 7d) -> 1/4-size override entry (the gun-analogy case)
+4. Hard vetoes encoded as Math-witness rules:
+   - `macd_histogram < -5 AND bucket == SAFE_INCOME AND share_price > 100` (the META blocker)
+   - `rsi > 75` (already exists but explicit here)
+   - `vs_sma200 > 30 AND ai_status != validated` (overextended without AI cover)
+5. Replace call site at `app/services/virtual_portfolio.py:884` -- `_eval_brain_trust_tier` becomes `evaluate_consensus`.
+6. **Shadow mode first:** run both gates in parallel for 7 days, log every disagreement to a new `consensus_disagreements` table, do not actually swap until backtest + shadow agree it's better.
+7. Backtest the consensus engine against the existing tier gate over the 18,759-signal historical dataset. Reject if 10d/20d win rate or avg return regresses.
+
+**Why this matters more than the individual rule tweaks:** The MACD blocker, the Tier 2/3 audit, the late-entry investigation -- they're all symptoms of the same disease. The brain has *no mechanism* to weigh disagreeing witnesses today. Every fix we ship in the current architecture is a band-aid on the wrong wound. Consensus engine is the correct surgery.
+
+---
+
 ## Template for Future Days
 
 ### Day N -- [Date]

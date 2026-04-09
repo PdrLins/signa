@@ -100,6 +100,7 @@ from datetime import datetime, timezone
 from loguru import logger
 
 from app.core.config import settings
+from app.core.dates import days_since
 from app.db import queries
 from app.db.supabase import get_client
 from app.notifications.messages import msg
@@ -171,7 +172,7 @@ async def run_watchdog() -> dict:
 
     # Get open brain positions
     result = db.table("virtual_trades") \
-        .select("id, symbol, entry_price, entry_date, entry_score, stop_loss, source") \
+        .select("id, symbol, entry_price, entry_date, entry_score, stop_loss, source, bucket, market_regime, target_price") \
         .eq("status", "OPEN") \
         .eq("source", "brain") \
         .execute()
@@ -275,12 +276,7 @@ async def run_watchdog() -> dict:
         entry_score = trade.get("entry_score") or 0
         latest_sig_data = latest_scores.get(symbol, {})
         current_score = latest_sig_data.get("score", 0)
-        days_held = 0
-        try:
-            entry_dt = datetime.fromisoformat(trade.get("entry_date", "").replace("Z", "+00:00"))
-            days_held = (datetime.now(timezone.utc) - entry_dt).days
-        except (ValueError, TypeError):
-            pass
+        days_held = days_since(trade.get("entry_date"))
 
         # 1. Interval drop (sudden move)
         if pnl_since_last <= -settings.watchdog_pnl_alert_pct:
@@ -468,7 +464,23 @@ async def _get_quick_sentiment(ticker: str) -> dict:
 
 
 async def _close_virtual_trade(db, trade: dict, exit_price: float, exit_reason: str):
-    """Close a virtual trade from the watchdog."""
+    """Close a virtual trade from the watchdog.
+
+    INTENTIONALLY NOT GATED BY `_exit_is_thesis_protected`. The thesis gate
+    in `virtual_portfolio.py` only protects scan-driven exits (SIGNAL,
+    STOP_HIT, TARGET_HIT, PROFIT_TAKE, TIME_EXPIRED) where Claude has just
+    re-evaluated the thesis with FRESH data from the same scan. The
+    watchdog runs every 15 min between scans, so it has fresher real-time
+    data than the cached `thesis_last_status` field would reflect — gating
+    the watchdog through stale thesis state could BLOCK a legitimate
+    emergency exit (e.g., a sentiment flip that the scan hasn't seen yet).
+
+    The watchdog is the BRAKE — its exits should fire fast when the
+    real-time conditions warrant it. Claude's stale thesis opinion has no
+    business overriding that. The catastrophic carve-out (-8% pnl) that
+    the scan-path uses is ALSO the watchdog's first force-sell trigger
+    (see WATCHDOG_FORCE_SELL above), so the same hard limit applies.
+    """
     entry_price = float(trade["entry_price"])
     pnl_pct = ((exit_price - entry_price) / entry_price) * 100
     pnl_amount = exit_price - entry_price
@@ -493,3 +505,13 @@ async def _close_virtual_trade(db, trade: dict, exit_price: float, exit_reason: 
         "is_win": pnl_pct > 0,
         "exit_reason": exit_reason,
     }).eq("id", trade["id"]).eq("status", "OPEN").execute()
+
+    # Forward to the learning loop. Best-effort — never blocks the close.
+    # Watchdog only acts on brain trades, but the helper double-checks
+    # source internally so this stays safe.
+    try:
+        from app.services.virtual_portfolio import _record_brain_outcome
+        _record_brain_outcome(trade, exit_price, exit_score, exit_reason, pnl_pct)
+    except Exception as e:
+        from loguru import logger
+        logger.warning(f"Watchdog failed to record outcome for {trade.get('symbol')}: {e}")

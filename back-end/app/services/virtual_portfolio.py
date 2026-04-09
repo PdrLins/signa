@@ -201,8 +201,16 @@ from loguru import logger
 
 from app.core.cache import TTLCache
 from app.core.config import settings
+from app.core.dates import days_since, parse_iso_utc
 from app.db import queries
 from app.db.supabase import get_client, with_retry
+from app.services.knowledge_events import (
+    EVENT_THINKING_OBSERVATION_ADDED,
+    OUTCOME_CONTRADICTING,
+    OUTCOME_NEUTRAL,
+    OUTCOME_SUPPORTING,
+    log_event,
+)
 from app.services.price_cache import _fetch_prices_batch
 
 
@@ -390,6 +398,333 @@ def _eval_brain_trust_tier(sig: dict) -> tuple[int, float, str]:
             return 3, 0.5, reason
 
     return 0, 0.0, f"no_tier_{ai_status}_score{score}"
+
+
+# ============================================================
+# LEARNING LOOP — record outcomes + update hypothesis evidence
+# ============================================================
+#
+# Every brain trade close MUST flow through `_record_brain_outcome` so that:
+#   1. `trade_outcomes` gets a row (feeds Stage 4 pattern stats and the
+#      existing weekly Claude analysis in `learning_service.run_weekly_analysis`)
+#   2. Active hypotheses in `signal_thinking` whose `pattern_match` matches
+#      the closed trade get their evidence counters incremented and the
+#      mutation is logged to `knowledge_events`
+#
+# Failures NEVER block the close path. Audit/learning is best-effort.
+# Watchlist trades are recorded too (under `record_outcome`'s existing
+# track) but only BRAIN trades drive hypothesis evidence — watchlist is
+# the user's exploratory list, not the brain's autonomous decisions.
+
+def _extract_thesis_keywords(sig: dict) -> dict:
+    """Snapshot the structured conditions that justified an entry.
+
+    The keywords are the *machine-checkable* parts of the thesis (numbers
+    and labels), captured at insert time so the thesis re-evaluator can
+    diff entry vs current state. Claude's free-text reasoning is captured
+    separately in `entry_thesis`. The re-eval prompt uses both: keywords
+    for fast field-by-field diff, prose for the WHY behind the entry.
+    """
+    td = sig.get("technical_data") or {}
+    md = sig.get("macro_data") or {}
+    gd = sig.get("grok_data") or {}
+    return {
+        "regime": md.get("regime") or sig.get("market_regime"),
+        "score_at_entry": sig.get("score"),
+        "macd_histogram": td.get("macd_histogram"),
+        "rsi": td.get("rsi"),
+        "vs_sma200": td.get("vs_sma200"),
+        "sentiment_score": gd.get("score") if isinstance(gd, dict) else None,
+        "sentiment_label": gd.get("label") if isinstance(gd, dict) else None,
+        "catalyst": sig.get("catalyst"),
+        "catalyst_type": sig.get("catalyst_type"),
+        "fear_greed": md.get("fear_greed"),
+    }
+
+
+def _exit_is_thesis_protected(pos: dict, exit_reason: str, pnl_pct: float) -> bool:
+    """Return True when an existing exit path should be SUPPRESSED because
+    the thesis re-evaluator says the position is still valid.
+
+    Catastrophic exits ALWAYS fire — we never let an "intact thesis" call
+    blow us up beyond `settings.brain_thesis_hard_stop_pct`. The thesis
+    check is for noise filtering, not for overriding hard risk limits.
+
+    The 6 existing exit paths gate themselves through this function:
+      • SIGNAL/AVOID flip → suppress if thesis still valid (HUM Day-1 fix)
+      • STOP_HIT → suppress if thesis still valid AND not catastrophic
+      • TARGET_HIT → suppress if thesis still valid (let it run)
+      • PROFIT_TAKE → suppress if thesis still valid (let it run)
+      • TIME_EXPIRED → suppress if thesis still valid (extend the window)
+      • ROTATION → NEVER suppressed (rotation is a relative comparison
+        between competing signals, doesn't depend on the absolute thesis)
+      • THESIS_INVALIDATED → N/A (this IS the thesis-driven exit)
+    """
+    if not settings.brain_thesis_gate_enabled:
+        return False
+    # Defensive None guard — a null pnl_pct shouldn't happen (all call sites
+    # compute from non-null floats) but if it ever does, fail-open so the
+    # exit fires rather than crashing the scan.
+    if pnl_pct is None:
+        return False
+    # Catastrophic carve-out: always exit, regardless of thesis. A wrong
+    # Claude call must never blow up the position past the hard limit.
+    if pnl_pct <= settings.brain_thesis_hard_stop_pct:
+        return False
+    if exit_reason == "ROTATION":
+        return False
+    if exit_reason == "THESIS_INVALIDATED":
+        return False
+    return (pos.get("thesis_last_status") or "").lower() == "valid"
+
+
+def _record_brain_outcome(
+    closed_trade: dict,
+    exit_price: float,
+    exit_score: int | None,
+    exit_reason: str,
+    pnl_pct: float,
+) -> None:
+    """Forward a closed virtual trade to learning_service.record_outcome().
+
+    Called from EVERY close path (SIGNAL, ROTATION, STOP_HIT, TARGET_HIT,
+    PROFIT_TAKE, TIME_EXPIRED, watchdog). Failures are caught and logged,
+    never raised — recording outcomes must NEVER block a real exit.
+
+    For brain trades, also runs `_match_thinking_observations` which checks
+    every active hypothesis and increments the supporting/contradicting
+    counter on any whose `pattern_match` matches this closed trade.
+    """
+    if closed_trade.get("source") != "brain":
+        # We could record watchlist outcomes too, but for v1 the learning
+        # loop only studies the brain track — the user's watchlist picks
+        # are exploratory and shouldn't shape the brain's learned patterns.
+        return
+    # Defensive guard: a brain trade without an entry_date shouldn't exist,
+    # but if it ever does, skip learning rather than stamping the outcome
+    # with today's date. That fallback would pollute pattern_stats's 90-day
+    # rolling window (trade from 6 months ago counted as "today").
+    entry_date_raw = closed_trade.get("entry_date")
+    if not entry_date_raw:
+        logger.warning(
+            f"Skipping brain outcome for {closed_trade.get('symbol')}: "
+            f"entry_date is null (pre-Stage-3 trade or data corruption)"
+        )
+        return
+    try:
+        from app.services import learning_service
+        entry_dt = parse_iso_utc(entry_date_raw)
+        if entry_dt is None:
+            logger.warning(
+                f"Skipping brain outcome for {closed_trade.get('symbol')}: "
+                f"unparseable entry_date {entry_date_raw!r}"
+            )
+            return
+        exit_dt = datetime.now(timezone.utc)
+        days_held = max(0, (exit_dt - entry_dt).days)
+        learning_service.record_outcome(
+            signal_id=None,  # virtual trades aren't tied to one specific signal_id
+            symbol=closed_trade["symbol"],
+            action="BUY",  # all brain entries are BUYs
+            score=int(closed_trade.get("entry_score") or 0),
+            bucket=closed_trade.get("bucket") or "UNKNOWN",
+            signal_date=entry_date_raw,
+            entry_price=float(closed_trade["entry_price"]),
+            exit_price=float(exit_price),
+            days_held=days_held,
+            target_price=closed_trade.get("target_price"),
+            stop_loss=closed_trade.get("stop_loss"),
+            market_regime=closed_trade.get("market_regime"),
+            catalyst_type=None,  # not snapshotted yet (Stage 6 entry_thesis_keywords will carry it)
+            notes=exit_reason,
+        )
+    except Exception as e:
+        logger.warning(
+            f"Failed to record brain outcome for {closed_trade.get('symbol')}: {e}"
+        )
+
+    # Hypothesis evidence update — separate try so a failure here doesn't
+    # cancel the record_outcome above. Both are best-effort.
+    try:
+        _match_thinking_observations(closed_trade, exit_reason, pnl_pct)
+    except Exception as e:
+        logger.warning(
+            f"Failed to update hypothesis observations for {closed_trade.get('symbol')}: {e}"
+        )
+
+
+def _trade_matches_pattern(trade: dict, pattern_match: dict) -> bool:
+    """Best-effort match of a closed trade against a hypothesis pattern_match.
+
+    Today we can only check (bucket, regime, score band) because that's all
+    we snapshot on virtual_trades. Other pattern keys (e.g., macd_histogram_lt)
+    are silently ignored — they'll become checkable once entry_thesis_keywords
+    starts carrying technicals.
+
+    Returns False if any CHECKABLE key fails, True otherwise. An empty
+    pattern_match returns False (refuse to match against everything — a
+    hypothesis with no pattern is unverifiable and would otherwise grab
+    every closed trade).
+
+    Score-band semantics:
+        score_min and score_max are INCLUSIVE bounds.
+        Non-integer/None values for score_min/score_max are silently
+        skipped rather than crashing — this guards against bad data in
+        pattern_match JSONB without raising on every closed trade.
+    """
+    if not pattern_match:
+        return False
+    # Defensive type check — pattern_match comes from JSONB and could
+    # theoretically be a list/string if a bad insert sneaks through.
+    # A non-dict here would crash .get() and kill ALL hypothesis updates
+    # for this close (the outer try/except catches it but loses the good
+    # hypotheses too). Return False for the bad entry, continue processing.
+    if not isinstance(pattern_match, dict):
+        return False
+    bucket = pattern_match.get("bucket")
+    if bucket and trade.get("bucket") != bucket:
+        return False
+    regime = pattern_match.get("regime")
+    if regime and trade.get("market_regime") != regime:
+        return False
+    score = trade.get("entry_score") or 0
+    score_min = pattern_match.get("score_min")
+    if isinstance(score_min, (int, float)) and score < score_min:
+        return False
+    score_max = pattern_match.get("score_max")
+    if isinstance(score_max, (int, float)) and score > score_max:
+        return False
+    score_eq = pattern_match.get("score_eq")
+    if isinstance(score_eq, (int, float)) and score != score_eq:
+        return False
+    return True
+
+
+def _classify_observation(prediction: str, pnl_pct: float) -> str:
+    """Decide whether a closed trade SUPPORTS or CONTRADICTS a hypothesis.
+
+    ⚠ V1 LIMITATION — READ BEFORE ADDING NEW HYPOTHESIS TYPES ⚠
+
+    This function assumes EVERY hypothesis predicts a NEGATIVE outcome (a
+    loss). The PYPL/META hypothesis from Stage 1 predicts losses, so a
+    losing trade is "supporting" and a winning trade is "contradicting."
+    This is correct for warning-style hypotheses but **inverted** for
+    bullish hypotheses like "post-earnings-drift winners" or "momentum
+    setups in TRENDING regime tend to win."
+
+    If you add a hypothesis that predicts WINS instead of losses, this
+    function will silently mis-classify every observation — winning trades
+    will increment `observations_contradicting` (wrong) and losers will
+    increment `observations_supporting` (also wrong). The brain's
+    graduation logic would then learn the opposite of reality.
+
+    The fix when needed: parse `prediction` text for keywords ("will gain",
+    "will win", "favors") OR add a structured `expected_direction` column
+    to `signal_thinking` ('loss' | 'win' | 'either') and switch on it here.
+    Until that fix lands, ONLY add hypotheses that predict losses to
+    `signal_thinking`.
+
+    The 1% deadband around zero filters out trades that closed near
+    breakeven — those don't really confirm or disprove a directional
+    prediction in either direction.
+    """
+    if -1.0 < pnl_pct < 1.0:
+        return OUTCOME_NEUTRAL
+    # V1: hypothesis predicts a LOSS. Loss confirms it; win disproves it.
+    if pnl_pct < 0:
+        return OUTCOME_SUPPORTING
+    return OUTCOME_CONTRADICTING
+
+
+def _match_thinking_observations(
+    closed_trade: dict,
+    exit_reason: str,
+    pnl_pct: float,
+) -> None:
+    """For every active hypothesis whose pattern matches this closed trade,
+    increment the relevant evidence counter and log a knowledge_event.
+
+    Best-effort matching — see `_trade_matches_pattern` for the limits of
+    what we can check today vs what becomes checkable when entry_thesis_keywords
+    carries the technical fields.
+
+    PERF NOTE: this loads active hypotheses on every call. With ~5 closes/scan
+    that's ~5 small queries (~50ms total). Acceptable today; if the brain
+    starts closing many trades per scan, batch-load active hypotheses once
+    in `process_virtual_trades` and pass them in.
+
+    RACE CONDITION (acceptable for v1):
+    The increment is read-modify-write, which is non-atomic. If a SCAN and
+    a WATCHDOG TICK both close trades matching the same hypothesis at
+    almost the same instant, both will read counter=N, both will write N+1,
+    and one increment will be lost. The scan_service has a concurrency
+    guard (rejects scans while another is RUNNING/QUEUED), so two SCANS
+    can't race. But the watchdog runs on its own APScheduler timer and
+    CAN overlap a long-running scan. Fix when needed: switch to a Postgres
+    atomic increment via raw SQL, OR add an updated_at-based optimistic
+    concurrency check. Until then, expect to lose ~1 counter increment per
+    year — irrelevant for graduation thresholds in single digits.
+    """
+    db = get_client()
+    active = (
+        db.table("signal_thinking")
+        .select("id, hypothesis, prediction, pattern_match, "
+                "observations_supporting, observations_contradicting, observations_neutral")
+        .eq("status", "active")
+        .execute()
+    ).data or []
+    if not active:
+        return
+
+    for hypothesis in active:
+        pattern = hypothesis.get("pattern_match") or {}
+        if not _trade_matches_pattern(closed_trade, pattern):
+            continue
+        outcome = _classify_observation(hypothesis.get("prediction") or "", pnl_pct)
+        # Map the outcome to the column we increment
+        if outcome == OUTCOME_SUPPORTING:
+            field = "observations_supporting"
+        elif outcome == OUTCOME_CONTRADICTING:
+            field = "observations_contradicting"
+        else:
+            field = "observations_neutral"
+        before = hypothesis.get(field) or 0
+        after = before + 1
+        try:
+            db.table("signal_thinking").update({
+                field: after,
+                "last_evaluated_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", hypothesis["id"]).execute()
+        except Exception as e:
+            logger.warning(
+                f"Failed to bump {field} on hypothesis {hypothesis['id']}: {e}"
+            )
+            continue
+        # Append an audit event for the increment
+        log_event(
+            EVENT_THINKING_OBSERVATION_ADDED,
+            triggered_by="brain_close_hook",
+            thinking_id=hypothesis["id"],
+            trade_id=closed_trade.get("id"),
+            observation_outcome=outcome,
+            payload={
+                "symbol": closed_trade.get("symbol"),
+                "bucket": closed_trade.get("bucket"),
+                "market_regime": closed_trade.get("market_regime"),
+                "entry_score": closed_trade.get("entry_score"),
+                "pnl_pct": round(pnl_pct, 2),
+                "exit_reason": exit_reason,
+                "counter_field": field,
+                "counter_before": before,
+                "counter_after": after,
+            },
+            reason=(
+                f"Trade {closed_trade.get('symbol')} closed {pnl_pct:+.2f}% "
+                f"({exit_reason}) — matches pattern_match for hypothesis "
+                f"\"{(hypothesis.get('hypothesis') or '')[:60]}...\" — "
+                f"{field}: {before} → {after}"
+            ),
+        )
 
 
 def _flag_positions_for_review(
@@ -687,7 +1022,14 @@ def process_virtual_trades(
     # targeted updates by row id.
     open_result = (
         db.table("virtual_trades")
-        .select("id, symbol, entry_price, entry_date, entry_score, source, pending_review_at")
+        .select("id, symbol, entry_price, entry_date, entry_score, source, "
+                "pending_review_at, thesis_last_status, "
+                # bucket + market_regime + target_price + stop_loss are
+                # required by _record_brain_outcome so that SIGNAL and
+                # ROTATION exits write correct trade_outcomes rows and
+                # the learning loop can match (bucket, regime) patterns.
+                # Missing any of these silently corrupts pattern_stats data.
+                "bucket, market_regime, target_price, stop_loss")
         .eq("status", "OPEN")
         .execute()
     )
@@ -786,6 +1128,19 @@ def process_virtual_trades(
                 is_win = pnl_pct > 0
                 source = pos.get("source", "watchlist")
 
+                # Stage 6 gate: if the thesis is still valid, this SIGNAL
+                # flip is treated as noise and the position is held. The
+                # HUM Day-1 incident: HUM hit a SELL signal but the thesis
+                # was still intact (just an AI-quality issue), and we sold
+                # at +0.77% leaving 15% on the table. The thesis gate
+                # fixes that class of false-positive sell.
+                if source == "brain" and _exit_is_thesis_protected(pos, "SIGNAL", pnl_pct):
+                    logger.info(
+                        f"Virtual SIGNAL exit SUPPRESSED for {symbol} — thesis still valid "
+                        f"(P&L {pnl_pct:+.1f}%, action was {action}, holding through)"
+                    )
+                    continue
+
                 # Status guard: the .eq("status", "OPEN") prevents this UPDATE
                 # from ever mutating an already-closed row. Belt-and-braces
                 # against the SELL→rotation race that previously allowed a
@@ -802,6 +1157,7 @@ def process_virtual_trades(
                     "exit_reason": "SIGNAL",
                 }).eq("id", pos["id"]).eq("status", "OPEN").execute()
                 sells += 1
+                _record_brain_outcome(pos, price, score, "SIGNAL", pnl_pct)
 
                 # Refresh in-memory state so the rotation block later in this
                 # scan doesn't pick this just-closed position as a rotation
@@ -867,6 +1223,8 @@ def process_virtual_trades(
                 "source": "watchlist",
                 "target_price": sig.get("target_price"),
                 "stop_loss": sig.get("stop_loss"),
+                # Snapshot for the learning loop — see _record_brain_outcome
+                "market_regime": sig.get("market_regime"),
             }).execute()
             buys += 1
             open_watchlist.add(symbol)  # block any further inserts this scan
@@ -939,6 +1297,7 @@ def process_virtual_trades(
                         "is_win": w_pnl > 0,
                         "exit_reason": "ROTATION",
                     }).eq("id", weakest["id"]).eq("status", "OPEN").execute()
+                    _record_brain_outcome(weakest, w_exit_price, score, "ROTATION", w_pnl)
                     open_brain.discard(w_symbol)
                     brain_open_count -= 1
                     logger.info(
@@ -993,6 +1352,17 @@ def process_virtual_trades(
                     "stop_loss": stop,
                     "entry_tier": brain_tier,
                     "trust_multiplier": trust_multiplier,
+                    # Snapshot for the learning loop — see _record_brain_outcome.
+                    # We snapshot at insert because the regime can shift between
+                    # entry and close, and pattern_stats matches on the regime
+                    # we ENTERED in (the conditions that justified the trade),
+                    # not the one we exited in.
+                    "market_regime": sig.get("market_regime"),
+                    # Stage 6: capture the THESIS for this entry. The thesis
+                    # tracker re-evaluates this every scan and triggers
+                    # THESIS_INVALIDATED exits when the reason is gone.
+                    "entry_thesis": (sig.get("reasoning") or "")[:500],
+                    "entry_thesis_keywords": _extract_thesis_keywords(sig),
                 }).execute()
                 buys += 1
                 brain_open_count += 1
@@ -1121,7 +1491,9 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
 
     open_result = (
         db.table("virtual_trades")
-        .select("id, symbol, entry_price, entry_score, entry_date, source, target_price, stop_loss")
+        .select("id, symbol, entry_price, entry_score, entry_date, source, "
+                "target_price, stop_loss, bucket, market_regime, "
+                "thesis_last_status")
         .eq("status", "OPEN")
         .execute()
     )
@@ -1176,12 +1548,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         pnl_pct = ((current_price - entry_price) / entry_price) * 100
 
         # Parse entry_date for age check
-        entry_date_str = trade.get("entry_date", "")
-        try:
-            entry_date = datetime.fromisoformat(entry_date_str.replace("Z", "+00:00"))
-            days_held = (now - entry_date).days
-        except (ValueError, TypeError):
-            days_held = 0
+        days_held = days_since(trade.get("entry_date"), now=now)
 
         # Determine exit reason (priority: stop > target > profit_take > time)
         exit_reason = None
@@ -1209,6 +1576,24 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
 
         if not exit_reason:
             continue
+
+        # Stage 6 gate: if the thesis is still valid, suppress this
+        # price-based exit as noise. The catastrophic carve-out at
+        # settings.brain_thesis_hard_stop_pct still fires unconditionally.
+        # Only applied to brain trades (watchlist track is exploratory
+        # and doesn't carry a thesis).
+        if trade.get("source") == "brain" and _exit_is_thesis_protected(trade, exit_reason, pnl_pct):
+            logger.info(
+                f"Virtual {exit_reason} SUPPRESSED for {symbol} — thesis still valid "
+                f"(P&L {pnl_pct:+.1f}%, holding through the noise)"
+            )
+            # Roll back the counter we incremented when we set exit_reason
+            if exit_reason == "STOP_HIT": stops_hit -= 1
+            elif exit_reason == "TARGET_HIT": targets_hit -= 1
+            elif exit_reason == "PROFIT_TAKE": profit_takes -= 1
+            elif exit_reason == "TIME_EXPIRED": expired -= 1
+            continue
+
         pnl_amount = current_price - entry_price
         is_win = pnl_pct > 0
         source = trade.get("source", "watchlist")
@@ -1226,6 +1611,9 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
             "is_win": is_win,
             "exit_reason": exit_reason,
         }).eq("id", trade["id"]).eq("status", "OPEN").execute()
+        # Forward to learning loop. The trade dict carries bucket +
+        # market_regime from the SELECT above, so no extra query.
+        _record_brain_outcome(trade, current_price, exit_score, exit_reason, pnl_pct)
 
         emoji = "✅" if is_win else "❌"
         logger.info(
@@ -1424,12 +1812,7 @@ def get_virtual_summary() -> dict:
         current = current_prices.get(symbol)
 
         # Calculate days held
-        entry_date_str = t.get("entry_date", "")
-        try:
-            entry_date = datetime.fromisoformat(entry_date_str.replace("Z", "+00:00"))
-            days_held = (now - entry_date).days
-        except (ValueError, TypeError):
-            days_held = 0
+        days_held = days_since(t.get("entry_date"), now=now)
 
         # Get signal reasoning (why the brain picked this)
         sig = signal_context.get(symbol, {})

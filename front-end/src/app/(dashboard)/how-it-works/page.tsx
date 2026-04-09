@@ -599,6 +599,71 @@ export default function HowItWorksPage() {
               </Section>
             </Card>
 
+            {/* Self-Learning Loop */}
+            <Card>
+              <Section title={h.learningLoopTitle}>
+                <P>{h.learningLoopDesc}</P>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.learningPrincipleTitle}
+                  </h3>
+                  <P>{h.learningPrincipleDesc}</P>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.learningLayersTitle}
+                  </h3>
+                  <P>{h.learningLayersDesc}</P>
+                  <ul className="space-y-1.5 mt-2">
+                    <Li>{h.learningLayer1}</Li>
+                    <Li>{h.learningLayer2}</Li>
+                    <Li>{h.learningLayer3}</Li>
+                    <Li>{h.learningLayer4}</Li>
+                  </ul>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.thinkingVsKnowledgeTitle}
+                  </h3>
+                  <P>{h.thinkingVsKnowledgeDesc}</P>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.thesisTrackingTitle}
+                  </h3>
+                  <P>{h.thesisTrackingDesc}</P>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.thesisInvalidatedTitle}
+                  </h3>
+                  <P>{h.thesisInvalidatedDesc}</P>
+                  <div className="mt-2">
+                    <P>{h.thesisInvalidatedExample}</P>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.thesisGateTitle}
+                  </h3>
+                  <P>{h.thesisGateDesc}</P>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.learningAuditTitle}
+                  </h3>
+                  <P>{h.learningAuditDesc}</P>
+                </div>
+              </Section>
+            </Card>
+
             {/* Fear & Greed Index */}
             <Card>
               <Section title={h.fearGreedTitle}>

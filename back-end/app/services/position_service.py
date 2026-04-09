@@ -59,16 +59,14 @@ def close_position_by_id(position_id: str, exit_price: float) -> dict:
 
     # Auto-record trade outcome for self-learning
     try:
+        from app.core.dates import days_since
         from app.services.learning_service import record_outcome
         from datetime import datetime, timezone
 
         entry_date = position.get("entry_date") or position.get("created_at", "")
         if isinstance(entry_date, str) and entry_date:
             signal_date = entry_date
-            try:
-                days_held = (datetime.now(timezone.utc) - datetime.fromisoformat(entry_date.replace("Z", "+00:00"))).days
-            except (ValueError, TypeError):
-                days_held = 0
+            days_held = days_since(entry_date)
         else:
             signal_date = datetime.now(timezone.utc).isoformat()
             days_held = 0

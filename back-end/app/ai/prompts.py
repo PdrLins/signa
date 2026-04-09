@@ -57,6 +57,12 @@ Current regime: {market_regime}
 ## Investment Knowledge (from Signa Brain)
 {knowledge_block}
 
+## Warning Signs (from technical/fundamental analysis)
+The brain has flagged the following danger signs in the data above. These are
+not vetoes — you (Claude) are the decider. But they are surfaced here so you
+cannot plausibly miss them when synthesizing your recommendation.
+{warning_signs}
+
 ## Your Task
 Based on ALL the data above, produce a JSON response with this exact structure:
 {{
@@ -93,6 +99,66 @@ Based on ALL the data above, produce a JSON response with this exact structure:
 - For Canadian accounts: recommend RRSP for active trading, TFSA for dividend holds
 
 Return JSON only, no markdown formatting."""
+
+
+# ============================================================
+# THESIS RE-EVALUATION PROMPT (Stage 6)
+# ============================================================
+#
+# Used by `app/services/thesis_tracker.py` to ask Claude whether the
+# original reason for a brain entry still holds. The output gates the
+# THESIS_INVALIDATED exit and suppresses noise on the existing 6 exit
+# paths.
+#
+# Design notes:
+#   - Inputs are the FULL original thesis (Claude's verbatim reasoning at
+#     entry) plus the structured snapshot of conditions at entry vs now.
+#   - Output is JSON with status ('valid'|'weakening'|'invalid'),
+#     confidence, reason, should_exit, and an updated thesis when the
+#     reason has evolved but is still intact.
+#   - The "Rules" section makes the principle explicit: a winning position
+#     with a dead thesis must be exited; a losing position with an intact
+#     thesis must be held. P&L direction does not determine the answer.
+
+THESIS_REEVAL_PROMPT = """You are an AI investment analyst re-evaluating an OPEN brain position.
+
+The brain bought {symbol} on {entry_date} ({days_held} days ago) at ${entry_price}.
+Current price: ${current_price} (P&L: {pnl_pct:+.2f}%).
+
+## Original Entry Thesis (verbatim from when we bought)
+{entry_thesis}
+
+## Conditions at Entry
+{entry_conditions}
+
+## Current Conditions
+{current_conditions}
+
+## Your Task
+Determine whether the original thesis is still valid TODAY. Return JSON:
+
+{{
+  "status": "valid" | "weakening" | "invalid",
+  "confidence": <0-100>,
+  "reason": "<one paragraph: what changed (or didn't), and why this conclusion>",
+  "should_exit": <true if status == "invalid", else false>,
+  "current_thesis": "<if still valid: the updated thesis given today's data; if invalid: null>"
+}}
+
+## Rules
+- "valid": the conditions and reasoning that justified entry are still in place
+- "weakening": some conditions have degraded but the core reason still holds (HOLD, monitor closely)
+- "invalid": the reason for owning is gone — even if the position is currently winning, the EDGE is gone
+- A winning position with a dead thesis should be EXITED. We sold not because we're losing but because we no longer have a reason to be long.
+- A losing position with an intact thesis should be HELD. The drawdown is noise.
+- Be especially alert to:
+  • Catalysts that have already played out (earnings beat, FDA approval, deal closed)
+  • Macro shifts that change the regime (war ends, Fed pivots, recession averted)
+  • Sentiment flips (bullish → bearish without our position recovering)
+  • The thesis itself becoming the consensus (everyone's already long, no incremental buyers)
+- P&L direction does NOT determine the answer. The thesis does.
+
+Return JSON only, no markdown."""
 
 
 def format_technicals(tech_data: dict) -> str:
@@ -216,3 +282,75 @@ def format_options_flow(grok_data: dict) -> str:
     if flow.get("agreement_note"):
         lines.append(f"- Note: {flow['agreement_note']}")
     return "\n".join(lines) if lines else "No options flow data available"
+
+
+def build_synthesis_prompt(
+    ticker: str,
+    technical_data: dict,
+    fundamental_data: dict,
+    macro_data: dict,
+    grok_data: dict,
+) -> str:
+    """Build the full Claude synthesis prompt from the raw data dicts.
+
+    Centralizes the prompt-prep boilerplate that was previously duplicated
+    across all 3 AI clients (claude_client, claude_local_client, gemini_client).
+    Each client now calls this ONE function instead of re-implementing:
+
+        market_regime = grok_data.get(...) if isinstance(...) else ...
+        signal_for_warnings = {"technical_data": ..., ...}
+        CLAUDE_SYNTHESIS_PROMPT.format(ticker=..., technicals=..., ...)
+
+    Adding a new prompt field (e.g., another evidence layer) now means
+    editing THIS function, not hunting through 3 clients.
+
+    Args:
+        ticker: The symbol being analyzed.
+        technical_data: Indicator output from `compute_indicators`.
+        fundamental_data: Output from `market_scanner.get_fundamentals`.
+        macro_data: Snapshot from `macro_scanner`.
+        grok_data: Sentiment result + injected metadata (_market_regime,
+            _regime_note, _catalyst_context, _knowledge_block, _options_flow).
+
+    Returns:
+        The fully-formatted `CLAUDE_SYNTHESIS_PROMPT` string, ready to
+        pass to any AI client's API/subprocess call.
+    """
+    from app.ai.danger_signals import format_warning_signs
+
+    is_dict = isinstance(grok_data, dict)
+    market_regime = grok_data.get("_market_regime", "TRENDING") if is_dict else "TRENDING"
+    regime_note = grok_data.get("_regime_note", "") if is_dict else ""
+    catalyst_context = (
+        grok_data.get("_catalyst_context", "No specific catalyst detected")
+        if is_dict else "No specific catalyst detected"
+    )
+    knowledge_block = grok_data.get("_knowledge_block", "") if is_dict else ""
+
+    # Build the signal-shaped dict that signal_breakdown expects so the
+    # warning rules can fire on the same data Claude is about to see.
+    # NOTE: `risk_reward` is None at this stage because Claude hasn't
+    # produced target/stop yet. rr_weak/rr_strong rules are intentionally
+    # inert via the warning_signs path — they still fire on the signal
+    # detail page via compute_signal_breakdown directly.
+    signal_for_warnings = {
+        "technical_data": technical_data,
+        "fundamental_data": fundamental_data,
+        "grok_data": grok_data,
+        "market_regime": market_regime,
+        "risk_reward": None,
+    }
+
+    return CLAUDE_SYNTHESIS_PROMPT.format(
+        ticker=ticker,
+        technicals=format_technicals(technical_data),
+        fundamentals=format_fundamentals(fundamental_data),
+        macro=format_macro(macro_data),
+        sentiment=format_sentiment(grok_data),
+        options_flow=format_options_flow(grok_data),
+        market_regime=market_regime,
+        regime_note=regime_note,
+        catalyst_context=catalyst_context,
+        knowledge_block=knowledge_block,
+        warning_signs=format_warning_signs(signal_for_warnings),
+    )

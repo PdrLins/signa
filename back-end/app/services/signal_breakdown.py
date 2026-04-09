@@ -150,6 +150,46 @@ RULES: list[dict] = [
             and (_safe_float(t.get("momentum_5d")) or 0) > 2
         ),
     ),
+    # Strongly negative MACD histogram, absolute (not divergence). Uses a
+    # PRICE-RELATIVE threshold so it works across stock price scales: a
+    # histogram of -19.66 on $627 META is meaningful, while -19 on a $5
+    # stock would be absurd. Threshold: histogram < -0.5% of current price.
+    # Catches the META Day 3 case directly (hist -19.66 vs price 627 →
+    # -3.13% of price → fires).
+    _rule(
+        "macd_strongly_negative", TONE_NEGATIVE,
+        fires=lambda s, t, f, o: (
+            _safe_float(t.get("macd_histogram")) is not None
+            and _safe_float(t.get("current_price")) is not None
+            and (_safe_float(t.get("current_price")) or 0) > 0
+            and (_safe_float(t.get("macd_histogram")) or 0)
+                < -0.005 * (_safe_float(t.get("current_price")) or 0)
+        ),
+        label_value=lambda s, t, f, o: {
+            "hist": round(_safe_float(t.get("macd_histogram")) or 0, 2),
+        },
+    ),
+    # Price is extremely far from its 200-day SMA in either direction —
+    # mean reversion risk is elevated when this stretches past 25%.
+    _rule(
+        "vs_sma200_extended", TONE_NEGATIVE,
+        fires=lambda s, t, f, o: abs(_safe_float(t.get("vs_sma200")) or 0) > 25,
+        label_value=lambda s, t, f, o: {
+            "pct": round(_safe_float(t.get("vs_sma200")) or 0, 1),
+        },
+    ),
+    # Multi-timeframe weakness: price below SMA200 AND MACD histogram
+    # negative AND 5-day momentum negative. When all three line up, the
+    # downtrend is no longer noise — it's confirmed across timeframes.
+    _rule(
+        "momentum_collapse", TONE_NEGATIVE,
+        fires=lambda s, t, f, o: (
+            _safe_float(t.get("vs_sma200")) is not None
+            and (_safe_float(t.get("vs_sma200")) or 0) < 0
+            and (_safe_float(t.get("macd_histogram")) or 0) < 0
+            and (_safe_float(t.get("momentum_5d")) or 0) < -2
+        ),
+    ),
 
     # ── Technical: volume ──
     _rule(

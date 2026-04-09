@@ -324,6 +324,11 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         if _knowledge_block:
             logger.info(f"Brain knowledge loaded: {len(_knowledge_block)} chars")
 
+        # Bust the per-scan pattern_stats dedupe cache so each scan
+        # re-reads closed history + live open positions fresh.
+        from app.services import pattern_stats
+        pattern_stats.invalidate_cache()
+
         # ══════════════════════════════════════════════════════
         # TWO-PASS SCANNING — saves ~70% AI tokens
         # Pass 1: Quick pre-score (FREE — technicals + fundamentals only)
@@ -651,7 +656,35 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             if vt_result["buys"] or vt_result["sells"]:
                 logger.info(f"Virtual portfolio: {vt_result['buys']} buys, {vt_result['sells']} sells")
 
-            # Check stop/target/time exits on all open virtual trades
+            # Stage 6: Thesis re-evaluation + invalidation exits.
+            # Runs BETWEEN process_virtual_trades (which handles SIGNAL/AVOID
+            # closes + new entries) and check_virtual_exits (which handles
+            # price-based stops/targets/profit-takes/time). This ordering
+            # matters: thesis_invalidated closes set status='CLOSED' so the
+            # subsequent stop/target sweep skips them via the OPEN guard.
+            #
+            # The thesis re-eval also persists thesis_last_status on every
+            # OPEN row, which check_virtual_exits then reads via
+            # _exit_is_thesis_protected to suppress noise exits when the
+            # thesis is still valid (catastrophic carve-out at hard_stop_pct).
+            try:
+                from app.services import thesis_tracker
+                thesis_results = await thesis_tracker.reevaluate_open_theses(valid_signals)
+                if thesis_results:
+                    invalidated = thesis_tracker.execute_thesis_invalidation_exits(
+                        thesis_results, brain_notifications,
+                    )
+                    if invalidated:
+                        logger.info(
+                            f"Thesis tracker: {invalidated} positions closed via THESIS_INVALIDATED"
+                        )
+            except Exception as e:
+                logger.warning(f"Thesis tracker failed (scan continues): {e}")
+
+            # Check stop/target/time exits on all open virtual trades.
+            # These now read pos.thesis_last_status (set above) and
+            # suppress themselves when the thesis is still valid, except
+            # for the catastrophic stop carve-out at hard_stop_pct.
             vt_exits = check_virtual_exits(brain_notifications)
             if any(vt_exits.values()):
                 logger.info(f"Virtual exits: {vt_exits}")
@@ -807,6 +840,25 @@ async def _process_candidate(
                 grok_data["_knowledge_block"] = knowledge_block
             if options_flow:
                 grok_data["_options_flow"] = options_flow
+
+            # Append per-ticker pattern stats — the brain's live track record
+            # on similar setups (closed trades + currently-open positions
+            # combined). Surfaces a warning when the brain has been losing
+            # this kind of pattern, or a green light when it's been winning.
+            # See app/services/pattern_stats.py for the math + thresholds.
+            try:
+                from app.services.pattern_stats import get_pattern_warning
+                pattern_warning = get_pattern_warning({
+                    "bucket": bucket,
+                    "market_regime": market_regime,
+                })
+                if pattern_warning:
+                    existing_kb = grok_data.get("_knowledge_block", "") or ""
+                    grok_data["_knowledge_block"] = existing_kb + "\n\n" + pattern_warning
+            except Exception as e:
+                # Unexpected failure in the stats query — surface as warning
+                # so it shows up in logs, but never block the synthesis.
+                logger.warning(f"pattern_stats injection failed for {ticker}: {e}")
 
         # AI synthesis with provider fallback chain
         synthesis = await ai_provider.synthesize_signal(

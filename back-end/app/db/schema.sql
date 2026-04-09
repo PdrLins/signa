@@ -252,7 +252,7 @@ CREATE TABLE IF NOT EXISTS investment_rules (
 CREATE INDEX IF NOT EXISTS idx_investment_rules_type ON investment_rules(rule_type);
 CREATE INDEX IF NOT EXISTS idx_investment_rules_active ON investment_rules(is_active) WHERE is_active = TRUE;
 
--- 14. SIGNAL KNOWLEDGE (brain)
+-- 14. SIGNAL KNOWLEDGE (brain) — validated, proven patterns
 CREATE TABLE IF NOT EXISTS signal_knowledge (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     topic           VARCHAR NOT NULL,
@@ -264,11 +264,93 @@ CREATE TABLE IF NOT EXISTS signal_knowledge (
     source_name     VARCHAR,
     source_url      VARCHAR,
     notes           TEXT,
+    -- Stage 1.5: distinguish where the knowledge entry came from. Lets us
+    -- filter "knowledge the brain LEARNED" vs "knowledge that was seeded"
+    -- in the brain editor and badge learned entries differently in the
+    -- AI prompt so Claude knows which patterns are observation-derived.
+    --   'seed'                  = original seed_*.py entries
+    --   'manual'                = added via brain editor
+    --   'learned_from_thinking' = graduated from a signal_thinking hypothesis
+    --   'auto_extracted'        = future: written by pattern_extractor
+    source_type     VARCHAR DEFAULT 'seed',
+    -- For learned entries, points back to the hypothesis that produced
+    -- this knowledge so we can join to its evidence trail (counts,
+    -- prediction, original notes). NULL for seed/manual entries.
+    learned_from_thinking_id UUID REFERENCES signal_thinking(id),
+    -- Stage 5: knowledge is conditional. invalidation_conditions captures
+    -- WHEN this pattern stops applying — e.g. {"any_of": [{"regime_in":["TRENDING"]}]}
+    invalidation_conditions JSONB,
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_signal_knowledge_topic ON signal_knowledge(topic);
 CREATE INDEX IF NOT EXISTS idx_signal_knowledge_active ON signal_knowledge(is_active) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_signal_knowledge_source_type ON signal_knowledge(source_type);
+-- Migration for existing installs (safe to re-run):
+ALTER TABLE signal_knowledge ADD COLUMN IF NOT EXISTS source_type VARCHAR DEFAULT 'seed';
+ALTER TABLE signal_knowledge ADD COLUMN IF NOT EXISTS learned_from_thinking_id UUID REFERENCES signal_thinking(id);
+ALTER TABLE signal_knowledge ADD COLUMN IF NOT EXISTS invalidation_conditions JSONB;
+UPDATE signal_knowledge SET source_type = 'seed' WHERE source_type IS NULL;
+
+-- 14b. SIGNAL THINKING (brain) — hypotheses under observation
+-- Distinct from signal_knowledge: thinking entries are guesses with low
+-- statistical support. They get fed to Claude as "Working Hypotheses" with
+-- explicit low-confidence framing. When observations_supporting reaches
+-- graduation_threshold (and contradicting stays low), the entry can be
+-- promoted to signal_knowledge — that promotion is currently manual.
+CREATE TABLE IF NOT EXISTS signal_thinking (
+    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    hypothesis                  TEXT NOT NULL,
+    prediction                  TEXT NOT NULL,
+    pattern_match               JSONB NOT NULL,
+    invalidation_conditions     JSONB,
+    created_by                  VARCHAR NOT NULL,
+    observations_supporting     INT DEFAULT 0,
+    observations_contradicting  INT DEFAULT 0,
+    observations_neutral        INT DEFAULT 0,
+    status                      VARCHAR DEFAULT 'active',
+    graduation_threshold        INT DEFAULT 5,
+    graduated_to                UUID REFERENCES signal_knowledge(id),
+    last_evaluated_at           TIMESTAMPTZ,
+    notes                       TEXT,
+    created_at                  TIMESTAMPTZ DEFAULT now(),
+    updated_at                  TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_signal_thinking_active ON signal_thinking(status) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_signal_thinking_created_by ON signal_thinking(created_by);
+
+-- 14c. KNOWLEDGE EVENTS (brain) — append-only audit log
+-- Every mutation to signal_thinking or signal_knowledge appends a row here.
+-- Never UPDATE, never DELETE — the whole table IS the audit log. Without
+-- this we have aggregate counters but no individual events; we cannot
+-- answer "show me the trades that graduated this hypothesis" or "why did
+-- the brain start avoiding META-class signals last Tuesday."
+CREATE TABLE IF NOT EXISTS knowledge_events (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type      VARCHAR NOT NULL,
+        -- 'thinking_created' | 'thinking_observation_added' |
+        -- 'thinking_graduated' | 'thinking_rejected' | 'thinking_stale' |
+        -- 'thinking_edited' | 'knowledge_created' | 'knowledge_edited' |
+        -- 'knowledge_deactivated'
+    thinking_id     UUID REFERENCES signal_thinking(id),
+    knowledge_id    UUID REFERENCES signal_knowledge(id),
+    trade_id        UUID REFERENCES virtual_trades(id),
+    triggered_by    VARCHAR NOT NULL,
+        -- 'auto_extractor' | 'claude_journal_analysis' | 'user_manual' |
+        -- 'graduation_logic' | 'thesis_tracker' | 'brain_editor_api' |
+        -- 'seed_brain_py'
+    observation_outcome VARCHAR,
+        -- 'supporting' | 'contradicting' | 'neutral' (only for observation events)
+    payload         JSONB,
+        -- Snapshot of relevant state at event time. Schema varies by event_type.
+    reason          TEXT,
+        -- Human-readable explanation
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_events_thinking ON knowledge_events(thinking_id) WHERE thinking_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_knowledge_events_knowledge ON knowledge_events(knowledge_id) WHERE knowledge_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_knowledge_events_type ON knowledge_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_knowledge_events_created ON knowledge_events(created_at DESC);
 
 -- 15. TRADE OUTCOMES (self-learning)
 CREATE TABLE IF NOT EXISTS trade_outcomes (
@@ -368,6 +450,20 @@ CREATE TABLE IF NOT EXISTS virtual_trades (
     pending_review_action  VARCHAR,     -- SELL, AVOID, or FORCE_SELL (sentinel for /forcesell user override)
     pending_review_score   INT,
     pending_review_reason  TEXT,
+    -- Snapshotted at insert time so close-time learning has the original
+    -- regime even if the regime has shifted since. Used by Stage 3
+    -- (record_outcome) and Stage 4 (pattern_stats).
+    market_regime          VARCHAR,
+    -- Stage 6: thesis tracking. Every brain entry captures Claude's
+    -- reasoning so the brain can re-evaluate WHY at every scan and exit
+    -- with reason='THESIS_INVALIDATED' when the reason no longer holds
+    -- (regardless of P&L direction). The keywords JSONB is the
+    -- machine-checkable snapshot of the entry conditions.
+    entry_thesis           TEXT,
+    entry_thesis_keywords  JSONB,
+    thesis_last_checked_at TIMESTAMPTZ,
+    thesis_last_status     VARCHAR,     -- 'valid' | 'weakening' | 'invalid' | NULL
+    thesis_last_reason     TEXT,
     created_at      TIMESTAMPTZ DEFAULT now(),
     -- updated_at lets us prove that a closed row was never mutated after close.
     -- Pair with the trigger below + status='OPEN' guards in app code.
@@ -390,6 +486,14 @@ ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS entry_tier INT;
 ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS trust_multiplier DOUBLE PRECISION;
 ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
 CREATE INDEX IF NOT EXISTS idx_virtual_trades_entry_tier ON virtual_trades(entry_tier) WHERE entry_tier IS NOT NULL;
+-- Self-learning loop migrations (Stage 3 + Stage 6):
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS market_regime VARCHAR;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS entry_thesis TEXT;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS entry_thesis_keywords JSONB;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS thesis_last_checked_at TIMESTAMPTZ;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS thesis_last_status VARCHAR;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS thesis_last_reason TEXT;
+CREATE INDEX IF NOT EXISTS idx_virtual_trades_thesis_status ON virtual_trades(thesis_last_status) WHERE status = 'OPEN';
 
 
 -- 18b. AI RETRY QUEUE (tickers whose AI synthesis failed — retry on next scan)

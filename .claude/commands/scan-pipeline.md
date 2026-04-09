@@ -39,6 +39,76 @@ Trigger endpoint has a concurrency guard — rejects if a scan is already RUNNIN
 8. GEM alerts → Watchlist sell alerts → Scan digest (PRE_MARKET + AFTER_CLOSE only)
 9. Position monitor: stop-loss, target, P&L milestones, signal weakening
 
+## Phase 7 — Virtual Portfolio + Learning Loop (after signals are inserted)
+
+Order matters in this phase. The new learning-loop logic (Stage 6) inserts a thesis re-evaluation step BETWEEN the new-entry/SIGNAL-exit pass and the price-based exit sweep.
+
+```
+process_pending_reviews(signals)        # pre-market reviews flagged earlier
+   ↓
+process_virtual_trades(signals, ...)    # SIGNAL/AVOID closes + new entries
+                                         # (each entry captures entry_thesis +
+                                         #  entry_thesis_keywords for Stage 6)
+   ↓
+thesis_tracker.reevaluate_open_theses()  # re-asks Claude per OPEN brain position
+                                         # parallel via asyncio.gather, semaphore=3
+                                         # writes thesis_last_status on each row
+   ↓
+thesis_tracker.execute_thesis_invalidation_exits()
+                                         # closes positions where status=invalid
+                                         # AND confidence>=60 (THESIS_INVALIDATED)
+   ↓
+check_virtual_exits()                    # STOP/TARGET/PROFIT/EXPIRED — each exit
+                                         # gated by _exit_is_thesis_protected
+                                         # (catastrophic stop -8% bypasses gate)
+   ↓
+flush_brain_notifications()              # drain Telegram queue
+```
+
+**Key invariant:** every brain trade close (regardless of path) flows through `_record_brain_outcome` which:
+1. Writes a row to `trade_outcomes` for the existing weekly Claude analysis + Stage 4 pattern stats
+2. Calls `_match_thinking_observations` to bump evidence counters on any active hypothesis whose `pattern_match` matches the closed trade
+3. Logs `thinking_observation_added` events to `knowledge_events`
+
+## Per-ticker prompt construction (Phase 4 — AI synthesis)
+
+Every AI synthesis call now includes 4 evidence layers fed into the prompt:
+
+```
+## Investment Knowledge (from Signa Brain)
+{validated patterns from signal_knowledge — proven, high confidence}
+
+## Working Hypotheses (under observation — low confidence)
+{active hypotheses from signal_thinking — explicit low-conf framing}
+
+## Pattern Stats — Your Live Track Record on This Setup
+{closed history + currently-open positions, combined per (bucket, regime)
+ surfaces ⚠ warning if N>=5 + WR<40%, ✓ green light if WR>65%}
+
+## Warning Signs (from technical/fundamental analysis)
+{signal_breakdown rules filtered to TONE_NEGATIVE, formatted as plain English}
+{placed JUST BEFORE "Your Task" — LLM recency bias}
+
+## Your Task
+{Claude's decision question}
+```
+
+The 3 AI clients (`claude_local_client`, `claude_client`, `gemini_client`) all build the same prompt via `format_warning_signs(signal_for_warnings)`. The knowledge block is loaded once per scan and per-ticker pattern stats are appended.
+
+## Brain trust gate (unchanged from Stage 0)
+
+`_eval_brain_trust_tier` is still in `app/services/virtual_portfolio.py` and still gates entries:
+
+| Tier | AI status | Min score | Position size |
+|------|-----------|-----------|---------------|
+| Tier 1 | validated | 72 | 1.0× (full Kelly) |
+| Tier 2 | low_confidence | 80 | 0.5× (half) |
+| Tier 3 | skipped (tech-only) | 82 + tech confirm | 0.5× (half) |
+
+This gate is NOT replaced by the learning loop — the learning loop layers ABOVE it. The brain still requires a tier match to BUY; the learning loop just makes Claude's decision better-informed and adds the THESIS_INVALIDATED exit type.
+
+For deeper detail on the brain learning system: see `/brain-learning`.
+
 ## Scoring Weights (app/ai/signal_engine.py)
 
 **Safe Income:**

@@ -112,6 +112,18 @@ class Settings(BaseSettings):
     virtual_trade_max_days: int = 30  # Auto-close virtual trades after N days
     brain_max_open: int = 20          # Max simultaneous brain positions
 
+    # --- Brain Thesis Tracking (Stage 6) ---
+    # When enabled, every scan re-evaluates the thesis on every open brain
+    # position via Claude. Positions whose thesis is invalidated are closed
+    # with exit_reason='THESIS_INVALIDATED', regardless of P&L direction.
+    # Existing exit paths (STOP_HIT, TARGET_HIT, etc.) are GATED by the
+    # thesis check — if the thesis is still 'valid', the exit is suppressed
+    # as noise. EXCEPTION: catastrophic stops (pnl_pct <= -8%) ALWAYS fire,
+    # bypassing the thesis gate, so a wrong thesis call can never blow us up.
+    # Set to False to revert to pre-Stage-6 behavior (no thesis checks).
+    brain_thesis_gate_enabled: bool = True
+    brain_thesis_hard_stop_pct: float = -8.0  # catastrophic stop carve-out
+
     # --- Brain Watchdog ---
     watchdog_enabled: bool = True
     watchdog_pnl_alert_pct: float = 2.0       # Alert if P&L drops this % in one interval

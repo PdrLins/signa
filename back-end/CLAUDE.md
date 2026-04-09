@@ -23,8 +23,9 @@ Config in `app/core/config.py` (Pydantic Settings from `.env`). Required: `JWT_S
 
 - `/architecture` — Module map, request flow, scan flow, all directories
 - `/scan-pipeline` — Two-pass pipeline, scoring weights, GEM conditions, blockers, contrarian, regimes
+- `/brain-learning` — Self-learning loop: thinking vs knowledge, thesis tracking, pattern stats, audit log
 - `/api-reference` — Every endpoint with methods, params, auth level, responses
-- `/database` — All 18 tables, indexes, triggers, query patterns, caching
+- `/database` — All 20 tables, indexes, triggers, query patterns, caching
 - `/security` — Auth flow, JWT, OTP, brain 2FA, rate limiting tiers, caching architecture
 - `/telegram` — Bot commands, alert types, OTP, webhook setup, bilingual templates
 - `/conventions` — Async patterns, auth patterns, caching, validation, file organization
@@ -43,4 +44,5 @@ Config in `app/core/config.py` (Pydantic Settings from `.env`). Required: `JWT_S
   - **Watchlist tickers are NOT guaranteed** — if they don't move enough, they drop off
 - Sentiment: Grok runs for HIGH_RISK only (35% weight); SAFE_INCOME skips it (10% weight, hardcoded neutral)
 - Kelly: fractional 25%, max position 15%
-- Virtual portfolio: brain auto-picks score >= 72 with target+stop filled, max 10 open, exits on stop/target/30d/SELL signal
+- Virtual portfolio: brain auto-picks score >= 72 with target+stop filled, max 10 open, exits on stop/target/30d/SELL/THESIS_INVALIDATED
+- **Brain thesis gate** (`brain_thesis_gate_enabled`, default True): suppresses noise exits when Claude's last thesis re-eval said `valid`. Carve-out at `brain_thesis_hard_stop_pct = -8.0` — catastrophic stops always fire. See `/brain-learning`.

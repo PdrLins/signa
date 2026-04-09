@@ -94,10 +94,11 @@ async def get_scans_today(user: dict = Depends(get_current_user)):
             completed = existing.get("completed_at")
             if started and completed:
                 try:
-                    from datetime import datetime as _dt
-                    s = _dt.fromisoformat(started.replace("Z", "+00:00")) if isinstance(started, str) else started
-                    c = _dt.fromisoformat(completed.replace("Z", "+00:00")) if isinstance(completed, str) else completed
-                    duration = int((c - s).total_seconds())
+                    from app.core.dates import parse_iso_utc
+                    s = parse_iso_utc(started) if isinstance(started, str) else started
+                    c = parse_iso_utc(completed) if isinstance(completed, str) else completed
+                    if s is not None and c is not None:
+                        duration = int((c - s).total_seconds())
                 except Exception:
                     pass
 

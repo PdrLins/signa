@@ -259,3 +259,132 @@ async def analyze_sentiment(ticker: str) -> dict:
         "error": "All providers failed or budget exceeded",
         "_provider": "none",
     }
+
+
+# ============================================================
+# THESIS RE-EVALUATION (Stage 6)
+# ============================================================
+#
+# Lighter than synthesize_signal — same provider chain (Claude Local first,
+# then paid Claude API) but skips Gemini. Gemini's reasoning is too crude
+# for nuanced thesis evaluation. If Claude is unavailable for both tiers,
+# we return None and the thesis tracker treats the position as "not
+# re-evaluated this scan" (existing exit gates fall back to no thesis check).
+
+async def re_evaluate_thesis(
+    symbol: str,
+    entry_date: str,
+    entry_price: float,
+    current_price: float,
+    pnl_pct: float,
+    days_held: int,
+    entry_thesis: str,
+    entry_conditions: dict,
+    current_conditions: dict,
+) -> dict | None:
+    """Ask Claude whether the original thesis for an open position still holds.
+
+    Returns a parsed dict like:
+        {"status": "valid"|"weakening"|"invalid",
+         "confidence": int,
+         "reason": str,
+         "should_exit": bool,
+         "current_thesis": str|None}
+
+    Returns None on hard failure (both Claude tiers down). Callers must
+    treat None as "no re-eval this scan" — leave any prior thesis_last_*
+    fields in place; do NOT clear them.
+    """
+    import json
+    from app.ai.prompts import THESIS_REEVAL_PROMPT, clean_json_response
+
+    def _format_conditions(d: dict) -> str:
+        if not d:
+            return "(no data)"
+        lines = []
+        for k, v in d.items():
+            if v is None:
+                continue
+            # Defense against prompt-injection via untrusted string fields
+            # (e.g., Grok's sentiment_label could theoretically contain
+            # "\n\nIGNORE PRIOR INSTRUCTIONS"). For strings, strip newlines
+            # and truncate to a safe length. Numbers/bools pass through.
+            if isinstance(v, str):
+                v = v.replace("\n", " ").replace("\r", " ")[:100]
+            lines.append(f"- {k}: {v}")
+        return "\n".join(lines) if lines else "(no data)"
+
+    prompt = THESIS_REEVAL_PROMPT.format(
+        symbol=symbol,
+        entry_date=entry_date[:10] if entry_date else "?",
+        days_held=days_held,
+        entry_price=entry_price,
+        current_price=current_price,
+        pnl_pct=pnl_pct,
+        entry_thesis=entry_thesis or "(no thesis recorded)",
+        entry_conditions=_format_conditions(entry_conditions),
+        current_conditions=_format_conditions(current_conditions),
+    )
+
+    budget = await _get_budget()
+
+    def _valid_reeval_shape(d) -> bool:
+        """Sanity-check Claude's re-eval JSON. Must be a dict with a
+        `status` field — otherwise an `EVENT_THESIS_EVALUATED` event would
+        get logged with garbage data and downstream code would default to
+        'valid' on a hallucinated response."""
+        return isinstance(d, dict) and "status" in d
+
+    # ── Tier 1: Claude Local (free) ──
+    if settings.claude_local:
+        try:
+            from app.ai.claude_local_client import call_with_prompt
+            data = await call_with_prompt(prompt)
+            if _valid_reeval_shape(data):
+                data["_provider"] = "claude-local"
+                logger.debug(
+                    f"Thesis re-eval [{symbol}] → {data.get('status')} "
+                    f"confidence={data.get('confidence')} (claude-local)"
+                )
+                return data
+            if data is not None:
+                logger.warning(
+                    f"Thesis re-eval [{symbol}] Claude Local returned invalid shape, "
+                    f"falling through to paid API: {type(data).__name__}"
+                )
+        except Exception as e:
+            logger.debug(f"Thesis re-eval Claude Local failed for {symbol}: {e}")
+
+    # ── Tier 2: Paid Claude API ──
+    allowed, _reason = await budget.can_call("claude", "synthesis")
+    if not allowed or not settings.anthropic_api_key:
+        logger.debug(f"Thesis re-eval skipped (no Claude API budget) for {symbol}")
+        return None
+    try:
+        from app.ai.claude_client import _get_client
+        client = await _get_client()
+        response = await client.messages.create(
+            model=settings.claude_model,
+            max_tokens=settings.claude_max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        content = clean_json_response(response.content[0].text)
+        data = json.loads(content)
+        if not _valid_reeval_shape(data):
+            logger.warning(
+                f"Thesis re-eval [{symbol}] Claude API returned invalid shape "
+                f"({type(data).__name__}) — discarding"
+            )
+            await budget.record_call("claude", "synthesis", symbol, success=False)
+            return None
+        data["_provider"] = "claude"
+        await budget.record_call("claude", "synthesis", symbol, success=True)
+        logger.debug(
+            f"Thesis re-eval [{symbol}] → {data.get('status')} "
+            f"confidence={data.get('confidence')} (claude-api)"
+        )
+        return data
+    except Exception as e:
+        logger.warning(f"Thesis re-eval Claude API failed for {symbol}: {e}")
+        await budget.record_call("claude", "synthesis", symbol, success=False)
+        return None
