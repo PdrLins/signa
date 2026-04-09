@@ -186,3 +186,54 @@ Contrarian signals use lower BUY threshold (55 vs 62/65).
 - `app/signals/kelly.py` — position sizing
 - `app/signals/contrarian.py` — deep-value detection
 - `app/scanners/` — data ingestion (yfinance, FRED, pandas-ta)
+
+## Operational: stuck scan cleanup
+
+**Symptom:** scan trigger rejected with `409 Conflict` or "another scan is already running", or dashboard shows an old scan stuck at weird times (e.g., a PRE_MARKET scan that never completed).
+
+**Cause:** the backend was killed mid-scan (restart, crash, SIGKILL). The `scans` row is marked `RUNNING` at the top of `run_scan()` and updated to `COMPLETE` at the end. When the process dies between those two points, the row stays in `RUNNING` forever and the concurrency guard blocks all new triggers.
+
+**Fix** (one-shot Python in the back-end venv):
+
+```python
+venv/bin/python << 'PY'
+import sys; sys.path.insert(0, ".")
+from app.db.supabase import get_client
+from datetime import datetime, timezone
+db = get_client()
+
+stuck = (
+    db.table("scans")
+    .select("id, scan_type, status, started_at")
+    .in_("status", ["RUNNING", "QUEUED"])
+    .execute()
+).data or []
+
+now = datetime.now(timezone.utc).isoformat()
+for s in stuck:
+    db.table("scans").update({
+        "status": "FAILED",
+        "completed_at": now,
+        "error_message": "Manually cleaned up — orphaned scan row from backend restart.",
+    }).eq("id", s["id"]).eq("status", s["status"]).execute()
+    print(f"cleaned {s['id']} ({s['scan_type']})")
+PY
+```
+
+**After cleanup:** trigger a new scan from the dashboard. The concurrency guard is now satisfied.
+
+**Note:** restarting the backend does NOT clear stuck scan rows — the state lives in Supabase, not the Python process. You MUST run the UPDATE above. The row survives restarts.
+
+**Future-proofing ideas (not shipped):** on-startup sweep that auto-fails RUNNING scans older than 30 min, heartbeat field on the scans row, graceful SIGTERM handler in `run_scan`. None implemented today because this only bites on abnormal termination. Add to a `feat: scan robustness` commit if it recurs often.
+
+## Post-restart proof-of-life check
+
+After any backend restart, verify the new code is loaded by triggering a scan and looking for these lines in the logs:
+
+- **`Brain knowledge loaded: ~7300 chars`** — Stage 1+ is live (pre-Stage-1 was ~1500 chars). This is the canonical proof-of-life check.
+- **`Thesis re-eval skipped for LYG: no entry_thesis (pre-Stage-6 trade)`** × 5 — Stage 6 thesis_tracker is wired. The 5 pre-Stage-6 legacy positions will continue being skipped until they naturally close; this is expected, not an error.
+- **`thesis_tracker closed N positions via THESIS_INVALIDATED`** — only fires when a Stage 6-tracked position's thesis is invalidated by Claude (first seen on CRM at 10:08 on Apr 9).
+
+If you see `Brain knowledge loaded: ~1500 chars`, the backend is still running pre-Stage-1 code. You forgot to restart.
+
+For the full brain architecture: see `/brain-learning`.

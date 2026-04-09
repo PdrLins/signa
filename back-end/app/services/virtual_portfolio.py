@@ -1870,6 +1870,15 @@ def get_virtual_summary() -> dict:
                 "exit_reason": t.get("exit_reason"),
                 "entry_score": t.get("entry_score"),
                 "exit_score": t.get("exit_score"),
+                # Frontend (brain/performance page) renders
+                # "entry_date entry_price → exit_date exit_price"
+                # under each closed-trade row. These fields are already
+                # loaded by the SELECT above; omitting them here is what
+                # made the UI render dashes instead of actual values.
+                "entry_date": t.get("entry_date"),
+                "exit_date": t.get("exit_date"),
+                "entry_price": t.get("entry_price"),
+                "exit_price": t.get("exit_price"),
             }
             for t in closed_trades[:5]
         ],
