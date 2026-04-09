@@ -920,7 +920,23 @@ async def _process_candidate(
         else:
             action = score_to_action(score, bucket)
 
-        # AI quality guard: downgrade BUY to HOLD when AI is unreliable
+        # AI quality guard: downgrade BUY to HOLD when AI is unreliable.
+        #
+        # ARCHITECTURE NOTE: score is the entry decider, Claude provides
+        # the dossier (reasoning, target, stop, confidence). The principle
+        # in `feedback_three_witness_consensus.md` is "AI is the decider"
+        # but it applies to EXITS (Stage 6 thesis tracker) and to FEEDING
+        # Claude a better dossier so future entries are calibrated. It does
+        # NOT mean Claude has unilateral veto over score-derived BUYs at
+        # entry — that would conflict with the explicit "do not build hard
+        # vetoes that override the AI's view" guidance and Pedro's
+        # "AI cannot win all the time" rule.
+        #
+        # What this guard CAN do: catch genuine self-contradictions where
+        # Claude says BUY but its OWN structured self_check says the
+        # reasoning doesn't support that BUY. That's not a math veto — it's
+        # asking Claude "are you sure?" via a structured second pass that
+        # Claude itself filled out.
         if action == "BUY":
             if ai_status == "failed":
                 logger.warning(f"{ticker}: BUY downgraded to HOLD (AI synthesis failed — all providers errored)")
@@ -929,31 +945,17 @@ async def _process_candidate(
                 logger.info(f"{ticker}: BUY downgraded to HOLD (low AI confidence {confidence}%)")
                 action = "HOLD"
             else:
-                # Self-consistency safety net: even when AI is "validated" at
-                # confidence >=50, Claude occasionally produces a BUY signal
-                # while the reasoning text describes the setup in bearish
-                # terms. Stage 6 thesis re-eval catches this within seconds,
-                # but it is cleaner to never make the buy in the first place.
+                # Self-consistency safety net via structured self_check.
+                # PRIMARY (added 2026-04-09): the synthesis prompt requires
+                # Claude to return a `self_check` block answering yes/no
+                # questions about its own reasoning. When Claude returns
+                # signal=BUY but its self_check flags wait/bearish/inconsistent,
+                # downgrade. Empirically structured self-questions are much
+                # easier for an LLM to answer correctly than overall judgment.
                 #
-                # PRIMARY check (added 2026-04-09): structured `self_check`
-                # block that the AI is required to fill in the synthesis
-                # response. The AI answers explicit yes/no questions about
-                # its own reasoning ("does this contain wait instructions?",
-                # "does this contain bearish descriptors?", "does the
-                # reasoning support the signal?"). Structured questions are
-                # much easier for an LLM to answer correctly than overall
-                # judgment calls — empirically the gap is large.
-                #
-                # FALLBACK check: a substring list of bearish hedge phrases.
-                # Only fires when self_check is missing (`_present=False`)
-                # because the AI provider didn't return one (legacy response,
-                # malformed JSON, error fallback). Kept as defense-in-depth.
-                #
-                # Real cases caught by the prior pure-regex version (2026-04-09
-                # production logs): CRM "structural downtrend", WING "falling
-                # knife", META "deeply negative MACD", BF-B "technically
-                # stretched". Whack-a-mole approach was retired because Claude
-                # kept finding new bearish phrasings to hedge with.
+                # FALLBACK: substring regex on raw reasoning (only fires when
+                # self_check is missing — older provider responses, malformed
+                # JSON, error fallbacks). Defense in depth.
                 _self_check = synthesis.get("self_check") or {}
                 _downgrade_reason: str | None = None
 
@@ -965,11 +967,6 @@ async def _process_candidate(
                     elif not _self_check.get("reasoning_supports_signal"):
                         _downgrade_reason = "self_check.reasoning_supports_signal=false"
                 else:
-                    # Legacy fallback: substring search on raw reasoning text.
-                    # Only one redundant phrase needs to hit — these are all
-                    # strong signals. If you find Claude using new bearish
-                    # phrasings that slip past this list, prefer expanding
-                    # the structured self_check prompt over adding here.
                     _BEARISH_HEDGE_PHRASES = (
                         "falling knife", "falling-knife",
                         "structural downtrend", "structural weakness",
@@ -999,8 +996,7 @@ async def _process_candidate(
                 if _downgrade_reason:
                     logger.warning(
                         f"{ticker}: BUY downgraded to HOLD — {_downgrade_reason} "
-                        f"(Claude self-contradiction; notes: "
-                        f"{_self_check.get('self_check_notes', '')!r})"
+                        f"(notes: {_self_check.get('self_check_notes', '')!r})"
                     )
                     action = "HOLD"
 
