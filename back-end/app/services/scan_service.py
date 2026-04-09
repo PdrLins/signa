@@ -1015,6 +1015,15 @@ async def _process_candidate(
 
         current_price = technical_data.get("current_price")
 
+        # Persist Claude's self_check block alongside the rest of grok_data
+        # so post-hoc audits can answer "did Claude say its reasoning was
+        # consistent with its signal?" without re-running the synthesis.
+        # Underscore-prefixed key matches the existing meta-field convention
+        # (_market_regime, _knowledge_block, _options_flow, ...) and is
+        # ignored by format_sentiment so it cannot leak into future prompts.
+        if isinstance(grok_data, dict) and synthesis.get("self_check"):
+            grok_data["_self_check"] = synthesis["self_check"]
+
         # Build signal record
         from app.scanners.universe import get_exchange
         exchange = get_exchange(ticker)
