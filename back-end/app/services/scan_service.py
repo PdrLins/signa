@@ -1011,14 +1011,21 @@ async def _process_candidate(
 
         current_price = technical_data.get("current_price")
 
-        # Persist Claude's self_check block alongside the rest of grok_data
-        # so post-hoc audits can answer "did Claude say its reasoning was
-        # consistent with its signal?" without re-running the synthesis.
-        # Underscore-prefixed key matches the existing meta-field convention
-        # (_market_regime, _knowledge_block, _options_flow, ...) and is
-        # ignored by format_sentiment so it cannot leak into future prompts.
-        if isinstance(grok_data, dict) and synthesis.get("self_check"):
-            grok_data["_self_check"] = synthesis["self_check"]
+        # Persist Claude's raw signal + self_check alongside the rest of
+        # grok_data so post-hoc audits can answer:
+        #   1. "What did Claude actually say?" (`_ai_signal`) — distinct from
+        #      `action`, which is derived by score_to_action and may differ.
+        #   2. "Did Claude say its reasoning was consistent with that
+        #      signal?" (`_self_check`).
+        # Underscore-prefixed keys match the existing meta-field convention
+        # (_market_regime, _knowledge_block, _options_flow, ...) and are
+        # ignored by format_sentiment so they cannot leak into future prompts.
+        if isinstance(grok_data, dict):
+            _ai_signal = synthesis.get("signal")
+            if _ai_signal:
+                grok_data["_ai_signal"] = _ai_signal
+            if synthesis.get("self_check"):
+                grok_data["_self_check"] = synthesis["self_check"]
 
         # Build signal record
         from app.scanners.universe import get_exchange
