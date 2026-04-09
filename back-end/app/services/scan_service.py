@@ -929,92 +929,78 @@ async def _process_candidate(
                 logger.info(f"{ticker}: BUY downgraded to HOLD (low AI confidence {confidence}%)")
                 action = "HOLD"
             else:
-                # Self-consistency safety net: even when AI is "validated"
-                # at confidence >=50, Claude sometimes produces a BUY signal
+                # Self-consistency safety net: even when AI is "validated" at
+                # confidence >=50, Claude occasionally produces a BUY signal
                 # while the reasoning text describes the setup in bearish
-                # terms ("falling knife", "deeply negative MACD", etc.).
-                # Stage 6 thesis re-eval catches this within seconds, but
-                # it's cleaner to never make the buy in the first place.
-                # The CLAUDE_SYNTHESIS_PROMPT now has a Self-Consistency
-                # Requirement section telling Claude not to do this; this
-                # is the deterministic backstop for the ~5% of cases where
-                # Claude ignores its own rule.
+                # terms. Stage 6 thesis re-eval catches this within seconds,
+                # but it is cleaner to never make the buy in the first place.
                 #
-                # Real cases caught (2026-04-09 production logs):
-                #   CRM @ score 77, "structural downtrend" → exited at +0.08% via Stage 6
-                #   WING @ score 72, "falling knife" → exited at -0.07% via Stage 6
-                #   META @ score 80, "deeply negative MACD" → caught at source
+                # PRIMARY check (added 2026-04-09): structured `self_check`
+                # block that the AI is required to fill in the synthesis
+                # response. The AI answers explicit yes/no questions about
+                # its own reasoning ("does this contain wait instructions?",
+                # "does this contain bearish descriptors?", "does the
+                # reasoning support the signal?"). Structured questions are
+                # much easier for an LLM to answer correctly than overall
+                # judgment calls — empirically the gap is large.
                 #
-                # Phrases the FIRST guard list missed (added 2026-04-09 round 2
-                # after 4-of-5 problem BUYs slipped past with milder language):
-                #   BF-B BUY 68/72: "technically stretched", "near overbought",
-                #     "wait for a pullback", "for a better entry"
-                #   VSEC BUY 72: "technically overextended", "momentum has rolled
-                #     over", "bearish divergence pattern", "wait for a pullback"
-                #   META BUY 62: "decisively bearish", "wait for MACD", "before
-                #     considering entry"
-                #   CRM BUY 58: "wait for MACD histogram to flatten...before
-                #     considering entry"
+                # FALLBACK check: a substring list of bearish hedge phrases.
+                # Only fires when self_check is missing (`_present=False`)
+                # because the AI provider didn't return one (legacy response,
+                # malformed JSON, error fallback). Kept as defense-in-depth.
                 #
-                # The strongest single signal is Claude literally writing "wait
-                # for X before considering entry" — that and BUY are mutually
-                # exclusive. All 4 escapees contained that exact pattern.
-                #
-                # If you find Claude using new bearish phrasings that slip past
-                # this list, add them here. Match is case-insensitive and
-                # substring-based — short distinctive phrases are best.
-                _BEARISH_HEDGE_PHRASES = (
-                    # Trend / momentum descriptors
-                    "falling knife",
-                    "falling-knife",
-                    "structural downtrend",
-                    "structural weakness",
-                    "severe downtrend",
-                    "confirmed downtrend",
-                    "decisively bearish",
-                    "strongly bearish",
-                    "accelerating bearish",
-                    "deeply negative macd",
-                    "deeply negative momentum",
-                    "strongly negative macd",
-                    "momentum has rolled over",
-                    "momentum rollover",
-                    "momentum collapse",
-                    "bearish divergence pattern",
-                    # Position descriptors
-                    "technically stretched",
-                    "technically overextended",
-                    "near overbought",
-                    "approaching overbought",
-                    # Risk / reward descriptors
-                    "internally contradictory",
-                    "poor risk/reward",
-                    "poor risk reward",
-                    "no fundamental margin of safety",
-                    "no margin of safety",
-                    "bleed risk",
-                    "bleed within",
-                    # Explicit "do not enter yet" instructions — strongest signal.
-                    # If Claude tells itself to wait, the action cannot be BUY.
-                    "wait for a pullback",
-                    "wait for macd",
-                    "wait for momentum",
-                    "wait for confirmation",
-                    "wait for the",
-                    "before considering entry",
-                    "before considering an entry",
-                    "before commit",     # matches "before committing/commitment"
-                    "for a better entry",
-                    "is premature",
-                    "not an entry",
-                )
-                _reasoning = (synthesis.get("reasoning") or "").lower()
-                _hit = next((p for p in _BEARISH_HEDGE_PHRASES if p in _reasoning), None)
-                if _hit:
+                # Real cases caught by the prior pure-regex version (2026-04-09
+                # production logs): CRM "structural downtrend", WING "falling
+                # knife", META "deeply negative MACD", BF-B "technically
+                # stretched". Whack-a-mole approach was retired because Claude
+                # kept finding new bearish phrasings to hedge with.
+                _self_check = synthesis.get("self_check") or {}
+                _downgrade_reason: str | None = None
+
+                if _self_check.get("_present"):
+                    if _self_check.get("contains_wait_instruction"):
+                        _downgrade_reason = "self_check.contains_wait_instruction=true"
+                    elif _self_check.get("contains_bearish_descriptors"):
+                        _downgrade_reason = "self_check.contains_bearish_descriptors=true"
+                    elif not _self_check.get("reasoning_supports_signal"):
+                        _downgrade_reason = "self_check.reasoning_supports_signal=false"
+                else:
+                    # Legacy fallback: substring search on raw reasoning text.
+                    # Only one redundant phrase needs to hit — these are all
+                    # strong signals. If you find Claude using new bearish
+                    # phrasings that slip past this list, prefer expanding
+                    # the structured self_check prompt over adding here.
+                    _BEARISH_HEDGE_PHRASES = (
+                        "falling knife", "falling-knife",
+                        "structural downtrend", "structural weakness",
+                        "severe downtrend", "confirmed downtrend",
+                        "decisively bearish", "strongly bearish", "accelerating bearish",
+                        "deeply negative macd", "deeply negative momentum",
+                        "strongly negative macd",
+                        "momentum has rolled over", "momentum rollover", "momentum collapse",
+                        "bearish divergence pattern",
+                        "technically stretched", "technically overextended",
+                        "near overbought", "approaching overbought",
+                        "internally contradictory",
+                        "poor risk/reward", "poor risk reward",
+                        "no fundamental margin of safety", "no margin of safety",
+                        "bleed risk", "bleed within",
+                        "wait for a pullback", "wait for macd", "wait for momentum",
+                        "wait for confirmation", "wait for the",
+                        "before considering entry", "before considering an entry",
+                        "before commit", "for a better entry", "is premature",
+                        "not an entry",
+                    )
+                    _reasoning = (synthesis.get("reasoning") or "").lower()
+                    _hit = next((p for p in _BEARISH_HEDGE_PHRASES if p in _reasoning), None)
+                    if _hit:
+                        _downgrade_reason = f"legacy regex hit {_hit!r} (no self_check)"
+
+                if _downgrade_reason:
                     logger.warning(
-                        f"{ticker}: BUY downgraded to HOLD — reasoning contains bearish "
-                        f"hedge phrase {_hit!r} (Claude self-contradiction; see "
-                        f"CLAUDE_SYNTHESIS_PROMPT Self-Consistency Requirement)"
+                        f"{ticker}: BUY downgraded to HOLD — {_downgrade_reason} "
+                        f"(Claude self-contradiction; notes: "
+                        f"{_self_check.get('self_check_notes', '')!r})"
                     )
                     action = "HOLD"
 

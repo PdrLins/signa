@@ -55,6 +55,8 @@ from app.ai.prompts import (
     build_synthesis_prompt,
     clean_json_response,
     format_sentiment,
+    normalize_synthesis_result,
+    synthesis_error_response,
 )
 from app.core.config import settings
 
@@ -80,31 +82,7 @@ def _get_client():
     return _client
 
 
-def _safe_int(value, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
 # ─── Synthesis (replaces Claude) ───────────────────────────────
-
-def _synthesis_error(ticker: str, reason: str) -> dict:
-    return {
-        "signal": "HOLD",
-        "confidence": 0,
-        "reasoning": "Analysis temporarily unavailable",
-        "risk_factors": [],
-        "catalyst": None,
-        "catalyst_date": None,
-        "red_flags": [],
-        "risk_reward_ratio": None,
-        "target_price": None,
-        "stop_loss": None,
-        "sentiment_weight": 0,
-        "error": reason,
-    }
-
 
 async def synthesize_signal(
     ticker: str,
@@ -133,25 +111,7 @@ async def synthesize_signal(
 
             content = clean_json_response(response.text)
             data = json.loads(content)
-
-            raw_signal = data.get("signal", "HOLD").upper()
-            if raw_signal not in ("BUY", "HOLD", "SELL", "AVOID"):
-                raw_signal = "HOLD"
-
-            result = {
-                "signal": raw_signal,
-                "confidence": _safe_int(data.get("confidence"), 50),
-                "reasoning": data.get("reasoning", ""),
-                "risk_factors": data.get("risk_factors", []),
-                "catalyst": data.get("catalyst"),
-                "catalyst_date": data.get("catalyst_date"),
-                "red_flags": data.get("red_flags", []),
-                "risk_reward_ratio": data.get("risk_reward_ratio"),
-                "target_price": data.get("target_price"),
-                "stop_loss": data.get("stop_loss"),
-                "sentiment_weight": _safe_int(data.get("sentiment_weight"), 0),
-                "error": None,
-            }
+            result = normalize_synthesis_result(data)
 
             logger.debug(
                 f"Gemini [{ticker}] → {result['signal']} "
@@ -182,7 +142,7 @@ async def synthesize_signal(
             continue
 
     logger.warning(f"Gemini returning synthesis fallback for {ticker} — {last_error}")
-    return _synthesis_error(ticker, last_error)
+    return synthesis_error_response(last_error)
 
 
 # ─── Sentiment (replaces Grok) ─────────────────────────────────

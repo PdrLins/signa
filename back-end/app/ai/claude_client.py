@@ -59,7 +59,12 @@ from typing import Optional
 import anthropic
 from loguru import logger
 
-from app.ai.prompts import build_synthesis_prompt, clean_json_response
+from app.ai.prompts import (
+    build_synthesis_prompt,
+    clean_json_response,
+    normalize_synthesis_result,
+    synthesis_error_response,
+)
 from app.core.config import settings
 
 _client: Optional[anthropic.AsyncAnthropic] = None
@@ -77,32 +82,6 @@ async def _get_client() -> anthropic.AsyncAnthropic:
         _client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         logger.info("Claude API client initialized")
         return _client
-
-
-def _safe_int(value, default: int = 0) -> int:
-    """Safely cast to int, returning default on failure."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _error_response(ticker: str, reason: str) -> dict:
-    """Return a safe fallback on failure."""
-    return {
-        "signal": "HOLD",
-        "confidence": 0,
-        "reasoning": "Analysis temporarily unavailable",
-        "risk_factors": [],
-        "catalyst": None,
-        "catalyst_date": None,
-        "red_flags": [],
-        "risk_reward_ratio": None,
-        "target_price": None,
-        "stop_loss": None,
-        "sentiment_weight": 0,
-        "error": reason,
-    }
 
 
 async def synthesize_signal(
@@ -135,26 +114,7 @@ async def synthesize_signal(
 
             content = clean_json_response(response.content[0].text)
             data = json.loads(content)
-
-            # Validate signal against allowed values
-            raw_signal = data.get("signal", "HOLD").upper()
-            if raw_signal not in ("BUY", "HOLD", "SELL", "AVOID"):
-                raw_signal = "HOLD"
-
-            result = {
-                "signal": raw_signal,
-                "confidence": _safe_int(data.get("confidence"), 50),
-                "reasoning": data.get("reasoning", ""),
-                "risk_factors": data.get("risk_factors", []),
-                "catalyst": data.get("catalyst"),
-                "catalyst_date": data.get("catalyst_date"),
-                "red_flags": data.get("red_flags", []),
-                "risk_reward_ratio": data.get("risk_reward_ratio"),
-                "target_price": data.get("target_price"),
-                "stop_loss": data.get("stop_loss"),
-                "sentiment_weight": _safe_int(data.get("sentiment_weight"), 0),
-                "error": None,
-            }
+            result = normalize_synthesis_result(data)
 
             logger.debug(
                 f"Claude [{ticker}] → {result['signal']} "
@@ -187,4 +147,4 @@ async def synthesize_signal(
             break
 
     logger.warning(f"Claude returning fallback for {ticker} — {last_error}")
-    return _error_response(ticker, last_error)
+    return synthesis_error_response(last_error)

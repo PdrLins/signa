@@ -9,6 +9,130 @@ def clean_json_response(content: str) -> str:
         content = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
     return content.strip()
 
+
+def _safe_int(value: object, default: int = 0) -> int:
+    """Safely cast to int, returning default on failure."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def synthesis_error_response(reason: str) -> dict:
+    """Return the canonical "synthesis failed" dict.
+
+    Used by all 3 AI clients (claude_client, claude_local_client,
+    gemini_client) when their provider exhausts retries. Contains a safe
+    HOLD signal so downstream code never crashes on missing fields, plus
+    `error` set to the reason string so `_process_candidate` can classify
+    the candidate as `ai_status="failed"` and route it through the tech-only
+    Tier 3 entry path.
+
+    Includes a `_present=False` self_check so the scan_service guard
+    doesn't try to apply the structured contradiction check on a fallback
+    response that has no real reasoning to check.
+    """
+    return {
+        "signal": "HOLD",
+        "confidence": 0,
+        "reasoning": "Analysis temporarily unavailable",
+        "risk_factors": [],
+        "catalyst": None,
+        "catalyst_date": None,
+        "red_flags": [],
+        "risk_reward_ratio": None,
+        "target_price": None,
+        "stop_loss": None,
+        "sentiment_weight": 0,
+        "self_check": normalize_self_check(None),
+        "error": reason,
+    }
+
+
+def normalize_synthesis_result(data: dict) -> dict:
+    """Normalize a raw parsed AI synthesis JSON into the canonical result dict.
+
+    All 3 AI clients (claude_client, claude_local_client, gemini_client) used
+    to build this dict inline with copy-pasted code. This helper is the single
+    source of truth — adding a new field means editing here once.
+
+    Side effects: validates `signal` against the allowed whitelist, coerces
+    int fields, normalizes `self_check` via `normalize_self_check()`, and
+    stamps `error: None` to indicate success.
+    """
+    raw_signal = (data.get("signal") or "HOLD").upper()
+    if raw_signal not in ("BUY", "HOLD", "SELL", "AVOID"):
+        raw_signal = "HOLD"
+
+    return {
+        "signal": raw_signal,
+        "confidence": _safe_int(data.get("confidence"), 50),
+        "reasoning": data.get("reasoning", ""),
+        "risk_factors": data.get("risk_factors", []),
+        "catalyst": data.get("catalyst"),
+        "catalyst_date": data.get("catalyst_date"),
+        "red_flags": data.get("red_flags", []),
+        "risk_reward_ratio": data.get("risk_reward_ratio"),
+        "target_price": data.get("target_price"),
+        "stop_loss": data.get("stop_loss"),
+        "sentiment_weight": _safe_int(data.get("sentiment_weight"), 0),
+        "self_check": normalize_self_check(data.get("self_check")),
+        "error": None,
+    }
+
+
+def normalize_self_check(raw: object) -> dict:
+    """Coerce a raw `self_check` field from the AI response into a normalized dict.
+
+    The AI is asked to return:
+        {
+          "reasoning_supports_signal": bool,
+          "contains_wait_instruction": bool,
+          "contains_bearish_descriptors": bool,
+          "self_check_notes": str,
+        }
+
+    But providers can be sloppy: missing fields, string "true"/"false", null,
+    or omit the block entirely. This helper returns a dict with all four keys
+    always present so downstream code (scan_service guard) can read them
+    without defensive checks at every call site.
+
+    Conservative defaults when the AI omits the block:
+        reasoning_supports_signal=True (don't auto-downgrade legacy / older
+            providers that haven't been updated yet — they fall through to
+            the regex backstop in scan_service)
+        contains_wait_instruction=False
+        contains_bearish_descriptors=False
+        self_check_notes=""
+
+    The `_present` flag tells the guard whether the AI actually returned
+    a self_check block — when False, the regex backstop runs as a fallback.
+    When True, the structured check is authoritative.
+    """
+    def _to_bool(v: object, default: bool) -> bool:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "yes", "1", "t", "y")
+        return default
+
+    if not isinstance(raw, dict):
+        return {
+            "_present": False,
+            "reasoning_supports_signal": True,
+            "contains_wait_instruction": False,
+            "contains_bearish_descriptors": False,
+            "self_check_notes": "",
+        }
+
+    return {
+        "_present": True,
+        "reasoning_supports_signal": _to_bool(raw.get("reasoning_supports_signal"), True),
+        "contains_wait_instruction": _to_bool(raw.get("contains_wait_instruction"), False),
+        "contains_bearish_descriptors": _to_bool(raw.get("contains_bearish_descriptors"), False),
+        "self_check_notes": str(raw.get("self_check_notes") or "")[:300],
+    }
+
 GROK_SENTIMENT_SYSTEM = """
 You are a financial sentiment analyst specializing in X/Twitter data.
 You MUST respond with valid JSON only.
@@ -78,7 +202,13 @@ Based on ALL the data above, produce a JSON response with this exact structure:
     "stop_loss": <suggested stop loss price, or null>,
     "sentiment_weight": <0-100, how much sentiment influenced your decision>,
     "account_recommendation": "<RRSP or TFSA or TAXABLE>",
-    "catalyst_type": "<PEAD or PRE_EARNINGS or DIVIDEND or OTHER or null>"
+    "catalyst_type": "<PEAD or PRE_EARNINGS or DIVIDEND or OTHER or null>",
+    "self_check": {{
+        "reasoning_supports_signal": <true | false>,
+        "contains_wait_instruction": <true | false>,
+        "contains_bearish_descriptors": <true | false>,
+        "self_check_notes": "<one sentence: if BUY, explicitly confirm reasoning is unambiguously bullish; otherwise explain the mismatch>"
+    }}
 }}
 
 ## Rules
@@ -87,29 +217,71 @@ Based on ALL the data above, produce a JSON response with this exact structure:
 - SELL: Deteriorating conditions, high risk
 - AVOID: Red flags, hostile conditions, or signal blockers detected
 
-## Self-Consistency Requirement (READ CAREFULLY)
-Your `signal` field MUST be consistent with your `reasoning` field. The most
-common failure mode is generating a BUY signal while writing reasoning that
-argues against the trade. This is forbidden.
+## Mandatory Self-Check Protocol (the LAST thing you do before returning JSON)
 
-- If your reasoning describes the setup using bearish language — "falling
-  knife", "structural downtrend", "severe downtrend", "deeply negative
-  MACD", "strongly bearish momentum", "internally contradictory", "poor
-  risk/reward", "below the 200-day SMA with no support", or any phrase
-  meaning the entry conditions are bearish/risky — your signal MUST be
-  HOLD or AVOID. Never BUY.
-- A BUY signal REQUIRES the reasoning to be unambiguously bullish on the
-  entry conditions. If you find yourself wanting to mention bearish risks
-  in the reasoning, that's a strong signal that BUY is wrong. Demote to
-  HOLD and put the risks in `risk_factors` instead of weakening the BUY
-  case.
-- BEFORE you commit to BUY, re-read your own reasoning sentence by
-  sentence. If ANY sentence describes the setup negatively, change the
-  signal to HOLD.
-- "The valuation is compelling BUT the technicals are bearish" → HOLD
-- "MACD histogram is deeply negative AND price is in a downtrend" → HOLD
-- "Forward P/E is attractive but the stock is a falling knife" → HOLD
-- These are not BUYs. They are HOLDs with reasoning that says "wait".
+After drafting `reasoning` and `signal`, you MUST fill `self_check` honestly.
+The downstream system uses these three booleans as the canonical contradiction
+detector — they have hard, deterministic effects:
+
+- If `reasoning_supports_signal` is **false** on a BUY → the BUY is
+  automatically downgraded to HOLD by the system.
+- If `contains_wait_instruction` is **true** on a BUY → automatic downgrade.
+- If `contains_bearish_descriptors` is **true** on a BUY → automatic downgrade.
+
+You are NOT being asked to lie. Answer honestly. Then, BEFORE finalizing the
+`signal` field, change `signal` to HOLD if any of the above conditions hold,
+so your output is internally consistent in the first place.
+
+### Definitions
+
+- **contains_wait_instruction** = true if your reasoning anywhere tells the
+  reader to wait. Triggers: "wait for", "before considering entry", "before
+  committing", "premature", "for a better entry", "wait for confirmation",
+  "monitor before entering", "let it stabilize first", any synonym. False
+  otherwise.
+
+- **contains_bearish_descriptors** = true if your reasoning describes the
+  SETUP itself using bearish words like: "falling knife", "downtrend",
+  "deeply negative MACD", "technically stretched", "overextended", "rolled
+  over", "no margin of safety", "decisively bearish", "momentum collapse",
+  "bearish divergence", "structural weakness", any synonym. NOTE: bearish
+  words appearing only in `risk_factors` (not in `reasoning`) do NOT count.
+  This flag is about how you describe the *core setup*, not the disclaimers.
+
+- **reasoning_supports_signal** = true only if a reader of your `reasoning`
+  text alone (without ever seeing the `signal` field) would arrive at the
+  SAME signal you chose. If a reader of the reasoning would conclude HOLD
+  but you wrote BUY, this is FALSE.
+
+### Failure examples (all of these MUST be HOLD, not BUY)
+
+- "MACD is deeply negative... wait for momentum to flatten before entry" →
+  wait_instruction=true, bearish_descriptors=true → HOLD
+- "Stock is in a structural downtrend, but valuation is compelling" →
+  bearish_descriptors=true → HOLD (put valuation in risk_factors as upside)
+- "Technically stretched at 100% Bollinger Band, momentum has rolled over" →
+  bearish_descriptors=true → HOLD
+- "Forward P/E is attractive but the stock is a falling knife" →
+  bearish_descriptors=true → HOLD
+
+### Correct BUY example
+
+```
+{{
+  "signal": "BUY",
+  "reasoning": "MACD histogram just turned positive after 3 weeks of compression, RSI at 55 in the sweet spot, broke above SMA50 on 2.3x volume, and the earnings catalyst is 6 days away.",
+  "self_check": {{
+    "reasoning_supports_signal": true,
+    "contains_wait_instruction": false,
+    "contains_bearish_descriptors": false,
+    "self_check_notes": "Reasoning is unambiguously bullish — momentum turn, healthy RSI, volume confirmation, near-term catalyst. No hedging language."
+  }}
+}}
+```
+
+A correctly-filled BUY must have all three booleans matching the example
+above. If any of them are wrong, the system will downgrade and the trade
+won't happen. Just write HOLD honestly when the setup isn't there.
 
 - Be especially cautious about fraud allegations, earnings misses, and hostile macro
 - Factor in X/Twitter sentiment but don't let it dominate for safe income stocks

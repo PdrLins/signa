@@ -58,15 +58,12 @@ import json
 
 from loguru import logger
 
-from app.ai.prompts import build_synthesis_prompt, clean_json_response
-
-
-def _safe_int(value, default: int = 0) -> int:
-    """Safely cast to int, returning default on failure."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
+from app.ai.prompts import (
+    build_synthesis_prompt,
+    clean_json_response,
+    normalize_synthesis_result,
+    synthesis_error_response,
+)
 
 
 async def _run_claude_cli(
@@ -183,24 +180,6 @@ async def call_with_prompt(prompt: str, max_retries: int = 2) -> dict | None:
     return await _run_claude_cli(prompt, max_retries=max_retries)
 
 
-def _error_response(ticker: str, reason: str) -> dict:
-    """Return a safe fallback on failure."""
-    return {
-        "signal": "HOLD",
-        "confidence": 0,
-        "reasoning": "Analysis temporarily unavailable",
-        "risk_factors": [],
-        "catalyst": None,
-        "catalyst_date": None,
-        "red_flags": [],
-        "risk_reward_ratio": None,
-        "target_price": None,
-        "stop_loss": None,
-        "sentiment_weight": 0,
-        "error": reason,
-    }
-
-
 async def synthesize_signal(
     ticker: str,
     technical_data: dict,
@@ -226,27 +205,9 @@ async def synthesize_signal(
     )
     data = await _run_claude_cli(prompt, max_retries=max_retries, log_context=ticker)
     if data is None:
-        return _error_response(ticker, f"Claude Local failed after {max_retries} retries")
+        return synthesis_error_response(f"Claude Local failed after {max_retries} retries")
 
-    # Synthesis-specific normalization: action whitelist + int coercion.
-    raw_signal = data.get("signal", "HOLD").upper()
-    if raw_signal not in ("BUY", "HOLD", "SELL", "AVOID"):
-        raw_signal = "HOLD"
-
-    result = {
-        "signal": raw_signal,
-        "confidence": _safe_int(data.get("confidence"), 50),
-        "reasoning": data.get("reasoning", ""),
-        "risk_factors": data.get("risk_factors", []),
-        "catalyst": data.get("catalyst"),
-        "catalyst_date": data.get("catalyst_date"),
-        "red_flags": data.get("red_flags", []),
-        "risk_reward_ratio": data.get("risk_reward_ratio"),
-        "target_price": data.get("target_price"),
-        "stop_loss": data.get("stop_loss"),
-        "sentiment_weight": _safe_int(data.get("sentiment_weight"), 0),
-        "error": None,
-    }
+    result = normalize_synthesis_result(data)
     logger.debug(
         f"Claude Local [{ticker}] → {result['signal']} "
         f"confidence={result['confidence']} rr={result['risk_reward_ratio']}"
