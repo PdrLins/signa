@@ -940,26 +940,73 @@ async def _process_candidate(
                 # is the deterministic backstop for the ~5% of cases where
                 # Claude ignores its own rule.
                 #
-                # Real cases (2026-04-09 production logs):
+                # Real cases caught (2026-04-09 production logs):
                 #   CRM @ score 77, "structural downtrend" → exited at +0.08% via Stage 6
                 #   WING @ score 72, "falling knife" → exited at -0.07% via Stage 6
+                #   META @ score 80, "deeply negative MACD" → caught at source
                 #
-                # If you find Claude using new bearish phrasings that slip
-                # past this list, add them here. Match is case-insensitive
-                # and substring-based — short distinctive phrases are best.
+                # Phrases the FIRST guard list missed (added 2026-04-09 round 2
+                # after 4-of-5 problem BUYs slipped past with milder language):
+                #   BF-B BUY 68/72: "technically stretched", "near overbought",
+                #     "wait for a pullback", "for a better entry"
+                #   VSEC BUY 72: "technically overextended", "momentum has rolled
+                #     over", "bearish divergence pattern", "wait for a pullback"
+                #   META BUY 62: "decisively bearish", "wait for MACD", "before
+                #     considering entry"
+                #   CRM BUY 58: "wait for MACD histogram to flatten...before
+                #     considering entry"
+                #
+                # The strongest single signal is Claude literally writing "wait
+                # for X before considering entry" — that and BUY are mutually
+                # exclusive. All 4 escapees contained that exact pattern.
+                #
+                # If you find Claude using new bearish phrasings that slip past
+                # this list, add them here. Match is case-insensitive and
+                # substring-based — short distinctive phrases are best.
                 _BEARISH_HEDGE_PHRASES = (
+                    # Trend / momentum descriptors
                     "falling knife",
+                    "falling-knife",
                     "structural downtrend",
                     "structural weakness",
                     "severe downtrend",
                     "confirmed downtrend",
-                    "deeply negative macd",
-                    "deeply negative momentum",
+                    "decisively bearish",
                     "strongly bearish",
                     "accelerating bearish",
+                    "deeply negative macd",
+                    "deeply negative momentum",
+                    "strongly negative macd",
+                    "momentum has rolled over",
+                    "momentum rollover",
+                    "momentum collapse",
+                    "bearish divergence pattern",
+                    # Position descriptors
+                    "technically stretched",
+                    "technically overextended",
+                    "near overbought",
+                    "approaching overbought",
+                    # Risk / reward descriptors
                     "internally contradictory",
                     "poor risk/reward",
                     "poor risk reward",
+                    "no fundamental margin of safety",
+                    "no margin of safety",
+                    "bleed risk",
+                    "bleed within",
+                    # Explicit "do not enter yet" instructions — strongest signal.
+                    # If Claude tells itself to wait, the action cannot be BUY.
+                    "wait for a pullback",
+                    "wait for macd",
+                    "wait for momentum",
+                    "wait for confirmation",
+                    "wait for the",
+                    "before considering entry",
+                    "before considering an entry",
+                    "before commit",     # matches "before committing/commitment"
+                    "for a better entry",
+                    "is premature",
+                    "not an entry",
                 )
                 _reasoning = (synthesis.get("reasoning") or "").lower()
                 _hit = next((p for p in _BEARISH_HEDGE_PHRASES if p in _reasoning), None)
