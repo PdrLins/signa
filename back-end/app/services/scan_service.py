@@ -928,6 +928,48 @@ async def _process_candidate(
             elif ai_status == "low_confidence":
                 logger.info(f"{ticker}: BUY downgraded to HOLD (low AI confidence {confidence}%)")
                 action = "HOLD"
+            else:
+                # Self-consistency safety net: even when AI is "validated"
+                # at confidence >=50, Claude sometimes produces a BUY signal
+                # while the reasoning text describes the setup in bearish
+                # terms ("falling knife", "deeply negative MACD", etc.).
+                # Stage 6 thesis re-eval catches this within seconds, but
+                # it's cleaner to never make the buy in the first place.
+                # The CLAUDE_SYNTHESIS_PROMPT now has a Self-Consistency
+                # Requirement section telling Claude not to do this; this
+                # is the deterministic backstop for the ~5% of cases where
+                # Claude ignores its own rule.
+                #
+                # Real cases (2026-04-09 production logs):
+                #   CRM @ score 77, "structural downtrend" → exited at +0.08% via Stage 6
+                #   WING @ score 72, "falling knife" → exited at -0.07% via Stage 6
+                #
+                # If you find Claude using new bearish phrasings that slip
+                # past this list, add them here. Match is case-insensitive
+                # and substring-based — short distinctive phrases are best.
+                _BEARISH_HEDGE_PHRASES = (
+                    "falling knife",
+                    "structural downtrend",
+                    "structural weakness",
+                    "severe downtrend",
+                    "confirmed downtrend",
+                    "deeply negative macd",
+                    "deeply negative momentum",
+                    "strongly bearish",
+                    "accelerating bearish",
+                    "internally contradictory",
+                    "poor risk/reward",
+                    "poor risk reward",
+                )
+                _reasoning = (synthesis.get("reasoning") or "").lower()
+                _hit = next((p for p in _BEARISH_HEDGE_PHRASES if p in _reasoning), None)
+                if _hit:
+                    logger.warning(
+                        f"{ticker}: BUY downgraded to HOLD — reasoning contains bearish "
+                        f"hedge phrase {_hit!r} (Claude self-contradiction; see "
+                        f"CLAUDE_SYNTHESIS_PROMPT Self-Consistency Requirement)"
+                    )
+                    action = "HOLD"
 
         # Check GEM (blocked signals can't be GEMs)
         is_gem, gem_conditions = check_gem(score, grok_data, synthesis)

@@ -552,6 +552,16 @@ def _record_brain_outcome(
             f"Failed to update hypothesis observations for {closed_trade.get('symbol')}: {e}"
         )
 
+    # Bust the Track Record by Score cache so the dashboard reflects the
+    # new close immediately. Without this, the closed trade is in the DB
+    # but the Track Record table shows stale data until the 15-min TTL
+    # expires (the bug Pedro caught after WING closed at 13:06).
+    try:
+        from app.services.signal_service import invalidate_track_record_cache
+        invalidate_track_record_cache()
+    except Exception as e:
+        logger.debug(f"Track record cache invalidation skipped: {e}")
+
 
 def _trade_matches_pattern(trade: dict, pattern_match: dict) -> bool:
     """Best-effort match of a closed trade against a hypothesis pattern_match.

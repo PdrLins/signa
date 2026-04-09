@@ -7,7 +7,20 @@ from app.db import queries
 from app.services.price_cache import enrich_signals
 from app.services.signal_breakdown import compute_signal_breakdown
 
-_track_record_cache = TTLCache(max_size=1, default_ttl=3600)
+_track_record_cache = TTLCache(max_size=1, default_ttl=900)
+
+
+def invalidate_track_record_cache() -> None:
+    """Bust the track record cache. Called whenever a brain/watchlist trade
+    closes so the dashboard reflects the new state immediately instead of
+    waiting up to 15 minutes for the TTL to expire.
+
+    Without this, a brain trade closing at 13:06 ET would not appear in the
+    Track Record by Score table until ~14:06 ET (the cache TTL), which is
+    confusing because the dashboard's Brain Performance card already shows
+    the new total. The two displays drift out of sync until cache expiry.
+    """
+    _track_record_cache.clear()
 
 
 def get_signals(

@@ -86,6 +86,31 @@ Based on ALL the data above, produce a JSON response with this exact structure:
 - HOLD: Mixed signals, wait for confirmation
 - SELL: Deteriorating conditions, high risk
 - AVOID: Red flags, hostile conditions, or signal blockers detected
+
+## Self-Consistency Requirement (READ CAREFULLY)
+Your `signal` field MUST be consistent with your `reasoning` field. The most
+common failure mode is generating a BUY signal while writing reasoning that
+argues against the trade. This is forbidden.
+
+- If your reasoning describes the setup using bearish language — "falling
+  knife", "structural downtrend", "severe downtrend", "deeply negative
+  MACD", "strongly bearish momentum", "internally contradictory", "poor
+  risk/reward", "below the 200-day SMA with no support", or any phrase
+  meaning the entry conditions are bearish/risky — your signal MUST be
+  HOLD or AVOID. Never BUY.
+- A BUY signal REQUIRES the reasoning to be unambiguously bullish on the
+  entry conditions. If you find yourself wanting to mention bearish risks
+  in the reasoning, that's a strong signal that BUY is wrong. Demote to
+  HOLD and put the risks in `risk_factors` instead of weakening the BUY
+  case.
+- BEFORE you commit to BUY, re-read your own reasoning sentence by
+  sentence. If ANY sentence describes the setup negatively, change the
+  signal to HOLD.
+- "The valuation is compelling BUT the technicals are bearish" → HOLD
+- "MACD histogram is deeply negative AND price is in a downtrend" → HOLD
+- "Forward P/E is attractive but the stock is a falling knife" → HOLD
+- These are not BUYs. They are HOLDs with reasoning that says "wait".
+
 - Be especially cautious about fraud allegations, earnings misses, and hostile macro
 - Factor in X/Twitter sentiment but don't let it dominate for safe income stocks
 - For high risk stocks, sentiment and catalysts should weigh more heavily
