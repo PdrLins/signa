@@ -1,8 +1,9 @@
 """Market data fetching via yfinance — prices, volume, and fundamentals."""
 
 import asyncio
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
@@ -20,11 +21,36 @@ except Exception:
     pass
 
 # Per-ticker bulk-screening cache. The 5d OHLCV that bulk_screening returns
-# doesn't materially change between back-to-back scans within ~30 minutes,
-# so we cache results across scans and only re-fetch on misses. This makes
-# the second/third/fourth scans of the day skip most of the ~100s yfinance
-# screening cost. The first scan of the day still pays full price.
-_bulk_screening_cache = TTLCache(max_size=2000, default_ttl=1800)  # 30 min
+# doesn't materially change minute-to-minute, so we cache across scans and
+# only re-fetch on misses. First scan of the day pays full price; later
+# scans skip most of the ~100s yfinance screening cost.
+#
+# TTL is dynamic — see `_bulk_screen_ttl()`. Shorter during market hours
+# (prices move fast, stale data risks acting on a gap) and longer outside
+# hours (nothing moves). The audit explicitly flagged this stale-data risk.
+_bulk_screening_cache = TTLCache(max_size=2000, default_ttl=1800)  # fallback only
+
+
+def _bulk_screen_ttl() -> int:
+    """TTL for bulk-screening cache entries, tuned to the session clock.
+
+    During the US regular session (9:30-16:00 ET, weekdays) prices move
+    fast enough that a stale cache from 30 min ago could feed a scan data
+    that's materially wrong. Keep it to 15 min.
+
+    Outside the regular session (overnight, weekends, holidays) prices
+    don't move and we can safely reuse results for hours — we cap at 1 hr
+    anyway because the trading day rolls and the bulk_screening 5d window
+    shifts when a new session closes.
+    """
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    if now_et.weekday() >= 5:  # weekend
+        return 3600
+    minutes = now_et.hour * 60 + now_et.minute
+    # 9:30am = 570, 4:00pm = 960
+    if 570 <= minutes < 960:
+        return 900  # 15 min during session
+    return 3600  # 1 hr outside session
 
 # Concurrency cap for parallel batch downloads. yfinance + DNS + macOS thread
 # pool starts to fall over above ~3 simultaneous in-flight downloads — this
@@ -328,7 +354,10 @@ async def get_bulk_screening(tickers: list[str]) -> dict[str, dict]:
         logger.error(f"Bulk screening gather failed: {e}")
         return results
 
-    # 3. Merge + cache
+    # 3. Merge + cache. TTL is market-hours-aware — shorter during the
+    # regular session so a fast-moving open can't feed stale prices to
+    # the next scan. See `_bulk_screen_ttl()`.
+    ttl = _bulk_screen_ttl()
     fetched_count = 0
     for br in batch_results:
         if isinstance(br, Exception):
@@ -336,7 +365,7 @@ async def get_bulk_screening(tickers: list[str]) -> dict[str, dict]:
             continue
         for ticker, row in br.items():
             results[ticker] = row
-            _bulk_screening_cache.set(ticker, row)
+            _bulk_screening_cache.set(ticker, row, ttl=ttl)
             fetched_count += 1
 
     logger.info(
