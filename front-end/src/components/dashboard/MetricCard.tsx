@@ -26,22 +26,22 @@ export function MetricCard({ label, value, sub, valueColor, children }: MetricCa
         children
       ) : (
         <>
-          <p
-            className="text-[10px] font-semibold uppercase tracking-wide mb-1"
+          <span
+            className="text-[10px] font-semibold uppercase tracking-wide mb-1 block"
             style={{ color: theme.colors.textSub }}
           >
             {label}
-          </p>
-          <p
-            className="text-[26px] font-bold leading-tight tabular-nums"
+          </span>
+          <span
+            className="text-[26px] font-bold leading-tight tabular-nums block"
             style={{ color: valueColor || theme.colors.text }}
           >
             {value}
-          </p>
+          </span>
           {sub && (
-            <p className="text-[11px] mt-0.5" style={{ color: theme.colors.textSub }}>
+            <span className="text-[11px] mt-0.5 block" style={{ color: theme.colors.textSub }}>
               {sub}
-            </p>
+            </span>
           )}
         </>
       )}

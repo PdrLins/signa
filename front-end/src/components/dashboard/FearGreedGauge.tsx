@@ -44,8 +44,8 @@ export function FearGreedGauge({ score, label }: FearGreedGaugeProps) {
         labelFontSize="0"
         valueTextFontSize="0"
       />
-      <p
-        className="text-[20px] font-bold leading-none tabular-nums -mt-4"
+      <span
+        className="text-[20px] font-bold leading-none tabular-nums -mt-4 block text-center"
         style={{
           color: score == null ? theme.colors.textSub
             : score <= 25 ? theme.colors.down
@@ -56,10 +56,10 @@ export function FearGreedGauge({ score, label }: FearGreedGaugeProps) {
         }}
       >
         {score == null ? '\u2014' : score.toFixed(0)}
-      </p>
-      <p className="text-[10px]" style={{ color: theme.colors.textSub }}>
+      </span>
+      <span className="text-[10px] block text-center" style={{ color: theme.colors.textSub }}>
         {label ?? 'Fear & Greed'}
-      </p>
+      </span>
     </div>
   )
 }
