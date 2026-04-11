@@ -475,6 +475,8 @@ def _exit_is_thesis_protected(pos: dict, exit_reason: str, pnl_pct: float) -> bo
         return False
     if exit_reason == "THESIS_INVALIDATED":
         return False
+    if exit_reason == "TRAILING_STOP":
+        return False  # trailing stop protects gains — never suppress it
     return (pos.get("thesis_last_status") or "").lower() == "valid"
 
 
@@ -1063,13 +1065,19 @@ def process_virtual_trades(
         else:
             open_watchlist.add(r["symbol"])
 
-    # Re-buy cooldown snapshot: any brain symbol THESIS_INVALIDATED-closed
-    # within `brain_thesis_rebuy_cooldown_minutes` is blocked from re-entry
-    # this scan. Without this, Claude's non-determinism on borderline trades
-    # produces a buy → invalidate → re-buy → invalidate loop within minutes.
-    # Real case (2026-04-09): WING #1 closed at 17:06:04 via THESIS_INVALIDATED;
-    # WING #2 opened at 18:00:16 (54 min later) and immediately bled to -0.95%.
-    # The Day 4 journal explicitly predicted we would need this.
+    # Re-buy cooldown snapshot: any brain symbol recently closed via
+    # THESIS_INVALIDATED or TARGET_HIT is blocked from re-entry this scan.
+    #
+    # THESIS_INVALIDATED: prevents the buy → invalidate → re-buy loop
+    # caused by Claude's non-determinism. Real case (2026-04-09): WING #1
+    # closed at 17:06:04, WING #2 opened 54 min later and bled -0.95%.
+    #
+    # TARGET_HIT: prevents selling at target then immediately re-buying
+    # at the same price. Real case (2026-04-10): ASML #1 sold at $1489
+    # (target hit, +5.09%), ASML #2 re-entered same day at $1480.96 with
+    # a bearish entry thesis. The sell + re-buy creates a taxable event
+    # in Canada with no strategic benefit. Better to wait for a pullback
+    # before re-entering.
     cooldown_minutes = settings.brain_thesis_rebuy_cooldown_minutes
     cooldown_brain_symbols: set[str] = set()
     if cooldown_minutes > 0:
@@ -1079,7 +1087,7 @@ def process_virtual_trades(
             .select("symbol, exit_date")
             .eq("source", "brain")
             .eq("status", "CLOSED")
-            .eq("exit_reason", "THESIS_INVALIDATED")
+            .in_("exit_reason", ["THESIS_INVALIDATED", "TARGET_HIT"])
             .gte("exit_date", cutoff)
             .execute()
         ).data or []
@@ -1439,40 +1447,41 @@ def process_virtual_trades(
 
 
 async def flush_brain_notifications(notifications: BrainNotificationQueue) -> int:
-    """Drain the scan-local brain notification queue and send each entry via Telegram.
+    """Drain the scan-local brain notification queue into the Telegram background worker.
 
-    This is the ONLY function in this module that actually sends Telegram
-    messages. Every other function APPENDS to the queue; this one drains it.
-    Centralising the send means:
-      1. We can batch all brain alerts at the end of a scan in a single
-         async pass instead of awaiting individual sends inside sync code.
-      2. If a previous scan crashed mid-loop, the new scan starts with a
-         fresh queue (because each scan creates its own via
-         `new_notification_queue()`).
-      3. Send failures don't break the scan — each send is wrapped in
-         try/except and we keep going.
+    This is the ONLY function in this module that emits Telegram messages.
+    Every other function APPENDS to the queue; this one drains it into the
+    background `enqueue()` path so the scan NEVER blocks on Telegram HTTP.
+
+    Before 2026-04-10: this function awaited `send_message()` per item —
+    up to 150s of Telegram HTTP blocking inside the scan coroutine. That
+    starved Claude Local subprocesses and caused AI synthesis failures
+    when Telegram was slow or a login OTP collided with the scan.
+
+    Now: each notification is enqueued instantly. The background worker in
+    `telegram_bot._telegram_worker()` handles delivery + retry. The scan
+    continues immediately after enqueue.
 
     Args:
         notifications: The scan-local queue threaded through every brain
-            function this scan run. Will be cleared after sending.
+            function this scan run. Will be cleared after enqueuing.
 
     Returns:
-        Count of notifications successfully sent. The queue is always
-        cleared at the end regardless of how many sends succeeded — the
-        same notification should never be sent twice.
+        Count of notifications enqueued. The queue is always cleared at
+        the end regardless — the same notification should never be sent
+        twice.
     """
     if not notifications:
         return 0
     from app.notifications.messages import msg
-    from app.notifications.telegram_bot import send_message
+    from app.notifications.telegram_bot import enqueue
     sent = 0
-    # Iterate a copy in case any handler mutates the queue
     for key, kwargs in list(notifications):
         try:
-            await send_message(settings.telegram_chat_id, msg(key, **kwargs))
+            enqueue(settings.telegram_chat_id, msg(key, **kwargs))
             sent += 1
         except Exception as e:
-            logger.debug(f"Brain notification failed ({key}): {e}")
+            logger.debug(f"Brain notification enqueue failed ({key}): {e}")
     notifications.clear()
     return sent
 
@@ -1531,7 +1540,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         db.table("virtual_trades")
         .select("id, symbol, entry_price, entry_score, entry_date, source, "
                 "target_price, stop_loss, bucket, market_regime, "
-                "thesis_last_status")
+                "thesis_last_status, peak_price")
         .eq("status", "OPEN")
         .execute()
     )
@@ -1588,26 +1597,66 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         # Parse entry_date for age check
         days_held = days_since(trade.get("entry_date"), now=now)
 
-        # Determine exit reason (priority: stop > target > profit_take > time)
+        # ── Peak price tracking for trailing stop ──
+        # Track the highest price since entry. Updated every scan so the
+        # trailing stop ratchets upward as the position wins.
+        peak = float(trade.get("peak_price") or entry_price)
+        if current_price > peak:
+            peak = current_price
+            try:
+                db.table("virtual_trades").update(
+                    {"peak_price": peak}
+                ).eq("id", trade["id"]).execute()
+            except Exception:
+                pass  # non-critical, will retry next scan
+
+        # Trailing stop is "active" once the position has been at least 3%
+        # above entry at ANY point (peak_price >= entry * 1.03). Once
+        # active, the exit trigger is 3% below the peak — this lets
+        # winners run while protecting gains. Replaces the old fixed
+        # PROFIT_TAKE at 3%.
+        trailing_active = peak >= entry_price * 1.03
+        trailing_stop_price = peak * 0.97 if trailing_active else None
+
+        # Determine exit reason (priority: stop > trailing > target > time)
+        #
+        # The holding period rule (#3): when a position is young (< 7 days)
+        # AND doing well (up > 3%), suppress the fixed TARGET_HIT and let
+        # the trailing stop manage the exit. This reduces churn on winners
+        # (fewer taxable events in Canada, lets momentum play out).
+        # After 7 days, the fixed target fires normally.
         exit_reason = None
         if stop and current_price <= stop:
             exit_reason = "STOP_HIT"
             stops_hit += 1
-        elif target and current_price >= target:
-            exit_reason = "TARGET_HIT"
-            targets_hit += 1
-        # Profit-taking: lock in gains at +3%+ after 2+ days (let thesis play out first)
-        elif pnl_pct >= 3.0 and days_held >= 2:
-            exit_reason = "PROFIT_TAKE"
-            profit_takes += 1
-            logger.info(f"Virtual PROFIT TAKE: {symbol} at +{pnl_pct:.1f}% (locking in gains)")
+        elif trailing_active and current_price <= trailing_stop_price:
+            exit_reason = "TRAILING_STOP"
+            profit_takes += 1  # reuse the counter for P&L tracking
+            logger.info(
+                f"Virtual TRAILING STOP: {symbol} at {pnl_pct:+.1f}% "
+                f"(peak ${peak:.2f}, trail ${trailing_stop_price:.2f}, now ${current_price:.2f})"
+            )
             notifications.append(("brain_sell", {
                 "symbol": symbol, "price": f"{current_price:.2f}",
-                "pnl": f"{pnl_pct:+.1f}", "reason": "Profit take at +3%",
+                "pnl": f"{pnl_pct:+.1f}",
+                "reason": f"Trailing stop (peak ${peak:.2f}, trail 3% below)",
                 "entry_score": str(trade.get("entry_score", 0)),
                 "exit_score": str(current_scores.get(symbol, 0)),
-                "verdict": "Gains locked in. Goal: make profit.",
+                "verdict": "Winner rode the trend, trailing stop protected gains.",
             }))
+        elif target and current_price >= target:
+            # Suppress TARGET_HIT for young, winning positions — let the
+            # trailing stop manage the exit instead. After 7 days, the
+            # fixed target fires to close the trade.
+            if days_held < 7 and pnl_pct > 3.0 and trailing_active:
+                logger.info(
+                    f"Virtual TARGET_HIT suppressed for {symbol} — "
+                    f"held {days_held}d, P&L {pnl_pct:+.1f}%, trailing stop active "
+                    f"(letting winner run, trail at ${trailing_stop_price:.2f})"
+                )
+                continue  # skip this exit, trailing stop will manage
+            exit_reason = "TARGET_HIT"
+            targets_hit += 1
         elif days_held >= max_days:
             exit_reason = "TIME_EXPIRED"
             expired += 1
@@ -1785,7 +1834,7 @@ def get_virtual_summary() -> dict:
     # All trades
     open_result = (
         db.table("virtual_trades")
-        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss")
+        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status")
         .eq("status", "OPEN")
         .order("entry_date", desc=True)
         .execute()
@@ -1870,6 +1919,7 @@ def get_virtual_summary() -> dict:
             "risk_reward": sig.get("risk_reward"),
             "contrarian_score": sig.get("contrarian_score"),
             "market_regime": sig.get("market_regime"),
+            "thesis_status": t.get("thesis_last_status"),  # valid/weakening/invalid/None
         }
 
         if current:

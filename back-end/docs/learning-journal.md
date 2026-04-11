@@ -630,6 +630,291 @@ Plan budgeted ~$0.48/day for thesis re-evals via paid Claude API. Actual cost: $
 
 ---
 
+## Day 4 -- April 9, 2026 — END-OF-DAY ENTRY
+
+**The day Claude's non-determinism became impossible to ignore.** The morning entry above captures the celebratory side: Stage 1-7 went live, the first THESIS_INVALIDATED exit fired on CRM in 23 seconds, PBR-A opened cleanly. The afternoon and evening tell the harder story: 7 brain buys, 4 closes (3 thesis-invalidations, 1 watchdog), one stock (BF-B) bought twice and closed twice, one architectural mistake by me that I had to revert, and an audit that pinpointed exactly where the scan pipeline is wasting 80+ seconds.
+
+### End-of-day numbers
+
+| Metric | Value |
+|---|---|
+| Scans run today | 14 (12 COMPLETE, 2 FAILED — both stuck PRE_CLOSEs cleaned up manually) |
+| Brain BUYs today | 7 (CRM, PBR-A, WING ×2, BF-B ×2, VSEC) |
+| Brain closes today | 4 (3 THESIS_INVALIDATED + 1 WATCHDOG_EXIT) |
+| THESIS_INVALIDATED exits | 3 — CRM (+0.08%), WING #1 (-0.07%), BF-B #2 (+0.13%) |
+| WATCHDOG_EXIT | BF-B #1 (-2.29%) |
+| OPEN brain positions at EOD | 8 |
+| Avg live P&L on open positions | +0.35% (skewed positive by 5 legacy positions: ASML +2.18%, RRX +1.32%, LTM +1.30%, LYG +0.54%, META +0.09%) |
+| Stage 6-tracked positions still open | PBR-A -0.68%, VSEC -1.55%, WING #2 -0.38% — all underwater |
+| knowledge_events written | 36 (1 thinking_created, 30 thesis_evaluated, 2 thinking_observation_added, 3 thesis_invalidated_exit) |
+
+### Incidents (continued from morning)
+
+**5. UI bug: Fear & Greed card empty on the dashboard**
+- What: Macro scanner was correctly populating F&G (`score=34.4 label=fear` in the logs) but the dashboard card showed blank dashes.
+- Root cause: `DailyStatsResponse` Pydantic `response_model` was missing a `fear_greed` field. **FastAPI silently strips any field not declared on the response model**, so the backend was computing the value, returning it from the handler, and Pydantic was throwing it away on the way out.
+- Fix applied: Added `FearGreedDetail` and `fear_greed` field to `app/models/stats.py`. Also saved the lesson to memory as `feedback_fastapi_response_model_strips_fields.md` so this isn't re-derived next time.
+- Status: APPLIED + verified live
+- Verdict: WORKING
+
+**6. UI bug: Closed Trades row showing only symbol + reason + P&L%**
+- What: The brain performance page's "Closed Trades" widget showed sparse rows missing entry/exit price and dates. The data exists in `trade_outcomes` and `virtual_trades`; the frontend just wasn't getting it.
+- Root cause: The `recent_closed` builder in stats was dropping `entry_date`/`exit_date`/`entry_price`/`exit_price` from the emitted rows.
+- Fix applied: Added the missing fields to the builder.
+- Status: APPLIED
+- Verdict: WORKING
+
+**7. UI bug: Track Record by Score not updating after a close**
+- What: After a brain trade closed, the dashboard's "Brain Performance" card updated immediately (live query), but "Track Record by Score" stayed stuck on the old numbers for ~1 hour.
+- Root cause: `signal_service.get_track_record()` had a 1-hour TTL cache. The Brain Performance card uses a different code path (no cache), so the two displays drifted out of sync until the cache expired.
+- Fix applied: Lowered TTL from 3600s → 900s, added `invalidate_track_record_cache()` helper, called it from every brain close path so the table refreshes immediately.
+- Status: APPLIED
+- Verdict: WORKING
+
+**8. CRITICAL: Pre-filter was excluding HELD brain positions on quiet days**
+- What: PBR-A's thesis was supposed to be re-evaluated every scan, but on quieter days when its `day_change` was below the 1% threshold, the pre-filter would drop it from the candidate set entirely. Stage 6 then couldn't re-evaluate a position it never saw. **Stage 6 was silently broken.**
+- Root cause: `prefilter.py` filtered everything by `day_change >= min_abs_change`, with no carve-out for symbols the brain currently holds.
+- Fix applied: Added `held_brain_symbols` parameter to `prefilter_candidates()`. Held positions bypass the volume/change/price filters and are always included, sitting ADDITIVELY alongside watchlist tickers (don't eat into the 50-slot cap). Added `queries.get_open_brain_symbols()` helper. Wired through `scan_service.run_scan()`.
+- Status: APPLIED
+- Verdict: WORKING. PBR-A now appears in every scan and gets re-evaluated even on flat days.
+
+**9. The non-determinism problem (the day's most important lesson)**
+
+This is the headline finding of Day 4. Claude is **non-deterministic on borderline trades**. Same dossier, same data, different scan → BUY one time, HOLD the next.
+
+Real cases observed today across the same 4-hour window:
+- **CRM**: 4 signals — 3× HOLD (confidence 38, 42, 45) and 1× BUY (confidence 58). The BUY happened at 14:07; the brain bought it; Stage 6 invalidated it 17 seconds later.
+- **WING**: 5+ signals — BUY confidence 78 at 17:05 (brain bought it #1), HOLD on later scans, then BUY again at 18:00 (brain bought it #2). WING #1 was invalidated; WING #2 is still open at -0.38%.
+- **BF-B**: 4+ signals — BUY conf 72, HOLD, BUY conf 72 again. Brain bought it twice. BF-B #1 hit a watchdog exit at -2.29%; BF-B #2 was invalidated at +0.13%.
+- **PBR-A**: across two consecutive scans the structured `self_check_notes` flipped from *"consistent with HOLD"* to *"unambiguously bullish — RSI in sweet spot, positive MACD momentum, strong valuation"*. Same underlying data. Same prompt. Different conclusion. This is the cleanest demonstration of the non-determinism we have on record.
+
+**This is the upstream cause of every bad entry today.** The score-based gate doesn't see the inconsistency because it only sees one snapshot at a time. Stage 6 doesn't catch most of them because Stage 6 asks "have conditions changed since entry" — and the answer for an instantly-non-deterministic flip-flop is "no, conditions are identical, valid".
+
+### Architectural mistake I made (and reverted)
+
+Around mid-afternoon I built a "Claude HOLD ⇒ system HOLD" override in `scan_service._process_candidate`. The reasoning seemed clean: if Claude (the validated AI) says HOLD, we shouldn't override it with a score-derived BUY. I tested it against 9 cases, all passed.
+
+Pedro pushed back immediately: *"but ai cannot win all the time, read the memories and the journal and the claude"*. Reading `feedback_three_witness_consensus.md` made the mistake obvious. The principle "AI is the decider" is about EXITS (Stage 6) and about FEEDING Claude a better dossier. It explicitly says **"do not build hard math vetoes that block trades regardless of the AI's view"** and **"do not build anything that treats math + knowledge as 'checks on' the AI rather than 'inputs to' the AI"** — and what I had built was the same shape, just inverted. A hard Claude-veto over the score-based gate.
+
+Reverted within ~15 minutes. The lesson: **even when the data looks like it justifies a new gate, re-read the principle memory before building the gate.** Saved to memory afterward implicitly via this journal entry — the existing `feedback_three_witness_consensus.md` is the load-bearing principle, no new memory needed.
+
+### What actually shipped today (after the revert)
+
+| Build | What it does | Files |
+|---|---|---|
+| `## Self-Consistency Requirement` prompt section | Tells Claude not to generate BUY signals while writing reasoning that argues against the trade. First-line defense. | `prompts.py` |
+| Bearish hedge phrase regex guard | Substring check on Claude's reasoning text when it says BUY — downgrades to HOLD if any of 38 bearish phrases appear. Whack-a-mole, retired in the next ship as the legacy fallback only. | `scan_service.py` |
+| Structured `self_check` block in synthesis output | Forces Claude to answer 3 yes/no questions about its own reasoning consistency in the JSON response. Definitions, failure examples, and a correct-BUY example included in the prompt. | `prompts.py`, all 3 AI clients |
+| Shared `normalize_synthesis_result()` + `synthesis_error_response()` helpers | Deduped ~150 LOC of copy-pasted result-builder dicts across `claude_client.py`, `claude_local_client.py`, `gemini_client.py`. Single source of truth for the synthesis schema. | `prompts.py` + 3 clients |
+| Persisted `_self_check` in `grok_data` | Writes Claude's structured self-check to the signal record so post-hoc audits can answer "did Claude flag its own reasoning as bearish?" without re-running synthesis. Underscore-prefixed convention; `format_sentiment` ignores it. | `scan_service.py` |
+| Persisted `_ai_signal` (Claude's raw signal field) in `grok_data` | The most important diagnostic add of the day. Without this we couldn't distinguish "Claude said BUY" from "Claude said HOLD but score won". Once persisted, the data showed Claude's signal matches the action 5/6 times — the score-override theory was wrong. | `scan_service.py` |
+| **THESIS_INVALIDATED re-buy cooldown** | After a brain trade closes with `exit_reason='THESIS_INVALIDATED'`, the symbol is blocked from re-entry for 60 minutes (`brain_thesis_rebuy_cooldown_minutes` config). Loaded once per scan via a single DB query, applied at the brain BUY gate. The Day 4 morning journal explicitly predicted we'd need this within "Future note: if buy → invalidate → buy → invalidate ever happens in practice." Today it happened (WING). | `virtual_portfolio.py`, `config.py` |
+| Stuck-scan cleanup runbook applied twice | PRE_MARKET scan stuck after morning restart, then PRE_CLOSE scans stuck after a later restart. Direct DB UPDATE to mark RUNNING → FAILED. Saved to memory as `feedback_stuck_scans_manual_cleanup.md` (already existed from morning). | `feedback_stuck_scans_manual_cleanup.md` |
+
+### The Stage 6 gap (the most important unsolved problem)
+
+Stage 6 thesis re-eval was designed with this question: *"Have conditions materially changed since entry?"* That correctly catches CRM-style cases where the original entry thesis literally contained its own warning ("falling knife with poor risk/reward") and Claude on re-eval reads its own warning and exits.
+
+It does NOT catch the case where:
+1. Entry was bad to begin with (bearish setup, Claude flipped to BUY on a non-deterministic moment)
+2. Conditions haven't materially changed since entry
+3. Stage 6 returns `valid` because *"unchanged from entry"* is its definition of valid
+4. Claude on the latest scan says HOLD with bearish self_check
+
+This is the live state of WING #2, BF-B #2 (before it was watchdog-killed), and VSEC right now. All `thesis_last_status: valid`. All bleeding. All would not be entered today from scratch.
+
+The fix is conceptually clear but architecturally non-trivial: **add a second check to Stage 6 that asks "would I enter this position today, fresh, given the current data?"** If the answer is no, exit even though conditions are unchanged. Not built tonight — needs careful design (it's basically running the entry pipeline against the held position) and we just shipped a lot today. Logged here as the #1 thing to design in the morning.
+
+### Performance audit (delivered by another Claude session, summarized here)
+
+Anchor: most recent MORNING scan ran in **~302s** (305.32s wall clock).
+
+The audit found **two structural bottlenecks**, not one:
+
+1. **`Semaphore(3)` at `scan_service.py:814` is doing double duty** — protecting yfinance from DNS exhaustion AND gating Claude Local subprocess concurrency. Claude Local doesn't need gating; it's a free CLI subprocess and 15 in parallel should land in ~25-35s instead of the ~155s we see today. Single highest-leverage change in the codebase: split into `yfinance_sem = Semaphore(3)` + `ai_sem = Semaphore(6-10)`. One file, one function. Estimated savings: **80-110s**.
+
+2. **PASS 1 yfinance data is not cached for PASS 2** — the top 15 candidates re-fetch `get_price_history(1y)` and `get_fundamentals` even though PASS 1 already pulled them. 30 duplicate yfinance calls, all stuck behind the same semaphore. Estimated savings: **25-45s**.
+
+Three more wins on top (parallelize bulk-screening batches, overlap macro/grok phases with bulk-screen, cross-scan caching of bulk-screen output). Audit estimates **target post-fix: 70-100s on cold scans, 30-50s on warm scans**.
+
+Critical preconditions before building:
+- **Run sanity Checks A and B from §6 of the audit** — measure `yf.download(threads=True)` vs `threads=False`, and confirm 15 parallel `claude -p` subprocesses don't blow up the laptop. The whole plan rests on these two assumptions.
+- **Build fix #1 first**, re-measure, then decide whether the rest is worth shipping. If #1 alone gets us to ~150s, we may not need the others.
+
+NOT in scope tonight. Will review with fresh eyes and start with the sanity checks tomorrow.
+
+### Patterns observed
+
+**1. Non-determinism is the upstream cause of every bad entry today.** Every problem we tried to fix downstream (the regex guard, the structured self_check, the Claude-HOLD override I reverted) was a symptom. The root cause is that Claude returns different signals on near-identical inputs. The two real fixes for this are (a) cross-model verification — send Claude's BUY to Gemini and require agreement, or (b) make the entry decision over multiple Claude calls with majority voting. Both are bigger than tonight's appetite.
+
+**2. Stage 6 catches CHANGES, not BAD STARTING POSITIONS.** Today's data made this gap visible for the first time. Need to design a quality-from-scratch check.
+
+**3. The cooldown was correctly predicted by the Day 4 morning journal.** *"if this pattern (buy → invalidate → buy → invalidate loop) ever actually happens in practice, add a recently-closed cooldown."* It happened today (WING), the cooldown is now built and shipped, and the journal closing the loop on its own prediction is satisfying.
+
+**4. UI bugs come in clusters when a backend feature ships.** Three separate UI bugs (F&G, closed trades, track record) all surfaced today as direct consequences of yesterday's brain learning loop ship. Watch for the pattern: every backend ship probably has a frontend follow-up.
+
+**5. Always re-read the principle memories before adding a new gate.** The "Claude HOLD wins" override I almost shipped would have violated `feedback_three_witness_consensus.md` directly. Pedro caught it within seconds; the lesson is to NOT have to be caught.
+
+### Wins I want to keep in mind
+
+- **3 THESIS_INVALIDATED exits today** (CRM, WING #1, BF-B #2). All three exited near-flat (+0.08%, -0.07%, +0.13%). Stage 6 is doing real work.
+- **The legacy positions are quietly winning.** ASML +2.18%, RRX +1.32%, LTM +1.30%. The brain's pre-Stage-6 picks from yesterday are positive across the board.
+- **`_ai_signal` persistence settled the architectural debate.** Without it I would still be guessing whether the score was overriding Claude. Once persisted, the data showed 5/6 match. I had been chasing a phantom problem.
+- **Three review passes and the review-passes memory continue to pay off.** Today's edits would have shipped with at least 2 dead-code patterns (`_safe_int` ghosts, `format_sentiment` import drift) without an end-of-edit cleanup pass.
+
+### Metrics to track tomorrow
+
+- [ ] Does the THESIS_INVALIDATED cooldown actually fire and block a re-entry? Need a Stage 6 exit followed by another scan within 60 min.
+- [ ] How many of today's currently-OPEN bleeding positions (PBR-A, VSEC, WING #2) will Stage 6 catch overnight or in the morning scan?
+- [ ] Apply perf audit fixes #1 and #2 after running sanity Checks A + B. Measure scan time before, after #1, after #2.
+- [ ] Does the `_ai_signal` field show any new mismatches between Claude's signal and the system action? Watch for the score override pattern I thought existed.
+- [ ] Design (NOT necessarily build) the Stage 6 absolute-quality check.
+- [ ] Any new brain BUYs at scores 72-79 with bearish `self_check` flags? Those are the cases where we have good visibility now.
+
+---
+
+## Day 5 -- April 10, 2026
+
+**First fully autonomous day.** Pedro didn't touch Signa once. The brain ran all 6 scheduled scans, opened 6 new positions, closed 2, and ended the day with 12 open positions at +7.75% combined live P&L. The AFTER_CLOSE scan had an AI provider degradation (11 of 16 candidates failed synthesis), but it was the only incident in an otherwise clean day.
+
+### Environment
+- Market: VOLATILE (continued from Day 4)
+- Scans: 6 (MANUAL 3:19am, PRE_MARKET 10am, MORNING 2pm, MIDDAY 4pm, PRE_CLOSE 7pm, AFTER_CLOSE 8:30pm — all UTC)
+- All scans COMPLETE — zero stuck, zero manual intervention required
+- Budget: $0.00 paid (Claude Local handled nearly everything for free)
+- Scan performance: avg **190s** vs Day 4's avg **308s** — **38% improvement** from yesterday's perf audit fixes
+
+### Scan performance (the perf fixes delivered)
+
+| Scan | Duration | Notes |
+|---|---|---|
+| MANUAL (3:19am) | 180s | Cold scan, no cache |
+| PRE_MARKET (10am) | **159s** | Best of day. First real market-hours scan. |
+| MORNING (2pm) | 208s | |
+| MIDDAY (4pm) | 185s | |
+| PRE_CLOSE (7pm) | 254s | Slowest — 58 candidates, higher ticker activity |
+| AFTER_CLOSE (8:30pm) | 152s | Fastest but degraded — 11/16 AI synthesis failed |
+
+Yesterday's 5 perf fixes are delivering:
+- **Fix #1 (semaphore decouple):** `ai_sem=6` confirmed safe by Check B (6 parallel Claude CLI in 7.83s). The AI synthesis phase dropped from ~155s to ~30-40s.
+- **Fix #2 (PASS 1 → PASS 2 cache):** ~30 duplicate yfinance calls eliminated per scan.
+- **Fix #3 (parallel bulk-screening):** 3 concurrent batches instead of 21 sequential.
+- **Fix #4 (phase overlap):** macro + knowledge load in parallel with screening.
+- **Fix #5 (cross-scan cache):** TTL cache with market-hours awareness (15 min during session, 1 hr outside).
+
+Range: 152s → 254s (vs yesterday's 223s → 330s). Even the worst scan today is better than the best scan yesterday.
+
+### Incidents
+
+**1. AFTER_CLOSE scan AI provider degradation**
+- What: 11 of 16 AI candidates got `ai_status=failed` ("all AI providers failed or budget exceeded"). Only 2 validated, 3 low_confidence. The `ai_usage` table shows 5 paid Claude API calls attempted (5 failed, 4 succeeded). The remaining ~6 failures happened at the Claude Local CLI tier and weren't logged.
+- Root cause (likely): Claude CLI rate limit or concurrency exhaustion. With 6 scans × 15 AI calls + thesis re-evals, the brain made ~100+ Claude CLI invocations on the day. The AFTER_CLOSE scan was the 6th — it's plausible the CLI has an undocumented per-hour or per-day soft cap. Alternatively, a concurrent Claude Code session may have been consuming CLI quota.
+- Impact: Low. AFTER_CLOSE runs after market close — no trades execute from it. The failed tickers got tech-only signals, which is correct degraded behavior.
+- Fix needed: Not urgent. If it recurs on in-session scans (PRE_MARKET, MORNING, MIDDAY, PRE_CLOSE), investigate CLI rate limits. For now, monitor.
+- Status: OBSERVED — no fix applied
+- Verdict: Acceptable degradation. The fallback chain worked correctly (Claude Local failed → Claude API attempted → some succeeded, some didn't → Gemini not reached for most). The worst outcome is slightly stale AI analysis for the after-hours scan, which doesn't affect trading.
+
+### Brain trades
+
+**Opened today (6):**
+
+| Symbol | Score | Tier | Entry | Thesis summary |
+|---|---|---|---|---|
+| TPL | 85 | Tier 2 | $409.01 | Pullback play: 12.6% below SMA50, MACD -4.7, no reversal signs |
+| LB | 80 | Tier 2 | $67.97 | Early momentum recovery: MACD turned positive, above SMA50 support |
+| AVGO | 81 | Tier 1 | $368.65 | Strong EPS growth 31.6%, forward P/E 20.66, but overextended at 100% BB |
+| AGI.TO | 81 | Tier 1 | $66.53 | Massive EPS growth 396%, RSI in sweet spot 59.4, above both SMAs |
+| ASML #2 | 80 | Tier 2 | $1480.96 | Overextended at 100% BB, MACD bearish divergence, momentum rolled over |
+| REGN | 79 | Tier 1 | $740.85 | Below SMA50, negative MACD, RSI 43.6, weakening short-term momentum |
+
+**Notable:** First time Tier 2 picks appear (TPL, LB, ASML #2). Tier 2 = low_confidence AI + score >= 80. Higher average scores than Day 4 (avg 81 vs avg 74). Entry theses are being captured for all 6 — Stage 6 can track them.
+
+**Thesis quality note:** AVGO and ASML #2 have entry theses that describe overextended/bearish setups — the same pattern as yesterday's BF-B/WING problem. The self_check didn't fire because Claude returned signal=BUY despite the bearish reasoning. Stage 6 will need to catch these if they turn bad.
+
+**Closed today (2):**
+
+| Symbol | Exit reason | P&L | Held since | Notes |
+|---|---|---|---|---|
+| **ASML #1** | **TARGET_HIT** | **+5.09%** | Apr 8 (2 days) | First ever target-hit exit. Bought $1417.74, target hit at $1489.90. Legacy position (no thesis tracking). |
+| VSEC | WATCHDOG_EXIT | -3.18% | Apr 9 (1 day) | The bleeder flagged in yesterday's EOD journal. Stage 6 kept saying "valid" (conditions unchanged). Watchdog caught it. |
+
+**ASML +5.09% is the brain's best trade to date.** It held for 2 days through the volatility and exited on a target hit. This is what the system is designed to do — score-based entry, price-based exit, no panic selling on noise.
+
+**Realized P&L today: +1.91%** (sum of the two closes). Net positive despite the VSEC loss because ASML's win was 1.6x larger.
+
+### Open positions at EOD (12)
+
+| Symbol | Entry | Live | P&L | Score | Thesis | Entered |
+|---|---|---|---|---|---|---|
+| LTM | $52.42 | $53.20 | +1.49% | 72 | NULL/legacy | Apr 8 |
+| LYG | $5.57 | $5.49 | -1.44% | 73 | NULL/legacy | Apr 8 |
+| RRX | $204.94 | $208.33 | +1.65% | 74 | NULL/legacy | Apr 8 |
+| META | $627.80 | $629.86 | +0.33% | 78 | NULL/legacy | Apr 8 |
+| PBR-A | $19.02 | $19.55 | **+2.79%** | 76 | YES/valid | Apr 9 |
+| WING | $179.73 | $179.89 | +0.09% | 74 | YES/valid | Apr 9 |
+| TPL | $409.01 | $409.97 | +0.23% | 85 | YES/valid | Apr 10 |
+| LB | $67.97 | $68.01 | +0.06% | 80 | YES/valid | Apr 10 |
+| AVGO | $368.65 | $371.55 | +0.79% | 81 | YES/valid | Apr 10 |
+| AGI.TO | $66.53 | $67.10 | +0.86% | 81 | YES/valid | Apr 10 |
+| ASML #2 | $1480.96 | $1478.28 | -0.18% | 80 | YES/valid | Apr 10 |
+| REGN | $740.85 | $748.87 | +1.08% | 79 | YES/valid | Apr 10 |
+
+**Sum live P&L: +7.75%** | **Avg per position: +0.65%**
+
+10 of 12 positions are green. Only LYG (-1.44%) and ASML #2 (-0.18%) are red. PBR-A (the first Stage 6-tracked position from yesterday) has recovered from -0.68% to +2.79% — a clean vindication of "hold through noise when the thesis is valid."
+
+### Answering Day 4's metrics-to-track
+
+- [x] **Does the THESIS_INVALIDATED cooldown fire?** Not tested — zero thesis-invalidation exits today. Cooldown is wired but unexercised.
+- [x] **How many bleeding positions from yesterday recovered?** PBR-A: -0.68% → +2.79% (full recovery + profit). WING: -0.38% → +0.09% (recovered to flat). Both are green now.
+- [x] **Perf audit fixes: scan time before/after?** 308s avg → 190s avg. PRE_MARKET best: 159s. Working.
+- [x] **Does `_ai_signal` show new mismatches?** 2 mismatches on latest scan: LYG (action=BUY, Claude=HOLD — the same pattern from yesterday) and TVE.TO (action=HOLD, Claude=BUY — the reverse, interesting). Small sample, not alarming.
+- [ ] **Stage 6 absolute-quality check design:** NOT started today. Deferred.
+- [ ] **New BUYs with bearish self_check:** AVGO and ASML #2 have bearish entry theses but self_check didn't flag them. Same gap as before.
+
+### Knowledge events
+
+22 `thesis_evaluated` events across 5 scans. All returned `valid` — no invalidations today. The brain is holding its positions with conviction, and the positions are (mostly) rewarding that conviction.
+
+### Patterns observed
+
+**1. The brain is expanding its portfolio correctly.** Started the day at 8 positions, ended at 12. First time opening Tier 2 picks (TPL, LB, ASML #2). Average entry score today was 81 vs 74 yesterday — the brain is being more selective.
+
+**2. ASML #1 TARGET_HIT +5.09% is the proof-of-concept trade.** Bought on Day 3 via score + validated AI, held 2 days through VOLATILE regime, exited on target. No thesis tracking (legacy position), no manual intervention. Score-based entry, price-based exit. The simplest path through the brain worked.
+
+**3. Yesterday's bleeders recovered.** PBR-A went from -0.68% to +2.79%. WING went from -0.38% to +0.09%. Stage 6's "hold through noise when thesis is valid" is working — the brain didn't panic-sell, and the market came back.
+
+**4. The AFTER_CLOSE AI degradation is a leading indicator.** If the Claude CLI has an undocumented daily rate limit, 6 scans/day with `ai_sem=6` (= up to 90 parallel CLI calls/day) might be close to the ceiling. If this recurs on in-session scans, we'll need to either lower `ai_sem` to 4 or space out scans differently. Watch this tomorrow.
+
+**5. The brain is all SAFE_INCOME.** 12/12 open positions are SAFE_INCOME. Zero HIGH_RISK. Same pattern as Day 1. The brain's conservative bias is producing consistent green but not catching momentum plays. Not a bug — the SAFE_INCOME bucket has the higher backtest win rate (62% vs 57%). But worth noting for future diversification.
+
+### Day 5 summary
+
+| | Day 4 | Day 5 | Direction |
+|---|---|---|---|
+| Scans completed | 12 of 14 (2 stuck) | **6 of 6 (perfect)** | Better |
+| Avg scan time | 308s | **190s** | **38% faster** |
+| Brain BUYs | 7 | 6 | Stable |
+| Brain closes | 4 | 2 | Fewer (holding longer) |
+| Best trade | +0.13% (BF-B thesis inv.) | **+5.09% (ASML target hit)** | Much better |
+| Worst trade | -2.29% (BF-B watchdog) | -3.18% (VSEC watchdog) | Slightly worse |
+| Realized P&L | -2.15% | **+1.91%** | Positive for the first time |
+| Open positions | 8 | **12** | Growing |
+| Live portfolio P&L | +2.82% (avg +0.35%) | **+7.75% (avg +0.65%)** | Growing |
+| THESIS_INVALIDATED exits | 3 | 0 | No bad entries today (or not caught yet) |
+| Manual interventions | ~8 (manual scans, stuck cleans, code fixes) | **0** | Fully autonomous |
+
+### Metrics to track tomorrow
+
+- [ ] Does the AFTER_CLOSE AI failure recur? If it happens on an in-session scan, investigate Claude CLI rate limits.
+- [ ] 12 open positions — has the brain hit brain_max_open? If so, is rotation logic activating?
+- [ ] LYG is the only legacy position still red (-1.44%, Day 3 entry). Watch it — no thesis tracking, no Stage 6 protection. If it hits the watchdog threshold, it exits without thesis gate.
+- [ ] AVGO and ASML #2 both entered with bearish entry theses. Will Stage 6 catch them if they start bleeding, or will it say "conditions unchanged = valid" (the same gap as VSEC)?
+- [ ] Does the cooldown ever fire? Zero thesis-invalidation exits today = zero cooldown triggers. Need a real test.
+- [ ] Day 5 was the first net-positive realized P&L day. Track whether Day 6 continues the trend.
+
+---
+
 ## Template for Future Days
 
 ### Day N -- [Date]

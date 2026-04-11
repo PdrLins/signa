@@ -45,9 +45,10 @@ async def get_scans_today(user: dict = Depends(get_current_user)):
     now_et = datetime.now(et)
     is_market_day = now_et.weekday() < 5  # Mon=0 .. Fri=4
 
-    today_start = datetime.now(timezone.utc).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
+    # Use ET date for "today" — at 8pm+ ET the UTC date rolls to
+    # tomorrow, which would make all of today's scans invisible.
+    today_et = now_et.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = today_et.astimezone(timezone.utc)
 
     scan_by_type: dict[str, dict] = {}
     # An active manual scan (Scan Now click) doesn't fit any of the 5

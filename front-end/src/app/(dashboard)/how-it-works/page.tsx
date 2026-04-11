@@ -661,6 +661,34 @@ export default function HowItWorksPage() {
                   </h3>
                   <P>{h.learningAuditDesc}</P>
                 </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.thesisDotsTitle}
+                  </h3>
+                  <P>{h.thesisDotsDesc}</P>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.rebuyCooldownTitle}
+                  </h3>
+                  <P>{h.rebuyCooldownDesc}</P>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.trailingStopTitle}
+                  </h3>
+                  <P>{h.trailingStopDesc}</P>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.exitLabelsTitle}
+                  </h3>
+                  <P>{h.exitLabelsDesc}</P>
+                </div>
               </Section>
             </Card>
 

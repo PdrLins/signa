@@ -104,7 +104,7 @@ from app.core.dates import days_since
 from app.db import queries
 from app.db.supabase import get_client
 from app.notifications.messages import msg
-from app.notifications.telegram_bot import send_message
+from app.notifications.telegram_bot import enqueue as _tg_send
 from app.services.price_cache import _fetch_prices_batch
 
 
@@ -361,7 +361,7 @@ async def run_watchdog() -> dict:
                 "in_watchlist": is_in_watchlist,
                 "notes": force_sell_reason,
             })
-            await send_message(settings.telegram_chat_id, msg(
+            _tg_send(settings.telegram_chat_id, msg(
                 "watchdog_force_sell", symbol=symbol, price=f"{current_price:.2f}",
                 pnl=f"{pnl_total_pct:+.1f}", reason=force_sell_reason), urgent=True)
             alerts_sent += 1
@@ -388,13 +388,13 @@ async def run_watchdog() -> dict:
             closes += 1
             pending_events.append({**event_base, "event_type": EVENT_CLOSE, "action_taken": "closed", "notes": reason})
 
-            await send_message(settings.telegram_chat_id, msg(
+            _tg_send(settings.telegram_chat_id, msg(
                 "watchdog_exit", symbol=symbol, price=f"{current_price:.2f}",
                 pnl=f"{pnl_total_pct:+.1f}", sentiment=sentiment_label), urgent=True)
             alerts_sent += 1
 
             if is_in_watchlist:
-                await send_message(settings.telegram_chat_id, msg(
+                _tg_send(settings.telegram_chat_id, msg(
                     "watchdog_user_brain_sold", symbol=symbol,
                     price=f"{current_price:.2f}", pnl=f"{pnl_total_pct:+.1f}"))
                 alerts_sent += 1
@@ -407,14 +407,14 @@ async def run_watchdog() -> dict:
 
             # Only send Telegram if the move is significant enough
             if abs(pnl_total_pct) >= settings.watchdog_min_notify_pct:
-                await send_message(settings.telegram_chat_id, msg(
+                _tg_send(settings.telegram_chat_id, msg(
                     "watchdog_warning", symbol=symbol, price=f"{current_price:.2f}",
                     stop=f"{stop:.2f}" if stop else "N/A",
                     pnl=f"{pnl_total_pct:+.1f}", reason=reason, sentiment=sentiment_label))
                 alerts_sent += 1
 
                 if is_in_watchlist:
-                    await send_message(settings.telegram_chat_id, msg("watchdog_user_warning", symbol=symbol))
+                    _tg_send(settings.telegram_chat_id, msg("watchdog_user_warning", symbol=symbol))
                     alerts_sent += 1
 
         else:

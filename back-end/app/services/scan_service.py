@@ -59,13 +59,16 @@ reported to the scans table for the frontend's progress bar.
 
   PHASE 4a — PASS 1 pre-scoring  (20-45%)
   ----------------------------------------
-    For every candidate (parallel, semaphore=3 to avoid DNS exhaustion):
+    For every candidate (parallel, gated by yfinance_sem=3 to avoid DNS
+    thread exhaustion):
       • Fetch 1-year price history via yfinance
       • Compute technical indicators (RSI, MACD, SMA, volume z-score, ATR)
       • Fetch fundamentals (P/E, EPS, dividend yield, market cap)
       • Quick score using technicals + fundamentals + macro ONLY
         (no AI yet — this is the cheap pre-score)
       • Skip HIGH_RISK candidates entirely if regime == "CRISIS"
+      • Stash price_df + fundamentals + technicals in `prescore_cache`
+        so PASS 2 reuses them instead of re-fetching from yfinance.
     Output: list of (ticker, pre_score, bucket, technical_data, fundamental_data)
 
   PHASE 4b — Top-N AI candidate selection
@@ -80,7 +83,10 @@ reported to the scans table for the frontend's progress bar.
 
   PHASE 4c — PASS 2 full AI synthesis  (45-80%)
   ---------------------------------------------
-    For every AI candidate (parallel):
+    For every AI candidate (parallel, gated by ai_sem=6 around the
+    Claude CLI subprocess only — sentiment/options/scoring run unguarded):
+      • Reuse price_df + fundamentals + technicals from `prescore_cache`
+        (no yfinance refetch).
       • Fetch sentiment via Grok / Gemini fallback (HIGH_RISK only —
         SAFE_INCOME hardcodes neutral to save cost).
       • Fetch Barchart options flow (free, all candidates).
@@ -274,7 +280,43 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             f"({len(core_set)} core + {len(db_additions)} brain-added + {len(discovered)} discovered)"
         )
 
-        screening_data = await market_scanner.get_bulk_screening(all_tickers)
+        # ── Phase 1 + Phase 2 + Phase 3 OVERLAP ──
+        # Bulk screening (~100s on cold scans, ~5s on warm) is the long pole.
+        # Macro snapshot, knowledge block, and macro pulse have NO dependency
+        # on the screening output, so we kick them off as background tasks
+        # alongside the screening and only await them at point of use.
+        # Net savings: ~7-15s on every scan, more after Fix #3 lands.
+        screening_task = asyncio.create_task(market_scanner.get_bulk_screening(all_tickers))
+        macro_task = asyncio.create_task(macro_scanner.get_macro_snapshot())
+
+        from app.services.knowledge_service import KnowledgeService
+        _ks = KnowledgeService()
+        knowledge_task = asyncio.create_task(_ks.get_knowledge_block([
+            "signa_is_short_term_only",
+            "score_ranges_and_actions",
+            "backtest_key_findings",
+            "gem_conditions",
+            "signal_blockers",
+            "market_regime_detection",
+            "grok_sentiment_calibration",
+            "supply_deficit_asymmetry",
+            "contrarian_sentiment_in_commodities",
+            "bubble_detection_framework",
+        ]))
+
+        # Macro pulse only on first scan of the day (Grok tokens).
+        # Wrapped in try/except to match the original defensive behavior:
+        # an import or task-creation failure must not crash the scan.
+        pulse_task = None
+        if scan_type in ("PRE_MARKET", "MANUAL"):
+            try:
+                from app.ai.macro_pulse import get_macro_pulse
+                pulse_task = asyncio.create_task(get_macro_pulse())
+            except Exception as e:
+                logger.debug(f"Macro pulse setup skipped: {e}")
+
+        # Block on screening (the long pole) before prefiltering
+        screening_data = await screening_task
         _update_progress(10, "filtering")
         watchlist_symbols = queries.get_all_watchlist_symbols()
         # Always include held brain positions in the candidate list, even
@@ -292,15 +334,13 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         queries.update_scan(scan_id, candidates=len(candidates), tickers_scanned=len(all_tickers))
         _update_progress(15, "macro", "Fetching macro data...")
 
-        # Phase 2: Macro snapshot (15-20%)
-        macro_data = await macro_scanner.get_macro_snapshot()
+        # Phase 2: Macro snapshot — already in flight, await result now.
+        macro_data = await macro_task
 
         # Macro news pulse -- only on first scan of the day to save Grok tokens
-        if scan_type in ("PRE_MARKET", "MANUAL"):
+        if pulse_task is not None:
             try:
-                from app.ai.macro_pulse import get_macro_pulse
-                pulse = await get_macro_pulse()
-                macro_data["macro_pulse"] = pulse
+                macro_data["macro_pulse"] = await pulse_task
             except Exception as e:
                 logger.debug(f"Macro pulse skipped: {e}")
 
@@ -312,24 +352,13 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
 
         _update_progress(20, "analyzing")
 
-        # Phase 3: Get previous signals + brain knowledge
+        # Phase 3: Get previous signals + brain knowledge (knowledge already in flight)
         previous_signals = queries.get_latest_signals_map()
-
-        # Load brain knowledge block ONCE per scan (not per ticker)
-        from app.services.knowledge_service import KnowledgeService
-        _ks = KnowledgeService()
-        _knowledge_block = await _ks.get_knowledge_block([
-            "signa_is_short_term_only",
-            "score_ranges_and_actions",
-            "backtest_key_findings",
-            "gem_conditions",
-            "signal_blockers",
-            "market_regime_detection",
-            "grok_sentiment_calibration",
-            "supply_deficit_asymmetry",
-            "contrarian_sentiment_in_commodities",
-            "bubble_detection_framework",
-        ])
+        try:
+            _knowledge_block = await knowledge_task
+        except Exception as e:
+            logger.warning(f"Knowledge block load failed: {e}")
+            _knowledge_block = ""
         if _knowledge_block:
             logger.info(f"Brain knowledge loaded: {len(_knowledge_block)} chars")
 
@@ -345,12 +374,26 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         # ══════════════════════════════════════════════════════
 
         AI_CANDIDATE_LIMIT = settings.ai_candidate_limit
-        semaphore = asyncio.Semaphore(3)  # Strict limit to prevent DNS thread exhaustion
+
+        # Two semaphores, two jobs:
+        #   yfinance_sem — guards yfinance fetches against DNS thread exhaustion.
+        #     Stays at 3 (the empirical safe ceiling).
+        #   ai_sem — guards Claude Local CLI subprocess invocations. Each call
+        #     is an independent Node process, so we can run more in parallel.
+        #     Start at 6 — high enough to crush the 5-wave bottleneck on the
+        #     top-15 AI candidates without spawning so many Node processes
+        #     that the laptop swaps. Tune up to 10 if memory headroom allows.
+        yfinance_sem = asyncio.Semaphore(3)
+        ai_sem = asyncio.Semaphore(6)
         total_candidates = len(candidates)
 
         # ── PASS 1: Pre-score all candidates (no AI tokens) ──
         _update_progress(20, "prescoring", "Pre-scoring candidates...")
         pre_scores: list[tuple[str, int, str, dict, dict]] = []  # (ticker, score, bucket, tech, fund)
+        # Stash the raw price_df + fundamentals from PASS 1 so PASS 2 can
+        # reuse them instead of re-fetching the same data from yfinance.
+        # Saves ~30 yfinance round trips per scan (15 AI candidates × 2 calls).
+        prescore_cache: dict[str, dict] = {}
 
         async def _prescore(ticker: str, idx: int) -> tuple[str, int, str, dict, dict] | None:
             _update_progress(
@@ -363,7 +406,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 if market_regime == "CRISIS" and bucket == "HIGH_RISK":
                     return None
 
-                async with semaphore:
+                async with yfinance_sem:
                     price_df, fundamental_data = await asyncio.gather(
                         market_scanner.get_price_history(ticker, "1y"),
                         market_scanner.get_fundamentals(ticker),
@@ -375,6 +418,12 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                     technical_data, fundamental_data or {}, macro_data,
                     {}, {}, bucket, market_regime,
                 )
+                # Stash for PASS 2 reuse
+                prescore_cache[ticker] = {
+                    "price_df": price_df,
+                    "fundamental_data": fundamental_data or {},
+                    "technical_data": technical_data,
+                }
                 return (ticker, quick_score, bucket, technical_data, fundamental_data or {})
             except Exception as e:
                 logger.debug(f"Pre-score failed {ticker}: {e}")
@@ -493,8 +542,8 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             try:
                 result = await _process_candidate(
                     ticker, macro_data, screening_data, previous_signals,
-                    scan_id, semaphore, market_regime, _knowledge_block,
-                    discovered_set,
+                    scan_id, yfinance_sem, ai_sem, market_regime, _knowledge_block,
+                    discovered_set, prescore_cache.get(ticker),
                 )
                 return result
             except Exception as e:
@@ -523,7 +572,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             # Best-effort Telegram alert (don't break the scan if it fails)
             try:
                 from app.notifications.messages import msg
-                from app.notifications.telegram_bot import send_message
+                from app.notifications.telegram_bot import enqueue
                 # Build a brief error breakdown from failed signals
                 error_samples = []
                 for s in ai_results:
@@ -534,7 +583,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                         if len(error_samples) >= 2:
                             break
                 errors_text = "; ".join(error_samples) if error_samples else "see logs"
-                await send_message(
+                enqueue(
                     settings.telegram_chat_id,
                     msg(
                         "ai_failure_rate",
@@ -753,10 +802,12 @@ async def _process_candidate(
     screening_data: dict,
     previous_signals: dict,
     scan_id: str,
-    semaphore: asyncio.Semaphore,
+    yfinance_sem: asyncio.Semaphore,
+    ai_sem: asyncio.Semaphore,
     market_regime: str = "TRENDING",
     knowledge_block: str = "",
     discovered_set: set | None = None,
+    prescore_data: dict | None = None,
 ) -> dict:
     """Run the FULL Pass-2 pipeline for a single AI candidate ticker.
 
@@ -766,12 +817,31 @@ async def _process_candidate(
     function and skip AI synthesis, blockers check, and contrarian
     detection entirely.
 
+    Concurrency model:
+
+      Two semaphores carve the function into three regions:
+        1. yfinance_sem (default 3) — held only while fetching price history
+           and fundamentals from yfinance. Protects against DNS thread
+           exhaustion. SKIPPED ENTIRELY when `prescore_data` is supplied
+           (the same data is reused from PASS 1).
+        2. unguarded — sentiment, options flow, technicals, scoring, blockers,
+           GEM checks, building the signal record. Each candidate runs these
+           in full parallel because they don't share a contended resource.
+        3. ai_sem (default 6) — held only while invoking Claude Local CLI
+           for synthesis. Each call spawns an independent Node subprocess,
+           so we can stack many in parallel — the cap is laptop RAM, not
+           any shared lock.
+
+      The previous design used a single Semaphore(3) wrapped around the
+      entire function body, which serialized the 15 AI candidates into
+      5 sequential waves of 3. That was the dominant cost in the scan.
+
     Steps inside this function:
 
       1. Classify bucket (SAFE_INCOME or HIGH_RISK)
       2. Fetch in parallel:
-           - 1y price history (yfinance)
-           - Fundamentals (yfinance .info)
+           - 1y price history (yfinance) — REUSED from PASS 1 if available
+           - Fundamentals (yfinance .info) — REUSED from PASS 1 if available
            - Sentiment (Grok / Gemini fallback) — HIGH_RISK only
            - Barchart options flow (free, all candidates)
       3. Compute technical indicators from the price data
@@ -796,8 +866,8 @@ async def _process_candidate(
         previous_signals: Map of symbol → previous signal record (used by
             `determine_status` to compute CONFIRMED/WEAKENING/etc).
         scan_id: The current scan ID to attribute the signal to.
-        semaphore: Concurrency limit (default 3) to avoid DNS exhaustion
-            from yfinance's threaded fetcher.
+        yfinance_sem: Concurrency cap on yfinance fetches (DNS protection).
+        ai_sem: Concurrency cap on Claude Local CLI subprocess invocations.
         market_regime: TRENDING / VOLATILE / CRISIS — drives the regime
             multiplier in `compute_score` and the contextual hint in the
             AI synthesis prompt.
@@ -806,277 +876,304 @@ async def _process_candidate(
         discovered_set: Symbols that came from `discover_tickers` rather
             than the core universe — used to set `is_discovered` on the
             signal record so the UI can flag them.
+        prescore_data: Optional dict with `price_df`, `fundamental_data`,
+            and `technical_data` from PASS 1. When supplied, skips the
+            yfinance refetch entirely. Saves ~2 yfinance calls per AI
+            candidate.
 
     Returns:
         A signal_data dict ready for `queries.insert_signals_batch`.
         The dict matches the `signals` table schema.
     """
-    async with semaphore:
-        logger.debug(f"Processing {ticker}...")
+    logger.debug(f"Processing {ticker}...")
 
-        bucket = _classify_bucket(ticker, screening_data.get(ticker, {}))
+    bucket = _classify_bucket(ticker, screening_data.get(ticker, {}))
 
-        # Fetch data in parallel
-        # Skip sentiment for SAFE_INCOME (only 10% weight — not worth the AI cost)
-        # Barchart options flow fetched for HIGH_RISK US equities (free, no API cost)
+    # ── Fetch market data (yfinance, sentiment, options) ──
+    # Reuse PASS 1's price/fundamentals when available — skips ~2 yfinance
+    # round trips per AI candidate. PASS 1 ran moments ago so the data is
+    # still fresh enough for synthesis.
+    if prescore_data is not None:
+        price_df = prescore_data["price_df"]
+        fundamental_data = prescore_data["fundamental_data"]
+        # Sentiment + options still need fetching (not in PASS 1)
         if bucket == "SAFE_INCOME":
-            price_df, fundamental_data, options_flow = await asyncio.gather(
-                market_scanner.get_price_history(ticker, "1y"),
-                market_scanner.get_fundamentals(ticker),
-                barchart_scanner.get_options_flow(ticker),
-            )
+            options_flow = await barchart_scanner.get_options_flow(ticker)
             grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [], "summary": "Sentiment skipped for Safe Income (10% weight)"}
         else:
-            price_df, fundamental_data, grok_data, options_flow = await asyncio.gather(
-                market_scanner.get_price_history(ticker, "1y"),
-                market_scanner.get_fundamentals(ticker),
+            grok_data, options_flow = await asyncio.gather(
                 ai_provider.analyze_sentiment(ticker),
                 barchart_scanner.get_options_flow(ticker),
             )
+    else:
+        # No PASS 1 data — fall back to fetching everything. yfinance calls
+        # are gated by yfinance_sem; sentiment + options run unguarded.
+        async with yfinance_sem:
+            price_df, fundamental_data = await asyncio.gather(
+                market_scanner.get_price_history(ticker, "1y"),
+                market_scanner.get_fundamentals(ticker),
+            )
+        if bucket == "SAFE_INCOME":
+            options_flow = await barchart_scanner.get_options_flow(ticker)
+            grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [], "summary": "Sentiment skipped for Safe Income (10% weight)"}
+        else:
+            grok_data, options_flow = await asyncio.gather(
+                ai_provider.analyze_sentiment(ticker),
+                barchart_scanner.get_options_flow(ticker),
+            )
+        fundamental_data = fundamental_data or {}
 
-        # Compute technicals (CPU-only, no I/O)
+    # Compute technicals (CPU-only, no I/O). Reuse PASS 1's result if present.
+    if prescore_data is not None:
+        technical_data = prescore_data["technical_data"]
+    else:
         technical_data = indicators.compute_indicators(price_df)
 
-        # Inject regime context + brain knowledge into grok_data for AI prompt
-        if isinstance(grok_data, dict):
-            grok_data["_market_regime"] = market_regime
-            grok_data["_catalyst_context"] = "No specific catalyst detected"
-            if market_regime != "TRENDING":
-                grok_data["_regime_note"] = f"Market is in {market_regime} mode — adjust signal accordingly"
-            else:
-                grok_data["_regime_note"] = ""
-            if knowledge_block:
-                grok_data["_knowledge_block"] = knowledge_block
-            if options_flow:
-                grok_data["_options_flow"] = options_flow
+    # Inject regime context + brain knowledge into grok_data for AI prompt
+    if isinstance(grok_data, dict):
+        grok_data["_market_regime"] = market_regime
+        grok_data["_catalyst_context"] = "No specific catalyst detected"
+        if market_regime != "TRENDING":
+            grok_data["_regime_note"] = f"Market is in {market_regime} mode — adjust signal accordingly"
+        else:
+            grok_data["_regime_note"] = ""
+        if knowledge_block:
+            grok_data["_knowledge_block"] = knowledge_block
+        if options_flow:
+            grok_data["_options_flow"] = options_flow
 
-            # Append per-ticker pattern stats — the brain's live track record
-            # on similar setups (closed trades + currently-open positions
-            # combined). Surfaces a warning when the brain has been losing
-            # this kind of pattern, or a green light when it's been winning.
-            # See app/services/pattern_stats.py for the math + thresholds.
-            try:
-                from app.services.pattern_stats import get_pattern_warning
-                pattern_warning = get_pattern_warning({
-                    "bucket": bucket,
-                    "market_regime": market_regime,
-                })
-                if pattern_warning:
-                    existing_kb = grok_data.get("_knowledge_block", "") or ""
-                    grok_data["_knowledge_block"] = existing_kb + "\n\n" + pattern_warning
-            except Exception as e:
-                # Unexpected failure in the stats query — surface as warning
-                # so it shows up in logs, but never block the synthesis.
-                logger.warning(f"pattern_stats injection failed for {ticker}: {e}")
+        # Append per-ticker pattern stats — the brain's live track record
+        # on similar setups (closed trades + currently-open positions
+        # combined). Surfaces a warning when the brain has been losing
+        # this kind of pattern, or a green light when it's been winning.
+        # See app/services/pattern_stats.py for the math + thresholds.
+        try:
+            from app.services.pattern_stats import get_pattern_warning
+            pattern_warning = get_pattern_warning({
+                "bucket": bucket,
+                "market_regime": market_regime,
+            })
+            if pattern_warning:
+                existing_kb = grok_data.get("_knowledge_block", "") or ""
+                grok_data["_knowledge_block"] = existing_kb + "\n\n" + pattern_warning
+        except Exception as e:
+            # Unexpected failure in the stats query — surface as warning
+            # so it shows up in logs, but never block the synthesis.
+            logger.warning(f"pattern_stats injection failed for {ticker}: {e}")
 
-        # AI synthesis with provider fallback chain
+    # AI synthesis with provider fallback chain. ai_sem caps how many
+    # Claude Local CLI subprocesses run concurrently — each is an
+    # independent Node process, so the cap protects laptop RAM, not
+    # any shared resource. With ai_sem=6, the 15 AI candidates land in
+    # ~3 waves of ~30s each instead of the previous 5 waves at sem=3.
+    async with ai_sem:
         synthesis = await ai_provider.synthesize_signal(
             ticker, technical_data, fundamental_data, macro_data, grok_data,
         )
 
-        # Classify AI status — honest data instead of inferring from confidence==0
-        # validated     = AI ran, confidence >= 50
-        # low_confidence = AI ran, confidence < 50 (but > 0)
-        # failed        = AI tried, all providers errored or over budget
-        synthesis_confidence = synthesis.get("confidence", 0) or 0
-        if synthesis.get("error"):
-            ai_status = "failed"
-        elif synthesis_confidence >= 50:
-            ai_status = "validated"
-        else:
-            ai_status = "low_confidence"
+    # Classify AI status — honest data instead of inferring from confidence==0
+    # validated     = AI ran, confidence >= 50
+    # low_confidence = AI ran, confidence < 50 (but > 0)
+    # failed        = AI tried, all providers errored or over budget
+    synthesis_confidence = synthesis.get("confidence", 0) or 0
+    if synthesis.get("error"):
+        ai_status = "failed"
+    elif synthesis_confidence >= 50:
+        ai_status = "validated"
+    else:
+        ai_status = "low_confidence"
 
-        # Update AI retry queue based on synthesis result
-        from app.services import ai_retry_queue
+    # Update AI retry queue based on synthesis result
+    from app.services import ai_retry_queue
+    if ai_status == "failed":
+        ai_retry_queue.record_failure(ticker, error=str(synthesis.get("error", "")))
+    else:
+        # AI ran (any confidence) — clear from retry queue if it was there
+        ai_retry_queue.clear_success(ticker)
+
+    # Score (with regime context)
+    asset_class = get_asset_class(ticker)
+    score, breakdown = compute_score(
+        technical_data, fundamental_data, macro_data,
+        grok_data, synthesis, bucket, market_regime, asset_class,
+    )
+
+    # Check blockers
+    is_blocked, block_reasons = check_blockers(
+        grok_data, fundamental_data, macro_data, technical_data,
+    )
+
+    # Contrarian detection
+    from app.signals.contrarian import detect_contrarian
+    contrarian = detect_contrarian(technical_data, bucket)
+    signal_style = contrarian["signal_style"]
+
+    # Determine action — contrarian signals can generate BUY even at lower scores
+    confidence = synthesis.get("confidence", 0) or 0
+    if is_blocked:
+        action = "AVOID"
+    elif contrarian["is_contrarian"] and contrarian["contrarian_score"] >= 60:
+        action = "BUY" if score >= 55 else "HOLD"
+    else:
+        action = score_to_action(score, bucket)
+
+    # AI quality guard: downgrade BUY to HOLD when AI is unreliable.
+    #
+    # ARCHITECTURE NOTE: score is the entry decider, Claude provides
+    # the dossier (reasoning, target, stop, confidence). The principle
+    # in `feedback_three_witness_consensus.md` is "AI is the decider"
+    # but it applies to EXITS (Stage 6 thesis tracker) and to FEEDING
+    # Claude a better dossier so future entries are calibrated. It does
+    # NOT mean Claude has unilateral veto over score-derived BUYs at
+    # entry — that would conflict with the explicit "do not build hard
+    # vetoes that override the AI's view" guidance and Pedro's
+    # "AI cannot win all the time" rule.
+    #
+    # What this guard CAN do: catch genuine self-contradictions where
+    # Claude says BUY but its OWN structured self_check says the
+    # reasoning doesn't support that BUY. That's not a math veto — it's
+    # asking Claude "are you sure?" via a structured second pass that
+    # Claude itself filled out.
+    if action == "BUY":
         if ai_status == "failed":
-            ai_retry_queue.record_failure(ticker, error=str(synthesis.get("error", "")))
+            logger.warning(f"{ticker}: BUY downgraded to HOLD (AI synthesis failed — all providers errored)")
+            action = "HOLD"
+        elif ai_status == "low_confidence":
+            logger.info(f"{ticker}: BUY downgraded to HOLD (low AI confidence {confidence}%)")
+            action = "HOLD"
         else:
-            # AI ran (any confidence) — clear from retry queue if it was there
-            ai_retry_queue.clear_success(ticker)
+            # Self-consistency safety net via structured self_check.
+            # PRIMARY (added 2026-04-09): the synthesis prompt requires
+            # Claude to return a `self_check` block answering yes/no
+            # questions about its own reasoning. When Claude returns
+            # signal=BUY but its self_check flags wait/bearish/inconsistent,
+            # downgrade. Empirically structured self-questions are much
+            # easier for an LLM to answer correctly than overall judgment.
+            #
+            # FALLBACK: substring regex on raw reasoning (only fires when
+            # self_check is missing — older provider responses, malformed
+            # JSON, error fallbacks). Defense in depth.
+            _self_check = synthesis.get("self_check") or {}
+            _downgrade_reason: str | None = None
 
-        # Score (with regime context)
-        asset_class = get_asset_class(ticker)
-        score, breakdown = compute_score(
-            technical_data, fundamental_data, macro_data,
-            grok_data, synthesis, bucket, market_regime, asset_class,
-        )
-
-        # Check blockers
-        is_blocked, block_reasons = check_blockers(
-            grok_data, fundamental_data, macro_data, technical_data,
-        )
-
-        # Contrarian detection
-        from app.signals.contrarian import detect_contrarian
-        contrarian = detect_contrarian(technical_data, bucket)
-        signal_style = contrarian["signal_style"]
-
-        # Determine action — contrarian signals can generate BUY even at lower scores
-        confidence = synthesis.get("confidence", 0) or 0
-        if is_blocked:
-            action = "AVOID"
-        elif contrarian["is_contrarian"] and contrarian["contrarian_score"] >= 60:
-            action = "BUY" if score >= 55 else "HOLD"
-        else:
-            action = score_to_action(score, bucket)
-
-        # AI quality guard: downgrade BUY to HOLD when AI is unreliable.
-        #
-        # ARCHITECTURE NOTE: score is the entry decider, Claude provides
-        # the dossier (reasoning, target, stop, confidence). The principle
-        # in `feedback_three_witness_consensus.md` is "AI is the decider"
-        # but it applies to EXITS (Stage 6 thesis tracker) and to FEEDING
-        # Claude a better dossier so future entries are calibrated. It does
-        # NOT mean Claude has unilateral veto over score-derived BUYs at
-        # entry — that would conflict with the explicit "do not build hard
-        # vetoes that override the AI's view" guidance and Pedro's
-        # "AI cannot win all the time" rule.
-        #
-        # What this guard CAN do: catch genuine self-contradictions where
-        # Claude says BUY but its OWN structured self_check says the
-        # reasoning doesn't support that BUY. That's not a math veto — it's
-        # asking Claude "are you sure?" via a structured second pass that
-        # Claude itself filled out.
-        if action == "BUY":
-            if ai_status == "failed":
-                logger.warning(f"{ticker}: BUY downgraded to HOLD (AI synthesis failed — all providers errored)")
-                action = "HOLD"
-            elif ai_status == "low_confidence":
-                logger.info(f"{ticker}: BUY downgraded to HOLD (low AI confidence {confidence}%)")
-                action = "HOLD"
+            if _self_check.get("_present"):
+                if _self_check.get("contains_wait_instruction"):
+                    _downgrade_reason = "self_check.contains_wait_instruction=true"
+                elif _self_check.get("contains_bearish_descriptors"):
+                    _downgrade_reason = "self_check.contains_bearish_descriptors=true"
+                elif not _self_check.get("reasoning_supports_signal"):
+                    _downgrade_reason = "self_check.reasoning_supports_signal=false"
             else:
-                # Self-consistency safety net via structured self_check.
-                # PRIMARY (added 2026-04-09): the synthesis prompt requires
-                # Claude to return a `self_check` block answering yes/no
-                # questions about its own reasoning. When Claude returns
-                # signal=BUY but its self_check flags wait/bearish/inconsistent,
-                # downgrade. Empirically structured self-questions are much
-                # easier for an LLM to answer correctly than overall judgment.
-                #
-                # FALLBACK: substring regex on raw reasoning (only fires when
-                # self_check is missing — older provider responses, malformed
-                # JSON, error fallbacks). Defense in depth.
-                _self_check = synthesis.get("self_check") or {}
-                _downgrade_reason: str | None = None
+                _BEARISH_HEDGE_PHRASES = (
+                    "falling knife", "falling-knife",
+                    "structural downtrend", "structural weakness",
+                    "severe downtrend", "confirmed downtrend",
+                    "decisively bearish", "strongly bearish", "accelerating bearish",
+                    "deeply negative macd", "deeply negative momentum",
+                    "strongly negative macd",
+                    "momentum has rolled over", "momentum rollover", "momentum collapse",
+                    "bearish divergence pattern",
+                    "technically stretched", "technically overextended",
+                    "near overbought", "approaching overbought",
+                    "internally contradictory",
+                    "poor risk/reward", "poor risk reward",
+                    "no fundamental margin of safety", "no margin of safety",
+                    "bleed risk", "bleed within",
+                    "wait for a pullback", "wait for macd", "wait for momentum",
+                    "wait for confirmation", "wait for the",
+                    "before considering entry", "before considering an entry",
+                    "before commit", "for a better entry", "is premature",
+                    "not an entry",
+                )
+                _reasoning = (synthesis.get("reasoning") or "").lower()
+                _hit = next((p for p in _BEARISH_HEDGE_PHRASES if p in _reasoning), None)
+                if _hit:
+                    _downgrade_reason = f"legacy regex hit {_hit!r} (no self_check)"
 
-                if _self_check.get("_present"):
-                    if _self_check.get("contains_wait_instruction"):
-                        _downgrade_reason = "self_check.contains_wait_instruction=true"
-                    elif _self_check.get("contains_bearish_descriptors"):
-                        _downgrade_reason = "self_check.contains_bearish_descriptors=true"
-                    elif not _self_check.get("reasoning_supports_signal"):
-                        _downgrade_reason = "self_check.reasoning_supports_signal=false"
-                else:
-                    _BEARISH_HEDGE_PHRASES = (
-                        "falling knife", "falling-knife",
-                        "structural downtrend", "structural weakness",
-                        "severe downtrend", "confirmed downtrend",
-                        "decisively bearish", "strongly bearish", "accelerating bearish",
-                        "deeply negative macd", "deeply negative momentum",
-                        "strongly negative macd",
-                        "momentum has rolled over", "momentum rollover", "momentum collapse",
-                        "bearish divergence pattern",
-                        "technically stretched", "technically overextended",
-                        "near overbought", "approaching overbought",
-                        "internally contradictory",
-                        "poor risk/reward", "poor risk reward",
-                        "no fundamental margin of safety", "no margin of safety",
-                        "bleed risk", "bleed within",
-                        "wait for a pullback", "wait for macd", "wait for momentum",
-                        "wait for confirmation", "wait for the",
-                        "before considering entry", "before considering an entry",
-                        "before commit", "for a better entry", "is premature",
-                        "not an entry",
-                    )
-                    _reasoning = (synthesis.get("reasoning") or "").lower()
-                    _hit = next((p for p in _BEARISH_HEDGE_PHRASES if p in _reasoning), None)
-                    if _hit:
-                        _downgrade_reason = f"legacy regex hit {_hit!r} (no self_check)"
+            if _downgrade_reason:
+                logger.warning(
+                    f"{ticker}: BUY downgraded to HOLD — {_downgrade_reason} "
+                    f"(notes: {_self_check.get('self_check_notes', '')!r})"
+                )
+                action = "HOLD"
 
-                if _downgrade_reason:
-                    logger.warning(
-                        f"{ticker}: BUY downgraded to HOLD — {_downgrade_reason} "
-                        f"(notes: {_self_check.get('self_check_notes', '')!r})"
-                    )
-                    action = "HOLD"
+    # Check GEM (blocked signals can't be GEMs)
+    is_gem, gem_conditions = check_gem(score, grok_data, synthesis)
+    if is_blocked:
+        is_gem = False
 
-        # Check GEM (blocked signals can't be GEMs)
-        is_gem, gem_conditions = check_gem(score, grok_data, synthesis)
-        if is_blocked:
-            is_gem = False
+    # Determine status vs previous signal
+    prev = previous_signals.get(ticker)
+    status = determine_status(action, score, prev)
 
-        # Determine status vs previous signal
-        prev = previous_signals.get(ticker)
-        status = determine_status(action, score, prev)
+    current_price = technical_data.get("current_price")
 
-        current_price = technical_data.get("current_price")
+    # Persist Claude's raw signal + self_check alongside the rest of
+    # grok_data so post-hoc audits can answer:
+    #   1. "What did Claude actually say?" (`_ai_signal`) — distinct from
+    #      `action`, which is derived by score_to_action and may differ.
+    #   2. "Did Claude say its reasoning was consistent with that
+    #      signal?" (`_self_check`).
+    # Underscore-prefixed keys match the existing meta-field convention
+    # (_market_regime, _knowledge_block, _options_flow, ...) and are
+    # ignored by format_sentiment so they cannot leak into future prompts.
+    if isinstance(grok_data, dict):
+        _ai_signal = synthesis.get("signal")
+        if _ai_signal:
+            grok_data["_ai_signal"] = _ai_signal
+        if synthesis.get("self_check"):
+            grok_data["_self_check"] = synthesis["self_check"]
 
-        # Persist Claude's raw signal + self_check alongside the rest of
-        # grok_data so post-hoc audits can answer:
-        #   1. "What did Claude actually say?" (`_ai_signal`) — distinct from
-        #      `action`, which is derived by score_to_action and may differ.
-        #   2. "Did Claude say its reasoning was consistent with that
-        #      signal?" (`_self_check`).
-        # Underscore-prefixed keys match the existing meta-field convention
-        # (_market_regime, _knowledge_block, _options_flow, ...) and are
-        # ignored by format_sentiment so they cannot leak into future prompts.
-        if isinstance(grok_data, dict):
-            _ai_signal = synthesis.get("signal")
-            if _ai_signal:
-                grok_data["_ai_signal"] = _ai_signal
-            if synthesis.get("self_check"):
-                grok_data["_self_check"] = synthesis["self_check"]
+    # Build signal record
+    from app.scanners.universe import get_exchange
+    exchange = get_exchange(ticker)
+    signal_data = {
+        "scan_id": scan_id,
+        "symbol": ticker,
+        "asset_type": get_asset_class(ticker),
+        "exchange": exchange,
+        "action": action,
+        "status": status,
+        "score": score,
+        "confidence": synthesis.get("confidence", 0),
+        "ai_status": ai_status,
+        "is_gem": is_gem,
+        "bucket": bucket,
+        "price_at_signal": current_price,
+        "target_price": synthesis.get("target_price"),
+        "stop_loss": synthesis.get("stop_loss"),
+        "risk_reward": synthesis.get("risk_reward_ratio"),
+        "catalyst": synthesis.get("catalyst"),
+        "sentiment_score": int(grok_data.get("score", 50)),
+        "reasoning": synthesis.get("reasoning", ""),
+        "technical_data": technical_data,
+        "fundamental_data": fundamental_data,
+        "macro_data": macro_data,
+        "grok_data": grok_data,
+        "market_regime": market_regime,
+        "catalyst_type": breakdown.get("catalyst_type"),
+        "account_recommendation": _recommend_account(bucket, exchange),
+        "signal_style": signal_style,
+        "contrarian_score": contrarian["contrarian_score"] if contrarian["is_contrarian"] else None,
+        "company_name": fundamental_data.get("company_name") if fundamental_data else None,
+        "is_discovered": ticker in (discovered_set or set()),
+        "probability_vs_spy": compute_probability_vs_spy(score, bucket, has_ai=bool(synthesis.get("reasoning"))),
+        "factor_labels": compute_factor_labels(breakdown, bucket, asset_class),
+    }
 
-        # Build signal record
-        from app.scanners.universe import get_exchange
-        exchange = get_exchange(ticker)
-        signal_data = {
-            "scan_id": scan_id,
-            "symbol": ticker,
-            "asset_type": get_asset_class(ticker),
-            "exchange": exchange,
-            "action": action,
-            "status": status,
-            "score": score,
-            "confidence": synthesis.get("confidence", 0),
-            "ai_status": ai_status,
-            "is_gem": is_gem,
-            "bucket": bucket,
-            "price_at_signal": current_price,
-            "target_price": synthesis.get("target_price"),
-            "stop_loss": synthesis.get("stop_loss"),
-            "risk_reward": synthesis.get("risk_reward_ratio"),
-            "catalyst": synthesis.get("catalyst"),
-            "sentiment_score": int(grok_data.get("score", 50)),
-            "reasoning": synthesis.get("reasoning", ""),
-            "technical_data": technical_data,
-            "fundamental_data": fundamental_data,
-            "macro_data": macro_data,
-            "grok_data": grok_data,
-            "market_regime": market_regime,
-            "catalyst_type": breakdown.get("catalyst_type"),
-            "account_recommendation": _recommend_account(bucket, exchange),
-            "signal_style": signal_style,
-            "contrarian_score": contrarian["contrarian_score"] if contrarian["is_contrarian"] else None,
-            "company_name": fundamental_data.get("company_name") if fundamental_data else None,
-            "is_discovered": ticker in (discovered_set or set()),
-            "probability_vs_spy": compute_probability_vs_spy(score, bucket, has_ai=bool(synthesis.get("reasoning"))),
-            "factor_labels": compute_factor_labels(breakdown, bucket, asset_class),
-        }
+    # Kelly position sizing (if actionable)
+    rr = synthesis.get("risk_reward_ratio")
+    if action == "BUY" and rr and float(rr) > 0:
+        from app.signals.kelly import calculate_kelly
+        kelly = calculate_kelly(risk_reward=float(rr), score=score, regime=market_regime)
+        signal_data["kelly_recommendation"] = kelly
 
-        # Kelly position sizing (if actionable)
-        rr = synthesis.get("risk_reward_ratio")
-        if action == "BUY" and rr and float(rr) > 0:
-            from app.signals.kelly import calculate_kelly
-            kelly = calculate_kelly(risk_reward=float(rr), score=score, regime=market_regime)
-            signal_data["kelly_recommendation"] = kelly
+    logger.info(
+        f"{ticker}: {action} (score={score}, gem={is_gem}, "
+        f"blocked={is_blocked}, status={status}, regime={market_regime})"
+    )
 
-        logger.info(
-            f"{ticker}: {action} (score={score}, gem={is_gem}, "
-            f"blocked={is_blocked}, status={status}, regime={market_regime})"
-        )
-
-        return signal_data
+    return signal_data
 
 
 def _classify_bucket(ticker: str, screening: dict) -> str:

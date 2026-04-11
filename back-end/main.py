@@ -18,7 +18,7 @@ from app.core.exceptions import register_exception_handlers
 from app.middleware.audit import AuditMiddleware
 from app.middleware.auth import AuthMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
-from app.notifications.telegram_bot import handle_command, send_message
+from app.notifications.telegram_bot import handle_command, send_message, start_telegram_worker, stop_telegram_worker
 from app.scheduler.runner import init_scheduler, start_scheduler, stop_scheduler
 from app.services.log_service import init_log_capture
 
@@ -33,6 +33,7 @@ async def lifespan(app: FastAPI):
     init_log_capture()
     init_scheduler()
     start_scheduler()
+    start_telegram_worker()
 
     # Catch up any missed scans (e.g., app was down during scheduled time)
     from app.scheduler.jobs import catch_up_missed_scans
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
     yield
 
     stop_scheduler()
+    await stop_telegram_worker()
 
     # Close the reusable Telegram HTTP client
     from app.notifications.telegram_bot import _http_client
