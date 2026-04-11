@@ -27,8 +27,12 @@ def get_daily_stats() -> dict:
     if cached is not None:
         return cached
 
-    now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Use ET date for "today" — after 8pm ET the UTC date rolls to
+    # tomorrow, which would zero out all of today's stats.
+    from zoneinfo import ZoneInfo
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    today_et = now_et.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = today_et.astimezone(timezone.utc)
     yesterday_start = today_start - timedelta(days=1)
 
     try:
