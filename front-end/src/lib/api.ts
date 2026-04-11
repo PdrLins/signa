@@ -44,11 +44,17 @@ function sanitizeErrorMessage(status: number, raw: string | undefined): string {
 }
 
 client.interceptors.request.use((config) => {
+  // Already logging out — kill ALL new requests before they reach the server.
+  // This stops the 401 flood from React Query refetchInterval hooks that keep
+  // firing during the ~100ms between forceLogout() and the actual browser
+  // navigation to /login.
+  if (isRedirecting) {
+    return Promise.reject(new Error('Logging out'))
+  }
   const isPublic = PUBLIC_ROUTES.some((r) => config.url?.startsWith(r)) || PUBLIC_EXACT.some((r) => config.url === r)
   if (!isPublic) {
     const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null
     if (!token) {
-      // No token at all — force logout (uses the same redirect path as 401 handling)
       forceLogout()
       return Promise.reject(new Error('Not authenticated'))
     }
