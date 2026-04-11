@@ -942,6 +942,8 @@
     "warning1": "VIX Backwardation Stress — VIX term structure ratio above 1.10 means spot fear exceeds expected future fear, historically precedes near-term drawdowns.",
     "warning2": "Yield Curve Inverted — 10Y-2Y spread negative is a recession warning that has preceded every US recession since 1970.",
     "warning3": "Credit Spread Stress — BBB OAS above 3.0% means the corporate bond market is pricing elevated default risk, often leading equity declines by weeks.",
+    "recoveryRegimeTitle": "RECOVERY Regime",
+    "recoveryRegimeDesc": "A fourth market regime alongside Trending, Volatile, and Crisis. Fires when VIX is falling from crisis levels (20-30 range), SPY has reclaimed its 50-day SMA, and VIX was above 30 within the last 30 days. This prevents false triggers on routine pullbacks — only a genuine post-crisis recovery qualifies. Historically produces the highest risk-adjusted returns of any regime. The brain gives a 10% score boost to HIGH_RISK signals because momentum strategies work exceptionally well during post-crisis recoveries. Beaten-down stocks showing fresh upward momentum have the highest alpha in this phase.",
     "shortInterestTitle": "Short Interest",
     "shortInterestDesc": "Each ticker's short interest (% of shares sold short) is shown on the signal detail page under Fundamentals. High short interest combined with bullish momentum can trigger squeeze potential, which the scoring system rewards with bonus points. Look for this when evaluating HIGH_RISK signals.",
     "probVsSpyTitle": "Probability vs SPY",

@@ -922,6 +922,8 @@
     "warning1": "Estresse de Backwardation do VIX — Razao da estrutura a termo acima de 1.10 significa que o medo spot excede o medo futuro esperado.",
     "warning2": "Curva de Juros Invertida — Spread 10Y-2Y negativo e alerta de recessao que precedeu toda recessao americana desde 1970.",
     "warning3": "Estresse de Spread de Credito — BBB OAS acima de 3.0% significa que o mercado de titulos corporativos esta precificando risco elevado de inadimplencia.",
+    "recoveryRegimeTitle": "Regime RECOVERY",
+    "recoveryRegimeDesc": "Um quarto regime de mercado junto com Trending, Volatile e Crisis. Dispara quando VIX esta caindo de niveis de crise (faixa 20-30), SPY recuperou a SMA50, e VIX estava acima de 30 nos ultimos 30 dias. Previne disparos falsos em recuos rotineiros — apenas uma recuperacao genuina pos-crise se qualifica. Historicamente produz os maiores retornos ajustados ao risco. O brain da um boost de 10% na pontuacao de sinais HIGH_RISK porque estrategias de momentum funcionam excepcionalmente bem em recuperacoes pos-crise.",
     "shortInterestTitle": "Short Interest",
     "shortInterestDesc": "O short interest de cada ticker (% de acoes vendidas a descoberto) e mostrado na pagina de detalhes do sinal em Fundamentos. Alto short interest combinado com momentum altista pode disparar potencial de squeeze, que o sistema de pontuacao recompensa com pontos bonus. Procure isso ao avaliar sinais ALTO RISCO.",
     "probVsSpyTitle": "Probabilidade vs SPY",
