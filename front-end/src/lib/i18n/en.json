@@ -390,7 +390,8 @@
     "failed": "failed",
     "manualScan": "Manual scan",
     "signalCount": "{count} signals",
-    "signalCountGems": "{count} signals, {gems} GEM"
+    "signalCountGems": "{count} signals, {gems} GEM",
+    "resumesMonday": "Resumes Monday"
   },
   "integrations": {
     "title": "Integrations",

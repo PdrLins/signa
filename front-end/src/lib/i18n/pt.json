@@ -390,7 +390,8 @@
     "failed": "falhou",
     "manualScan": "Varredura manual",
     "signalCount": "{count} sinais",
-    "signalCountGems": "{count} sinais, {gems} GEM"
+    "signalCountGems": "{count} sinais, {gems} GEM",
+    "resumesMonday": "Retoma segunda-feira"
   },
   "integrations": {
     "title": "Integrações",
