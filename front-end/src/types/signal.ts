@@ -64,6 +64,21 @@ export interface DailyStats {
   claude_cost: number
   grok_cost: number
   fear_greed: { score: number; label: string } | null
+  intermarket: {
+    gold_price: number | null
+    gold_change_pct: number | null
+    oil_price: number | null
+    oil_change_pct: number | null
+    copper_gold_ratio: number | null
+  } | null
+  vix_term: {
+    spot: number | null
+    futures_3m: number | null
+    ratio: number | null
+    structure: string | null
+  } | null
+  yield_curve: number | null
+  credit_spread: number | null
 }
 
 export interface ScanTodayRecord {

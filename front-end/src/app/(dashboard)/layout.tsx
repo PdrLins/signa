@@ -10,6 +10,7 @@ import { useStats } from '@/hooks/useStats'
 import { LeftNav } from '@/components/layout/LeftNav'
 import { BottomNav } from '@/components/layout/BottomNav'
 import { DEFAULT_TIMEZONE, isMarketOpen } from '@/lib/utils'
+import { CircleDot, Droplets, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 
 function MarketIndicator() {
   const theme = useTheme()
@@ -28,6 +29,10 @@ function MarketIndicator() {
   const open = isMarketOpen()
   const regime = signals?.[0]?.market_regime ?? null
   const fg = stats?.fear_greed ?? null
+  const im = stats?.intermarket ?? null
+  const vt = stats?.vix_term ?? null
+  const yc = stats?.yield_curve ?? null
+  const cs = stats?.credit_spread ?? null
 
   const regimeColor = useMemo(() => {
     if (regime === 'CRISIS') return theme.colors.down
@@ -39,8 +44,30 @@ function MarketIndicator() {
     if (regime === 'CRISIS') return t.market.crisis
     if (regime === 'VOLATILE') return t.market.volatile
     if (regime === 'TRENDING') return t.market.trending
+    if (regime === 'RECOVERY') return (t.market as Record<string, string>)?.recovery ?? 'Recovery'
     return null
   }, [regime, t])
+
+  // Macro environment from the latest signal's macro_data
+  const environment = useMemo(() => {
+    const md = signals?.[0]?.macro_data
+    if (!md || typeof md !== 'object') return null
+    return (md as Record<string, string>).environment ?? null
+  }, [signals])
+
+  const envColor = useMemo(() => {
+    if (environment === 'hostile') return theme.colors.down
+    if (environment === 'neutral') return theme.colors.warning
+    return theme.colors.up
+  }, [environment, theme])
+
+  const envLabel = useMemo(() => {
+    const m = t.market as Record<string, string>
+    if (environment === 'hostile') return m?.hostile ?? 'Hostile'
+    if (environment === 'neutral') return m?.envNeutral ?? 'Neutral'
+    if (environment === 'favorable') return m?.favorable ?? 'Favorable'
+    return null
+  }, [environment, t])
 
   const fgColor = useMemo(() => {
     if (!fg) return theme.colors.textSub
@@ -86,6 +113,14 @@ function MarketIndicator() {
           {regimeLabel}
         </span>
       )}
+      {envLabel && (
+        <span
+          className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+          style={{ backgroundColor: envColor + '18', color: envColor }}
+        >
+          {envLabel}
+        </span>
+      )}
       {time && (
         <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textSub }}>
           {time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: DEFAULT_TIMEZONE })}
@@ -101,39 +136,149 @@ function MarketIndicator() {
             boxShadow: theme.isDark ? '0 8px 24px rgba(0,0,0,0.4)' : '0 8px 24px rgba(0,0,0,0.1)',
           }}
         >
-          <div className="space-y-2.5">
+          <div className="space-y-2">
             {fg && (
               <div className="flex items-center justify-between">
                 <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
                   {t.stats.fearGreed}
                 </span>
                 <span className="text-[11px] font-bold tabular-nums" style={{ color: fgColor }}>
-                  {fg.score.toFixed(0)} -- {fg.label}
+                  {fg.score.toFixed(0)} <span className="font-normal lowercase" style={{ color: theme.colors.textSub }}>{fg.label}</span>
                 </span>
               </div>
             )}
-            {stats?.next_scan_time && (
+
+            {/* Intermarket */}
+            {im && (im.gold_price != null || im.oil_price != null) && (
+              <div className="pt-1.5" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
+                <span className="text-[9px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>Intermarket</span>
+                <div className="mt-1 space-y-1">
+                  {im.gold_price != null && (
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <CircleDot size={10} style={{ color: '#F59E0B' }} />
+                        <span className="text-[10px]" style={{ color: theme.colors.text }}>Gold</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-semibold tabular-nums" style={{ color: theme.colors.text }}>
+                          ${im.gold_price.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                        </span>
+                        {im.gold_change_pct != null && (
+                          <span className="text-[9px] font-medium tabular-nums" style={{ color: im.gold_change_pct >= 0 ? theme.colors.up : theme.colors.down }}>
+                            {im.gold_change_pct >= 0 ? '+' : ''}{im.gold_change_pct.toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {im.oil_price != null && (
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Droplets size={10} style={{ color: '#3B82F6' }} />
+                        <span className="text-[10px]" style={{ color: theme.colors.text }}>Oil</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-semibold tabular-nums" style={{ color: theme.colors.text }}>
+                          ${im.oil_price.toFixed(1)}
+                        </span>
+                        {im.oil_change_pct != null && (
+                          <span className="text-[9px] font-medium tabular-nums" style={{ color: im.oil_change_pct >= 0 ? theme.colors.up : theme.colors.down }}>
+                            {im.oil_change_pct >= 0 ? '+' : ''}{im.oil_change_pct.toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {im.copper_gold_ratio != null && (
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Minus size={10} style={{ color: theme.colors.textHint }} />
+                        <span className="text-[10px]" style={{ color: theme.colors.text }}>Cu/Au</span>
+                      </div>
+                      <span className="text-[10px] font-semibold tabular-nums" style={{ color: theme.colors.text }}>
+                        {im.copper_gold_ratio.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Macro indicators */}
+            {(yc != null || cs != null || vt) && (
+              <div className="pt-1.5" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
+                <span className="text-[9px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>Macro</span>
+                <div className="mt-1 space-y-1">
+                  {yc != null && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px]" style={{ color: theme.colors.text }}>Yield Curve</span>
+                      <span className="text-[10px] font-semibold tabular-nums" style={{ color: yc < 0 ? theme.colors.down : theme.colors.up }}>
+                        {yc > 0 ? '+' : ''}{yc.toFixed(2)}%
+                        {yc < 0 && <span className="text-[8px] font-normal ml-1" style={{ color: theme.colors.down }}>INV</span>}
+                        {yc > 1.5 && <span className="text-[8px] font-normal ml-1" style={{ color: theme.colors.up }}>STEEP</span>}
+                      </span>
+                    </div>
+                  )}
+                  {cs != null && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px]" style={{ color: theme.colors.text }}>Credit Spread</span>
+                      <span className="text-[10px] font-semibold tabular-nums" style={{ color: cs > 3.0 ? theme.colors.down : cs > 2.0 ? theme.colors.warning : theme.colors.textSub }}>
+                        {cs.toFixed(2)}%
+                        {cs > 5.0 && <span className="text-[8px] font-normal ml-1" style={{ color: theme.colors.down }}>CRISIS</span>}
+                        {cs > 3.0 && cs <= 5.0 && <span className="text-[8px] font-normal ml-1" style={{ color: theme.colors.down }}>STRESS</span>}
+                        {cs > 2.0 && cs <= 3.0 && <span className="text-[8px] font-normal ml-1" style={{ color: theme.colors.warning }}>ELEV</span>}
+                      </span>
+                    </div>
+                  )}
+                  {vt && vt.ratio != null && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px]" style={{ color: theme.colors.text }}>VIX Term</span>
+                      <div className="flex items-center gap-1">
+                        {vt.ratio > 1.0
+                          ? <TrendingUp size={9} style={{ color: theme.colors.down }} />
+                          : <TrendingDown size={9} style={{ color: theme.colors.up }} />
+                        }
+                        <span className="text-[10px] font-semibold tabular-nums" style={{ color: vt.ratio > 1.1 ? theme.colors.down : theme.colors.textSub }}>
+                          {vt.ratio.toFixed(3)}
+                        </span>
+                        <span className="text-[8px]" style={{ color: theme.colors.textHint }}>
+                          {vt.structure === 'backwardation' ? 'BWD' : 'CTG'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Next scan & AI cost */}
+            <div className="pt-1.5 space-y-1.5" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
                   {t.nav.nextScan}
                 </span>
                 <span className="text-[11px] tabular-nums" style={{ color: theme.colors.textSub }}>
-                  {new Date(stats.next_scan_time).toLocaleTimeString('en-US', {
-                    hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York', timeZoneName: 'short',
-                  })}
+                  {!open
+                    ? (t.scans?.resumesMonday ?? 'Resumes Monday')
+                    : stats?.next_scan_time
+                      ? new Date(stats.next_scan_time).toLocaleTimeString('en-US', {
+                          hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York', timeZoneName: 'short',
+                        })
+                      : '--'
+                  }
                 </span>
               </div>
-            )}
-            {stats && (
-              <div className="flex items-center justify-between pt-1.5" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
-                <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
-                  {t.stats.aiCost}
-                </span>
-                <span className="text-[11px] font-semibold tabular-nums" style={{ color: theme.colors.warning }}>
-                  ${stats.ai_cost_today.toFixed(2)}
-                </span>
-              </div>
-            )}
+              {stats && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
+                    {t.stats.aiCost}
+                  </span>
+                  <span className="text-[11px] font-semibold tabular-nums" style={{ color: theme.colors.warning }}>
+                    ${stats.ai_cost_today.toFixed(2)}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

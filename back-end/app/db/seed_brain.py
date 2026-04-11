@@ -601,6 +601,31 @@ SIGNAL_KNOWLEDGE = [
         "source_name": "Signa Universe",
     },
 
+    # ═══ MACRO: LEADING INDICATORS ═══
+    {
+        "topic": "MACRO",
+        "key_concept": "yield_curve_recession_predictor",
+        "explanation": "The 10Y-2Y Treasury spread is the single most reliable recession predictor. When it goes NEGATIVE (inverted), a recession has followed within 12-18 months in 8 of the last 8 times since 1970. BUT the timing nuance is critical: stocks often RALLY during the inversion itself. The real danger comes when the curve UN-INVERTS (goes back positive) after being inverted — this steepening is the actual crash signal, typically 3-9 months before recession hits. ACTIONABLE: Inverted curve = raise caution, tighten stops, reduce position sizes. UN-inverting after inversion = most dangerous macro phase, strongly prefer SAFE_INCOME over HIGH_RISK. Steep positive curve (>150bp) = favorable for growth and HIGH_RISK.",
+        "formula": "T10Y2Y < 0 = caution (tighten stops). T10Y2Y turns positive AFTER inversion = danger (prefer SAFE_INCOME). T10Y2Y > 150bp = favorable for growth.",
+        "source_name": "Federal Reserve Bank of NY Recession Probability Model",
+    },
+    {
+        "topic": "MACRO",
+        "key_concept": "credit_spreads_crash_predictor",
+        "explanation": "BBB corporate bond spreads (OAS over Treasuries) measure the market's pricing of corporate default risk. This is the smart money's fear gauge — it moves BEFORE VIX and before stock prices. Normal: 1.0-2.0%. Elevated: 2.0-3.0%. Stress: 3.0-5.0%. Crisis: 5.0%+. ACTIONABLE: When BBB OAS rises above 2.5% AND is rising week-over-week, this is an early warning that credit markets are seizing — reduce HIGH_RISK exposure. When BBB OAS falls below 1.5% after being elevated, this confirms recovery — increase HIGH_RISK confidence. Credit spreads below 1.0% = complacency risk, similar to VIX < 12. NOTE: FRED series BAMLC0A4CBBB has ~1 day lag, always yesterday's value.",
+        "formula": "credit_spread < 1.5% = favorable. 1.5-2.5% = neutral. 2.5-3.5% = reduce HIGH_RISK confidence. 3.5%+ = hostile signal.",
+        "source_name": "ICE BofA BBB Corporate Bond OAS via FRED",
+    },
+
+    # ═══ MACRO: VIX TERM STRUCTURE ═══
+    {
+        "topic": "MACRO",
+        "key_concept": "vix_term_structure_interpretation",
+        "explanation": "VIX term structure compares spot VIX to 3-month VIX futures (VIX3M). CONTANGO (spot < futures, ratio < 1.0) is normal — the market expects current calm to persist. BACKWARDATION (spot > futures, ratio > 1.0) means acute fear — the market is more scared NOW than it expects to be later. Ratio > 1.15 = severe stress, historically precedes 5-15% drawdowns within 2 weeks. Ratio < 0.85 = extreme complacency, markets often correct within 30 days. ACTIONABLE: When backwardation ratio > 1.10, reduce HIGH_RISK confidence and tighten stops. When ratio > 1.15, treat as hostile signal — only highest-conviction SAFE_INCOME plays. When contango ratio < 0.85, raise contrarian caution — markets may be too complacent for momentum to sustain.",
+        "formula": "ratio = VIX_spot / VIX3M. ratio > 1.15 = hostile. ratio > 1.10 = caution. ratio < 0.85 = complacency warning. 0.85-1.10 = normal.",
+        "source_name": "CBOE VIX Term Structure Research",
+    },
+
     # ═══ NEW: MOMENTUM SCIENCE ═══
     {
         "topic": "MOMENTUM_SCIENCE",
@@ -660,6 +685,15 @@ SIGNAL_KNOWLEDGE = [
         "explanation": "Today's post-COVID market has higher dispersion — companies differ more in their ability to navigate challenges. Higher dispersion means more opportunities for signal-based selection. When sector dispersion is high (spread between best and worst stocks >15% over 20 days), increase confidence in sector-specific signals. When all stocks move together with low dispersion, reduce confidence in individual signals.",
         "source_name": "BlackRock Market Neutral Investing",
         "source_url": "https://www.blackrock.com/us/financial-professionals/insights/market-neutral-investing",
+    },
+
+    # ═══ MARKET REGIME: RECOVERY ═══
+    {
+        "topic": "MARKET_REGIME",
+        "key_concept": "recovery_regime_opportunity",
+        "explanation": "RECOVERY is the fourth market regime, distinct from TRENDING. It occurs when VIX is falling from crisis levels (20-30 range), SPY has reclaimed its 50-day SMA, and VIX was above 30 within the last 30 days. Historically, RECOVERY produces the highest risk-adjusted returns of any regime (DeStefano, 2004). Momentum strategies work exceptionally well because the bear-to-bull reversal is OVER and a new trend is forming. Value stocks that were crushed in the prior crisis also outperform. ACTIONABLE: In RECOVERY regime, increase HIGH_RISK confidence. Favor stocks that fell the most in the prior crisis and are now showing momentum recovery — beaten-down + fresh momentum confirmation = highest alpha setup. Kelly sizing can be normal or slightly aggressive. SAFE_INCOME continues as normal.",
+        "formula": "RECOVERY = VIX between 20-30 AND falling AND SPY > SMA50 AND recent crisis (VIX was >30 in last 30 days). HIGH_RISK score boost +10%.",
+        "source_name": "DeStefano 2004 - Stock Returns and the Business Cycle",
     },
 
     # ═══ NEW: CANADA TAX RULES ═══
@@ -743,6 +777,50 @@ SIGNAL_KNOWLEDGE = [
         "source_name": "Market Bubble Research (Kindleberger, Shiller)",
         "source_url": "https://www.investopedia.com/terms/b/bubble.asp",
     },
+    # ═══ NEW: RESEARCH-BACKED KNOWLEDGE ENRICHMENT ═══
+    {
+        "topic": "MOMENTUM_SCIENCE",
+        "key_concept": "momentum_crash_specific_conditions",
+        "explanation": "Momentum crashes follow a specific pattern documented by Barroso and Santa-Clara (2015): (1) A sharp market decline (SPY drops >10% in <30 days), (2) VIX spikes above 30, (3) Then the BEAR-TO-BULL REVERSAL happens — the market bounces violently. In this reversal, last year's LOSERS outperform last year's WINNERS by 20-40% in a single month. This is when momentum strategies suffer catastrophic losses. The key: momentum works in trending markets, fails in reversals from extremes. ACTIONABLE: After a >10% market decline followed by a >5% bounce within 5 days, PAUSE all momentum-based HIGH_RISK signals for 10 trading days. Let the reversal play out. Resume when VIX falls below 25 and stays there for 5+ consecutive days.",
+        "formula": "IF spy_30d_return < -10% AND spy_5d_return > 5% THEN momentum_reversal_risk = TRUE → pause HIGH_RISK momentum for 10 days. Resume when VIX < 25 for 5+ days.",
+        "source_name": "Barroso and Santa-Clara 2015 - Momentum Has Its Moments",
+    },
+    {
+        "topic": "RISK_MANAGEMENT",
+        "key_concept": "crisis_correlation_convergence",
+        "explanation": "During market crises, correlations between all risky assets converge toward 1.0 (Longin and Solnik, 2001). This means diversification FAILS exactly when you need it most. Stocks, corporate bonds, commodities, and crypto all fall together — holding 10 different HIGH_RISK positions provides almost zero diversification benefit in a crisis. Only US Treasuries, gold, and cash provide real diversification during crises. ACTIONABLE: When regime is CRISIS or VIX > 35, do NOT assume that holding multiple different HIGH_RISK signals provides safety through diversification. Reduce total HIGH_RISK exposure to max 2 positions regardless of how many BUY signals fire. Concentrate remaining exposure in SAFE_INCOME with proven dividends. When VIX > 40, strongly prefer cash or equivalent.",
+        "formula": "IF regime == CRISIS: max_high_risk_positions = 2. IF vix > 40: max_high_risk_positions = 0, SAFE_INCOME only.",
+        "source_name": "Longin and Solnik 2001 - Extreme Correlation of International Equity Markets",
+    },
+    {
+        "topic": "SCORING",
+        "key_concept": "factor_independence_warning",
+        "explanation": "Not all scoring factors are independent. RSI and momentum are correlated (~0.6). MACD and momentum are highly correlated (~0.7). Sentiment and price momentum are correlated during trends (~0.5). This means a stock scoring high on RSI, MACD, AND momentum is not 3x confirmed — it is roughly 1.5x confirmed because the factors overlap. Truly INDEPENDENT factor pairs that provide unique information: (1) sentiment vs technicals (correlation ~0.2 in normal markets), (2) fundamentals vs momentum (correlation ~0.1), (3) macro vs stock-specific (correlation ~0.0), (4) catalyst timing vs everything else. ACTIONABLE: When evaluating a BUY signal, check if the confirming factors are actually independent. A signal confirmed by sentiment + fundamentals + catalyst is STRONGER than one confirmed by RSI + MACD + momentum, even if both have similar composite scores.",
+        "formula": "Independent pairs: sentiment-technicals, fundamentals-momentum, macro-stock, catalyst-everything. Redundant pairs: RSI-momentum, MACD-momentum, RSI-MACD.",
+        "source_name": "Fama-French Factor Research / Principal Component Analysis",
+    },
+    {
+        "topic": "EVENT_DRIVEN_STRATEGY",
+        "key_concept": "pead_decay_curve_and_optimal_hold",
+        "explanation": "Research-backed PEAD timing from Bernard and Thomas (1989), updated by Livnat and Mendenhall (2006): Day 0-1 after earnings surprise: 40% of total drift occurs (largest single move). Day 2-5: another 30% of drift. Day 6-10: another 20% of drift. Day 11-20: remaining 10%, mostly noise. Day 20+: drift is fully priced in. OPTIMAL ENTRY: Day 0-1 (same day or next day after earnings). OPTIMAL EXIT: Day 7-10 (capture 90% of drift, avoid the noisy tail). Holding beyond day 10 adds risk without proportional reward. EPS surprise magnitude matters: >10% surprise = strongest drift, hold full 10 days. 5-10% = moderate drift, exit by day 7. 3-5% = weak drift, exit by day 5. <3% = not tradeable as PEAD.",
+        "formula": "PEAD entry: day 0-1. Exit: day 7-10. Surprise > 10% = hold full 10 days. Surprise 5-10% = exit by day 7. Surprise 3-5% = exit by day 5.",
+        "source_name": "Bernard and Thomas 1989, updated by Livnat and Mendenhall 2006",
+    },
+    {
+        "topic": "RISK_MANAGEMENT",
+        "key_concept": "small_sample_fat_tail_warning",
+        "explanation": "Financial returns have fat-tailed distributions (Taleb, 2001). This means: (1) Rare extreme events happen far more often than a normal distribution predicts. (2) Small sample backtests (< 30 trades) CANNOT reliably estimate tail risk. (3) A strategy that 'worked' on 5-10 trades may have simply not yet encountered the tail event that destroys it. An 80% win rate on N=5 has a 95% confidence interval of [28%, 99%] — it tells you almost nothing. ACTIONABLE: When pattern_stats show fewer than 30 observations for a pattern, treat the win rate estimate as unreliable. Do NOT increase position sizes based on high win rates from small samples. Require at least 30 observations before treating a pattern as tentative, 100+ before adjusting Kelly parameters. The brain's current graduation threshold of 5 observations is fine for hypotheses but insufficient for confident knowledge.",
+        "formula": "observations < 30 = hypothesis only, keep kelly conservative. 30-100 = tentative, can inform but not override. 100+ = reliable enough for sizing adjustments.",
+        "source_name": "Taleb - Fooled by Randomness / Statistical Learning Theory",
+    },
+    {
+        "topic": "RISK_MANAGEMENT",
+        "key_concept": "put_call_ratio_contrarian",
+        "explanation": "The put/call volume ratio (available from options flow data) is a powerful contrarian indicator at extremes. Extreme high put/call (>1.2) = excessive hedging/fear = contrarian bullish signal — the crowd is already positioned for decline, creating a setup for a rally. Extreme low put/call (<0.5) = excessive complacency = contrarian bearish — the crowd has no hedges, vulnerable to any shock. Normal range (0.7-1.0) = no signal, ignore. ACTIONABLE: Most useful when combined with other contrarian indicators: oversold RSI + high put/call (>1.2) + VIX spike = strong contrarian BUY setup. Overbought RSI + low put/call (<0.5) + VIX complacency = caution flag on BUY signals.",
+        "formula": "put_call > 1.2 = contrarian bullish. put_call < 0.5 = contrarian bearish. 0.7-1.0 = neutral, no signal.",
+        "source_name": "CBOE Put/Call Ratio Research",
+    },
+
     {
         "topic": "RISK_MANAGEMENT",
         "key_concept": "volatility_vs_permanent_loss",

@@ -299,6 +299,41 @@ RULES: list[dict] = [
         label_value=lambda s, t, f, o: {"pct": round(_safe_float(o.get("iv_percentile")) or 0)},
     ),
 
+    # ── Macro warnings (from macro_data injected into signal dict) ──
+    _rule(
+        "vix_backwardation_stress", TONE_NEGATIVE,
+        fires=lambda s, t, f, o: (
+            isinstance(s.get("macro_data"), dict)
+            and isinstance(s["macro_data"].get("vix_term_structure"), dict)
+            and (_safe_float(s["macro_data"]["vix_term_structure"].get("ratio")) or 0) > 1.10
+        ),
+        label_value=lambda s, t, f, o: {
+            "ratio": round(_safe_float(s["macro_data"]["vix_term_structure"].get("ratio")) or 0, 3),
+        },
+    ),
+    _rule(
+        "yield_curve_inverted", TONE_NEGATIVE,
+        fires=lambda s, t, f, o: (
+            isinstance(s.get("macro_data"), dict)
+            and _safe_float(s["macro_data"].get("yield_curve_10y2y")) is not None
+            and (_safe_float(s["macro_data"].get("yield_curve_10y2y")) or 0) < 0
+        ),
+        label_value=lambda s, t, f, o: {
+            "spread": round((_safe_float(s["macro_data"].get("yield_curve_10y2y")) or 0) * 100),
+        },
+    ),
+    _rule(
+        "credit_spread_stress", TONE_NEGATIVE,
+        fires=lambda s, t, f, o: (
+            isinstance(s.get("macro_data"), dict)
+            and _safe_float(s["macro_data"].get("credit_spread_bbb")) is not None
+            and (_safe_float(s["macro_data"].get("credit_spread_bbb")) or 0) > 3.0
+        ),
+        label_value=lambda s, t, f, o: {
+            "spread": round((_safe_float(s["macro_data"].get("credit_spread_bbb")) or 0) * 100),
+        },
+    ),
+
     # ── 52-week range proximity ──
     _rule(
         "near_52w_high", TONE_NEUTRAL,

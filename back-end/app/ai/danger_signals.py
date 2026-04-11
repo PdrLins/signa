@@ -102,6 +102,18 @@ KEY_TO_PROMPT_TEXT: dict[str, str] = {
         "Options IV at {pct}th percentile (extreme complacency) — "
         "historically precedes vol expansion and downside"
     ),
+    "vix_backwardation_stress": (
+        "VIX term structure in backwardation (ratio {ratio}) — acute market stress, "
+        "spot fear exceeds expected future fear, historically precedes 5-15% drawdowns"
+    ),
+    "yield_curve_inverted": (
+        "Yield curve inverted (10Y-2Y spread: {spread}bp) — recession warning, "
+        "historically preceded every US recession since 1970"
+    ),
+    "credit_spread_stress": (
+        "Credit spreads elevated (BBB OAS: {spread}bp) — corporate bond market "
+        "pricing elevated default risk, often leads equity declines by weeks"
+    ),
 }
 
 

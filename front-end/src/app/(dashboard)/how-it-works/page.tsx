@@ -448,6 +448,12 @@ export default function HowItWorksPage() {
             <Card>
               <Section title={h.regimeBadgesTitle}>
                 <P>{h.regimeBadgesDesc}</P>
+                <ul className="space-y-1.5 mt-2">
+                  <Li>{h.regimeTrending}</Li>
+                  <Li>{h.regimeVolatile}</Li>
+                  <Li>{h.regimeCrisis}</Li>
+                  <Li>{h.regimeRecovery}</Li>
+                </ul>
               </Section>
             </Card>
 
@@ -696,6 +702,67 @@ export default function HowItWorksPage() {
             <Card>
               <Section title={h.fearGreedTitle}>
                 <P>{h.fearGreedDesc}</P>
+              </Section>
+            </Card>
+
+            {/* Macro Environment Badge */}
+            {h.macroEnvironmentTitle && (
+              <Card>
+                <Section title={h.macroEnvironmentTitle}>
+                  <P>{h.macroEnvironmentDesc}</P>
+                </Section>
+              </Card>
+            )}
+
+            {/* Intermarket Indicators */}
+            <Card>
+              <Section title={h.intermarketTitle}>
+                <P>{h.intermarketDesc}</P>
+                <ul className="space-y-1.5 mt-2">
+                  <Li>{h.intermarket1}</Li>
+                  <Li>{h.intermarket2}</Li>
+                  <Li>{h.intermarket3}</Li>
+                </ul>
+              </Section>
+            </Card>
+
+            {/* Yield Curve */}
+            <Card>
+              <Section title={h.yieldCurveTitle}>
+                <P>{h.yieldCurveDesc}</P>
+              </Section>
+            </Card>
+
+            {/* Credit Spreads */}
+            <Card>
+              <Section title={h.creditSpreadTitle}>
+                <P>{h.creditSpreadDesc}</P>
+              </Section>
+            </Card>
+
+            {/* VIX Term Structure */}
+            <Card>
+              <Section title={h.vixTermTitle}>
+                <P>{h.vixTermDesc}</P>
+              </Section>
+            </Card>
+
+            {/* Macro Warning Signs */}
+            <Card>
+              <Section title={h.warningSignsTitle}>
+                <P>{h.warningSignsDesc}</P>
+                <ul className="space-y-1.5 mt-2">
+                  <Li>{h.warning1}</Li>
+                  <Li>{h.warning2}</Li>
+                  <Li>{h.warning3}</Li>
+                </ul>
+              </Section>
+            </Card>
+
+            {/* RECOVERY Regime */}
+            <Card>
+              <Section title={h.recoveryRegimeTitle}>
+                <P>{h.recoveryRegimeDesc}</P>
               </Section>
             </Card>
 

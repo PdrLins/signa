@@ -79,8 +79,12 @@ def get_daily_stats() -> dict:
             win_rate = win_rate_future.result()
             ai_cost = ai_cost_future.result()
 
-        # Fear & Greed from latest signal's macro_data (no extra API call needed)
+        # Macro data from latest signal (no extra API call needed)
         fear_greed = None
+        intermarket = None
+        vix_term = None
+        yield_curve = None
+        credit_spread = None
         try:
             fg_result = (
                 db.table("signals")
@@ -94,6 +98,16 @@ def get_daily_stats() -> dict:
                 fg = macro.get("fear_greed")
                 if fg and isinstance(fg, dict):
                     fear_greed = fg
+                im = macro.get("intermarket")
+                if im and isinstance(im, dict):
+                    intermarket = im
+                vt = macro.get("vix_term_structure")
+                if vt and isinstance(vt, dict):
+                    vix_term = vt
+                if macro.get("yield_curve_10y2y") is not None:
+                    yield_curve = macro["yield_curve_10y2y"]
+                if macro.get("credit_spread_bbb") is not None:
+                    credit_spread = macro["credit_spread_bbb"]
         except Exception:
             pass
 
@@ -108,6 +122,10 @@ def get_daily_stats() -> dict:
             "claude_cost": 0.0,
             "grok_cost": 0.0,
             "fear_greed": fear_greed,
+            "intermarket": intermarket,
+            "vix_term": vix_term,
+            "yield_curve": yield_curve,
+            "credit_spread": credit_spread,
         }
         stats_cache.set("daily_stats", result, ttl=120)
         return result

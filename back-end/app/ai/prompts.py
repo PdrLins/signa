@@ -427,6 +427,48 @@ def format_macro(macro_data: dict) -> str:
     fg = macro_data.get("fear_greed")
     if fg and isinstance(fg, dict) and fg.get("score") is not None:
         lines.append(f"- Fear & Greed Index: {fg['score']:.0f}/100 ({fg.get('label', 'Unknown')})")
+    # VIX term structure (already fetched by macro_scanner, was invisible to Claude)
+    vix_term = macro_data.get("vix_term_structure")
+    if vix_term and isinstance(vix_term, dict):
+        spot = vix_term.get("spot")
+        futures = vix_term.get("futures_3m")
+        structure = vix_term.get("structure", "unknown")
+        ratio = vix_term.get("ratio")
+        if spot is not None and futures is not None:
+            lines.append(
+                f"- VIX Term Structure: spot {spot:.1f} vs 3M futures {futures:.1f} "
+                f"= {structure.upper()} (ratio: {ratio:.3f})"
+            )
+
+    # Yield curve (added in Ship 2, safe to render if present)
+    yc = macro_data.get("yield_curve_10y2y")
+    if yc is not None:
+        label = "INVERTED" if yc < 0 else ("STEEP" if yc > 1.5 else "NORMAL")
+        lines.append(f"- Yield Curve (10Y-2Y): {yc:.2f}% [{label}]")
+
+    # Credit spread (added in Ship 2, safe to render if present)
+    cs = macro_data.get("credit_spread_bbb")
+    if cs is not None:
+        label = "CRISIS" if cs > 5.0 else ("STRESS" if cs > 3.0 else ("ELEVATED" if cs > 2.0 else "NORMAL"))
+        lines.append(f"- Credit Spread (BBB OAS): {cs:.2f}% [{label}]")
+
+    # Intermarket signals (already fetched by macro_scanner, was invisible to Claude)
+    intermarket = macro_data.get("intermarket")
+    if intermarket and isinstance(intermarket, dict):
+        parts = []
+        if intermarket.get("gold_price") is not None:
+            gold_chg = intermarket.get("gold_change_pct")
+            chg_str = f" ({gold_chg:+.1f}% 5d)" if gold_chg is not None else ""
+            parts.append(f"Gold ${intermarket['gold_price']:.0f}{chg_str}")
+        if intermarket.get("oil_price") is not None:
+            oil_chg = intermarket.get("oil_change_pct")
+            chg_str = f" ({oil_chg:+.1f}% 5d)" if oil_chg is not None else ""
+            parts.append(f"Oil ${intermarket['oil_price']:.1f}{chg_str}")
+        if intermarket.get("copper_gold_ratio") is not None:
+            parts.append(f"Cu/Au ratio {intermarket['copper_gold_ratio']:.2f}")
+        if parts:
+            lines.append(f"- Intermarket: {', '.join(parts)}")
+
     pulse = macro_data.get("macro_pulse")
     if pulse and isinstance(pulse, dict) and pulse.get("trends"):
         lines.append(f"- Market Pulse: {pulse.get('summary', 'N/A')}")
@@ -534,6 +576,7 @@ def build_synthesis_prompt(
         "technical_data": technical_data,
         "fundamental_data": fundamental_data,
         "grok_data": grok_data,
+        "macro_data": macro_data,
         "market_regime": market_regime,
         "risk_reward": None,
     }

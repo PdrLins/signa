@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
+from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.db import queries
 from app.models.signals import ScanTodayRecord
@@ -57,7 +58,8 @@ async def get_scans_today(user: dict = Depends(get_current_user)):
     # has no row to show a RUNNING/QUEUED status on, and the pulse animation
     # never fires when the user manually triggers a scan.
     manual_active: dict | None = None
-    if is_market_day:
+    should_check_scans = is_market_day or settings.allow_weekend_scans
+    if should_check_scans:
         recent_scans = signal_service.get_scans(limit=50)
         today_scans = [
             s for s in recent_scans
@@ -156,10 +158,10 @@ async def trigger_scan(
     """
     from zoneinfo import ZoneInfo
     et_now = datetime.now(ZoneInfo("America/New_York"))
-    if et_now.weekday() >= 5:  # Saturday=5, Sunday=6
+    if et_now.weekday() >= 5 and not settings.allow_weekend_scans:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Markets are closed on weekends — scans are skipped to save AI credits.",
+            detail="Weekend scans are disabled. Enable in Settings > Scanning.",
         )
 
     # Concurrency guard — reject if a scan is already running
