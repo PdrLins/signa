@@ -23,7 +23,7 @@ from app.db.supabase import get_client
 from app.middleware.brain_auth import require_brain_token
 from app.models.audit import AuditEvent
 from app.notifications.messages import msg
-from app.notifications.telegram_bot import send_message
+from app.notifications.telegram_bot import enqueue as _tg_send
 from app.services.knowledge_service import KnowledgeService
 
 
@@ -421,7 +421,7 @@ async def brain_challenge(request: Request, user: dict = Depends(get_current_use
 
     db_user = get_user_by_id(user_id)
     chat_id = db_user["telegram_chat_id"] if db_user else settings.telegram_chat_id
-    await send_message(chat_id, msg("brain_otp", otp=otp), urgent=True)
+    _tg_send(chat_id, msg("brain_otp", otp=otp), urgent=True)
 
     insert_audit_log(event_type=AuditEvent.BRAIN_CHALLENGE_SENT, success=True, user_id=user_id, ip_address=ip)
     logger.info(f"Brain challenge sent for user {user_id}")

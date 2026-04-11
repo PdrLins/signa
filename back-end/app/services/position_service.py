@@ -7,7 +7,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.db import queries
-from app.notifications.telegram_bot import send_message
+from app.notifications.telegram_bot import enqueue as _tg_send
 
 
 def open_position(
@@ -197,7 +197,7 @@ async def monitor_positions(signals: list[dict]) -> int:
 
         # Send alert
         if alert_message:
-            await send_message(settings.telegram_chat_id, alert_message)
+            _tg_send(settings.telegram_chat_id, alert_message)
             alerts_sent += 1
 
     if alerts_sent:

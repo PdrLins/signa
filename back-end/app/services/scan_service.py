@@ -572,7 +572,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             # Best-effort Telegram alert (don't break the scan if it fails)
             try:
                 from app.notifications.messages import msg
-                from app.notifications.telegram_bot import send_message
+                from app.notifications.telegram_bot import enqueue
                 # Build a brief error breakdown from failed signals
                 error_samples = []
                 for s in ai_results:
@@ -583,7 +583,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                         if len(error_samples) >= 2:
                             break
                 errors_text = "; ".join(error_samples) if error_samples else "see logs"
-                await send_message(
+                enqueue(
                     settings.telegram_chat_id,
                     msg(
                         "ai_failure_rate",

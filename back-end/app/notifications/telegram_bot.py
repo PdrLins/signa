@@ -1,5 +1,43 @@
-"""Telegram bot — send alerts and handle commands."""
+"""Telegram bot — send alerts, handle commands, and background queue worker.
 
+============================================================
+ARCHITECTURE: NON-BLOCKING TELEGRAM QUEUE
+============================================================
+
+The brain scan, watchdog, and auth flows all send Telegram notifications.
+Before this queue, every send was an inline `await send_message()` that
+blocked the calling coroutine for up to 15 seconds (the HTTP timeout).
+During a scan, `flush_brain_notifications` could send 5-10 messages
+sequentially — up to 150s of blocked event-loop time competing with
+Claude Local subprocesses and yfinance fetches.
+
+Real incident (2026-04-10): Pedro tried to log in (OTP via Telegram)
+while the AFTER_CLOSE scan was flushing brain notifications. The
+Telegram contention starved Claude Local subprocess awaits, causing
+11 of 16 AI synthesis calls to fail.
+
+The fix: a background `asyncio.Queue` + worker task.
+
+  • `enqueue(chat_id, text, ...)` puts a message on the queue and
+    returns INSTANTLY — zero blocking on the caller.
+  • `_telegram_worker()` runs as a background task, drains the queue,
+    sends each message via the HTTP client, and retries once on failure.
+  • `send_message()` is still available as the direct (blocking) path
+    for the rare call sites that need to know the send result (health
+    ping, OTP — though OTP now also uses the queue by default).
+
+Call sites that previously did `await send_message(...)` now do
+`enqueue(...)` (fire-and-forget). The only behavioral change: the
+caller no longer gets a True/False return value. For scan notifications,
+watchdog alerts, and brain trades, that's fine — they already treated
+send failures as non-fatal. For OTP, the code already returned "OTP
+sent" to the user regardless of actual Telegram success.
+
+The worker starts in `main.py:lifespan` via `start_telegram_worker()`
+and shuts down cleanly via `stop_telegram_worker()`.
+"""
+
+import asyncio
 from datetime import datetime, timezone
 from html import escape
 from zoneinfo import ZoneInfo
@@ -32,8 +70,101 @@ def _telegram_url(method: str) -> str:
     return f"https://api.telegram.org/bot{settings.telegram_bot_token}/{method}"
 
 
+# ── Background queue + worker ──────────────────────────────────
+
+_queue: asyncio.Queue | None = None
+_worker_task: asyncio.Task | None = None
+
+
+def _get_queue() -> asyncio.Queue:
+    """Get or create the module-level queue (must be called inside an event loop)."""
+    global _queue
+    if _queue is None:
+        _queue = asyncio.Queue(maxsize=200)
+    return _queue
+
+
+async def _telegram_worker() -> None:
+    """Background task that drains the Telegram message queue forever.
+
+    Sends one message at a time (Telegram rate limits are ~30 msg/sec per
+    bot, so serialization is fine). Retries once on failure with a 2-second
+    delay. Never crashes — exceptions are caught and logged.
+    """
+    q = _get_queue()
+    logger.info("Telegram worker started")
+    while True:
+        try:
+            chat_id, text, parse_mode, urgent = await q.get()
+            success = await send_message(chat_id, text, parse_mode, urgent=urgent)
+            if not success:
+                # Retry once after 2 seconds
+                await asyncio.sleep(2)
+                await send_message(chat_id, text, parse_mode, urgent=urgent)
+            q.task_done()
+        except asyncio.CancelledError:
+            logger.info("Telegram worker shutting down")
+            break
+        except Exception as e:
+            logger.error(f"Telegram worker error: {e}")
+            await asyncio.sleep(1)
+
+
+def start_telegram_worker() -> None:
+    """Start the background Telegram queue worker. Called from lifespan."""
+    global _worker_task
+    if _worker_task is not None and not _worker_task.done():
+        return  # already running
+    _worker_task = asyncio.ensure_future(_telegram_worker())
+
+
+async def stop_telegram_worker() -> None:
+    """Gracefully stop the worker, draining remaining messages first."""
+    global _worker_task
+    if _worker_task is None or _worker_task.done():
+        return
+    q = _get_queue()
+    # Wait up to 10 seconds for the queue to drain
+    try:
+        await asyncio.wait_for(q.join(), timeout=10)
+    except asyncio.TimeoutError:
+        logger.warning(f"Telegram worker shutdown: {q.qsize()} messages dropped (timeout)")
+    _worker_task.cancel()
+    try:
+        await _worker_task
+    except asyncio.CancelledError:
+        pass
+
+
+def enqueue(chat_id: str, text: str, parse_mode: str = "HTML", urgent: bool = False) -> None:
+    """Put a message on the background queue. Returns instantly (non-blocking).
+
+    This is the preferred send path for all non-critical notifications:
+    brain trades, watchdog alerts, scan digests, GEM alerts. The background
+    worker handles actual delivery + retry.
+
+    If the queue is full (200 messages — should never happen unless the
+    worker is stuck), the message is dropped with a warning. This prevents
+    a broken Telegram connection from backpressuring the scan pipeline.
+    """
+    try:
+        q = _get_queue()
+        q.put_nowait((chat_id, text, parse_mode, urgent))
+    except asyncio.QueueFull:
+        logger.warning(f"Telegram queue full — dropped message: {text[:80]}...")
+    except Exception as e:
+        logger.warning(f"Telegram enqueue failed: {e}")
+
+
+# ── Direct send (still used by health ping and as the worker's backend) ──
+
 async def send_message(chat_id: str, text: str, parse_mode: str = "HTML", urgent: bool = False) -> bool:
-    """Send a message via Telegram Bot API."""
+    """Send a message via Telegram Bot API (direct, awaits HTTP response).
+
+    Most call sites should use `enqueue()` instead. This function is kept
+    for: (a) the background worker's internal send loop, (b) the health
+    ping endpoint which needs to verify the send actually succeeded.
+    """
     from app.notifications.messages import is_quiet_hours
     if not urgent and is_quiet_hours():
         logger.debug(f"Telegram message suppressed (quiet hours): {text[:50]}...")
@@ -52,9 +183,16 @@ async def send_message(chat_id: str, text: str, parse_mode: str = "HTML", urgent
 
 
 async def send_otp_message(chat_id: str, otp_code: str) -> bool:
-    """Send an OTP verification code via Telegram."""
+    """Send an OTP verification code via Telegram (enqueued, near-instant delivery).
+
+    The background worker drains the queue continuously so the delay between
+    enqueue and actual Telegram delivery is typically <100ms. The caller
+    (auth_service) returns "OTP sent" regardless of actual delivery, so
+    there's no behavioral change from switching to the queue path.
+    """
     from app.notifications.messages import msg
-    return await send_message(chat_id, msg("otp", otp_code=escape(otp_code)), urgent=True)
+    enqueue(chat_id, msg("otp", otp_code=escape(otp_code)), urgent=True)
+    return True
 
 
 async def send_gem_alert(signal: dict) -> bool:
@@ -76,7 +214,8 @@ async def send_gem_alert(signal: dict) -> bool:
         reasoning=escape(str(signal.get("reasoning", ""))),
         catalyst_line=catalyst_line,
     )
-    return await send_message(settings.telegram_chat_id, message)
+    enqueue(settings.telegram_chat_id, message)
+    return True
 
 
 async def send_scan_digest(scan_type: str, signals: list[dict]) -> bool:
@@ -107,7 +246,8 @@ async def send_scan_digest(scan_type: str, signals: list[dict]) -> bool:
     if gems:
         message += msg("scan_digest_gem_footer", count=len(gems))
 
-    return await send_message(settings.telegram_chat_id, message)
+    enqueue(settings.telegram_chat_id, message)
+    return True
 
 
 async def send_watchlist_sell_alert(signal: dict) -> bool:
@@ -150,7 +290,8 @@ async def send_watchlist_sell_alert(signal: dict) -> bool:
         bucket_line=bucket_line,
         reasoning=escape(reasoning),
     )
-    return await send_message(settings.telegram_chat_id, message)
+    enqueue(settings.telegram_chat_id, message)
+    return True
 
 
 async def handle_command(command: str, args: str = "", user_id: str = "") -> str:

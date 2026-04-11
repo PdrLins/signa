@@ -65,6 +65,7 @@ interface VirtualTrade {
   risk_reward?: number
   contrarian_score?: number
   market_regime?: string
+  thesis_status?: string  // valid | weakening | invalid | null (legacy)
 }
 
 interface ClosedTrade {
@@ -122,6 +123,11 @@ function fmtShortDate(iso?: string): string {
   }
 }
 
+// Format a P&L percentage with 2 decimals, avoiding "-0.00" for near-zero values.
+function fmtPct(v: number): string {
+  return Math.abs(v) < 0.005 ? '0.00' : v.toFixed(2)
+}
+
 // ── Small components ──
 
 function StatBox({ label, value, sub, color, bgColor }: { label: string; value: string; sub?: string; color: string; bgColor: string }) {
@@ -138,11 +144,14 @@ function StatBox({ label, value, sub, color, bgColor }: { label: string; value: 
 function ExitReasonBadge({ reason, theme }: { reason?: string; theme: ReturnType<typeof useTheme> }) {
   if (!reason) return null
   const config: Record<string, { label: string; color: string }> = {
-    SIGNAL: { label: 'Signal', color: theme.colors.primary },
-    STOP_HIT: { label: 'Stop hit', color: theme.colors.down },
-    TARGET_HIT: { label: 'Target hit', color: theme.colors.up },
-    TIME_EXPIRED: { label: 'Expired', color: theme.colors.warning },
+    THESIS_INVALIDATED: { label: 'Brain Exit', color: theme.colors.warning },
     WATCHDOG_EXIT: { label: 'Watchdog', color: theme.colors.warning },
+    TARGET_HIT: { label: 'Target Hit', color: theme.colors.up },
+    STOP_HIT: { label: 'Stop Hit', color: theme.colors.down },
+    PROFIT_TAKE: { label: 'Profit Take', color: theme.colors.up },
+    TIME_EXPIRED: { label: 'Expired', color: theme.colors.warning },
+    SIGNAL: { label: 'Signal', color: theme.colors.primary },
+    ROTATION: { label: 'Rotated', color: theme.colors.primary },
   }
   const c = config[reason] || { label: reason, color: theme.colors.textHint }
   return (
@@ -304,7 +313,7 @@ export default function BrainPerformancePage() {
               label="Open Positions"
               value={String(brain.open_count)}
               sub={brainTrades.length > 0 && avgUnrealizedPnl !== 0
-                ? `Avg P&L ${avgUnrealizedPnl >= 0 ? '+' : ''}${avgUnrealizedPnl.toFixed(1)}%`
+                ? `Avg P&L ${avgUnrealizedPnl >= 0 ? '+' : ''}${fmtPct(avgUnrealizedPnl)}%`
                 : undefined}
               color={theme.colors.text}
               bgColor={theme.colors.surfaceAlt}
@@ -325,8 +334,8 @@ export default function BrainPerformancePage() {
             />
             <StatBox
               label="Total Return"
-              value={hasClosedData ? `${brain.total_return_pct >= 0 ? '+' : ''}${brain.total_return_pct.toFixed(1)}%` : '\u2014'}
-              sub={hasClosedData ? `Avg ${brain.avg_return_pct >= 0 ? '+' : ''}${brain.avg_return_pct.toFixed(1)}% per trade` : 'Tracking...'}
+              value={hasClosedData ? `${brain.total_return_pct >= 0 ? '+' : ''}${fmtPct(brain.total_return_pct)}%` : '\u2014'}
+              sub={hasClosedData ? `Avg ${brain.avg_return_pct >= 0 ? '+' : ''}${fmtPct(brain.avg_return_pct)}% per trade` : 'Tracking...'}
               color={hasClosedData ? (brain.total_return_pct >= 0 ? theme.colors.up : theme.colors.down) : theme.colors.textSub}
               bgColor={theme.colors.surfaceAlt}
             />
@@ -348,7 +357,7 @@ export default function BrainPerformancePage() {
                   <TrendingUp size={14} style={{ color: theme.colors.up }} />
                   <span className="text-[11px]" style={{ color: theme.colors.textHint }}>Best</span>
                   <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{brain.best_trade.symbol}</span>
-                  <span className="text-[12px] font-bold tabular-nums" style={{ color: theme.colors.up }}>+{brain.best_trade.pnl_pct.toFixed(1)}%</span>
+                  <span className="text-[12px] font-bold tabular-nums" style={{ color: theme.colors.up }}>+{fmtPct(brain.best_trade.pnl_pct)}%</span>
                 </div>
               )}
               {brain.worst_trade && (
@@ -356,7 +365,7 @@ export default function BrainPerformancePage() {
                   <TrendingDown size={14} style={{ color: theme.colors.down }} />
                   <span className="text-[11px]" style={{ color: theme.colors.textHint }}>Worst</span>
                   <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{brain.worst_trade.symbol}</span>
-                  <span className="text-[12px] font-bold tabular-nums" style={{ color: theme.colors.down }}>{brain.worst_trade.pnl_pct.toFixed(1)}%</span>
+                  <span className="text-[12px] font-bold tabular-nums" style={{ color: theme.colors.down }}>{fmtPct(brain.worst_trade.pnl_pct)}%</span>
                 </div>
               )}
             </div>
@@ -411,7 +420,7 @@ export default function BrainPerformancePage() {
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <span className="text-[11px] font-bold tabular-nums" style={{ color: pnlColor }}>
-                              {evt.pnl_pct >= 0 ? '+' : ''}{evt.pnl_pct.toFixed(1)}%
+                              {evt.pnl_pct >= 0 ? '+' : ''}{fmtPct(evt.pnl_pct)}%
                             </span>
                             <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{relativeTime(evt.created_at)}</span>
                           </div>
@@ -436,7 +445,7 @@ export default function BrainPerformancePage() {
               </p>
               {brainTrades.length > 0 && avgUnrealizedPnl !== 0 && (
                 <span className="text-[11px] font-bold tabular-nums" style={{ color: avgUnrealizedPnl >= 0 ? theme.colors.up : theme.colors.down }}>
-                  {avgUnrealizedPnl >= 0 ? '+' : ''}{avgUnrealizedPnl.toFixed(1)}% avg
+                  {avgUnrealizedPnl >= 0 ? '+' : ''}{fmtPct(avgUnrealizedPnl)}% avg
                 </span>
               )}
             </div>
@@ -459,7 +468,17 @@ export default function BrainPerformancePage() {
                         className="flex items-center justify-between py-2 px-3 cursor-pointer transition-opacity hover:opacity-80"
                         onClick={() => setExpandedSymbol(isExpanded ? null : vt.symbol)}
                       >
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {/* Thesis status dot: green=valid, yellow=weakening, gray=untracked */}
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            title={vt.thesis_status === 'valid' ? 'Thesis valid' : vt.thesis_status === 'weakening' ? 'Thesis weakening' : 'No thesis tracking'}
+                            style={{
+                              backgroundColor: vt.thesis_status === 'valid' ? theme.colors.up
+                                : vt.thesis_status === 'weakening' ? theme.colors.warning
+                                : theme.colors.border,
+                            }}
+                          />
                           <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{vt.symbol}</span>
                           <Badge variant={vt.bucket === 'SAFE_INCOME' ? 'safe' : 'risk'}>
                             {vt.bucket === 'SAFE_INCOME' ? 'Safe' : 'Risk'}
@@ -484,13 +503,18 @@ export default function BrainPerformancePage() {
                             : <ChevronDown size={12} style={{ color: theme.colors.textHint }} />
                           }
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          {vt.days_held != null && (
+                            <span className="text-[9px] tabular-nums px-1 py-0.5 rounded" style={{ color: theme.colors.textHint, backgroundColor: theme.colors.surfaceAlt }}>
+                              {vt.days_held}d
+                            </span>
+                          )}
                           <span className="text-[11px] tabular-nums" style={{ color: theme.colors.textHint }}>
                             ${Number(vt.entry_price).toFixed(2)}
                           </span>
                           {hasPnl && (
                             <span className="text-[12px] font-bold tabular-nums" style={{ color: pnlColor }}>
-                              {vt.unrealized_pnl_pct! >= 0 ? '+' : ''}{vt.unrealized_pnl_pct!.toFixed(1)}%
+                              {vt.unrealized_pnl_pct! >= 0 ? '+' : ''}{fmtPct(vt.unrealized_pnl_pct!)}%
                             </span>
                           )}
                           <span className="text-[11px] font-semibold tabular-nums px-1.5 py-0.5 rounded" style={{
@@ -595,33 +619,43 @@ export default function BrainPerformancePage() {
               </p>
             ) : (
               <div className="space-y-1.5">
-                {brainClosed.map((rc, i) => (
-                  <Link key={i} href={`/signals/${rc.symbol}`}>
-                    <div className="flex items-start justify-between py-2 px-3 rounded-lg transition-opacity hover:opacity-80" style={{ backgroundColor: theme.colors.surfaceAlt }}>
-                      <div className="flex flex-col gap-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          {rc.is_win
-                            ? <TrendingUp size={14} style={{ color: theme.colors.up }} />
-                            : <TrendingDown size={14} style={{ color: theme.colors.down }} />
-                          }
-                          <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{rc.symbol}</span>
-                          <ExitReasonBadge reason={rc.exit_reason} theme={theme} />
-                          {rc.entry_score != null && (
-                            <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textHint }}>
-                              {rc.entry_score}{rc.exit_score != null ? ` → ${rc.exit_score}` : ''}
-                            </span>
-                          )}
+                {brainClosed.map((rc, i) => {
+                  const daysHeld = rc.entry_date && rc.exit_date
+                    ? Math.max(1, Math.round((new Date(rc.exit_date).getTime() - new Date(rc.entry_date).getTime()) / 86400000))
+                    : null
+                  return (
+                    <Link key={i} href={`/signals/${rc.symbol}`}>
+                      <div className="flex items-start justify-between py-2 px-3 rounded-lg transition-opacity hover:opacity-80" style={{ backgroundColor: theme.colors.surfaceAlt }}>
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            {rc.is_win
+                              ? <TrendingUp size={14} style={{ color: theme.colors.up }} />
+                              : <TrendingDown size={14} style={{ color: theme.colors.down }} />
+                            }
+                            <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{rc.symbol}</span>
+                            <ExitReasonBadge reason={rc.exit_reason} theme={theme} />
+                            {daysHeld != null && (
+                              <span className="text-[9px] tabular-nums px-1 py-0.5 rounded" style={{ color: theme.colors.textHint, backgroundColor: theme.colors.surface }}>
+                                {daysHeld}d
+                              </span>
+                            )}
+                            {rc.entry_score != null && (
+                              <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textHint }}>
+                                {rc.entry_score}{rc.exit_score != null ? ` → ${rc.exit_score}` : ''}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] tabular-nums pl-[22px]" style={{ color: theme.colors.textHint }}>
+                            {fmtShortDate(rc.entry_date)} {formatPrice(rc.entry_price)} → {fmtShortDate(rc.exit_date)} {formatPrice(rc.exit_price)}
+                          </div>
                         </div>
-                        <div className="text-[10px] tabular-nums pl-[22px]" style={{ color: theme.colors.textHint }}>
-                          {fmtShortDate(rc.entry_date)} {formatPrice(rc.entry_price)} → {fmtShortDate(rc.exit_date)} {formatPrice(rc.exit_price)}
-                        </div>
+                        <span className="text-[13px] font-bold tabular-nums shrink-0" style={{ color: rc.is_win ? theme.colors.up : theme.colors.down }}>
+                          {rc.pnl_pct >= 0 ? '+' : ''}{fmtPct(rc.pnl_pct)}%
+                        </span>
                       </div>
-                      <span className="text-[13px] font-bold tabular-nums shrink-0" style={{ color: rc.is_win ? theme.colors.up : theme.colors.down }}>
-                        {rc.pnl_pct >= 0 ? '+' : ''}{rc.pnl_pct.toFixed(1)}%
-                      </span>
-                    </div>
-                  </Link>
-                ))}
+                    </Link>
+                  )
+                })}
               </div>
             )}
           </Card>
@@ -662,7 +696,7 @@ export default function BrainPerformancePage() {
                     <p className="text-[11px] font-semibold tabular-nums text-right" style={{
                       color: row.trades === 0 ? theme.colors.textHint : row.avg_return_pct >= 0 ? theme.colors.up : theme.colors.down,
                     }}>
-                      {row.trades === 0 ? '\u2014' : `${row.avg_return_pct >= 0 ? '+' : ''}${row.avg_return_pct.toFixed(1)}%`}
+                      {row.trades === 0 ? '\u2014' : `${row.avg_return_pct >= 0 ? '+' : ''}${fmtPct(row.avg_return_pct)}%`}
                     </p>
                   </div>
                 ))}

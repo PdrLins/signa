@@ -1439,40 +1439,41 @@ def process_virtual_trades(
 
 
 async def flush_brain_notifications(notifications: BrainNotificationQueue) -> int:
-    """Drain the scan-local brain notification queue and send each entry via Telegram.
+    """Drain the scan-local brain notification queue into the Telegram background worker.
 
-    This is the ONLY function in this module that actually sends Telegram
-    messages. Every other function APPENDS to the queue; this one drains it.
-    Centralising the send means:
-      1. We can batch all brain alerts at the end of a scan in a single
-         async pass instead of awaiting individual sends inside sync code.
-      2. If a previous scan crashed mid-loop, the new scan starts with a
-         fresh queue (because each scan creates its own via
-         `new_notification_queue()`).
-      3. Send failures don't break the scan — each send is wrapped in
-         try/except and we keep going.
+    This is the ONLY function in this module that emits Telegram messages.
+    Every other function APPENDS to the queue; this one drains it into the
+    background `enqueue()` path so the scan NEVER blocks on Telegram HTTP.
+
+    Before 2026-04-10: this function awaited `send_message()` per item —
+    up to 150s of Telegram HTTP blocking inside the scan coroutine. That
+    starved Claude Local subprocesses and caused AI synthesis failures
+    when Telegram was slow or a login OTP collided with the scan.
+
+    Now: each notification is enqueued instantly. The background worker in
+    `telegram_bot._telegram_worker()` handles delivery + retry. The scan
+    continues immediately after enqueue.
 
     Args:
         notifications: The scan-local queue threaded through every brain
-            function this scan run. Will be cleared after sending.
+            function this scan run. Will be cleared after enqueuing.
 
     Returns:
-        Count of notifications successfully sent. The queue is always
-        cleared at the end regardless of how many sends succeeded — the
-        same notification should never be sent twice.
+        Count of notifications enqueued. The queue is always cleared at
+        the end regardless — the same notification should never be sent
+        twice.
     """
     if not notifications:
         return 0
     from app.notifications.messages import msg
-    from app.notifications.telegram_bot import send_message
+    from app.notifications.telegram_bot import enqueue
     sent = 0
-    # Iterate a copy in case any handler mutates the queue
     for key, kwargs in list(notifications):
         try:
-            await send_message(settings.telegram_chat_id, msg(key, **kwargs))
+            enqueue(settings.telegram_chat_id, msg(key, **kwargs))
             sent += 1
         except Exception as e:
-            logger.debug(f"Brain notification failed ({key}): {e}")
+            logger.debug(f"Brain notification enqueue failed ({key}): {e}")
     notifications.clear()
     return sent
 
@@ -1785,7 +1786,7 @@ def get_virtual_summary() -> dict:
     # All trades
     open_result = (
         db.table("virtual_trades")
-        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss")
+        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status")
         .eq("status", "OPEN")
         .order("entry_date", desc=True)
         .execute()
@@ -1870,6 +1871,7 @@ def get_virtual_summary() -> dict:
             "risk_reward": sig.get("risk_reward"),
             "contrarian_score": sig.get("contrarian_score"),
             "market_regime": sig.get("market_regime"),
+            "thesis_status": t.get("thesis_last_status"),  # valid/weakening/invalid/None
         }
 
         if current:

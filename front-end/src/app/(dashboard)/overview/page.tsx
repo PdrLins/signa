@@ -74,71 +74,72 @@ export default function OverviewPage() {
       {/* Safe to Buy / Must Sell -- hero section */}
       <QuickActions />
 
-      {/* Brain Performance — full width */}
-      <BrainPerformanceWidget />
+      {/* Two-column layout: main content left, widgets right */}
+      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4 items-start">
+        {/* Left column — wider */}
+        <div className="space-y-4">
+          <BrainPerformanceWidget />
+          <BrainTierBreakdownWidget />
 
-      {/* Brain Trust Tier Breakdown — full width */}
-      <BrainTierBreakdownWidget />
-
-      {/* Dashboard Widgets: Budget + Alerts + Portfolio */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
-        <BudgetWidget />
-        <AlertsWidget />
-        <PortfolioWidget />
-      </div>
-
-      {/* Watchlist — compact horizontal */}
-      <Card>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
-            {t.overview.watchlist}
-          </h2>
-        </div>
-        <WatchlistTable signals={allSignals} compact />
-      </Card>
-
-      {/* Top signals */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold" style={{ color: theme.colors.text }}>
-              {t.overview.topSignals}
-            </h2>
-            {totalCount > 0 && (
-              <div className="flex items-center gap-1.5">
-                <Badge variant="buy">{buyCount} BUY</Badge>
-                {gemCount > 0 && <Badge variant="gem">{gemCount} GEM</Badge>}
+          {/* Top signals */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold" style={{ color: theme.colors.text }}>
+                  {t.overview.topSignals}
+                </h2>
+                {totalCount > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="buy">{buyCount} BUY</Badge>
+                    {gemCount > 0 && <Badge variant="gem">{gemCount} GEM</Badge>}
+                  </div>
+                )}
               </div>
-            )}
+            </div>
+
+            {/* Filter tabs */}
+            <div
+              className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5 mb-4"
+              style={{ backgroundColor: theme.colors.nav }}
+            >
+              {filters.map((f) => (
+                <button
+                  key={f.value}
+                  onClick={() => setFilter(f.value)}
+                  className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all"
+                  style={{
+                    backgroundColor: filter === f.value ? theme.colors.navActive : 'transparent',
+                    color: filter === f.value ? theme.colors.text : theme.colors.textSub,
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            <SignalList
+              signals={topSignals}
+              isLoading={isLoading}
+              isError={isError}
+              error={error}
+            />
           </div>
         </div>
 
-        {/* Filter tabs */}
-        <div
-          className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5 mb-4"
-          style={{ backgroundColor: theme.colors.nav }}
-        >
-          {filters.map((f) => (
-            <button
-              key={f.value}
-              onClick={() => setFilter(f.value)}
-              className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all"
-              style={{
-                backgroundColor: filter === f.value ? theme.colors.navActive : 'transparent',
-                color: filter === f.value ? theme.colors.text : theme.colors.textSub,
-              }}
-            >
-              {f.label}
-            </button>
-          ))}
+        {/* Right column — narrower */}
+        <div className="space-y-4">
+          <BudgetWidget />
+          <AlertsWidget />
+          <PortfolioWidget />
+          <Card>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+                {t.overview.watchlist}
+              </h2>
+            </div>
+            <WatchlistTable signals={allSignals} compact />
+          </Card>
         </div>
-
-        <SignalList
-          signals={topSignals}
-          isLoading={isLoading}
-          isError={isError}
-          error={error}
-        />
       </div>
     </div>
   )

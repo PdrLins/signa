@@ -306,14 +306,14 @@ class BudgetService:
         # Send Telegram alert (best-effort, don't block the call recording)
         try:
             from app.notifications.messages import msg
-            from app.notifications.telegram_bot import send_message
+            from app.notifications.telegram_bot import enqueue
             if highest_crossed >= 100:
                 threshold_msg = "Provider blocked. Brain will fall back to next provider in chain."
             elif highest_crossed >= 90:
                 threshold_msg = "Approaching limit. Consider increasing budget or reducing scans."
             else:
                 threshold_msg = "Heads up — budget at 70%. Plan ahead before it runs out."
-            await send_message(
+            enqueue(
                 settings.telegram_chat_id,
                 msg(
                     "budget_threshold",
