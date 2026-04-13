@@ -102,6 +102,14 @@ KEY_TO_PROMPT_TEXT: dict[str, str] = {
         "Options IV at {pct}th percentile (extreme complacency) — "
         "historically precedes vol expansion and downside"
     ),
+    "high_short_interest_bearish": (
+        "High short interest ({pct}% of float) while price is below SMA50 — "
+        "informed bears are positioned against this stock and the trend confirms their thesis"
+    ),
+    "high_short_interest_squeeze": (
+        "High short interest ({pct}% of float) with price above SMA50 and positive MACD — "
+        "potential short squeeze setup if momentum continues"
+    ),
     "vix_backwardation_stress": (
         "VIX term structure in backwardation (ratio {ratio}) — acute market stress, "
         "spot fear exceeds expected future fear, historically precedes 5-15% drawdowns"
@@ -118,15 +126,12 @@ KEY_TO_PROMPT_TEXT: dict[str, str] = {
 
 
 def format_warning_signs(signal: dict) -> str:
-    """Build the '## Warning Signs' section content for the synthesis prompt.
+    """Build the '## Warning Signs & Opportunities' section for the synthesis prompt.
 
-    Filters `signal_breakdown.compute_signal_breakdown()` output to
-    TONE_NEGATIVE rules only, looks up each key's English template, and
-    interpolates the label_value dict. Returns the joined warning lines
-    (with bullet markers and the ⚠ prefix), or the literal string
-    "None detected." if nothing fires — the caller embeds the result
-    into a fixed prompt section, so a stable placeholder string is
-    preferable to an empty section header.
+    Surfaces BOTH negative warnings (⚠) and positive opportunities (✓)
+    from `signal_breakdown.compute_signal_breakdown()`. This ensures
+    Claude sees the full picture — not just dangers but also tailwinds
+    like short-squeeze setups or recovery momentum.
 
     Args:
         signal: dict with at least `technical_data`, `fundamental_data`,
@@ -134,24 +139,28 @@ def format_warning_signs(signal: dict) -> str:
             expects). Missing fields are tolerated.
 
     Returns:
-        Multi-line string with one bullet per fired warning, or
+        Multi-line string with one bullet per fired signal, or
         "None detected." when no rules fire.
     """
     rows = compute_signal_breakdown(signal)
-    lines: list[str] = []
+    warnings: list[str] = []
+    opportunities: list[str] = []
     for row in rows:
-        if row.get("tone") != "negative":
+        tone = row.get("tone")
+        if tone not in ("negative", "positive"):
             continue
         template = KEY_TO_PROMPT_TEXT.get(row["key"])
         if not template:
-            continue  # rule fired but we have no English template — skip silently
+            continue
         try:
             text = template.format(**(row.get("label_value") or {}))
         except (KeyError, IndexError):
-            # Template expects a kwarg the rule didn't provide — fall back
-            # to the raw template so we still surface the warning.
             text = template
-        lines.append(f"- ⚠ {text}")
+        if tone == "negative":
+            warnings.append(f"- ⚠ {text}")
+        else:
+            opportunities.append(f"- ✓ {text}")
+    lines = warnings + opportunities
     if not lines:
         return "None detected."
     return "\n".join(lines)

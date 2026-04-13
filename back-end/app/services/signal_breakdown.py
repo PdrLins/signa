@@ -299,6 +299,33 @@ RULES: list[dict] = [
         label_value=lambda s, t, f, o: {"pct": round(_safe_float(o.get("iv_percentile")) or 0)},
     ),
 
+    # ── Short interest warnings ──
+    # High short interest is a double-edged signal:
+    #   • Negative when combined with falling price (informed bears, LB pattern)
+    #   • Positive when combined with rising momentum (squeeze, WING pattern)
+    # We surface both so Claude can interpret the context.
+    _rule(
+        "high_short_interest_bearish", TONE_NEGATIVE,
+        fires=lambda s, t, f, o: (
+            (_safe_float(f.get("short_percent_of_float")) or 0) > 0.10
+            and (_safe_float(t.get("vs_sma50")) or 0) < 0
+        ),
+        label_value=lambda s, t, f, o: {
+            "pct": round((_safe_float(f.get("short_percent_of_float")) or 0) * 100, 1),
+        },
+    ),
+    _rule(
+        "high_short_interest_squeeze", TONE_POSITIVE,
+        fires=lambda s, t, f, o: (
+            (_safe_float(f.get("short_percent_of_float")) or 0) > 0.10
+            and (_safe_float(t.get("vs_sma50")) or 0) > 0
+            and (_safe_float(t.get("macd_histogram")) or 0) > 0
+        ),
+        label_value=lambda s, t, f, o: {
+            "pct": round((_safe_float(f.get("short_percent_of_float")) or 0) * 100, 1),
+        },
+    ),
+
     # ── Macro warnings (from macro_data injected into signal dict) ──
     _rule(
         "vix_backwardation_stress", TONE_NEGATIVE,

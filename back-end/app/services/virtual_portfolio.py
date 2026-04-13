@@ -351,8 +351,24 @@ def _eval_brain_trust_tier(sig: dict) -> tuple[int, float, str]:
     if ai_status == "failed":
         return 0, 0.0, "ai_failed"
 
+    # ── SMA50 trend filter ──
+    # Week 1 data (Apr 8-13) showed a clean pattern: ALL winners
+    # (PBR-A +4.47%, AVGO +3.01%, ASML +1.30%, RRX +2.47%) were above
+    # SMA50 at entry. ALL counter-trend losers (VZ -5.2% 5d, LB -5.5%
+    # 5d, TPL -7.3% 5d) were below SMA50 at entry. "Cheap and falling"
+    # is not "cheap and recovering."
+    #
+    # When price is below SMA50, the short-term trend is DOWN regardless
+    # of fundamentals. The brain still enters (fundamentals might be
+    # right) but at REDUCED SIZE — Tier 1 is downgraded to Tier 2 (50%
+    # size) to limit exposure to counter-trend entries.
+    vs_sma50 = technical_data.get("vs_sma50")
+    below_sma50 = vs_sma50 is not None and vs_sma50 < 0
+
     # Tier 1: validated AI + standard score threshold
     if ai_status == "validated" and score >= BRAIN_MIN_SCORE:
+        if below_sma50:
+            return 2, 0.5, "validated_below_sma50"
         return 1, 1.0, "validated"
 
     # Tier 2: low confidence AI + higher score bar
@@ -1398,6 +1414,7 @@ def process_virtual_trades(
                     "stop_loss": stop,
                     "entry_tier": brain_tier,
                     "trust_multiplier": trust_multiplier,
+                    "tier_reason": tier_reason,
                     # Snapshot for the learning loop — see _record_brain_outcome.
                     # We snapshot at insert because the regime can shift between
                     # entry and close, and pattern_stats matches on the regime
@@ -1834,7 +1851,7 @@ def get_virtual_summary() -> dict:
     # All trades
     open_result = (
         db.table("virtual_trades")
-        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status")
+        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status, tier_reason")
         .eq("status", "OPEN")
         .order("entry_date", desc=True)
         .execute()
@@ -1920,6 +1937,7 @@ def get_virtual_summary() -> dict:
             "contrarian_score": sig.get("contrarian_score"),
             "market_regime": sig.get("market_regime"),
             "thesis_status": t.get("thesis_last_status"),  # valid/weakening/invalid/None
+            "tier_reason": t.get("tier_reason"),
         }
 
         if current:

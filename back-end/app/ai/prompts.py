@@ -181,10 +181,11 @@ Current regime: {market_regime}
 ## Investment Knowledge (from Signa Brain)
 {knowledge_block}
 
-## Warning Signs (from technical/fundamental analysis)
-The brain has flagged the following danger signs in the data above. These are
-not vetoes — you (Claude) are the decider. But they are surfaced here so you
-cannot plausibly miss them when synthesizing your recommendation.
+## Warning Signs & Opportunities (from technical/fundamental/macro analysis)
+The brain has flagged the following signals in the data above. Warnings (⚠) are
+danger signs; opportunities (✓) are bullish tailwinds. Neither are vetoes — you
+(Claude) are the decider. They are surfaced here so you cannot plausibly miss
+them when synthesizing your recommendation.
 {warning_signs}
 
 ## Your Task

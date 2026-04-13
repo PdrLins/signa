@@ -66,6 +66,7 @@ interface VirtualTrade {
   contrarian_score?: number
   market_regime?: string
   thesis_status?: string  // valid | weakening | invalid | null (legacy)
+  tier_reason?: string    // validated | validated_below_sma50 | low_confidence_high_score | tech_only_confirmed_*
 }
 
 interface ClosedTrade {
@@ -566,7 +567,7 @@ export default function BrainPerformancePage() {
                           </div>
 
                           {/* Meta row */}
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-3 flex-wrap">
                             {vt.days_held != null && (
                               <span className="text-[10px] flex items-center gap-1" style={{ color: theme.colors.textHint }}>
                                 <Clock size={9} /> {vt.days_held}d held
@@ -580,6 +581,17 @@ export default function BrainPerformancePage() {
                             {vt.unrealized_pnl_amount != null && (
                               <span className="text-[10px] font-medium tabular-nums" style={{ color: pnlColor }}>
                                 {vt.unrealized_pnl_amount >= 0 ? '+' : ''}${vt.unrealized_pnl_amount.toFixed(2)}
+                              </span>
+                            )}
+                            {vt.tier_reason && (
+                              <span
+                                className="text-[9px] font-medium px-1.5 py-0.5 rounded"
+                                style={{
+                                  backgroundColor: (vt.tier_reason.includes('below_sma50') ? theme.colors.warning : theme.colors.primary) + '15',
+                                  color: vt.tier_reason.includes('below_sma50') ? theme.colors.warning : theme.colors.primary,
+                                }}
+                              >
+                                {vt.tier_reason.includes('below_sma50') ? 'Below SMA50' : vt.tier_reason.replace(/_/g, ' ')}
                               </span>
                             )}
                           </div>
