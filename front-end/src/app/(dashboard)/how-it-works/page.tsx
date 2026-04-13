@@ -691,6 +691,20 @@ export default function HowItWorksPage() {
 
                 <div className="mt-4">
                   <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.sma50FilterTitle}
+                  </h3>
+                  <P>{h.sma50FilterDesc}</P>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.shortInterestSignalsTitle}
+                  </h3>
+                  <P>{h.shortInterestSignalsDesc}</P>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
                     {h.exitLabelsTitle}
                   </h3>
                   <P>{h.exitLabelsDesc}</P>
