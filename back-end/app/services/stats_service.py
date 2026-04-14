@@ -11,13 +11,7 @@ from app.core.cache import stats_cache
 from app.db.supabase import get_client, with_retry
 
 
-# Scan schedule (ET times) — used to compute next_scan_time
-_SCHEDULE = [
-    ("PRE_MARKET", "06:00"),
-    ("MORNING", "10:00"),
-    ("PRE_CLOSE", "15:00"),
-    ("AFTER_CLOSE", "16:30"),
-]
+from app.core.scan_schedule import next_scan_time_et
 
 
 @with_retry
@@ -191,22 +185,15 @@ def _get_ai_cost_today() -> float:
 
 
 def _compute_next_scan_time() -> str | None:
-    """Determine the next scheduled scan time (ET)."""
+    """Determine the next scheduled scan time (ET).
+
+    Thin wrapper around `core.scan_schedule.next_scan_time_et` — the
+    canonical schedule lives in that single module. Returns ISO-8601
+    or None on any failure so the caller can serialize it into the
+    stats response without extra handling.
+    """
     try:
-        from zoneinfo import ZoneInfo
-
-        et = ZoneInfo("America/New_York")
-        now_et = datetime.now(et)
-
-        for _, time_str in _SCHEDULE:
-            h, m = map(int, time_str.split(":"))
-            scan_time = now_et.replace(hour=h, minute=m, second=0, microsecond=0)
-            if scan_time > now_et:
-                return scan_time.isoformat()
-
-        # All scans done today — next is tomorrow's PRE_MARKET
-        tomorrow = now_et + timedelta(days=1)
-        h, m = map(int, _SCHEDULE[0][1].split(":"))
-        return tomorrow.replace(hour=h, minute=m, second=0, microsecond=0).isoformat()
+        dt = next_scan_time_et()
+        return dt.isoformat() if dt else None
     except Exception:
         return None

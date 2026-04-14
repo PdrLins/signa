@@ -102,15 +102,8 @@ async def catch_up_missed_scans():
     if now_et.weekday() >= 5:
         return
 
+    from app.core.scan_schedule import SCAN_SCHEDULE
     from app.db import queries
-
-    scan_slots = [
-        ("PRE_MARKET", 6, 0),
-        ("MORNING", 10, 0),
-        ("MIDDAY", 12, 0),
-        ("PRE_CLOSE", 15, 0),
-        ("AFTER_CLOSE", 16, 30),
-    ]
 
     # Get today's completed scans (exclude manual)
     today_start = now_et.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -124,10 +117,10 @@ async def catch_up_missed_scans():
 
     # Find missed scans (scheduled time has passed but no completed scan)
     missed = []
-    for scan_type, hour, minute in scan_slots:
-        scheduled_time = now_et.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if now_et > scheduled_time and scan_type not in completed_types:
-            missed.append(scan_type)
+    for slot in SCAN_SCHEDULE:
+        scheduled_time = now_et.replace(hour=slot.hour, minute=slot.minute, second=0, microsecond=0)
+        if now_et > scheduled_time and slot.scan_type not in completed_types:
+            missed.append(slot.scan_type)
 
     if not missed:
         logger.info("Startup catch-up: no missed scans")

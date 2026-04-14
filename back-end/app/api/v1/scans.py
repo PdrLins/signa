@@ -8,20 +8,12 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 
 from app.core.config import settings
 from app.core.dependencies import get_current_user
+from app.core.scan_schedule import SCAN_SCHEDULE
 from app.db import queries
 from app.models.signals import ScanTodayRecord
 from app.services import scan_service, signal_service
 
 router = APIRouter(prefix="/scans", tags=["Scans"])
-
-# Scan type → human label + scheduled ET time
-_SCAN_SLOTS = [
-    ("PRE_MARKET", "Morning scan", "06:00"),
-    ("MORNING", "Market open", "10:00"),
-    ("MIDDAY", "Midday", "12:00"),
-    ("PRE_CLOSE", "Pre-close", "15:00"),
-    ("AFTER_CLOSE", "After close", "16:30"),
-]
 
 
 @router.get("")
@@ -78,7 +70,10 @@ async def get_scans_today(user: dict = Depends(get_current_user)):
                 scan_by_type[st] = s
 
     result = []
-    for scan_type, label, sched_time in _SCAN_SLOTS:
+    for slot in SCAN_SCHEDULE:
+        scan_type = slot.scan_type
+        label = slot.label
+        sched_time = slot.hhmm
         if not is_market_day:
             result.append(ScanTodayRecord(
                 scan_type=scan_type,

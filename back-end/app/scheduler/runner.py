@@ -5,6 +5,7 @@ from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 
 from app.core.config import settings
+from app.core.scan_schedule import SCAN_SCHEDULE
 from app.scheduler.jobs import (
     after_close_scan,
     brain_watchdog,
@@ -15,6 +16,17 @@ from app.scheduler.jobs import (
     pre_market_scan,
     virtual_portfolio_snapshot,
 )
+
+# Map scan_type to the async job handler. This preserves the existing
+# per-job handler pattern while letting us drive registration from the
+# canonical SCAN_SCHEDULE list in core/scan_schedule.py.
+_SCAN_HANDLERS = {
+    "PRE_MARKET": pre_market_scan,
+    "MORNING": morning_scan,
+    "MIDDAY": midday_scan,
+    "PRE_CLOSE": pre_close_scan,
+    "AFTER_CLOSE": after_close_scan,
+}
 
 scheduler = AsyncIOScheduler(timezone=settings.timezone)
 
@@ -30,50 +42,21 @@ def init_scheduler() -> AsyncIOScheduler:
     All scans run Monday-Friday only (day_of_week='mon-fri').
     Times are in Eastern Time.
     """
-    # 6:00 AM ET — Pre-market scan
-    scheduler.add_job(
-        pre_market_scan,
-        CronTrigger(hour=6, minute=0, day_of_week="mon-fri", timezone=settings.timezone),
-        id="pre_market_scan",
-        name="Pre-Market Scan (6:00 AM ET)",
-        replace_existing=True,
-    )
-
-    # 10:00 AM ET — Morning confirmation
-    scheduler.add_job(
-        morning_scan,
-        CronTrigger(hour=10, minute=0, day_of_week="mon-fri", timezone=settings.timezone),
-        id="morning_scan",
-        name="Morning Scan (10:00 AM ET)",
-        replace_existing=True,
-    )
-
-    # 12:00 PM ET — Midday scan (covers the 10 AM - 3 PM gap)
-    scheduler.add_job(
-        midday_scan,
-        CronTrigger(hour=12, minute=0, day_of_week="mon-fri", timezone=settings.timezone),
-        id="midday_scan",
-        name="Midday Scan (12:00 PM ET)",
-        replace_existing=True,
-    )
-
-    # 3:00 PM ET — Pre-close check
-    scheduler.add_job(
-        pre_close_scan,
-        CronTrigger(hour=15, minute=0, day_of_week="mon-fri", timezone=settings.timezone),
-        id="pre_close_scan",
-        name="Pre-Close Scan (3:00 PM ET)",
-        replace_existing=True,
-    )
-
-    # 4:30 PM ET — After-close full scan
-    scheduler.add_job(
-        after_close_scan,
-        CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone=settings.timezone),
-        id="after_close_scan",
-        name="After-Close Scan (4:30 PM ET)",
-        replace_existing=True,
-    )
+    # Register all scan jobs from the canonical schedule. Adding a new
+    # scan means adding it to core/scan_schedule.py — NOT here.
+    for slot in SCAN_SCHEDULE:
+        handler = _SCAN_HANDLERS.get(slot.scan_type)
+        if handler is None:
+            logger.warning(f"No handler registered for scan_type={slot.scan_type}, skipping")
+            continue
+        job_id = slot.scan_type.lower() + "_scan"
+        scheduler.add_job(
+            handler,
+            CronTrigger(hour=slot.hour, minute=slot.minute, day_of_week="mon-fri", timezone=settings.timezone),
+            id=job_id,
+            name=f"{slot.label} ({slot.hhmm} ET)",
+            replace_existing=True,
+        )
 
     # 2:00 AM ET — Daily cleanup of expired tokens, OTPs, brain sessions
     scheduler.add_job(
