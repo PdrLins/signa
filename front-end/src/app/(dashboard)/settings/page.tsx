@@ -730,7 +730,7 @@ export default function SettingsPage() {
           {t.settings.languageLabel}
         </p>
         <div className="flex gap-3">
-          {([['en', 'English', '🇨🇦'], ['pt', 'Portugues', '🇧🇷']] as const).map(([code, label, flag]) => {
+          {([['en', 'English', 'EN'], ['pt', 'Português', 'PT']] as const).map(([code, label, badge]) => {
             const isActive = locale === code
             return (
               <button
@@ -743,7 +743,7 @@ export default function SettingsPage() {
                   color: isActive ? theme.colors.primary : theme.colors.text,
                 }}
               >
-                <span className="text-lg">{flag}</span>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: isActive ? theme.colors.primary + '20' : theme.colors.border, color: isActive ? theme.colors.primary : theme.colors.textSub }}>{badge}</span>
                 <span className="text-sm font-medium">{label}</span>
                 {isActive && <Check size={16} className="ml-auto" />}
               </button>

@@ -530,6 +530,8 @@ def _exit_is_thesis_protected(pos: dict, exit_reason: str, pnl_pct: float) -> bo
         return False
     if exit_reason == "TRAILING_STOP":
         return False  # trailing stop protects gains — never suppress it
+    if exit_reason == "QUALITY_PRUNE":
+        return False  # pruning dead weight — the thesis IS the reason we're selling
     return (pos.get("thesis_last_status") or "").lower() == "valid"
 
 
@@ -1813,6 +1815,54 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
             exit_reason = "TIME_EXPIRED"
             expired += 1
 
+        # ── Quality prune: cut bad entries early ──
+        # If no price-based exit triggered, check if this position is
+        # dead weight that should be freed up. A portfolio manager
+        # wouldn't hold a losing position with a deteriorating thesis
+        # for 30 days waiting for the stop — they'd cut it early and
+        # redeploy the slot.
+        #
+        # Conditions (ALL must be true):
+        #   • No other exit triggered (stop/trail/target didn't fire)
+        #   • Position is DOWN from entry (pnl < 0)
+        #   • Held 2-7 days (give it a chance, but don't wait forever)
+        #   • Claude's latest signal is NOT BUY (the AI doesn't want it)
+        #   • Thesis is weakening or invalid (the reason is degrading)
+        #
+        # This catches: BLK -1.40% (day 1, Claude=HOLD, bearish),
+        # VZ -1.80% (day 1, Claude=HOLD, falling knife). It does NOT
+        # catch positions with valid thesis or positions Claude still
+        # likes — those deserve time to play out.
+        if not exit_reason and trade.get("source") == "brain":
+            latest_sig = current_scores_full.get(symbol) if 'current_scores_full' in dir() else None
+            # Use the signal action from the batch we already fetched
+            latest_action = None
+            for row in (sig_result.data or []):
+                if row.get("symbol") == symbol:
+                    latest_action = row.get("action")
+                    break
+
+            if (
+                pnl_pct < 0
+                and 2 <= days_held <= 7
+                and thesis_status in ("weakening", "invalid", "")
+                and latest_action in ("HOLD", "AVOID", "SELL", None)
+            ):
+                exit_reason = "QUALITY_PRUNE"
+                logger.info(
+                    f"Virtual QUALITY PRUNE: {symbol} at {pnl_pct:+.1f}% "
+                    f"(held {days_held}d, thesis={thesis_status or 'none'}, "
+                    f"latest_action={latest_action}) — freeing slot for better pick"
+                )
+                notifications.append(("brain_sell", {
+                    "symbol": symbol, "price": f"{current_price:.2f}",
+                    "pnl": f"{pnl_pct:+.1f}",
+                    "reason": f"Quality prune (thesis {thesis_status or 'none'}, {days_held}d held)",
+                    "entry_score": str(trade.get("entry_score", 0)),
+                    "exit_score": str(current_scores.get(symbol, 0)),
+                    "verdict": "Position underperforming with deteriorating thesis — slot freed for stronger pick.",
+                }))
+
         if not exit_reason:
             continue
 
@@ -2057,6 +2107,9 @@ def get_virtual_summary() -> dict:
             return f"Watchdog: bearish sentiment + price drop" + (f". {snippet}" if snippet else "")
         if reason == "TIME_EXPIRED":
             return "Held maximum 30 days without hitting target or stop"
+        if reason == "QUALITY_PRUNE":
+            thesis = t.get("thesis_last_status") or "none"
+            return f"Pruned: losing position with {thesis} thesis — slot freed for a stronger pick"
         if reason == "ROTATION":
             return "Rotated out for a stronger candidate"
         return reason or "Unknown"
