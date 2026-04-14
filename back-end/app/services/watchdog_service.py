@@ -211,6 +211,41 @@ async def run_watchdog() -> dict:
             )
         open_trades = crypto_trades
 
+    # ── SPY intraday crash detection ──
+    # If SPY drops > 2% intraday, the market is turning. This is faster
+    # than waiting for VIX to cross 20 (regime change) or the next scan.
+    # When detected, all positions are flagged for urgent review.
+    #
+    # Pedro's principle: "we cannot lose whatever we make." The watchdog
+    # runs every 15 min — a 2% SPY drop detected here triggers an alert
+    # before the next scan (which could be hours away).
+    spy_crash_detected = False
+    try:
+        spy_prices = await asyncio.to_thread(
+            lambda: _fetch_prices_batch(["SPY"])
+        )
+        spy_px, _ = spy_prices.get("SPY", (None, None))
+        if spy_px:
+            import yfinance as yf
+            spy_info = await asyncio.to_thread(lambda: yf.Ticker("SPY").info)
+            spy_prev_close = spy_info.get("previousClose") or spy_info.get("regularMarketPreviousClose")
+            if spy_prev_close and spy_prev_close > 0:
+                spy_change_pct = ((spy_px - spy_prev_close) / spy_prev_close) * 100
+                if spy_change_pct < -2.0:
+                    spy_crash_detected = True
+                    logger.warning(
+                        f"Watchdog: SPY intraday crash detected ({spy_change_pct:+.1f}%). "
+                        f"Market is turning — all positions flagged for urgent review."
+                    )
+                    _tg_send(
+                        settings.telegram_chat_id,
+                        f"🚨 MARKET ALERT: SPY {spy_change_pct:+.1f}% intraday. "
+                        f"Brain watchdog monitoring all {len(open_trades)} positions closely.",
+                        urgent=True,
+                    )
+    except Exception as e:
+        logger.debug(f"Watchdog SPY check failed: {e}")
+
     # Get watchlist for overlap detection
     watchlist_symbols = queries.get_all_watchlist_symbols()
 

@@ -298,7 +298,7 @@ def _is_us_market_open() -> bool:
     return 570 <= minutes < 960
 
 
-def _eval_brain_trust_tier(sig: dict) -> tuple[int, float, str]:
+def _eval_brain_trust_tier(sig: dict, portfolio_heat: int = 0) -> tuple[int, float, str]:
     """Decide which brain trust tier (if any) a signal qualifies for.
 
     This is the brain's GATE. Every brain auto-buy goes through this function.
@@ -351,6 +351,19 @@ def _eval_brain_trust_tier(sig: dict) -> tuple[int, float, str]:
     if ai_status == "failed":
         return 0, 0.0, "ai_failed"
 
+    # ── Portfolio heat gating ──
+    # heat=3 (locked): no new entries at all — protect existing gains
+    if portfolio_heat >= 3:
+        return 0, 0.0, "portfolio_locked"
+
+    # heat=2 (defensive): only score 80+ at half size
+    if portfolio_heat >= 2 and score < 80:
+        return 0, 0.0, f"portfolio_defensive_score{score}"
+
+    # heat=1 (cautious): only score 76+
+    if portfolio_heat >= 1 and score < 76:
+        return 0, 0.0, f"portfolio_cautious_score{score}"
+
     # ── SMA50 trend filter ──
     # Week 1 data (Apr 8-13) showed a clean pattern: ALL winners
     # (PBR-A +4.47%, AVGO +3.01%, ASML +1.30%, RRX +2.47%) were above
@@ -365,10 +378,34 @@ def _eval_brain_trust_tier(sig: dict) -> tuple[int, float, str]:
     vs_sma50 = technical_data.get("vs_sma50")
     below_sma50 = vs_sma50 is not None and vs_sma50 < 0
 
+    # ── Bollinger Band ceiling + MACD divergence filter ──
+    # Week 1-2 data: entries at BB > 95% with negative MACD had a 45%
+    # win rate vs 69% overall. Price at the Bollinger ceiling with fading
+    # momentum is a "buying the top" pattern — not bad enough to block
+    # (AVGO +3.29% and ASML +2.52% entered this way) but risky enough
+    # to halve the position size. Same principle as the SMA50 filter:
+    # reduce, don't block.
+    #
+    # Real cases: VSEC -3.18%, BF-B -2.29%, LTM -1.24%, BLK -1.40%
+    # all entered at BB=1.00 with negative MACD.
+    bb_position = technical_data.get("bb_position")
+    macd_hist = technical_data.get("macd_histogram")
+    overextended = (
+        bb_position is not None and bb_position > 0.95
+        and macd_hist is not None and macd_hist < 0
+    )
+
+    # Heat=2 forces half size on all entries that pass the score gate
+    heat_halve = portfolio_heat >= 2
+
     # Tier 1: validated AI + standard score threshold
     if ai_status == "validated" and score >= BRAIN_MIN_SCORE:
         if below_sma50:
             return 2, 0.5, "validated_below_sma50"
+        if overextended:
+            return 2, 0.5, "validated_overextended_bb"
+        if heat_halve:
+            return 2, 0.5, "validated_heat_defensive"
         return 1, 1.0, "validated"
 
     # Tier 2: low confidence AI + higher score bar
@@ -1074,12 +1111,73 @@ def process_virtual_trades(
     open_watchlist: set[str] = set()
     open_brain: set[str] = set()
     brain_open_count = 0
+    brain_entry_prices: list[float] = []
     for r in all_open:
         if r.get("source") == "brain":
             open_brain.add(r["symbol"])
             brain_open_count += 1
+            brain_entry_prices.append(float(r.get("entry_price", 0)))
         else:
             open_watchlist.add(r["symbol"])
+
+    # ── Portfolio heat score ──
+    # Computed once per scan. Controls how aggressively the brain adds
+    # new positions. The goal: PROTECT existing gains. When the portfolio
+    # is fat (high unrealized P&L), concentrated (many positions), or the
+    # market is complacent (low VIX), the brain gets more selective.
+    #
+    # Pedro's principle (Day 8): "we cannot lose whatever we make. if so
+    # what is the point?" Making money and then losing it is worse than
+    # never making it. The heat score ensures the brain shifts from
+    # "grow" to "protect" as profits accumulate.
+    #
+    # heat=0: normal (score >= 72, full size)
+    # heat=1: cautious (score >= 76, full size)
+    # heat=2: defensive (score >= 80, half size)
+    # heat=3: locked (no new entries, let existing positions ride)
+    portfolio_heat = 0
+
+    # Factor 1: Portfolio unrealized P&L (do we have gains to protect?)
+    if brain_entry_prices and brain_open_count >= 3:
+        brain_symbols = [r["symbol"] for r in all_open if r.get("source") == "brain"]
+        brain_prices = _fetch_prices_batch(brain_symbols)
+        total_unrealized = 0.0
+        priced_count = 0
+        for r in all_open:
+            if r.get("source") != "brain":
+                continue
+            px, _ = brain_prices.get(r["symbol"], (None, None))
+            ep = float(r.get("entry_price", 0))
+            if px and ep > 0:
+                total_unrealized += ((px - ep) / ep) * 100
+                priced_count += 1
+        avg_unrealized = total_unrealized / priced_count if priced_count else 0
+        if avg_unrealized > 2.0:  # avg position is up >2% — meaningful gains
+            portfolio_heat += 1
+
+    # Factor 2: Concentration (too many open positions)
+    if brain_open_count > 12:
+        portfolio_heat += 1
+
+    # Factor 3: Market complacency (VIX too low = shock risk)
+    # Use the macro_data from the first signal if available
+    first_macro = None
+    for sig_item in signals:
+        if sig_item.get("macro_data"):
+            first_macro = sig_item["macro_data"]
+            break
+    if first_macro:
+        vix = first_macro.get("vix")
+        if vix is not None and vix < 16:
+            portfolio_heat += 1
+
+    if portfolio_heat > 0:
+        heat_labels = {1: "cautious", 2: "defensive", 3: "locked"}
+        logger.info(
+            f"Portfolio heat: {portfolio_heat} ({heat_labels.get(portfolio_heat, 'max')}) — "
+            f"positions={brain_open_count}, avg_pnl={avg_unrealized if brain_entry_prices else 0:+.1f}%, "
+            f"vix={first_macro.get('vix') if first_macro else '?'}"
+        )
 
     # Re-buy cooldown snapshot: any brain symbol recently closed via
     # THESIS_INVALIDATED or TARGET_HIT is blocked from re-entry this scan.
@@ -1300,7 +1398,7 @@ def process_virtual_trades(
         # compensate for the AI uncertainty.
         #
         # See `_eval_brain_trust_tier` and the file header for the rules.
-        brain_tier, trust_multiplier, tier_reason = _eval_brain_trust_tier(sig)
+        brain_tier, trust_multiplier, tier_reason = _eval_brain_trust_tier(sig, portfolio_heat)
         if (
             brain_tier > 0
             and symbol not in open_brain

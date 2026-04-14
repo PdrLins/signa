@@ -674,11 +674,11 @@ export default function BrainPerformancePage() {
                               <span
                                 className="text-[9px] font-medium px-1.5 py-0.5 rounded"
                                 style={{
-                                  backgroundColor: (vt.tier_reason.includes('below_sma50') ? theme.colors.warning : theme.colors.primary) + '15',
-                                  color: vt.tier_reason.includes('below_sma50') ? theme.colors.warning : theme.colors.primary,
+                                  backgroundColor: (vt.tier_reason.includes('below_sma50') || vt.tier_reason.includes('overextended') ? theme.colors.warning : theme.colors.primary) + '15',
+                                  color: vt.tier_reason.includes('below_sma50') || vt.tier_reason.includes('overextended') ? theme.colors.warning : theme.colors.primary,
                                 }}
                               >
-                                {vt.tier_reason.includes('below_sma50') ? 'Below SMA50' : vt.tier_reason.replace(/_/g, ' ')}
+                                {vt.tier_reason.includes('below_sma50') ? 'Below SMA50' : vt.tier_reason.includes('overextended') ? 'Overextended' : vt.tier_reason.replace(/_/g, ' ')}
                               </span>
                             )}
                           </div>

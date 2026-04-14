@@ -1068,19 +1068,130 @@ Trailing stop active on PBR-A (+4.47%), WING (+3.66%), AVGO (+3.01%) — all abo
 
 ---
 
+## Day 8 -- April 14, 2026 (Tuesday)
+
+**First trailing stops fire in production. First 10%+ winner (WING). Portfolio crosses +32%.** Three closes today (PBR-A trailing +1.13%, LB trailing -1.31%, VZ watchdog -1.80%), four new entries (GOOGL, BLK, HBM, CNQ), and the thesis-gated trailing stop design was validated retroactively — LB would have been saved under the new code.
+
+### Environment
+- Market: TRENDING (VIX 18.36)
+- Environment: favorable
+- Fear & Greed: 47 (neutral — up from 41 fear yesterday)
+- Yield curve: 0.52% (normal) — **FRED is back!**
+- Credit spread: 1.04% (normal)
+- Scans: 4/5 COMPLETE, 1 FAILED (PRE_CLOSE)
+- Budget: ~$0 (Claude Local)
+
+### Scan performance
+
+| Scan | Duration | Status |
+|---|---|---|
+| PRE_MARKET | 209s | COMPLETE |
+| MORNING | 201s | COMPLETE |
+| MIDDAY | 195s | COMPLETE |
+| PRE_CLOSE | 209s | **FAILED** |
+| AFTER_CLOSE | 216s | COMPLETE |
+
+PRE_CLOSE failure — first market-hours scan failure since Day 5's AFTER_CLOSE. Same Claude CLI exhaustion pattern likely. Not investigated yet.
+
+### Brain trades
+
+**Opened (4):**
+
+| Symbol | Score | Tier | Entry | Thesis note |
+|---|---|---|---|---|
+| GOOGL | 81 | T1 | $332.32 | Claude=HOLD, 99% BB, MACD negative, "entry is poor" |
+| BLK | 73 | T1 | $1,069.51 | Claude=HOLD, 100% BB, MACD -9.79, "momentum reversed" |
+| HBM | 80 | T1 | $25.32 | 545% EPS growth, 6% dividend, "demands patience" |
+| CNQ | 77 | T1 | $45.51 | Oil exposure, MACD turning positive, oil -6.1% 5d headwind |
+
+GOOGL and BLK are both Claude-says-HOLD entries with self_check.bearish=True. Both above SMA50 (so the new filter doesn't catch them). The brain buys on score (81 and 73) despite Claude flagging overextended technicals. Same pattern as VZ/LB from last week.
+
+**Closed (3):**
+
+| Symbol | Exit reason | P&L | Peak | Thesis | Notes |
+|---|---|---|---|---|---|
+| PBR-A | TRAILING_STOP | **+1.13%** | $19.85 | weakening | Soft trail fired. Peak was +4.4%, locked in +1.13%. Thesis was weakening — correct to sell under new rules. |
+| LB | TRAILING_STOP | **-1.31%** | $70.38 | valid | Soft trail fired under OLD code. **Under new thesis-gated code: would have been SUPPRESSED** (thesis=valid, drop was 4.7% < 5% hard trail). LB would still be open. |
+| VZ | WATCHDOG_EXIT | **-1.80%** | — | valid | Falling knife played out exactly as Claude warned on Day 7. Watchdog bypasses thesis gate. |
+
+**Realized P&L: -1.98%** (negative day — VZ and LB losses outweighed PBR-A gain).
+
+### The LB retroactive validation
+
+LB is the proof that the thesis-gated trailing stop we built yesterday is correct:
+
+- **Old code (still live today):** 3% mechanical trail → LB drops from peak $70.38 to $67.08 (4.7% drop) → auto-sell at -1.31%
+- **New code (deployed tonight):** thesis=valid → soft trail SUPPRESSED → hold. Hard trail at 5% ($66.86) not hit. LB stays open.
+- **Outcome if held:** LB closed at $67.08 today. If we held, we'd still be at -1.31% but with the thesis valid and a chance to recover vs being locked into a realized loss.
+
+This is the exact scenario Pedro described: "why did it sell? the fundamentals are fine, it's just noise." The thesis-gated trailing stop answers that question correctly.
+
+### Open positions (15) — +32.29% combined
+
+| Symbol | P&L | Thesis | Notes |
+|---|---|---|---|
+| **WING** | **+10.21%** | weakening | Biggest winner in brain history. Short squeeze playing out (16.8% SI). |
+| META | +5.53% | NULL | Legacy, no thesis. Strong recovery. |
+| AVGO | +3.29% | valid | Trailing active. |
+| TSM | +3.01% | valid | Trailing active. |
+| ETH-USD | +2.67% | valid | First crypto still running. |
+| ASML | +2.52% | weakening | Re-entry working. |
+| RRX | +2.15% | NULL | Legacy. |
+| REGN | +1.98% | valid | Steady. |
+| AGI.TO | +0.92% | valid | Gold miner. |
+| TPL | +0.78% | valid | Recovering from counter-trend. |
+| LYG | +0.54% | NULL | Legacy, finally green. |
+| CNQ | +0.31% | valid | New today. |
+| GOOGL | +0.18% | valid | New today. |
+| HBM | -0.39% | valid | New today. |
+| BLK | -1.40% | valid | New today, immediately red. |
+
+**Sum: +32.29% | Avg: +2.15%/position | 12 green, 3 red**
+
+### Milestones
+
+1. **WING +10.21%** — first double-digit winner. The brain entered at $179.73, current $198.08. 16.8% short interest squeeze is the driver. Trailing stop protecting gains (thesis=weakening → soft trail would fire on a 3% drop from peak).
+2. **First trailing stops fired in production** — PBR-A (correct: thesis weakening, sell) and LB (would be suppressed under new code: thesis valid, hold).
+3. **FRED back online** — yield curve 0.52%, credit spread 1.04%. Ship 2's leading indicators are finally reaching Claude.
+4. **Portfolio crossed +32%** combined across 15 positions.
+5. **thinking_observation_added event** — the PYPL/META hypothesis got updated.
+
+### Patterns observed
+
+**1. The brain keeps buying Claude-says-HOLD stocks above SMA50.** GOOGL and BLK today, same as VZ and LB last week. The SMA50 filter only catches below-SMA50 entries. Stocks AT the Bollinger Band ceiling (99-100%) with negative MACD are a different risk: they're above SMA50 but technically exhausted. The brain sees score 73-81, the AI sees "wait for pullback." Consider: adding a Bollinger Band ceiling check to the tier model (if BB > 95% AND MACD histogram < 0, downgrade to half size).
+
+**2. Trailing stops need to be thesis-gated in production.** Today's LB close proves it. The new code is built but wasn't live yet. After tonight's restart, thesis-gated trailing stops are active.
+
+**3. The watchdog is the last line of defense for thesis=valid positions.** VZ had thesis=valid (the thesis gate would have suppressed stop/target/trail exits) but the watchdog caught the bearish sentiment + price drop and force-closed. The watchdog correctly bypasses the thesis gate. Without it, VZ would still be bleeding.
+
+**4. Energy exposure through CNQ is oil-dependent.** The thesis explicitly notes "oil's sharp 5-day decline of -6.1%." The brain entered despite this headwind because fundamentals are strong. If oil keeps falling, CNQ follows. The intermarket data (oil price) is now in Claude's prompt — the brain CHOSE to enter despite seeing the headwind.
+
+**5. FRED recovery means Ship 2 is finally testable.** First market-hours scan with yield curve + credit spread data reaching Claude. Both are normal/favorable today — the real test comes when one of them deteriorates.
+
+### Features shipped today
+
+| Feature | What it does |
+|---|---|
+| Thesis-gated trailing stop | Soft trail (3%) suppressed when thesis=valid; hard trail (5%) always fires |
+| SMA50 trend filter | Below SMA50 → Tier 1 downgraded to Tier 2 (half size) |
+| Short interest warning rules | Bearish (below SMA50 + SI>10%) and squeeze (above SMA50 + SI>10% + MACD+) |
+| Opportunities in Claude's prompt | format_warning_signs now surfaces positive signals too (✓ prefix) |
+| Exit context on closed trades | Human-readable explanation of why each trade was sold |
+| Tier reason stored + shown in UI | "Below SMA50" badge visible in expanded position detail |
+| Watchdog monitor grid | Click-to-expand per-symbol watchdog history, closed positions toggle |
+| Weakening ≠ sell knowledge entry | Added to signal_knowledge so Claude reads it every scan |
+
+### Metrics to track tomorrow
+
+- [ ] Does the thesis-gated trailing stop work in production? Watch for "TRAILING STOP suppressed — thesis still valid" in logs.
+- [ ] BLK entered at -1.40% day one with bearish self_check. Does it recover or continue bleeding? Same pattern as VZ.
+- [ ] WING at +10.21% — does the 16.8% SI squeeze continue or does it reverse? This is the trailing stop's biggest test.
+- [ ] Consider BB ceiling check: stocks at >95% BB with negative MACD should get reduced size even if above SMA50.
+- [ ] PRE_CLOSE scan failure — investigate Claude CLI exhaustion pattern.
+- [ ] Polymarket integration exploration — forward-looking crowd consensus on Fed, earnings, geopolitics.
+
+---
+
 ## Template for Future Days
-
-### Day N -- [Date]
-
-**Environment:** [regime, VIX, scans count, budget]
-
-**Incidents:**
-1. [What happened, root cause, fix, status, verdict]
-
-**Patterns:** [Recurring observations]
-
-**Fixes Applied:** [What was changed]
-
-**Backtest comparison:** [Did metrics improve from previous backtest?]
 
 **Metrics:** [Did yesterday's fixes work?]
