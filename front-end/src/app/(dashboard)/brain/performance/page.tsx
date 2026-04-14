@@ -196,9 +196,12 @@ export default function BrainPerformancePage() {
 
   const { data: watchdogEvents } = useQuery<WatchdogEvent[]>({
     queryKey: ['stats', 'watchdog-events'],
-    queryFn: async () => (await client.get<WatchdogEvent[]>('/stats/watchdog-events?limit=3')).data,
+    queryFn: async () => (await client.get<WatchdogEvent[]>('/stats/watchdog-events?limit=50')).data,
     staleTime: 30_000,
   })
+
+  // Group watchdog events by symbol for the monitor grid
+  const [watchdogExpandedSymbol, setWatchdogExpandedSymbol] = useState<string | null>(null)
 
   const { data: signalsData } = useQuery<{ signals: { symbol: string; is_discovered?: boolean }[] }>({
     queryKey: ['signals', 'discovered-check'],
@@ -376,70 +379,137 @@ export default function BrainPerformancePage() {
           )}
 
           {/* Watchdog Timeline */}
-          {watchdogEvents && watchdogEvents.length > 0 && (
-            <Card>
-              <div className="flex items-center gap-1.5 mb-3">
-                <Eye size={14} style={{ color: theme.colors.warning }} />
-                <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
-                  Watchdog
-                </p>
-                {data?.watchdog?.active && (
-                  <span className="text-[8px] px-1.5 py-0.5 rounded-full ml-auto" style={{ backgroundColor: theme.colors.up + '15', color: theme.colors.up }}>
-                    Active
-                  </span>
-                )}
-              </div>
+          {/* Watchdog Monitor Grid */}
+          {(() => {
+            // Build per-symbol watchdog state from events + open positions
+            const evtsBySymbol: Record<string, WatchdogEvent[]> = {}
+            for (const evt of (watchdogEvents || [])) {
+              if (!evtsBySymbol[evt.symbol]) evtsBySymbol[evt.symbol] = []
+              evtsBySymbol[evt.symbol].push(evt)
+            }
+            // Include all open brain positions even if they have no events
+            for (const vt of brainTrades) {
+              if (!evtsBySymbol[vt.symbol]) evtsBySymbol[vt.symbol] = []
+            }
+            const symbols = Object.keys(evtsBySymbol).sort((a, b) => {
+              const aCount = evtsBySymbol[a].length
+              const bCount = evtsBySymbol[b].length
+              return bCount - aCount // most active first
+            })
 
-              <div className="relative pl-4">
-                {/* Timeline line */}
-                <div className="absolute left-[5px] top-1 bottom-1 w-px" style={{ backgroundColor: theme.colors.border }} />
+            if (symbols.length === 0) return null
 
-                <div className="space-y-3">
-                  {watchdogEvents.map((evt, i) => {
-                    const typeColor = getEventTypeColor(evt.event_type, theme)
-                    const pnlColor = evt.pnl_pct >= 0 ? theme.colors.up : theme.colors.down
+            const getSymbolStatus = (evts: WatchdogEvent[]): { label: string; color: string } => {
+              if (evts.length === 0) return { label: 'healthy', color: theme.colors.up }
+              const latest = evts[0]
+              if (latest.event_type === 'CLOSE') return { label: 'closed', color: theme.colors.down }
+              if (latest.event_type === 'ALERT' || latest.event_type === 'ESCALATION')
+                return { label: `${evts.length} alert${evts.length > 1 ? 's' : ''}`, color: theme.colors.warning }
+              if (latest.event_type === 'RECOVERY') return { label: 'recovered', color: theme.colors.up }
+              if (latest.event_type === 'HOLD_THROUGH_DIP') return { label: 'held dip', color: theme.colors.primary }
+              return { label: 'healthy', color: theme.colors.up }
+            }
+
+            return (
+              <Card>
+                <div className="flex items-center gap-1.5 mb-3">
+                  <Eye size={14} style={{ color: theme.colors.warning }} />
+                  <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+                    Watchdog — Monitoring {symbols.length} positions
+                  </p>
+                  {data?.watchdog?.active && (
+                    <span className="text-[8px] px-1.5 py-0.5 rounded-full ml-auto" style={{ backgroundColor: theme.colors.up + '15', color: theme.colors.up }}>
+                      Active
+                    </span>
+                  )}
+                </div>
+
+                {/* Symbol grid */}
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {symbols.map((sym) => {
+                    const evts = evtsBySymbol[sym]
+                    const status = getSymbolStatus(evts)
+                    const isExpanded = watchdogExpandedSymbol === sym
 
                     return (
-                      <div key={i} className="relative">
-                        {/* Timeline dot */}
-                        <div
-                          className="absolute -left-4 top-1 w-[10px] h-[10px] rounded-full border-2"
-                          style={{ backgroundColor: theme.colors.surface, borderColor: typeColor }}
+                      <button
+                        key={sym}
+                        onClick={() => setWatchdogExpandedSymbol(isExpanded ? null : sym)}
+                        className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-medium transition-all"
+                        style={{
+                          backgroundColor: isExpanded ? status.color + '20' : theme.colors.surfaceAlt,
+                          border: `1px solid ${isExpanded ? status.color + '40' : theme.colors.border}`,
+                          color: theme.colors.text,
+                        }}
+                      >
+                        <span
+                          className="w-1.5 h-1.5 rounded-full shrink-0"
+                          style={{ backgroundColor: status.color }}
                         />
-
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[11px] font-semibold" style={{ color: theme.colors.text }}>{evt.symbol}</span>
-                            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded" style={{ backgroundColor: typeColor + '15', color: typeColor }}>
-                              {evt.event_type.replace(/_/g, ' ')}
-                            </span>
-                            {evt.in_watchlist && (
-                              <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ backgroundColor: theme.colors.primary + '15', color: theme.colors.primary }}>
-                                WL
-                              </span>
-                            )}
-                            {evt.sentiment_label && (
-                              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{evt.sentiment_label}</span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className="text-[11px] font-bold tabular-nums" style={{ color: pnlColor }}>
-                              {evt.pnl_pct >= 0 ? '+' : ''}{fmtPct(evt.pnl_pct)}%
-                            </span>
-                            <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{relativeTime(evt.created_at)}</span>
-                          </div>
-                        </div>
-
-                        <p className="text-[9px] mt-0.5" style={{ color: theme.colors.textHint }}>
-                          {evt.action_taken}
-                        </p>
-                      </div>
+                        {sym}
+                        {evts.length > 0 && (
+                          <span className="text-[8px] tabular-nums" style={{ color: status.color }}>
+                            {evts.length}
+                          </span>
+                        )}
+                      </button>
                     )
                   })}
                 </div>
-              </div>
-            </Card>
-          )}
+
+                {/* Expanded event history for selected symbol */}
+                {watchdogExpandedSymbol && evtsBySymbol[watchdogExpandedSymbol] && (
+                  <div
+                    className="rounded-lg p-3 mt-1"
+                    style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}` }}
+                  >
+                    {evtsBySymbol[watchdogExpandedSymbol].length === 0 ? (
+                      <p className="text-[10px]" style={{ color: theme.colors.textHint }}>
+                        No watchdog events — position is healthy.
+                      </p>
+                    ) : (
+                      <div className="relative pl-4">
+                        <div className="absolute left-[5px] top-1 bottom-1 w-px" style={{ backgroundColor: theme.colors.border }} />
+                        <div className="space-y-2.5">
+                          {evtsBySymbol[watchdogExpandedSymbol].map((evt, i) => {
+                            const typeColor = getEventTypeColor(evt.event_type, theme)
+                            const pnlColor = evt.pnl_pct >= 0 ? theme.colors.up : theme.colors.down
+                            return (
+                              <div key={i} className="relative">
+                                <div
+                                  className="absolute -left-4 top-1 w-[10px] h-[10px] rounded-full border-2"
+                                  style={{ backgroundColor: theme.colors.surface, borderColor: typeColor }}
+                                />
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-[9px] font-medium px-1.5 py-0.5 rounded" style={{ backgroundColor: typeColor + '15', color: typeColor }}>
+                                      {evt.event_type.replace(/_/g, ' ')}
+                                    </span>
+                                    {evt.sentiment_label && (
+                                      <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{evt.sentiment_label}</span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-[10px] font-bold tabular-nums" style={{ color: pnlColor }}>
+                                      {evt.pnl_pct >= 0 ? '+' : ''}{fmtPct(evt.pnl_pct)}%
+                                    </span>
+                                    <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{relativeTime(evt.created_at)}</span>
+                                  </div>
+                                </div>
+                                <p className="text-[9px] mt-0.5" style={{ color: theme.colors.textHint }}>
+                                  {evt.action_taken}
+                                </p>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            )
+          })()}
 
           {/* Open positions — brain picks */}
           <Card>
