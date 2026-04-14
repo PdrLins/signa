@@ -1629,38 +1629,75 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
 
         # Trailing stop is "active" once the position has been at least 3%
         # above entry at ANY point (peak_price >= entry * 1.03). Once
-        # active, the exit trigger is 3% below the peak — this lets
-        # winners run while protecting gains. Replaces the old fixed
-        # PROFIT_TAKE at 3%.
-        trailing_active = peak >= entry_price * 1.03
-        trailing_stop_price = peak * 0.97 if trailing_active else None
-
-        # Determine exit reason (priority: stop > trailing > target > time)
+        # active, two levels protect the position:
         #
-        # The holding period rule (#3): when a position is young (< 7 days)
-        # AND doing well (up > 3%), suppress the fixed TARGET_HIT and let
-        # the trailing stop manage the exit. This reduces churn on winners
-        # (fewer taxable events in Canada, lets momentum play out).
-        # After 7 days, the fixed target fires normally.
+        #   SOFT trail (3% below peak): thesis-gated. Only fires when
+        #     thesis is weakening or invalid. If thesis is valid, a 3%
+        #     pullback is treated as noise — a portfolio manager wouldn't
+        #     sell a fundamentally sound stock on a routine dip.
+        #
+        #   HARD trail (5% below peak): always fires regardless of thesis.
+        #     If the price drops 5% from peak, something real is happening
+        #     and we protect gains unconditionally.
+        #
+        # This was refined after PBR-A (Apr 14): the 3% mechanical stop
+        # sold at +1.13% on a routine pullback while the thesis was only
+        # "weakening" — a portfolio manager would have checked the context
+        # before selling.
+        trailing_active = peak >= entry_price * 1.03
+        soft_trail = peak * 0.97 if trailing_active else None   # 3% below peak
+        hard_trail = peak * 0.95 if trailing_active else None   # 5% below peak
+
+        thesis_status = (trade.get("thesis_last_status") or "").lower()
+
+        # Determine exit reason (priority: stop > hard_trail > soft_trail > target > time)
         exit_reason = None
         if stop and current_price <= stop:
             exit_reason = "STOP_HIT"
             stops_hit += 1
-        elif trailing_active and current_price <= trailing_stop_price:
+        elif trailing_active and current_price <= hard_trail:
+            # Hard trailing stop — always fires, no thesis check.
+            # 5% from peak means something real is happening.
             exit_reason = "TRAILING_STOP"
-            profit_takes += 1  # reuse the counter for P&L tracking
+            profit_takes += 1
             logger.info(
-                f"Virtual TRAILING STOP: {symbol} at {pnl_pct:+.1f}% "
-                f"(peak ${peak:.2f}, trail ${trailing_stop_price:.2f}, now ${current_price:.2f})"
+                f"Virtual TRAILING STOP (hard): {symbol} at {pnl_pct:+.1f}% "
+                f"(peak ${peak:.2f}, hard trail ${hard_trail:.2f}, now ${current_price:.2f})"
             )
             notifications.append(("brain_sell", {
                 "symbol": symbol, "price": f"{current_price:.2f}",
                 "pnl": f"{pnl_pct:+.1f}",
-                "reason": f"Trailing stop (peak ${peak:.2f}, trail 3% below)",
+                "reason": f"Trailing stop (peak ${peak:.2f}, dropped 5% — hard exit)",
                 "entry_score": str(trade.get("entry_score", 0)),
                 "exit_score": str(current_scores.get(symbol, 0)),
-                "verdict": "Winner rode the trend, trailing stop protected gains.",
+                "verdict": "Hard trailing stop fired — 5% drop from peak.",
             }))
+        elif trailing_active and current_price <= soft_trail:
+            # Soft trailing stop — thesis-gated.
+            # If thesis is valid, this is just noise. Hold.
+            # If thesis is weakening/invalid, price confirms — sell.
+            if thesis_status == "valid":
+                logger.info(
+                    f"Virtual TRAILING STOP suppressed for {symbol} — thesis still valid "
+                    f"(peak ${peak:.2f}, soft trail ${soft_trail:.2f}, now ${current_price:.2f}, "
+                    f"P&L {pnl_pct:+.1f}%). Holding through noise."
+                )
+                # Don't exit — treat as noise. The hard trail at 5% is the safety net.
+            else:
+                exit_reason = "TRAILING_STOP"
+                profit_takes += 1
+                logger.info(
+                    f"Virtual TRAILING STOP (soft, thesis={thesis_status}): {symbol} at {pnl_pct:+.1f}% "
+                    f"(peak ${peak:.2f}, soft trail ${soft_trail:.2f}, now ${current_price:.2f})"
+                )
+                notifications.append(("brain_sell", {
+                    "symbol": symbol, "price": f"{current_price:.2f}",
+                    "pnl": f"{pnl_pct:+.1f}",
+                    "reason": f"Trailing stop (peak ${peak:.2f}, thesis {thesis_status})",
+                    "entry_score": str(trade.get("entry_score", 0)),
+                    "exit_score": str(current_scores.get(symbol, 0)),
+                    "verdict": f"Thesis was {thesis_status}, price drop confirmed — locked in gains.",
+                }))
         elif target and current_price >= target:
             # Suppress TARGET_HIT for young, winning positions — let the
             # trailing stop manage the exit instead. After 7 days, the
@@ -1861,7 +1898,8 @@ def get_virtual_summary() -> dict:
     closed_result = (
         db.table("virtual_trades")
         .select("symbol, entry_price, exit_price, pnl_pct, pnl_amount, is_win, "
-                "entry_date, exit_date, entry_score, exit_score, bucket, source, exit_reason")
+                "entry_date, exit_date, entry_score, exit_score, bucket, source, exit_reason, "
+                "peak_price, thesis_last_reason, tier_reason")
         .eq("status", "CLOSED")
         .order("exit_date", desc=True)
         .limit(50)
@@ -1890,6 +1928,40 @@ def get_virtual_summary() -> dict:
             sym = row.get("symbol")
             if sym and sym not in signal_context:
                 signal_context[sym] = row
+
+    def _build_exit_context(t: dict) -> str:
+        """Build a one-line human-readable explanation of why a trade was closed."""
+        reason = t.get("exit_reason", "")
+        peak = t.get("peak_price")
+        entry = float(t.get("entry_price") or 0)
+        exit_px = float(t.get("exit_price") or 0)
+        thesis_reason = t.get("thesis_last_reason") or ""
+
+        if reason == "TRAILING_STOP" and peak:
+            peak_pnl = ((float(peak) - entry) / entry * 100) if entry else 0
+            drop_pct = ((float(peak) - exit_px) / float(peak) * 100) if float(peak) else 0
+            thesis = t.get("thesis_last_status") or "unknown"
+            return (
+                f"Peak ${float(peak):.2f} (+{peak_pnl:.1f}%), dropped {drop_pct:.1f}% from peak. "
+                f"Thesis was {thesis} — {'price drop confirmed weakness' if thesis != 'valid' else 'hard safety net triggered'}"
+            )
+        if reason == "TARGET_HIT":
+            target = t.get("target_price")
+            return f"Hit target ${float(target):.2f}" if target else "Hit AI-generated target"
+        if reason == "STOP_HIT":
+            stop = t.get("stop_loss")
+            return f"Hit stop loss ${float(stop):.2f}" if stop else "Hit stop loss"
+        if reason == "THESIS_INVALIDATED":
+            snippet = thesis_reason[:120].strip()
+            return f"Thesis invalidated: {snippet}" if snippet else "Thesis invalidated by Stage 6 re-eval"
+        if reason == "WATCHDOG_EXIT":
+            snippet = thesis_reason[:120].strip()
+            return f"Watchdog: bearish sentiment + price drop" + (f". {snippet}" if snippet else "")
+        if reason == "TIME_EXPIRED":
+            return "Held maximum 30 days without hitting target or stop"
+        if reason == "ROTATION":
+            return "Rotated out for a stronger candidate"
+        return reason or "Unknown"
 
     def _calc_stats(trades: list[dict]) -> dict:
         total = len(trades)
@@ -1985,6 +2057,8 @@ def get_virtual_summary() -> dict:
                 "exit_date": t.get("exit_date"),
                 "entry_price": t.get("entry_price"),
                 "exit_price": t.get("exit_price"),
+                "peak_price": t.get("peak_price"),
+                "exit_context": _build_exit_context(t),
             }
             for t in closed_trades[:5]
         ],

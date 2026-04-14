@@ -98,7 +98,7 @@ def init_scheduler() -> AsyncIOScheduler:
 
     watchdog_status = "enabled" if settings.watchdog_enabled else "disabled"
     logger.info(
-        f"Scheduler configured: 4 scans + cleanup + snapshot + watchdog ({watchdog_status}) "
+        f"Scheduler configured: {len(SCAN_SCHEDULE)} scans + cleanup + snapshot + watchdog ({watchdog_status}) "
         f"(timezone: {settings.timezone})"
     )
 

@@ -81,6 +81,8 @@ interface ClosedTrade {
   exit_date?: string
   entry_price?: number
   exit_price?: number
+  peak_price?: number
+  exit_context?: string  // human-readable explanation of why it was sold
 }
 
 interface WatchdogEvent {
@@ -660,7 +662,15 @@ export default function BrainPerformancePage() {
                           </div>
                           <div className="text-[10px] tabular-nums pl-[22px]" style={{ color: theme.colors.textHint }}>
                             {fmtShortDate(rc.entry_date)} {formatPrice(rc.entry_price)} → {fmtShortDate(rc.exit_date)} {formatPrice(rc.exit_price)}
+                            {rc.peak_price != null && (
+                              <span style={{ color: theme.colors.textSub }}> (peak {formatPrice(rc.peak_price)})</span>
+                            )}
                           </div>
+                          {rc.exit_context && (
+                            <div className="text-[9px] pl-[22px] mt-0.5" style={{ color: theme.colors.textSub }}>
+                              {rc.exit_context}
+                            </div>
+                          )}
                         </div>
                         <span className="text-[13px] font-bold tabular-nums shrink-0" style={{ color: rc.is_win ? theme.colors.up : theme.colors.down }}>
                           {rc.pnl_pct >= 0 ? '+' : ''}{fmtPct(rc.pnl_pct)}%
