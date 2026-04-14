@@ -202,6 +202,7 @@ export default function BrainPerformancePage() {
 
   // Group watchdog events by symbol for the monitor grid
   const [watchdogExpandedSymbol, setWatchdogExpandedSymbol] = useState<string | null>(null)
+  const [watchdogShowClosed, setWatchdogShowClosed] = useState(false)
 
   const { data: signalsData } = useQuery<{ signals: { symbol: string; is_discovered?: boolean }[] }>({
     queryKey: ['signals', 'discovered-check'],
@@ -382,33 +383,32 @@ export default function BrainPerformancePage() {
           {/* Watchdog Monitor Grid */}
           {(() => {
             // Build per-symbol watchdog state from events + open positions
+            // Only include symbols that have actual watchdog events
             const evtsBySymbol: Record<string, WatchdogEvent[]> = {}
             for (const evt of (watchdogEvents || [])) {
               if (!evtsBySymbol[evt.symbol]) evtsBySymbol[evt.symbol] = []
               evtsBySymbol[evt.symbol].push(evt)
             }
-            // Include all open brain positions even if they have no events
-            for (const vt of brainTrades) {
-              if (!evtsBySymbol[vt.symbol]) evtsBySymbol[vt.symbol] = []
-            }
-            const symbols = Object.keys(evtsBySymbol).sort((a, b) => {
-              const aCount = evtsBySymbol[a].length
-              const bCount = evtsBySymbol[b].length
-              return bCount - aCount // most active first
-            })
 
-            if (symbols.length === 0) return null
-
-            const getSymbolStatus = (evts: WatchdogEvent[]): { label: string; color: string } => {
-              if (evts.length === 0) return { label: 'healthy', color: theme.colors.up }
+            const getSymbolStatus = (evts: WatchdogEvent[]): { label: string; color: string; isClosed: boolean } => {
               const latest = evts[0]
-              if (latest.event_type === 'CLOSE') return { label: 'closed', color: theme.colors.down }
+              if (latest.event_type === 'CLOSE') return { label: 'closed', color: theme.colors.down, isClosed: true }
               if (latest.event_type === 'ALERT' || latest.event_type === 'ESCALATION')
-                return { label: `${evts.length} alert${evts.length > 1 ? 's' : ''}`, color: theme.colors.warning }
-              if (latest.event_type === 'RECOVERY') return { label: 'recovered', color: theme.colors.up }
-              if (latest.event_type === 'HOLD_THROUGH_DIP') return { label: 'held dip', color: theme.colors.primary }
-              return { label: 'healthy', color: theme.colors.up }
+                return { label: `${evts.length} alert${evts.length > 1 ? 's' : ''}`, color: theme.colors.warning, isClosed: false }
+              if (latest.event_type === 'RECOVERY') return { label: 'recovered', color: theme.colors.up, isClosed: false }
+              if (latest.event_type === 'HOLD_THROUGH_DIP') return { label: 'held dip', color: theme.colors.primary, isClosed: false }
+              return { label: 'event', color: theme.colors.textHint, isClosed: false }
             }
+
+            // Filter: hide closed positions unless toggled on
+            const symbols = Object.keys(evtsBySymbol)
+              .filter((sym) => {
+                if (watchdogShowClosed) return true
+                return !getSymbolStatus(evtsBySymbol[sym]).isClosed
+              })
+              .sort((a, b) => evtsBySymbol[b].length - evtsBySymbol[a].length)
+
+            const closedCount = Object.values(evtsBySymbol).filter((evts) => getSymbolStatus(evts).isClosed).length
 
             return (
               <Card>
@@ -417,11 +417,26 @@ export default function BrainPerformancePage() {
                   <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
                     Watchdog — Monitoring {symbols.length} positions
                   </p>
-                  {data?.watchdog?.active && (
-                    <span className="text-[8px] px-1.5 py-0.5 rounded-full ml-auto" style={{ backgroundColor: theme.colors.up + '15', color: theme.colors.up }}>
-                      Active
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2 ml-auto">
+                    {closedCount > 0 && (
+                      <button
+                        onClick={() => setWatchdogShowClosed(!watchdogShowClosed)}
+                        className="text-[8px] px-1.5 py-0.5 rounded-full transition-all"
+                        style={{
+                          backgroundColor: watchdogShowClosed ? theme.colors.textHint + '20' : 'transparent',
+                          color: theme.colors.textHint,
+                          border: `1px solid ${theme.colors.border}`,
+                        }}
+                      >
+                        {watchdogShowClosed ? 'Hide' : 'Show'} closed ({closedCount})
+                      </button>
+                    )}
+                    {data?.watchdog?.active && (
+                      <span className="text-[8px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: theme.colors.up + '15', color: theme.colors.up }}>
+                        Active
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Symbol grid */}
