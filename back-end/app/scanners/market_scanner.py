@@ -104,6 +104,28 @@ def _normalize_pct(value) -> float | None:
         return None
 
 
+def _cap_dividend_yield(value: float | None) -> float | None:
+    """Cap dividend yield at 15% to filter yfinance garbage data.
+
+    No legitimate, sustainable dividend yield exceeds ~15% (even REITs
+    and BDCs rarely go above 12%). yfinance regularly returns nonsense
+    values for ADRs and international stocks — PBR-A showed 744%,
+    AGI.TO showed 24%. These inflate the "Dividend Reliability" score
+    component and mislead the brain into thinking a stock has strong
+    income characteristics when it doesn't.
+
+    Values above 15% are capped to None (treated as no dividend data)
+    rather than capped to 15%, because a garbage value tells us the
+    data source is unreliable — better to score as "unknown" than to
+    assume the cap is the real yield.
+    """
+    if value is None:
+        return None
+    if value > 0.15:  # 15% in decimal form
+        return None
+    return value
+
+
 def _compute_period_changes(hist: pd.DataFrame) -> dict:
     """Compute 1W, 1M, 3M, YTD price changes from a 1-year history DataFrame."""
     if hist.empty or len(hist) < 2:
@@ -200,7 +222,7 @@ async def get_fundamentals(ticker: str) -> dict:
             "forward_pe": info.get("forwardPE"),
             "eps": info.get("trailingEps"),
             "eps_growth": info.get("earningsGrowth"),
-            "dividend_yield": _normalize_pct(info.get("dividendYield")),
+            "dividend_yield": _cap_dividend_yield(_normalize_pct(info.get("dividendYield"))),
             "payout_ratio": _normalize_pct(info.get("payoutRatio")),
             "debt_to_equity": info.get("debtToEquity"),
             "market_cap": info.get("marketCap"),

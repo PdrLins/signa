@@ -88,16 +88,28 @@ export function Sidebar() {
   const t = useI18nStore((s) => s.t)
   const { data: signals } = useAllSignals({ limit: 50 })
 
-  // Top brain-quality picks: BUY signals scored 72+, up to 3 per asset type
+  // Fetch brain's open positions to exclude from radar
+  const { data: portfolio } = useQuery<{ open_trades: { symbol: string }[] }>({
+    queryKey: ['stats', 'virtual-portfolio'],
+    queryFn: async () => (await client.get('/stats/virtual-portfolio')).data,
+    staleTime: 60_000,
+  })
+  const heldSymbols = useMemo(
+    () => new Set((portfolio?.open_trades ?? []).map((t) => t.symbol)),
+    [portfolio],
+  )
+
+  // Brain Radar: BUY signals scored 72+ that the brain DOESN'T already hold.
+  // If it's already in Open Positions, showing it here is redundant.
   const brainPicks = useMemo(() => {
     if (!signals) return []
     const buys = signals
-      .filter((s) => s.action === 'BUY' && s.score >= 72)
+      .filter((s) => s.action === 'BUY' && s.score >= 72 && !heldSymbols.has(s.symbol))
       .sort((a, b) => b.score - a.score)
     const equity = buys.filter((s) => s.asset_type !== 'CRYPTO').slice(0, 3)
     const crypto = buys.filter((s) => s.asset_type === 'CRYPTO').slice(0, 3)
     return [...equity, ...crypto]
-  }, [signals])
+  }, [signals, heldSymbols])
 
   return (
     <aside className="hidden lg:flex flex-col gap-3 w-[300px] shrink-0">

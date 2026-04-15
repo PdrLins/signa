@@ -719,14 +719,14 @@ export default function BrainPerformancePage() {
                 No closed trades yet. Trades close when they hit their target, stop loss, expire after 30 days, or the brain signals SELL.
               </p>
             ) : (
-              <div className="space-y-1.5">
+              <div className="divide-y" style={{ borderColor: theme.colors.border }}>
                 {brainClosed.map((rc, i) => {
                   const daysHeld = rc.entry_date && rc.exit_date
                     ? Math.max(1, Math.round((new Date(rc.exit_date).getTime() - new Date(rc.entry_date).getTime()) / 86400000))
                     : null
                   return (
                     <Link key={i} href={`/signals/${rc.symbol}`}>
-                      <div className="flex items-start justify-between py-2 px-3 rounded-lg transition-opacity hover:opacity-80" style={{ backgroundColor: theme.colors.surfaceAlt }}>
+                      <div className="flex items-start justify-between py-4 px-3 transition-opacity hover:opacity-80">
                         <div className="flex flex-col gap-1 min-w-0">
                           <div className="flex items-center gap-2">
                             {rc.is_win
@@ -780,39 +780,66 @@ export default function BrainPerformancePage() {
               </p>
 
               {/* Table header */}
-              <div className="grid grid-cols-4 gap-2 pb-2 mb-1" style={{ borderBottom: `1px solid ${theme.colors.border}` }}>
+              <div className="grid grid-cols-6 gap-1 pb-2 mb-1" style={{ borderBottom: `1px solid ${theme.colors.border}` }}>
                 <p className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.brainPerf.scoreRange}</p>
-                <p className="text-[9px] font-semibold uppercase tracking-wide text-center" style={{ color: theme.colors.textHint }}>{t.brainPerf.trades}</p>
-                <p className="text-[9px] font-semibold uppercase tracking-wide text-center" style={{ color: theme.colors.textHint }}>{t.stats.winRate}</p>
-                <p className="text-[9px] font-semibold uppercase tracking-wide text-right" style={{ color: theme.colors.textHint }}>{t.brainPerf.avgReturn}</p>
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-center" style={{ color: theme.colors.textHint }}>W / L</p>
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-center" style={{ color: theme.colors.textHint }}>{t.stats?.winRate ?? 'Win Rate'}</p>
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-center" style={{ color: theme.colors.textHint }}>{t.brainPerf.avgReturn}</p>
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-center" style={{ color: theme.colors.textHint }}>Best</p>
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-right" style={{ color: theme.colors.textHint }}>Total</p>
               </div>
 
               {/* Table rows */}
               <div className="space-y-0.5">
-                {trackRecord.ranges.map((row) => (
-                  <div
-                    key={row.score_range}
-                    className="grid grid-cols-4 gap-2 py-2 rounded-lg px-1"
-                    style={{ backgroundColor: row.trades > 0 ? theme.colors.surfaceAlt : 'transparent' }}
-                  >
-                    <p className="text-[11px] font-semibold tabular-nums" style={{ color: theme.colors.text }}>{row.score_range}</p>
-                    <p className="text-[11px] tabular-nums text-center" style={{ color: theme.colors.textSub }}>{row.trades}</p>
-                    <p className="text-[11px] font-semibold tabular-nums text-center" style={{
-                      color: row.trades === 0 ? theme.colors.textHint : row.win_rate >= 60 ? theme.colors.up : row.win_rate >= 50 ? theme.colors.warning : theme.colors.down,
-                    }}>
-                      {row.trades === 0 ? '\u2014' : `${row.win_rate.toFixed(0)}%`}
-                    </p>
-                    <p className="text-[11px] font-semibold tabular-nums text-right" style={{
-                      color: row.trades === 0 ? theme.colors.textHint : row.avg_return_pct >= 0 ? theme.colors.up : theme.colors.down,
-                    }}>
-                      {row.trades === 0 ? '\u2014' : `${row.avg_return_pct >= 0 ? '+' : ''}${fmtPct(row.avg_return_pct)}%`}
-                    </p>
-                  </div>
-                ))}
+                {trackRecord.ranges.map((row: Record<string, number | string>) => {
+                  const trades = (row.trades as number) || 0
+                  const winRate = (row.win_rate as number) || 0
+                  const avgRet = (row.avg_return_pct as number) || 0
+                  const best = (row.best as number) || 0
+                  const worst = (row.worst as number) || 0
+                  const totalPnl = (row.total_pnl as number) || 0
+                  const wins = (row.wins as number) || 0
+                  const losses = (row.losses as number) || 0
+
+                  return (
+                    <div
+                      key={row.score_range as string}
+                      className="grid grid-cols-6 gap-1 py-2 rounded-lg px-1"
+                      style={{ backgroundColor: trades > 0 ? theme.colors.surfaceAlt : 'transparent' }}
+                    >
+                      <p className="text-[11px] font-semibold tabular-nums" style={{ color: theme.colors.text }}>{row.score_range}</p>
+                      <p className="text-[11px] tabular-nums text-center" style={{ color: theme.colors.textSub }}>
+                        {trades === 0 ? '\u2014' : (
+                          <><span style={{ color: theme.colors.up }}>{wins}</span> / <span style={{ color: theme.colors.down }}>{losses}</span></>
+                        )}
+                      </p>
+                      <p className="text-[11px] font-semibold tabular-nums text-center" style={{
+                        color: trades === 0 ? theme.colors.textHint : winRate >= 60 ? theme.colors.up : winRate >= 50 ? theme.colors.warning : theme.colors.down,
+                      }}>
+                        {trades === 0 ? '\u2014' : `${winRate.toFixed(0)}%`}
+                      </p>
+                      <p className="text-[11px] tabular-nums text-center" style={{
+                        color: trades === 0 ? theme.colors.textHint : avgRet >= 0 ? theme.colors.up : theme.colors.down,
+                      }}>
+                        {trades === 0 ? '\u2014' : `${avgRet >= 0 ? '+' : ''}${fmtPct(avgRet)}%`}
+                      </p>
+                      <p className="text-[10px] tabular-nums text-center" style={{ color: theme.colors.textHint }}>
+                        {trades === 0 ? '\u2014' : (
+                          <><span style={{ color: theme.colors.up }}>{fmtPct(best)}%</span> / <span style={{ color: theme.colors.down }}>{fmtPct(worst)}%</span></>
+                        )}
+                      </p>
+                      <p className="text-[11px] font-semibold tabular-nums text-right" style={{
+                        color: trades === 0 ? theme.colors.textHint : totalPnl >= 0 ? theme.colors.up : theme.colors.down,
+                      }}>
+                        {trades === 0 ? '\u2014' : `${totalPnl >= 0 ? '+' : ''}${fmtPct(totalPnl)}%`}
+                      </p>
+                    </div>
+                  )
+                })}
               </div>
 
               {/* Overall summary */}
-              <div className="grid grid-cols-4 gap-2 pt-2 mt-1 px-1" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
+              <div className="grid grid-cols-6 gap-1 pt-2 mt-1 px-1" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
                 <p className="text-[11px] font-bold" style={{ color: theme.colors.text }}>{t.brainPerf.overall}</p>
                 <p className="text-[11px] font-bold tabular-nums text-center" style={{ color: theme.colors.text }}>{trackRecord.total_trades}</p>
                 <p className="text-[11px] font-bold tabular-nums text-center" style={{
@@ -820,6 +847,8 @@ export default function BrainPerformancePage() {
                 }}>
                   {trackRecord.overall_win_rate.toFixed(0)}%
                 </p>
+                <p className="text-[11px] text-center" style={{ color: theme.colors.textHint }}></p>
+                <p className="text-[11px] text-center" style={{ color: theme.colors.textHint }}></p>
                 <p className="text-[11px] text-right" style={{ color: theme.colors.textHint }}></p>
               </div>
             </Card>

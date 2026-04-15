@@ -109,15 +109,22 @@ def get_track_record() -> dict:
             ]
             count = len(matched)
             if not count:
-                results.append({"score_range": r["label"], "trades": 0, "win_rate": 0, "avg_return_pct": 0})
+                results.append({"score_range": r["label"], "trades": 0, "win_rate": 0, "avg_return_pct": 0, "total_pnl": 0, "best": 0, "worst": 0, "wins": 0, "losses": 0})
                 continue
             wins = sum(1 for t in matched if t.get("is_win"))
-            avg_ret = sum(t.get("pnl_pct", 0) for t in matched) / count
+            losses = count - wins
+            pnls = [t.get("pnl_pct", 0) for t in matched]
+            avg_ret = sum(pnls) / count
             results.append({
                 "score_range": r["label"],
                 "trades": count,
+                "wins": wins,
+                "losses": losses,
                 "win_rate": round(wins / count * 100, 1),
                 "avg_return_pct": round(avg_ret, 2),
+                "total_pnl": round(sum(pnls), 2),
+                "best": round(max(pnls), 2),
+                "worst": round(min(pnls), 2),
             })
         return results
 
