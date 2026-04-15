@@ -67,6 +67,15 @@ let isRefreshing = false
 let refreshPromise: Promise<string | null> | null = null
 let isRedirecting = false
 
+// Nuclear failsafe: if we see 3+ 401s within 5 seconds, force logout.
+// This catches the edge case where the refresh "succeeds" but the new
+// token is immediately rejected — creating an infinite 401 loop that
+// the normal interceptor logic can't break.
+let _401count = 0
+let _401windowStart = 0
+const _401_MAX = 3
+const _401_WINDOW_MS = 5000
+
 async function silentRefresh(): Promise<string | null> {
   const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null
   if (!token) return null
@@ -147,6 +156,18 @@ client.interceptors.response.use(
     }
 
     if (error.response?.status === 401 && error.config) {
+      // Nuclear failsafe: too many 401s too fast = something is broken, just logout
+      const now401 = Date.now()
+      if (now401 - _401windowStart > _401_WINDOW_MS) {
+        _401count = 0
+        _401windowStart = now401
+      }
+      _401count++
+      if (_401count >= _401_MAX) {
+        forceLogout('expired')
+        return new Promise(() => {})
+      }
+
       // Skip refresh on auth routes (login/verify) -- those 401s are user-facing
       const isAuthRoute = PUBLIC_ROUTES.some((r) => error.config.url?.startsWith(r))
       if (isAuthRoute) {

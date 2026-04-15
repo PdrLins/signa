@@ -57,7 +57,12 @@ async def logout(request: Request, user: dict = Depends(get_current_user)):
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(request: Request):
-    """Refresh the JWT access token. Accepts expired tokens (within 24h)."""
+    """Refresh the JWT access token within a 4-hour grace window.
+
+    After 4 hours of inactivity the refresh fails and the frontend
+    redirects to /login. Was 24h previously — that meant the user was
+    never kicked out because the refresh always succeeded.
+    """
     from app.core.security import decode_token_allow_expired
 
     auth_header = request.headers.get("Authorization", "")
@@ -66,7 +71,7 @@ async def refresh_token(request: Request):
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No token provided")
 
-    payload = decode_token_allow_expired(token, max_age_hours=24)
+    payload = decode_token_allow_expired(token, max_age_hours=4)
     if not payload:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token too old for refresh")
 
