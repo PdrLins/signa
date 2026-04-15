@@ -57,7 +57,13 @@ async def logout(request: Request, user: dict = Depends(get_current_user)):
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(request: Request):
-    """Refresh the JWT access token. Accepts expired tokens (within 24h)."""
+    """Refresh the JWT access token. Accepts expired tokens within a grace window.
+
+    Grace period: 4 hours. Long enough for a normal work session, short
+    enough that leaving overnight logs you out. Was 24h previously, which
+    meant the silent refresh always succeeded and the user was never
+    kicked out — defeating the purpose of token expiry.
+    """
     from app.core.security import decode_token_allow_expired
 
     auth_header = request.headers.get("Authorization", "")
@@ -66,7 +72,7 @@ async def refresh_token(request: Request):
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No token provided")
 
-    payload = decode_token_allow_expired(token, max_age_hours=24)
+    payload = decode_token_allow_expired(token, max_age_hours=4)
     if not payload:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token too old for refresh")
 
