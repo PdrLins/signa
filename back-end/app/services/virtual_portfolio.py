@@ -1736,8 +1736,13 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         # "weakening" — a portfolio manager would have checked the context
         # before selling.
         trailing_active = peak >= entry_price * 1.03
-        soft_trail = peak * 0.97 if trailing_active else None   # 3% below peak
-        hard_trail = peak * 0.95 if trailing_active else None   # 5% below peak
+        # Trail levels are floored at entry_price — once a position was up
+        # 3%+, the worst exit should be breakeven, NEVER a loss. The RRX
+        # incident (Day 9): peak +3.9%, hard trail was $202.24 but entry
+        # was $204.94. Position swung from +3.9% to -3.61% before the
+        # trail caught it. With the floor: exit at breakeven instead.
+        soft_trail = max(peak * 0.97, entry_price) if trailing_active else None
+        hard_trail = max(peak * 0.95, entry_price) if trailing_active else None
 
         thesis_status = (trade.get("thesis_last_status") or "").lower()
 

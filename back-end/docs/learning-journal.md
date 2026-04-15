@@ -1192,6 +1192,129 @@ This is the exact scenario Pedro described: "why did it sell? the fundamentals a
 
 ---
 
+## Day 9 -- April 15, 2026 (Tuesday)
+
+**DNS exhaustion broke the app for half the day, but the brain still closed +7.79% realized.** META hit its best trade ever (+7.38%), quality prune fired for the first time, and a critical trailing stop floor bug was discovered and fixed.
+
+### Environment
+- Market: TRENDING (VIX 18.17)
+- Environment: favorable
+- Fear & Greed: **56.5 (greed)** — first time above 50, market shifting bullish
+- Scans: 7/15 COMPLETE (8 failed from DNS exhaustion before fix)
+- Budget: ~$0 (Claude Local)
+
+### Critical incident: DNS thread exhaustion
+
+**Root cause:** Three new features we added yesterday (SPY crash detection in watchdog, portfolio heat live price fetch, signal list enrichment) all made yfinance calls that competed with the scan for DNS threads. The Mac's DNS pool (~12 threads) was overwhelmed → every API request got `[Errno 8] nodename nor servname provided, or not known` → 500 errors on ALL endpoints including basic auth middleware (`is_token_blacklisted`).
+
+**Impact:** 8 scans failed. The UI was completely broken for ~3 hours (every page showed 500 errors). The brain couldn't trade during this window.
+
+**Fix applied:** Removed the three offending features:
+1. SPY crash detection removed from watchdog (2 yfinance calls per 15-min cycle)
+2. Portfolio heat live price fetch replaced with position-count heuristic (15 yfinance calls per scan)
+3. Signal list enrichment removed — signals served without live prices (50 yfinance calls per API request)
+4. Axios timeout increased from 8s to 15s
+
+**Lesson saved:** The system has a hard DNS thread ceiling. Every new feature that adds network calls must be evaluated against this ceiling. The scan + watchdog + API together cannot exceed ~12 concurrent DNS resolutions.
+
+### Also fixed today
+
+**`trailing_stop_price` undefined** — leftover variable from the thesis-gated trailing stop refactor. Caused the PRE_MARKET scan to fail with `NameError`. Fixed by replacing with `soft_trail`.
+
+**yfinance returning None** — `t.history()` sometimes returns `None` instead of an empty DataFrame. Added a None guard in `get_price_history`.
+
+### Brain trades
+
+**Opened (1):** ESE @ $304.95, score 82, Tier 2. Only 1 new entry — portfolio heat at cautious level.
+
+**Closed (4):**
+
+| Symbol | Exit reason | P&L | Peak P&L | Notes |
+|---|---|---|---|---|
+| **META** | **TARGET_HIT** | **+7.38%** | +7.8% | Brain's best trade. Held 7 days. Target was +5.3% but stock overshot to +7.8%. |
+| **AVGO** | **SIGNAL** | **+6.75%** | +3.2% | Scan generated SELL. Thesis was weakening. Strong exit. |
+| RRX | TRAILING_STOP | **-3.61%** | +3.9% | ⚠ Was UP +3.9% but closed NEGATIVE. Trail floor bug — see below. |
+| ASML | QUALITY_PRUNE | **-2.73%** | +2.5% | First quality prune in production. Thesis weakening + losing. |
+
+**Realized P&L: +7.79%** (2W +14.13% vs 2L -6.34%)
+
+### Improvement discovered: trailing stop floor bug
+
+**RRX was up +3.9% at its peak but exited at -3.61%.** The hard trailing stop (5% below peak) was calculated as `peak * 0.95 = $202.24`, but the entry price was `$204.94`. The trail was BELOW the entry price — so the position went from profit to loss before the trail caught it.
+
+**Rule:** Once a position has been up 3%+ (trailing stop active), it should NEVER close at a loss. The worst exit should be breakeven.
+
+**Fix applied:**
+```python
+soft_trail = max(peak * 0.97, entry_price)  # never below entry
+hard_trail = max(peak * 0.95, entry_price)  # never below entry
+```
+
+With this fix, RRX would have exited at $204.94 (breakeven) instead of $197.54 (-3.61%). The entire loss was preventable.
+
+### META target analysis
+
+META's target was set at +5.3% ($661) at entry. The stock peaked at +7.8% ($676.79). The 7-day TARGET_HIT suppression held through the run, but expired on day 7 and the fixed target fired at +7.4%. The trailing stop would have continued managing the exit.
+
+**The target should rise when the stock outperforms.** Currently targets are fixed at entry and never adjust. Future improvement: when peak exceeds the original target by > 2%, raise the target to `peak * 0.97` (same as the trailing stop). This merges the target and trail into one adaptive exit.
+
+### Open positions (12)
+
+| Symbol | P&L | Thesis | Notes |
+|---|---|---|---|
+| WING | +6.49% | weakening | Still the portfolio's biggest open winner |
+| ETH-USD | +4.48% | weakening | Crypto doing well |
+| TPL | +2.03% | weakening | Recovering from the counter-trend |
+| REGN | +1.77% | valid | Steady |
+| TSM | +1.71% | weakening | Semi play |
+| GOOGL | +1.44% | valid | Day 2, working |
+| ESE | +0.90% | valid | New today |
+| LYG | +0.72% | legacy | The last legacy survivor |
+| CNQ | +0.57% | valid | Oil play |
+| AGI.TO | -1.23% | valid | Gold miner pulling back |
+| HBM | -1.74% | valid | Copper miner, early |
+| BLK | -1.96% | valid | The overextended entry from yesterday |
+
+**Sum: +15.19% | Avg: +1.27%/position | 9 green, 3 red**
+
+### Features shipped today
+
+| Feature | What it does |
+|---|---|
+| Trailing stop floor | `max(peak * 0.95, entry_price)` — never exit a winner at a loss |
+| DNS fix: remove signal enrichment | List endpoint skips live prices |
+| DNS fix: remove SPY watchdog check | Watchdog no longer competes for DNS |
+| DNS fix: simplify portfolio heat | Position count heuristic, no price fetch |
+| Scan timing instrumentation | `⏱ SCAN TIMING: screening=Xs, pass1=Xs, pass2=Xs, tail=Xs` |
+| yfinance None guard | `t.history()` returning None no longer crashes |
+| `trailing_stop_price` fix | Stale variable name from refactor |
+
+### Week 2 running totals (Apr 13-15)
+
+| Metric | Value |
+|---|---|
+| Trading days | 3 (Mon-Wed) |
+| Brain entries | 6 |
+| Brain closes | 9 |
+| Close win rate | 56% (5W / 4L) |
+| Best trade | META TARGET_HIT +7.38% |
+| Worst trade | RRX TRAILING_STOP -3.61% |
+| Total realized | +5.81% |
+| Currently open | 12 positions |
+| Portfolio sum P&L | +15.19% |
+| Scans completed | 12/20 (8 failed from DNS bug) |
+
+### Metrics to track tomorrow
+
+- [ ] Does the trailing stop floor prevent any negative exits on positions that were once up 3%+?
+- [ ] Does the DNS fix hold — all scans complete, UI responsive during scans?
+- [ ] BLK at -1.96% with thesis=valid — does it recover or approach the quality prune threshold (day 2+)?
+- [ ] Fear & Greed at 56.5 (greed) — if it keeps climbing, should the portfolio heat respond?
+- [ ] META cooldown active — brain won't re-buy META for 60 minutes after the TARGET_HIT. Watch for re-entry attempts.
+- [ ] Scan timing: is pass2 (87s) consistent, or was the 478s morning scan a one-off?
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]
