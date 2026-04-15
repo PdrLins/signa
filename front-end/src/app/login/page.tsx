@@ -312,8 +312,8 @@ export default function LoginPage() {
                   <button
                     type="submit"
                     disabled={!username.trim() || !password.trim() || loading}
-                    className="w-full rounded-xl px-5 py-3.5 text-sm font-semibold text-white transition-all hover:opacity-90 active:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ backgroundColor: theme.colors.text }}
+                    className="w-full rounded-xl px-5 py-3.5 text-sm font-semibold transition-all hover:opacity-90 active:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ backgroundColor: theme.colors.primary, color: theme.colors.surface }}
                   >
                     {loading ? t.login.signingIn : t.login.continue}
                   </button>
@@ -400,8 +400,8 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={otp.join('').length !== 6 || loading}
-                  className="w-full rounded-xl px-5 py-3.5 text-sm font-semibold text-white transition-all hover:opacity-90 active:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: theme.colors.text }}
+                  className="w-full rounded-xl px-5 py-3.5 text-sm font-semibold transition-all hover:opacity-90 active:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: theme.colors.primary, color: theme.colors.surface }}
                 >
                   {loading ? t.login.verifying : t.login.verify}
                 </button>

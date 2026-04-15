@@ -29,6 +29,7 @@ class AIConfigUpdateRequest(BaseModel):
     notify_quiet_start: Optional[int] = Field(None, ge=0, le=23)
     notify_quiet_end: Optional[int] = Field(None, ge=0, le=23)
     watchdog_weekend_crypto: Optional[bool] = None
+    allow_weekend_scans: Optional[bool] = None
 
 
 class BudgetUpdateRequest(BaseModel):
@@ -280,6 +281,7 @@ async def get_ai_config(user: dict = Depends(get_current_user)):
             "notify_quiet_start": settings.notify_quiet_start,
             "notify_quiet_end": settings.notify_quiet_end,
             "weekend_crypto": settings.watchdog_weekend_crypto,
+            "allow_weekend_scans": settings.allow_weekend_scans,
         },
     }
 
@@ -346,6 +348,8 @@ async def update_ai_config(
         settings.notify_quiet_end = body.notify_quiet_end
     if body.watchdog_weekend_crypto is not None:
         settings.watchdog_weekend_crypto = body.watchdog_weekend_crypto
+    if body.allow_weekend_scans is not None:
+        settings.allow_weekend_scans = body.allow_weekend_scans
 
     # Audit log config changes
     uid = user.get("user_id")
@@ -379,5 +383,6 @@ async def update_ai_config(
             "notify_quiet_start": settings.notify_quiet_start,
             "notify_quiet_end": settings.notify_quiet_end,
             "weekend_crypto": settings.watchdog_weekend_crypto,
+            "allow_weekend_scans": settings.allow_weekend_scans,
         },
     }

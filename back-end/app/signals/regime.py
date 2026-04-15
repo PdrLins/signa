@@ -1,16 +1,47 @@
 """Market regime detection — runs ONCE per scan, not per ticker.
 
-Three regimes: TRENDING, VOLATILE, CRISIS.
+Four regimes: TRENDING, VOLATILE, CRISIS, RECOVERY.
 Affects signal generation, Kelly sizing, and score multipliers.
+
+RECOVERY is distinct from TRENDING: it fires only when VIX is falling
+from crisis levels (20-30 range) AND SPY has reclaimed its 50-day SMA
+AND VIX was above 30 within the last 30 days. This prevents false
+triggers on routine pullback recoveries. Historically, RECOVERY
+produces the highest risk-adjusted returns of any regime — momentum
+works exceptionally well because the reversal is over and a new trend
+is forming.
 """
 
 from loguru import logger
 
 
+def _was_crisis_recently(macro_data: dict) -> bool:
+    """Check if VIX was above 30 within the last 30 calendar days.
+
+    Reads `macro_data["vix_30d_high"]` which is fetched ONCE per scan
+    by `macro_scanner.get_macro_snapshot()` alongside all other macro data.
+    No extra yfinance calls — the data is already in hand.
+
+    Returns False on missing data so the RECOVERY boost is never
+    awarded without positive evidence of a recent crisis.
+    """
+    if not macro_data:
+        return False
+    # Fast path: if current VIX > 28, crisis is basically now
+    current_vix = macro_data.get("vix")
+    if current_vix is not None and current_vix > 28:
+        return True
+    # Check pre-fetched 30-day VIX high
+    vix_30d_high = macro_data.get("vix_30d_high")
+    if vix_30d_high is not None and vix_30d_high > 30:
+        return True
+    return False
+
+
 def get_market_regime(macro_data: dict, as_of_date: str = None) -> str:
     """Compute market regime from macro data.
 
-    Returns: TRENDING | VOLATILE | CRISIS
+    Returns: TRENDING | VOLATILE | CRISIS | RECOVERY
     This runs ONCE per scan, not per ticker.
     """
     try:
@@ -38,15 +69,27 @@ def get_market_regime(macro_data: dict, as_of_date: str = None) -> str:
             logger.debug("VIX data unavailable — defaulting to TRENDING")
             return "TRENDING"
 
+        # CRISIS: highest priority
         if vix > 30 or (spy_vs_sma200 is not None and spy_vs_sma200 < -2):
             logger.info(f"Market regime: CRISIS (VIX={vix})")
             return "CRISIS"
-        elif vix > 20 or (spy_vs_sma50 is not None and spy_vs_sma50 < -1):
+
+        # RECOVERY: VIX elevated (20-30) but SPY reclaiming trend after recent crisis
+        # Requires: VIX was > 30 within last 30 days (not just a routine pullback)
+        if 20 < vix <= 30:
+            if (spy_vs_sma50 is not None and spy_vs_sma50 > 0
+                    and spy_vs_sma200 is not None and spy_vs_sma200 < 5
+                    and _was_crisis_recently(macro_data)):
+                logger.info(f"Market regime: RECOVERY (VIX={vix}, SPY reclaiming trend after recent crisis)")
+                return "RECOVERY"
+
+        # VOLATILE
+        if vix > 20 or (spy_vs_sma50 is not None and spy_vs_sma50 < -1):
             logger.info(f"Market regime: VOLATILE (VIX={vix})")
             return "VOLATILE"
-        else:
-            logger.info(f"Market regime: TRENDING (VIX={vix})")
-            return "TRENDING"
+
+        logger.info(f"Market regime: TRENDING (VIX={vix})")
+        return "TRENDING"
 
     except Exception as e:
         logger.warning(f"Regime detection failed: {e}. Defaulting to TRENDING.")

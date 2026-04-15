@@ -46,6 +46,7 @@ interface AIProviderConfig {
     notify_quiet_start: number
     notify_quiet_end: number
     weekend_crypto: boolean
+    allow_weekend_scans?: boolean
   }
 }
 
@@ -237,6 +238,7 @@ export default function SettingsPage() {
   const [quietStart, setQuietStart] = useState(18)
   const [quietEnd, setQuietEnd] = useState(6)
   const [weekendCrypto, setWeekendCrypto] = useState(false)
+  const [allowWeekendScans, setAllowWeekendScans] = useState(true)
   const [dirty, setDirty] = useState(false)
   const [confirmSave, setConfirmSave] = useState(false)
 
@@ -262,6 +264,9 @@ export default function SettingsPage() {
         setQuietStart(aiConfig.watchdog.notify_quiet_start)
         setQuietEnd(aiConfig.watchdog.notify_quiet_end)
         setWeekendCrypto(aiConfig.watchdog.weekend_crypto)
+        if (aiConfig.watchdog.allow_weekend_scans !== undefined) {
+          setAllowWeekendScans(aiConfig.watchdog.allow_weekend_scans)
+        }
       }
     }
   }, [aiConfig])
@@ -284,13 +289,14 @@ export default function SettingsPage() {
         notify_quiet_start: quietStart,
         notify_quiet_end: quietEnd,
         watchdog_weekend_crypto: weekendCrypto,
+        allow_weekend_scans: allowWeekendScans,
       })
       toast.show(t.settings.configSaved, 'success')
       setDirty(false)
     } catch {
       toast.show(t.settings.configSaveFailed, 'error')
     }
-  }, [synthProviders, sentProviders, aiEnabled, aiLimit, maxCandidates, scoreBuySafe, scoreBuyRisk, scoreHold, wdMinNotify, wdPnlAlert, brainMaxOpen, quietEnabled, quietStart, quietEnd, weekendCrypto, toast, t])
+  }, [synthProviders, sentProviders, aiEnabled, aiLimit, maxCandidates, scoreBuySafe, scoreBuyRisk, scoreHold, wdMinNotify, wdPnlAlert, brainMaxOpen, quietEnabled, quietStart, quietEnd, weekendCrypto, allowWeekendScans, toast, t])
 
   const handleLogout = () => {
     logout()
@@ -436,6 +442,28 @@ export default function SettingsPage() {
           <p className="text-[10px]" style={{ color: theme.colors.textHint }}>
             {t.settings.preFilterDesc.replace('{max}', String(maxCandidates)).replace('{aiDesc}', aiEnabled ? t.settings.aiOnDesc.replace('{limit}', String(aiLimit)) : t.settings.aiOffDesc)}
           </p>
+
+          {/* Weekend Scans */}
+          <div className="flex items-center justify-between pt-2" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
+            <div>
+              <p className="text-sm font-medium" style={{ color: theme.colors.text }}>
+                {t.settings.allowWeekendScans ?? 'Allow Weekend Scans'}
+              </p>
+              <p className="text-[10px]" style={{ color: theme.colors.textSub }}>
+                {t.settings.allowWeekendScansDesc ?? 'Allow manual scan triggers on Saturdays and Sundays.'}
+              </p>
+            </div>
+            <button
+              onClick={() => { setAllowWeekendScans(!allowWeekendScans); setDirty(true) }}
+              className="w-11 h-6 rounded-full transition-all relative"
+              style={{ backgroundColor: allowWeekendScans ? theme.colors.primary : theme.colors.border }}
+            >
+              <div
+                className="w-5 h-5 rounded-full bg-white absolute top-0.5 transition-all"
+                style={{ left: allowWeekendScans ? 22 : 2 }}
+              />
+            </button>
+          </div>
         </div>
       </Card>
 
@@ -702,7 +730,7 @@ export default function SettingsPage() {
           {t.settings.languageLabel}
         </p>
         <div className="flex gap-3">
-          {([['en', 'English', '🇨🇦'], ['pt', 'Portugues', '🇧🇷']] as const).map(([code, label, flag]) => {
+          {([['en', 'English', 'EN'], ['pt', 'Português', 'PT']] as const).map(([code, label, badge]) => {
             const isActive = locale === code
             return (
               <button
@@ -715,7 +743,7 @@ export default function SettingsPage() {
                   color: isActive ? theme.colors.primary : theme.colors.text,
                 }}
               >
-                <span className="text-lg">{flag}</span>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: isActive ? theme.colors.primary + '20' : theme.colors.border, color: isActive ? theme.colors.primary : theme.colors.textSub }}>{badge}</span>
                 <span className="text-sm font-medium">{label}</span>
                 {isActive && <Check size={16} className="ml-auto" />}
               </button>

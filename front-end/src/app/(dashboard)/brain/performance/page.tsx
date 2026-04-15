@@ -66,6 +66,7 @@ interface VirtualTrade {
   contrarian_score?: number
   market_regime?: string
   thesis_status?: string  // valid | weakening | invalid | null (legacy)
+  tier_reason?: string    // validated | validated_below_sma50 | low_confidence_high_score | tech_only_confirmed_*
 }
 
 interface ClosedTrade {
@@ -80,6 +81,8 @@ interface ClosedTrade {
   exit_date?: string
   entry_price?: number
   exit_price?: number
+  peak_price?: number
+  exit_context?: string  // human-readable explanation of why it was sold
 }
 
 interface WatchdogEvent {
@@ -149,6 +152,7 @@ function ExitReasonBadge({ reason, theme }: { reason?: string; theme: ReturnType
     TARGET_HIT: { label: 'Target Hit', color: theme.colors.up },
     STOP_HIT: { label: 'Stop Hit', color: theme.colors.down },
     TRAILING_STOP: { label: 'Trailing Stop', color: theme.colors.up },
+    QUALITY_PRUNE: { label: 'Pruned', color: theme.colors.warning },
     PROFIT_TAKE: { label: 'Profit Take', color: theme.colors.up },
     TIME_EXPIRED: { label: 'Expired', color: theme.colors.warning },
     SIGNAL: { label: 'Signal', color: theme.colors.primary },
@@ -193,9 +197,13 @@ export default function BrainPerformancePage() {
 
   const { data: watchdogEvents } = useQuery<WatchdogEvent[]>({
     queryKey: ['stats', 'watchdog-events'],
-    queryFn: async () => (await client.get<WatchdogEvent[]>('/stats/watchdog-events?limit=3')).data,
+    queryFn: async () => (await client.get<WatchdogEvent[]>('/stats/watchdog-events?limit=50')).data,
     staleTime: 30_000,
   })
+
+  // Group watchdog events by symbol for the monitor grid
+  const [watchdogExpandedSymbol, setWatchdogExpandedSymbol] = useState<string | null>(null)
+  const [watchdogShowClosed, setWatchdogShowClosed] = useState(false)
 
   const { data: signalsData } = useQuery<{ signals: { symbol: string; is_discovered?: boolean }[] }>({
     queryKey: ['signals', 'discovered-check'],
@@ -373,70 +381,151 @@ export default function BrainPerformancePage() {
           )}
 
           {/* Watchdog Timeline */}
-          {watchdogEvents && watchdogEvents.length > 0 && (
-            <Card>
-              <div className="flex items-center gap-1.5 mb-3">
-                <Eye size={14} style={{ color: theme.colors.warning }} />
-                <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
-                  Watchdog
-                </p>
-                {data?.watchdog?.active && (
-                  <span className="text-[8px] px-1.5 py-0.5 rounded-full ml-auto" style={{ backgroundColor: theme.colors.up + '15', color: theme.colors.up }}>
-                    Active
-                  </span>
-                )}
-              </div>
+          {/* Watchdog Monitor Grid */}
+          {(() => {
+            // Build per-symbol watchdog state from events + open positions
+            // Only include symbols that have actual watchdog events
+            const evtsBySymbol: Record<string, WatchdogEvent[]> = {}
+            for (const evt of (watchdogEvents || [])) {
+              if (!evtsBySymbol[evt.symbol]) evtsBySymbol[evt.symbol] = []
+              evtsBySymbol[evt.symbol].push(evt)
+            }
 
-              <div className="relative pl-4">
-                {/* Timeline line */}
-                <div className="absolute left-[5px] top-1 bottom-1 w-px" style={{ backgroundColor: theme.colors.border }} />
+            const getSymbolStatus = (evts: WatchdogEvent[]): { label: string; color: string; isClosed: boolean } => {
+              const latest = evts[0]
+              if (latest.event_type === 'CLOSE') return { label: 'closed', color: theme.colors.down, isClosed: true }
+              if (latest.event_type === 'ALERT' || latest.event_type === 'ESCALATION')
+                return { label: `${evts.length} alert${evts.length > 1 ? 's' : ''}`, color: theme.colors.warning, isClosed: false }
+              if (latest.event_type === 'RECOVERY') return { label: 'recovered', color: theme.colors.up, isClosed: false }
+              if (latest.event_type === 'HOLD_THROUGH_DIP') return { label: 'held dip', color: theme.colors.primary, isClosed: false }
+              return { label: 'event', color: theme.colors.textHint, isClosed: false }
+            }
 
-                <div className="space-y-3">
-                  {watchdogEvents.map((evt, i) => {
-                    const typeColor = getEventTypeColor(evt.event_type, theme)
-                    const pnlColor = evt.pnl_pct >= 0 ? theme.colors.up : theme.colors.down
+            // Filter: hide closed positions unless toggled on
+            const symbols = Object.keys(evtsBySymbol)
+              .filter((sym) => {
+                if (watchdogShowClosed) return true
+                return !getSymbolStatus(evtsBySymbol[sym]).isClosed
+              })
+              .sort((a, b) => evtsBySymbol[b].length - evtsBySymbol[a].length)
+
+            const closedCount = Object.values(evtsBySymbol).filter((evts) => getSymbolStatus(evts).isClosed).length
+
+            return (
+              <Card>
+                <div className="flex items-center gap-1.5 mb-3">
+                  <Eye size={14} style={{ color: theme.colors.warning }} />
+                  <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+                    Watchdog — Monitoring {symbols.length} positions
+                  </p>
+                  <div className="flex items-center gap-2 ml-auto">
+                    {closedCount > 0 && (
+                      <button
+                        onClick={() => setWatchdogShowClosed(!watchdogShowClosed)}
+                        className="text-[8px] px-1.5 py-0.5 rounded-full transition-all"
+                        style={{
+                          backgroundColor: watchdogShowClosed ? theme.colors.textHint + '20' : 'transparent',
+                          color: theme.colors.textHint,
+                          border: `1px solid ${theme.colors.border}`,
+                        }}
+                      >
+                        {watchdogShowClosed ? 'Hide' : 'Show'} closed ({closedCount})
+                      </button>
+                    )}
+                    {data?.watchdog?.active && (
+                      <span className="text-[8px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: theme.colors.up + '15', color: theme.colors.up }}>
+                        Active
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Symbol grid */}
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {symbols.map((sym) => {
+                    const evts = evtsBySymbol[sym]
+                    const status = getSymbolStatus(evts)
+                    const isExpanded = watchdogExpandedSymbol === sym
 
                     return (
-                      <div key={i} className="relative">
-                        {/* Timeline dot */}
-                        <div
-                          className="absolute -left-4 top-1 w-[10px] h-[10px] rounded-full border-2"
-                          style={{ backgroundColor: theme.colors.surface, borderColor: typeColor }}
+                      <button
+                        key={sym}
+                        onClick={() => setWatchdogExpandedSymbol(isExpanded ? null : sym)}
+                        className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-medium transition-all"
+                        style={{
+                          backgroundColor: isExpanded ? status.color + '20' : theme.colors.surfaceAlt,
+                          border: `1px solid ${isExpanded ? status.color + '40' : theme.colors.border}`,
+                          color: theme.colors.text,
+                        }}
+                      >
+                        <span
+                          className="w-1.5 h-1.5 rounded-full shrink-0"
+                          style={{ backgroundColor: status.color }}
                         />
-
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[11px] font-semibold" style={{ color: theme.colors.text }}>{evt.symbol}</span>
-                            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded" style={{ backgroundColor: typeColor + '15', color: typeColor }}>
-                              {evt.event_type.replace(/_/g, ' ')}
-                            </span>
-                            {evt.in_watchlist && (
-                              <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ backgroundColor: theme.colors.primary + '15', color: theme.colors.primary }}>
-                                WL
-                              </span>
-                            )}
-                            {evt.sentiment_label && (
-                              <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{evt.sentiment_label}</span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className="text-[11px] font-bold tabular-nums" style={{ color: pnlColor }}>
-                              {evt.pnl_pct >= 0 ? '+' : ''}{fmtPct(evt.pnl_pct)}%
-                            </span>
-                            <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{relativeTime(evt.created_at)}</span>
-                          </div>
-                        </div>
-
-                        <p className="text-[9px] mt-0.5" style={{ color: theme.colors.textHint }}>
-                          {evt.action_taken}
-                        </p>
-                      </div>
+                        {sym}
+                        {evts.length > 0 && (
+                          <span className="text-[8px] tabular-nums" style={{ color: status.color }}>
+                            {evts.length}
+                          </span>
+                        )}
+                      </button>
                     )
                   })}
                 </div>
-              </div>
-            </Card>
-          )}
+
+                {/* Expanded event history for selected symbol */}
+                {watchdogExpandedSymbol && evtsBySymbol[watchdogExpandedSymbol] && (
+                  <div
+                    className="rounded-lg p-3 mt-1"
+                    style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}` }}
+                  >
+                    {evtsBySymbol[watchdogExpandedSymbol].length === 0 ? (
+                      <p className="text-[10px]" style={{ color: theme.colors.textHint }}>
+                        No watchdog events — position is healthy.
+                      </p>
+                    ) : (
+                      <div className="relative pl-4">
+                        <div className="absolute left-[5px] top-1 bottom-1 w-px" style={{ backgroundColor: theme.colors.border }} />
+                        <div className="space-y-2.5">
+                          {evtsBySymbol[watchdogExpandedSymbol].map((evt, i) => {
+                            const typeColor = getEventTypeColor(evt.event_type, theme)
+                            const pnlColor = evt.pnl_pct >= 0 ? theme.colors.up : theme.colors.down
+                            return (
+                              <div key={i} className="relative">
+                                <div
+                                  className="absolute -left-4 top-1 w-[10px] h-[10px] rounded-full border-2"
+                                  style={{ backgroundColor: theme.colors.surface, borderColor: typeColor }}
+                                />
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-[9px] font-medium px-1.5 py-0.5 rounded" style={{ backgroundColor: typeColor + '15', color: typeColor }}>
+                                      {evt.event_type.replace(/_/g, ' ')}
+                                    </span>
+                                    {evt.sentiment_label && (
+                                      <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{evt.sentiment_label}</span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-[10px] font-bold tabular-nums" style={{ color: pnlColor }}>
+                                      {evt.pnl_pct >= 0 ? '+' : ''}{fmtPct(evt.pnl_pct)}%
+                                    </span>
+                                    <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{relativeTime(evt.created_at)}</span>
+                                  </div>
+                                </div>
+                                <p className="text-[9px] mt-0.5" style={{ color: theme.colors.textHint }}>
+                                  {evt.action_taken}
+                                </p>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            )
+          })()}
 
           {/* Open positions — brain picks */}
           <Card>
@@ -566,7 +655,7 @@ export default function BrainPerformancePage() {
                           </div>
 
                           {/* Meta row */}
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-3 flex-wrap">
                             {vt.days_held != null && (
                               <span className="text-[10px] flex items-center gap-1" style={{ color: theme.colors.textHint }}>
                                 <Clock size={9} /> {vt.days_held}d held
@@ -580,6 +669,17 @@ export default function BrainPerformancePage() {
                             {vt.unrealized_pnl_amount != null && (
                               <span className="text-[10px] font-medium tabular-nums" style={{ color: pnlColor }}>
                                 {vt.unrealized_pnl_amount >= 0 ? '+' : ''}${vt.unrealized_pnl_amount.toFixed(2)}
+                              </span>
+                            )}
+                            {vt.tier_reason && (
+                              <span
+                                className="text-[9px] font-medium px-1.5 py-0.5 rounded"
+                                style={{
+                                  backgroundColor: (vt.tier_reason.includes('below_sma50') || vt.tier_reason.includes('overextended') ? theme.colors.warning : theme.colors.primary) + '15',
+                                  color: vt.tier_reason.includes('below_sma50') || vt.tier_reason.includes('overextended') ? theme.colors.warning : theme.colors.primary,
+                                }}
+                              >
+                                {vt.tier_reason.includes('below_sma50') ? 'Below SMA50' : vt.tier_reason.includes('overextended') ? 'Overextended' : vt.tier_reason.replace(/_/g, ' ')}
                               </span>
                             )}
                           </div>
@@ -648,7 +748,15 @@ export default function BrainPerformancePage() {
                           </div>
                           <div className="text-[10px] tabular-nums pl-[22px]" style={{ color: theme.colors.textHint }}>
                             {fmtShortDate(rc.entry_date)} {formatPrice(rc.entry_price)} → {fmtShortDate(rc.exit_date)} {formatPrice(rc.exit_price)}
+                            {rc.peak_price != null && (
+                              <span style={{ color: theme.colors.textSub }}> (peak {formatPrice(rc.peak_price)})</span>
+                            )}
                           </div>
+                          {rc.exit_context && (
+                            <div className="text-[9px] pl-[22px] mt-0.5" style={{ color: theme.colors.textSub }}>
+                              {rc.exit_context}
+                            </div>
+                          )}
                         </div>
                         <span className="text-[13px] font-bold tabular-nums shrink-0" style={{ color: rc.is_win ? theme.colors.up : theme.colors.down }}>
                           {rc.pnl_pct >= 0 ? '+' : ''}{fmtPct(rc.pnl_pct)}%

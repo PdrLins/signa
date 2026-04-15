@@ -298,7 +298,7 @@ def _is_us_market_open() -> bool:
     return 570 <= minutes < 960
 
 
-def _eval_brain_trust_tier(sig: dict) -> tuple[int, float, str]:
+def _eval_brain_trust_tier(sig: dict, portfolio_heat: int = 0) -> tuple[int, float, str]:
     """Decide which brain trust tier (if any) a signal qualifies for.
 
     This is the brain's GATE. Every brain auto-buy goes through this function.
@@ -351,8 +351,61 @@ def _eval_brain_trust_tier(sig: dict) -> tuple[int, float, str]:
     if ai_status == "failed":
         return 0, 0.0, "ai_failed"
 
+    # ── Portfolio heat gating ──
+    # heat=3 (locked): no new entries at all — protect existing gains
+    if portfolio_heat >= 3:
+        return 0, 0.0, "portfolio_locked"
+
+    # heat=2 (defensive): only score 80+ at half size
+    if portfolio_heat >= 2 and score < 80:
+        return 0, 0.0, f"portfolio_defensive_score{score}"
+
+    # heat=1 (cautious): only score 76+
+    if portfolio_heat >= 1 and score < 76:
+        return 0, 0.0, f"portfolio_cautious_score{score}"
+
+    # ── SMA50 trend filter ──
+    # Week 1 data (Apr 8-13) showed a clean pattern: ALL winners
+    # (PBR-A +4.47%, AVGO +3.01%, ASML +1.30%, RRX +2.47%) were above
+    # SMA50 at entry. ALL counter-trend losers (VZ -5.2% 5d, LB -5.5%
+    # 5d, TPL -7.3% 5d) were below SMA50 at entry. "Cheap and falling"
+    # is not "cheap and recovering."
+    #
+    # When price is below SMA50, the short-term trend is DOWN regardless
+    # of fundamentals. The brain still enters (fundamentals might be
+    # right) but at REDUCED SIZE — Tier 1 is downgraded to Tier 2 (50%
+    # size) to limit exposure to counter-trend entries.
+    vs_sma50 = technical_data.get("vs_sma50")
+    below_sma50 = vs_sma50 is not None and vs_sma50 < 0
+
+    # ── Bollinger Band ceiling + MACD divergence filter ──
+    # Week 1-2 data: entries at BB > 95% with negative MACD had a 45%
+    # win rate vs 69% overall. Price at the Bollinger ceiling with fading
+    # momentum is a "buying the top" pattern — not bad enough to block
+    # (AVGO +3.29% and ASML +2.52% entered this way) but risky enough
+    # to halve the position size. Same principle as the SMA50 filter:
+    # reduce, don't block.
+    #
+    # Real cases: VSEC -3.18%, BF-B -2.29%, LTM -1.24%, BLK -1.40%
+    # all entered at BB=1.00 with negative MACD.
+    bb_position = technical_data.get("bb_position")
+    macd_hist = technical_data.get("macd_histogram")
+    overextended = (
+        bb_position is not None and bb_position > 0.95
+        and macd_hist is not None and macd_hist < 0
+    )
+
+    # Heat=2 forces half size on all entries that pass the score gate
+    heat_halve = portfolio_heat >= 2
+
     # Tier 1: validated AI + standard score threshold
     if ai_status == "validated" and score >= BRAIN_MIN_SCORE:
+        if below_sma50:
+            return 2, 0.5, "validated_below_sma50"
+        if overextended:
+            return 2, 0.5, "validated_overextended_bb"
+        if heat_halve:
+            return 2, 0.5, "validated_heat_defensive"
         return 1, 1.0, "validated"
 
     # Tier 2: low confidence AI + higher score bar
@@ -477,6 +530,8 @@ def _exit_is_thesis_protected(pos: dict, exit_reason: str, pnl_pct: float) -> bo
         return False
     if exit_reason == "TRAILING_STOP":
         return False  # trailing stop protects gains — never suppress it
+    if exit_reason == "QUALITY_PRUNE":
+        return False  # pruning dead weight — the thesis IS the reason we're selling
     return (pos.get("thesis_last_status") or "").lower() == "valid"
 
 
@@ -1058,12 +1113,73 @@ def process_virtual_trades(
     open_watchlist: set[str] = set()
     open_brain: set[str] = set()
     brain_open_count = 0
+    brain_entry_prices: list[float] = []
     for r in all_open:
         if r.get("source") == "brain":
             open_brain.add(r["symbol"])
             brain_open_count += 1
+            brain_entry_prices.append(float(r.get("entry_price", 0)))
         else:
             open_watchlist.add(r["symbol"])
+
+    # ── Portfolio heat score ──
+    # Computed once per scan. Controls how aggressively the brain adds
+    # new positions. The goal: PROTECT existing gains. When the portfolio
+    # is fat (high unrealized P&L), concentrated (many positions), or the
+    # market is complacent (low VIX), the brain gets more selective.
+    #
+    # Pedro's principle (Day 8): "we cannot lose whatever we make. if so
+    # what is the point?" Making money and then losing it is worse than
+    # never making it. The heat score ensures the brain shifts from
+    # "grow" to "protect" as profits accumulate.
+    #
+    # heat=0: normal (score >= 72, full size)
+    # heat=1: cautious (score >= 76, full size)
+    # heat=2: defensive (score >= 80, half size)
+    # heat=3: locked (no new entries, let existing positions ride)
+    portfolio_heat = 0
+
+    # Factor 1: Portfolio unrealized P&L (do we have gains to protect?)
+    if brain_entry_prices and brain_open_count >= 3:
+        brain_symbols = [r["symbol"] for r in all_open if r.get("source") == "brain"]
+        brain_prices = _fetch_prices_batch(brain_symbols)
+        total_unrealized = 0.0
+        priced_count = 0
+        for r in all_open:
+            if r.get("source") != "brain":
+                continue
+            px, _ = brain_prices.get(r["symbol"], (None, None))
+            ep = float(r.get("entry_price", 0))
+            if px and ep > 0:
+                total_unrealized += ((px - ep) / ep) * 100
+                priced_count += 1
+        avg_unrealized = total_unrealized / priced_count if priced_count else 0
+        if avg_unrealized > 2.0:  # avg position is up >2% — meaningful gains
+            portfolio_heat += 1
+
+    # Factor 2: Concentration (too many open positions)
+    if brain_open_count > 12:
+        portfolio_heat += 1
+
+    # Factor 3: Market complacency (VIX too low = shock risk)
+    # Use the macro_data from the first signal if available
+    first_macro = None
+    for sig_item in signals:
+        if sig_item.get("macro_data"):
+            first_macro = sig_item["macro_data"]
+            break
+    if first_macro:
+        vix = first_macro.get("vix")
+        if vix is not None and vix < 16:
+            portfolio_heat += 1
+
+    if portfolio_heat > 0:
+        heat_labels = {1: "cautious", 2: "defensive", 3: "locked"}
+        logger.info(
+            f"Portfolio heat: {portfolio_heat} ({heat_labels.get(portfolio_heat, 'max')}) — "
+            f"positions={brain_open_count}, avg_pnl={avg_unrealized if brain_entry_prices else 0:+.1f}%, "
+            f"vix={first_macro.get('vix') if first_macro else '?'}"
+        )
 
     # Re-buy cooldown snapshot: any brain symbol recently closed via
     # THESIS_INVALIDATED or TARGET_HIT is blocked from re-entry this scan.
@@ -1284,7 +1400,7 @@ def process_virtual_trades(
         # compensate for the AI uncertainty.
         #
         # See `_eval_brain_trust_tier` and the file header for the rules.
-        brain_tier, trust_multiplier, tier_reason = _eval_brain_trust_tier(sig)
+        brain_tier, trust_multiplier, tier_reason = _eval_brain_trust_tier(sig, portfolio_heat)
         if (
             brain_tier > 0
             and symbol not in open_brain
@@ -1398,6 +1514,7 @@ def process_virtual_trades(
                     "stop_loss": stop,
                     "entry_tier": brain_tier,
                     "trust_multiplier": trust_multiplier,
+                    "tier_reason": tier_reason,
                     # Snapshot for the learning loop — see _record_brain_outcome.
                     # We snapshot at insert because the regime can shift between
                     # entry and close, and pattern_stats matches on the regime
@@ -1612,38 +1729,75 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
 
         # Trailing stop is "active" once the position has been at least 3%
         # above entry at ANY point (peak_price >= entry * 1.03). Once
-        # active, the exit trigger is 3% below the peak — this lets
-        # winners run while protecting gains. Replaces the old fixed
-        # PROFIT_TAKE at 3%.
-        trailing_active = peak >= entry_price * 1.03
-        trailing_stop_price = peak * 0.97 if trailing_active else None
-
-        # Determine exit reason (priority: stop > trailing > target > time)
+        # active, two levels protect the position:
         #
-        # The holding period rule (#3): when a position is young (< 7 days)
-        # AND doing well (up > 3%), suppress the fixed TARGET_HIT and let
-        # the trailing stop manage the exit. This reduces churn on winners
-        # (fewer taxable events in Canada, lets momentum play out).
-        # After 7 days, the fixed target fires normally.
+        #   SOFT trail (3% below peak): thesis-gated. Only fires when
+        #     thesis is weakening or invalid. If thesis is valid, a 3%
+        #     pullback is treated as noise — a portfolio manager wouldn't
+        #     sell a fundamentally sound stock on a routine dip.
+        #
+        #   HARD trail (5% below peak): always fires regardless of thesis.
+        #     If the price drops 5% from peak, something real is happening
+        #     and we protect gains unconditionally.
+        #
+        # This was refined after PBR-A (Apr 14): the 3% mechanical stop
+        # sold at +1.13% on a routine pullback while the thesis was only
+        # "weakening" — a portfolio manager would have checked the context
+        # before selling.
+        trailing_active = peak >= entry_price * 1.03
+        soft_trail = peak * 0.97 if trailing_active else None   # 3% below peak
+        hard_trail = peak * 0.95 if trailing_active else None   # 5% below peak
+
+        thesis_status = (trade.get("thesis_last_status") or "").lower()
+
+        # Determine exit reason (priority: stop > hard_trail > soft_trail > target > time)
         exit_reason = None
         if stop and current_price <= stop:
             exit_reason = "STOP_HIT"
             stops_hit += 1
-        elif trailing_active and current_price <= trailing_stop_price:
+        elif trailing_active and current_price <= hard_trail:
+            # Hard trailing stop — always fires, no thesis check.
+            # 5% from peak means something real is happening.
             exit_reason = "TRAILING_STOP"
-            profit_takes += 1  # reuse the counter for P&L tracking
+            profit_takes += 1
             logger.info(
-                f"Virtual TRAILING STOP: {symbol} at {pnl_pct:+.1f}% "
-                f"(peak ${peak:.2f}, trail ${trailing_stop_price:.2f}, now ${current_price:.2f})"
+                f"Virtual TRAILING STOP (hard): {symbol} at {pnl_pct:+.1f}% "
+                f"(peak ${peak:.2f}, hard trail ${hard_trail:.2f}, now ${current_price:.2f})"
             )
             notifications.append(("brain_sell", {
                 "symbol": symbol, "price": f"{current_price:.2f}",
                 "pnl": f"{pnl_pct:+.1f}",
-                "reason": f"Trailing stop (peak ${peak:.2f}, trail 3% below)",
+                "reason": f"Trailing stop (peak ${peak:.2f}, dropped 5% — hard exit)",
                 "entry_score": str(trade.get("entry_score", 0)),
                 "exit_score": str(current_scores.get(symbol, 0)),
-                "verdict": "Winner rode the trend, trailing stop protected gains.",
+                "verdict": "Hard trailing stop fired — 5% drop from peak.",
             }))
+        elif trailing_active and current_price <= soft_trail:
+            # Soft trailing stop — thesis-gated.
+            # If thesis is valid, this is just noise. Hold.
+            # If thesis is weakening/invalid, price confirms — sell.
+            if thesis_status == "valid":
+                logger.info(
+                    f"Virtual TRAILING STOP suppressed for {symbol} — thesis still valid "
+                    f"(peak ${peak:.2f}, soft trail ${soft_trail:.2f}, now ${current_price:.2f}, "
+                    f"P&L {pnl_pct:+.1f}%). Holding through noise."
+                )
+                # Don't exit — treat as noise. The hard trail at 5% is the safety net.
+            else:
+                exit_reason = "TRAILING_STOP"
+                profit_takes += 1
+                logger.info(
+                    f"Virtual TRAILING STOP (soft, thesis={thesis_status}): {symbol} at {pnl_pct:+.1f}% "
+                    f"(peak ${peak:.2f}, soft trail ${soft_trail:.2f}, now ${current_price:.2f})"
+                )
+                notifications.append(("brain_sell", {
+                    "symbol": symbol, "price": f"{current_price:.2f}",
+                    "pnl": f"{pnl_pct:+.1f}",
+                    "reason": f"Trailing stop (peak ${peak:.2f}, thesis {thesis_status})",
+                    "entry_score": str(trade.get("entry_score", 0)),
+                    "exit_score": str(current_scores.get(symbol, 0)),
+                    "verdict": f"Thesis was {thesis_status}, price drop confirmed — locked in gains.",
+                }))
         elif target and current_price >= target:
             # Suppress TARGET_HIT for young, winning positions — let the
             # trailing stop manage the exit instead. After 7 days, the
@@ -1660,6 +1814,54 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         elif days_held >= max_days:
             exit_reason = "TIME_EXPIRED"
             expired += 1
+
+        # ── Quality prune: cut bad entries early ──
+        # If no price-based exit triggered, check if this position is
+        # dead weight that should be freed up. A portfolio manager
+        # wouldn't hold a losing position with a deteriorating thesis
+        # for 30 days waiting for the stop — they'd cut it early and
+        # redeploy the slot.
+        #
+        # Conditions (ALL must be true):
+        #   • No other exit triggered (stop/trail/target didn't fire)
+        #   • Position is DOWN from entry (pnl < 0)
+        #   • Held 2-7 days (give it a chance, but don't wait forever)
+        #   • Claude's latest signal is NOT BUY (the AI doesn't want it)
+        #   • Thesis is weakening or invalid (the reason is degrading)
+        #
+        # This catches: BLK -1.40% (day 1, Claude=HOLD, bearish),
+        # VZ -1.80% (day 1, Claude=HOLD, falling knife). It does NOT
+        # catch positions with valid thesis or positions Claude still
+        # likes — those deserve time to play out.
+        if not exit_reason and trade.get("source") == "brain":
+            latest_sig = current_scores_full.get(symbol) if 'current_scores_full' in dir() else None
+            # Use the signal action from the batch we already fetched
+            latest_action = None
+            for row in (sig_result.data or []):
+                if row.get("symbol") == symbol:
+                    latest_action = row.get("action")
+                    break
+
+            if (
+                pnl_pct < 0
+                and 2 <= days_held <= 7
+                and thesis_status in ("weakening", "invalid", "")
+                and latest_action in ("HOLD", "AVOID", "SELL", None)
+            ):
+                exit_reason = "QUALITY_PRUNE"
+                logger.info(
+                    f"Virtual QUALITY PRUNE: {symbol} at {pnl_pct:+.1f}% "
+                    f"(held {days_held}d, thesis={thesis_status or 'none'}, "
+                    f"latest_action={latest_action}) — freeing slot for better pick"
+                )
+                notifications.append(("brain_sell", {
+                    "symbol": symbol, "price": f"{current_price:.2f}",
+                    "pnl": f"{pnl_pct:+.1f}",
+                    "reason": f"Quality prune (thesis {thesis_status or 'none'}, {days_held}d held)",
+                    "entry_score": str(trade.get("entry_score", 0)),
+                    "exit_score": str(current_scores.get(symbol, 0)),
+                    "verdict": "Position underperforming with deteriorating thesis — slot freed for stronger pick.",
+                }))
 
         if not exit_reason:
             continue
@@ -1834,7 +2036,7 @@ def get_virtual_summary() -> dict:
     # All trades
     open_result = (
         db.table("virtual_trades")
-        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status")
+        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status, tier_reason")
         .eq("status", "OPEN")
         .order("entry_date", desc=True)
         .execute()
@@ -1844,7 +2046,8 @@ def get_virtual_summary() -> dict:
     closed_result = (
         db.table("virtual_trades")
         .select("symbol, entry_price, exit_price, pnl_pct, pnl_amount, is_win, "
-                "entry_date, exit_date, entry_score, exit_score, bucket, source, exit_reason")
+                "entry_date, exit_date, entry_score, exit_score, bucket, source, exit_reason, "
+                "peak_price, thesis_last_reason, tier_reason")
         .eq("status", "CLOSED")
         .order("exit_date", desc=True)
         .limit(50)
@@ -1873,6 +2076,43 @@ def get_virtual_summary() -> dict:
             sym = row.get("symbol")
             if sym and sym not in signal_context:
                 signal_context[sym] = row
+
+    def _build_exit_context(t: dict) -> str:
+        """Build a one-line human-readable explanation of why a trade was closed."""
+        reason = t.get("exit_reason", "")
+        peak = t.get("peak_price")
+        entry = float(t.get("entry_price") or 0)
+        exit_px = float(t.get("exit_price") or 0)
+        thesis_reason = t.get("thesis_last_reason") or ""
+
+        if reason == "TRAILING_STOP" and peak:
+            peak_pnl = ((float(peak) - entry) / entry * 100) if entry else 0
+            drop_pct = ((float(peak) - exit_px) / float(peak) * 100) if float(peak) else 0
+            thesis = t.get("thesis_last_status") or "unknown"
+            return (
+                f"Peak ${float(peak):.2f} (+{peak_pnl:.1f}%), dropped {drop_pct:.1f}% from peak. "
+                f"Thesis was {thesis} — {'price drop confirmed weakness' if thesis != 'valid' else 'hard safety net triggered'}"
+            )
+        if reason == "TARGET_HIT":
+            target = t.get("target_price")
+            return f"Hit target ${float(target):.2f}" if target else "Hit AI-generated target"
+        if reason == "STOP_HIT":
+            stop = t.get("stop_loss")
+            return f"Hit stop loss ${float(stop):.2f}" if stop else "Hit stop loss"
+        if reason == "THESIS_INVALIDATED":
+            snippet = thesis_reason[:120].strip()
+            return f"Thesis invalidated: {snippet}" if snippet else "Thesis invalidated by Stage 6 re-eval"
+        if reason == "WATCHDOG_EXIT":
+            snippet = thesis_reason[:120].strip()
+            return f"Watchdog: bearish sentiment + price drop" + (f". {snippet}" if snippet else "")
+        if reason == "TIME_EXPIRED":
+            return "Held maximum 30 days without hitting target or stop"
+        if reason == "QUALITY_PRUNE":
+            thesis = t.get("thesis_last_status") or "none"
+            return f"Pruned: losing position with {thesis} thesis — slot freed for a stronger pick"
+        if reason == "ROTATION":
+            return "Rotated out for a stronger candidate"
+        return reason or "Unknown"
 
     def _calc_stats(trades: list[dict]) -> dict:
         total = len(trades)
@@ -1920,6 +2160,7 @@ def get_virtual_summary() -> dict:
             "contrarian_score": sig.get("contrarian_score"),
             "market_regime": sig.get("market_regime"),
             "thesis_status": t.get("thesis_last_status"),  # valid/weakening/invalid/None
+            "tier_reason": t.get("tier_reason"),
         }
 
         if current:
@@ -1967,6 +2208,8 @@ def get_virtual_summary() -> dict:
                 "exit_date": t.get("exit_date"),
                 "entry_price": t.get("entry_price"),
                 "exit_price": t.get("exit_price"),
+                "peak_price": t.get("peak_price"),
+                "exit_context": _build_exit_context(t),
             }
             for t in closed_trades[:5]
         ],

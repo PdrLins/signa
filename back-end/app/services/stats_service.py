@@ -11,13 +11,7 @@ from app.core.cache import stats_cache
 from app.db.supabase import get_client, with_retry
 
 
-# Scan schedule (ET times) — used to compute next_scan_time
-_SCHEDULE = [
-    ("PRE_MARKET", "06:00"),
-    ("MORNING", "10:00"),
-    ("PRE_CLOSE", "15:00"),
-    ("AFTER_CLOSE", "16:30"),
-]
+from app.core.scan_schedule import next_scan_time_et
 
 
 @with_retry
@@ -79,8 +73,12 @@ def get_daily_stats() -> dict:
             win_rate = win_rate_future.result()
             ai_cost = ai_cost_future.result()
 
-        # Fear & Greed from latest signal's macro_data (no extra API call needed)
+        # Macro data from latest signal (no extra API call needed)
         fear_greed = None
+        intermarket = None
+        vix_term = None
+        yield_curve = None
+        credit_spread = None
         try:
             fg_result = (
                 db.table("signals")
@@ -94,6 +92,16 @@ def get_daily_stats() -> dict:
                 fg = macro.get("fear_greed")
                 if fg and isinstance(fg, dict):
                     fear_greed = fg
+                im = macro.get("intermarket")
+                if im and isinstance(im, dict):
+                    intermarket = im
+                vt = macro.get("vix_term_structure")
+                if vt and isinstance(vt, dict):
+                    vix_term = vt
+                if macro.get("yield_curve_10y2y") is not None:
+                    yield_curve = macro["yield_curve_10y2y"]
+                if macro.get("credit_spread_bbb") is not None:
+                    credit_spread = macro["credit_spread_bbb"]
         except Exception:
             pass
 
@@ -108,6 +116,10 @@ def get_daily_stats() -> dict:
             "claude_cost": 0.0,
             "grok_cost": 0.0,
             "fear_greed": fear_greed,
+            "intermarket": intermarket,
+            "vix_term": vix_term,
+            "yield_curve": yield_curve,
+            "credit_spread": credit_spread,
         }
         stats_cache.set("daily_stats", result, ttl=120)
         return result
@@ -173,22 +185,15 @@ def _get_ai_cost_today() -> float:
 
 
 def _compute_next_scan_time() -> str | None:
-    """Determine the next scheduled scan time (ET)."""
+    """Determine the next scheduled scan time (ET).
+
+    Thin wrapper around `core.scan_schedule.next_scan_time_et` — the
+    canonical schedule lives in that single module. Returns ISO-8601
+    or None on any failure so the caller can serialize it into the
+    stats response without extra handling.
+    """
     try:
-        from zoneinfo import ZoneInfo
-
-        et = ZoneInfo("America/New_York")
-        now_et = datetime.now(et)
-
-        for _, time_str in _SCHEDULE:
-            h, m = map(int, time_str.split(":"))
-            scan_time = now_et.replace(hour=h, minute=m, second=0, microsecond=0)
-            if scan_time > now_et:
-                return scan_time.isoformat()
-
-        # All scans done today — next is tomorrow's PRE_MARKET
-        tomorrow = now_et + timedelta(days=1)
-        h, m = map(int, _SCHEDULE[0][1].split(":"))
-        return tomorrow.replace(hour=h, minute=m, second=0, microsecond=0).isoformat()
+        dt = next_scan_time_et()
+        return dt.isoformat() if dt else None
     except Exception:
         return None

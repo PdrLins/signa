@@ -16,6 +16,8 @@ SERIES = {
     "treasury_10y": "GS10",
     "cpi_yoy": "CPIAUCSL",
     "unemployment_rate": "UNRATE",
+    "yield_curve_10y2y": "T10Y2Y",        # 10Y-2Y spread (pre-computed by FRED)
+    "credit_spread_bbb": "BAMLC0A4CBBB",  # ICE BofA BBB Corporate OAS (~1 day lag)
 }
 
 
@@ -98,6 +100,28 @@ async def _fetch_vix() -> Optional[float]:
         return await asyncio.to_thread(_fetch)
     except Exception as e:
         logger.warning(f"VIX fetch failed: {e}")
+        return None
+
+
+async def _fetch_vix_30d_high() -> Optional[float]:
+    """Fetch the highest VIX close in the last 30 calendar days.
+
+    Used by regime detection to determine if a recent crisis occurred
+    (VIX > 30 within the window). Fetched ONCE per scan alongside the
+    other macro data in get_macro_snapshot()'s asyncio.gather — NOT
+    inside regime.py where it would block the event loop.
+    """
+    def _fetch():
+        vix = yf.Ticker("^VIX")
+        hist = vix.history(period="1mo")
+        if hist.empty:
+            return None
+        return float(hist["Close"].max())
+
+    try:
+        return await asyncio.to_thread(_fetch)
+    except Exception as e:
+        logger.debug(f"VIX 30d high fetch failed: {e}")
         return None
 
 
@@ -194,6 +218,16 @@ def classify_macro_environment(macro_data: dict) -> str:
     if vix_term and isinstance(vix_term, dict) and vix_term.get("ratio", 1.0) > 1.15:
         hostile_signals += 1
 
+    # Yield curve inversion = recession warning (10Y-2Y spread negative)
+    yield_curve = macro_data.get("yield_curve_10y2y")
+    if yield_curve is not None and yield_curve < 0:
+        hostile_signals += 1
+
+    # Credit stress = corporate default risk elevated (BBB OAS > 3.0%)
+    credit_spread = macro_data.get("credit_spread_bbb")
+    if credit_spread is not None and credit_spread > 3.0:
+        hostile_signals += 1
+
     if hostile_signals >= 3:
         return "hostile"
     elif hostile_signals >= 1:
@@ -208,15 +242,22 @@ async def get_macro_snapshot() -> dict:
     """
     async with httpx.AsyncClient() as client:
         # Fetch all data in parallel (FRED + VIX + Fear & Greed)
-        fed_funds, treasury, cpi, unemployment, vix, fear_greed, vix_term, intermarket = await asyncio.gather(
+        (
+            fed_funds, treasury, cpi, unemployment,
+            yield_curve, credit_spread,
+            vix, fear_greed, vix_term, intermarket, vix_30d_high,
+        ) = await asyncio.gather(
             _fetch_fred_series(SERIES["fed_funds_rate"], client),
             _fetch_fred_series(SERIES["treasury_10y"], client),
             _fetch_fred_series(SERIES["cpi_yoy"], client),
             _fetch_fred_series(SERIES["unemployment_rate"], client),
+            _fetch_fred_series(SERIES["yield_curve_10y2y"], client),
+            _fetch_fred_series(SERIES["credit_spread_bbb"], client),
             _fetch_vix(),
             _fetch_fear_greed(),
             _fetch_vix_term_structure(),
             _fetch_intermarket_signals(),
+            _fetch_vix_30d_high(),
         )
 
     macro_data = {
@@ -224,17 +265,21 @@ async def get_macro_snapshot() -> dict:
         "treasury_10y": treasury,
         "cpi_yoy": cpi,
         "unemployment_rate": unemployment,
+        "yield_curve_10y2y": yield_curve,
+        "credit_spread_bbb": credit_spread,
         "vix": vix,
         "fear_greed": fear_greed,
         "vix_term_structure": vix_term,
         "intermarket": intermarket,
+        "vix_30d_high": vix_30d_high,
     }
 
     macro_data["environment"] = classify_macro_environment(macro_data)
 
     logger.info(
         f"Macro snapshot: VIX={vix}, FedFunds={fed_funds}, "
-        f"10Y={treasury}, F&G={fear_greed}, VIX_term={vix_term}, "
+        f"10Y={treasury}, YieldCurve={yield_curve}, CreditSpread={credit_spread}, "
+        f"F&G={fear_greed}, VIX_term={vix_term}, "
         f"Intermarket={intermarket}, Environment={macro_data['environment']}"
     )
 

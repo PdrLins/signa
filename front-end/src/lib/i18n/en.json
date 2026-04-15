@@ -390,7 +390,8 @@
     "failed": "failed",
     "manualScan": "Manual scan",
     "signalCount": "{count} signals",
-    "signalCountGems": "{count} signals, {gems} GEM"
+    "signalCountGems": "{count} signals, {gems} GEM",
+    "resumesMonday": "Resumes Monday"
   },
   "integrations": {
     "title": "Integrations",
@@ -510,7 +511,7 @@
     "step3Title": "3. Fundamental Data",
     "step3Desc": "Key fundamentals are evaluated: P/E ratio, EPS growth, dividend yield, profit margins, debt ratios, and market cap. This helps distinguish between genuinely strong companies and overhyped momentum plays.",
     "step4Title": "4. Macro Snapshot",
-    "step4Desc": "Signa pulls the latest macroeconomic data from FRED (Federal Reserve): interest rates, CPI inflation, VIX volatility index, and Fed policy trends. A hostile macro environment can block otherwise strong signals.",
+    "step4Desc": "Signa pulls macroeconomic data from FRED (Federal Reserve): interest rates, CPI inflation, VIX volatility, yield curve slope (10Y-2Y Treasury spread), and BBB corporate credit spreads. It also fetches VIX term structure (contango vs backwardation), intermarket signals (gold, oil, copper/gold ratio), and the CNN Fear & Greed Index. An inverted yield curve, widening credit spreads, or VIX backwardation can trigger warning signs and shift the macro environment to hostile.",
     "step5Title": "5. AI Sentiment & Options Flow",
     "step5Desc": "Signa gathers sentiment from multiple sources — Grok AI analyzes X/Twitter for real-time market mood, breaking news, and social momentum, while options flow data (put/call ratios, IV percentile, unusual volume) provides institutional-level insight. When social sentiment and options flow agree, confidence increases. When they conflict, the signal is flagged as uncertain for deeper AI analysis. Sentiment only runs for High Risk tickers (35% of the score). Safe Income tickers skip it (10% weight) to save API costs.",
     "step6Title": "6. AI Synthesis (Claude)",
@@ -634,10 +635,14 @@
     "exitLabelsDesc": "Closed trades show an exit reason badge explaining why the brain sold. 'Trailing Stop' means the position was a winner that rode the trend up, then the price dropped 3% from its peak — gains were locked in while letting the winner run as long as possible. 'Target Hit' means the price reached the AI-generated target (only fires after 7 days or if the trailing stop isn't active yet). 'Stop Hit' means the stop loss triggered. 'Brain Exit' means the thesis was invalidated — the reason for owning died regardless of P&L. 'Watchdog' means the watchdog detected bearish sentiment combined with a price drop and force-closed. 'Rotated' means a stronger candidate arrived and this position was swapped out. 'Expired' means the 30-day hold limit was reached.",
     "trailingStopTitle": "Trailing Stop — Let Winners Run",
     "trailingStopDesc": "When a position reaches +3% above entry at any point, the brain activates a trailing stop at 3% below the peak price. Instead of selling at a fixed target, the trailing stop ratchets upward as the price climbs — it never moves down. This lets winners run well beyond +3% while protecting gains if the price reverses. For the first 7 days, the trailing stop takes priority over the fixed AI-generated target, reducing churn and unnecessary taxable events. After 7 days, the fixed target fires if hit. The trailing stop is never suppressed by the thesis gate — protecting gains always takes priority.",
+    "sma50FilterTitle": "SMA50 Trend Filter",
+    "sma50FilterDesc": "When a stock's price is below its 50-day moving average, the short-term trend is down regardless of how cheap the fundamentals look. Week 1 data showed a clear pattern: all winners (PBR-A, AVGO, ASML, RRX) were above SMA50 at entry, all counter-trend losers (VZ, LB, TPL) were below it. The brain still enters below-SMA50 stocks but at HALF position size (Tier 1 downgraded to Tier 2). This limits exposure to 'cheap and falling' entries while still allowing fundamentally strong picks to prove themselves. The expanded position detail shows a 'Below SMA50' badge when this filter activated.",
+    "shortInterestSignalsTitle": "Short Interest Signals",
+    "shortInterestSignalsDesc": "High short interest (above 10% of float) is a double-edged signal that the brain interprets based on the trend. When a stock has high short interest AND is below SMA50, that is a bearish warning — informed bears are positioned against the stock and the trend confirms their thesis. But when a stock has high short interest AND is above SMA50 with positive MACD momentum, that is a potential short squeeze setup — the bears may be forced to cover as the price rises. Both signals appear in Claude's Warning Signs section so the AI can factor them into BUY/HOLD decisions.",
     "blockersTitle": "Signal Blockers",
     "blockersDesc": "Some conditions automatically block a BUY signal regardless of score:",
     "blocker1": "RSI above 75 — the stock is likely overbought and due for a pullback",
-    "blocker2": "Hostile macro environment — rising rates + high inflation + high VIX",
+    "blocker2": "Hostile macro environment — rising rates + high inflation + high VIX + inverted yield curve + widening credit spreads",
     "blocker3": "Extremely low volume — less than 200K daily average, too illiquid",
     "blocker4": "Fraud or integrity red flags detected in fundamental data",
     "priceDisplayTitle": "Price Display on Signal Cards",
@@ -689,7 +694,11 @@
     "twoPassTitle": "Two-Pass Scanning",
     "twoPassDesc": "Signa uses a two-pass scanning optimization: the top 15 candidates by volume/price action receive full AI analysis (reasoning, sentiment, target prices), while the remaining 35 get tech-only scoring. This balances analysis depth with API cost. You can configure these thresholds in Settings under the Scanning section.",
     "regimeBadgesTitle": "Market Regime Badges",
-    "regimeBadgesDesc": "Each signal may carry a market regime tag — TRENDING, VOLATILE, or CRISIS — reflecting the current macro environment. In TRENDING mode, full signals are generated with normal Kelly sizing. In VOLATILE mode, High Risk scores are reduced 15% and Kelly is halved. In CRISIS mode, High Risk signals are paused entirely and only Safe Income dividends are shown.",
+    "regimeBadgesDesc": "Each signal carries a market regime tag reflecting the current macro environment. Four regimes exist:",
+    "regimeTrending": "TRENDING — Normal market. Full signal generation, normal Kelly sizing. VIX below 20, SPY above its moving averages.",
+    "regimeVolatile": "VOLATILE — Elevated uncertainty. High Risk scores reduced 15%, Kelly halved. VIX 20-30 or SPY below 50-day SMA.",
+    "regimeCrisis": "CRISIS — Market stress. High Risk signals paused entirely, only Safe Income dividend plays shown. VIX above 30 or SPY well below 200-day SMA.",
+    "regimeRecovery": "RECOVERY — Post-crisis rebound. VIX falling from crisis levels (20-30), SPY reclaiming its 50-day SMA, and VIX was above 30 within the last 30 days. Historically the highest-return regime. High Risk scores boosted 10% because momentum works exceptionally well in early recoveries.",
     "kellyTitle": "Kelly Position Sizing",
     "kellyDesc": "Signa uses fractional Kelly criterion (25% of full Kelly) to suggest position sizes, adjusted by market regime. In normal conditions, Kelly sizing applies fully. In volatile markets, Kelly is halved. In crisis mode, Kelly is capped at 5%. This prevents overexposure during uncertain conditions while still optimizing for expected returns.",
     "settingsTitle": "Settings Page",
@@ -850,6 +859,26 @@
       {
         "term": "P&L",
         "meaning": "Profit and Loss — your gain or loss on a position, shown as both dollar amount and percentage."
+      },
+      {
+        "term": "OAS",
+        "meaning": "Option-Adjusted Spread — the yield spread of a bond over Treasuries, adjusted for embedded options. Used for credit spread measurement."
+      },
+      {
+        "term": "BWD",
+        "meaning": "Backwardation — when spot VIX exceeds VIX futures. Signals acute market stress. The opposite of contango (CTG)."
+      },
+      {
+        "term": "CTG",
+        "meaning": "Contango — when VIX futures exceed spot VIX. Normal market condition. The opposite of backwardation (BWD)."
+      },
+      {
+        "term": "Cu/Au",
+        "meaning": "Copper/Gold Ratio — copper price divided by gold price. Rising = economic growth expectations. Falling = flight to safety."
+      },
+      {
+        "term": "INV",
+        "meaning": "Inverted — refers to the yield curve when 10-Year Treasury yield is below 2-Year yield. A recession warning signal."
       }
     ],
     "telegramMsgsTitle": "Telegram Message Types",
@@ -899,6 +928,26 @@
     "weekendCryptoDesc": "Crypto markets trade 24/7, including weekends. When enabled in Settings, the brain monitors crypto positions every hour on Saturdays and Sundays. If a crypto position hits a stop, drops more than 2%, or shows bearish sentiment, the brain will act -- just like during the week. Equity positions are skipped on weekends since stock markets are closed. This is off by default to save on API costs, but recommended if you hold crypto positions over the weekend.",
     "fearGreedTitle": "Fear & Greed Index",
     "fearGreedDesc": "The dashboard shows the CNN Fear & Greed Index (0-100) alongside VIX and other macro data. Extreme Fear periods are historically better for buying, while Extreme Greed suggests caution. The AI providers also receive this data so their analysis reflects current market psychology.",
+    "macroEnvironmentTitle": "Macro Environment Badge",
+    "macroEnvironmentDesc": "The top-right market indicator shows a colored Favorable, Neutral, or Hostile badge. This is computed from multiple macro signals: VIX level, VIX term structure (contango/backwardation), yield curve slope (10Y-2Y spread), and credit spreads (BBB OAS). Green (Favorable) means no hostile signals detected. Yellow (Neutral) means 1-2 warning signals are active. Red (Hostile) means 3+ warning signals are firing and the brain becomes very conservative.",
+    "intermarketTitle": "Intermarket Indicators",
+    "intermarketDesc": "The market status indicator (top right) shows real-time intermarket data when you hover over it. These cross-asset signals provide context that single-stock analysis misses.",
+    "intermarket1": "Gold — Safe-haven asset. Rising gold prices often signal fear or inflation hedging. A strong gold rally during a stock selloff confirms risk-off sentiment.",
+    "intermarket2": "Oil — Economic activity barometer. Falling oil prices can signal slowing demand (bearish for energy stocks) or oversupply. Rising oil impacts transportation and manufacturing costs.",
+    "intermarket3": "Copper/Gold Ratio — The most reliable real-time economic health indicator. Rising ratio means growth expectations are improving (bullish for equities). Falling ratio means flight to safety (bearish). Tracks GDP growth better than most survey data.",
+    "yieldCurveTitle": "Yield Curve (10Y-2Y)",
+    "yieldCurveDesc": "The 10-Year minus 2-Year Treasury spread is the single most reliable recession predictor. It has preceded every US recession since 1970. When positive (normal), the economy is healthy. When negative (inverted), a recession typically follows in 12-18 months. The critical nuance: stocks often rally DURING the inversion — the real danger comes when the curve un-inverts (goes back positive) after being inverted, typically 3-9 months before recession hits. Shown in the hover card with an INV tag when inverted and STEEP when above 1.5%.",
+    "creditSpreadTitle": "Credit Spreads (BBB OAS)",
+    "creditSpreadDesc": "BBB corporate bond spreads measure how much extra yield the bond market demands for corporate default risk. This is the smart money's fear gauge — it moves BEFORE VIX and before stock prices. Normal: 1.0-2.0%. Elevated: 2.0-3.0%. Stress: 3.0-5.0%. Crisis: 5.0%+. When credit spreads are widening, the bond market is pricing in trouble that equity markets haven't recognized yet. Shown with ELEV, STRESS, or CRISIS tags.",
+    "vixTermTitle": "VIX Term Structure",
+    "vixTermDesc": "Compares spot VIX to 3-month VIX futures. In contango (CTG, spot below futures) the market expects calm to persist — normal. In backwardation (BWD, spot above futures) the market is more scared NOW than later — acute stress. Ratio above 1.10 = caution. Above 1.15 = severe stress, historically precedes 5-15% drawdowns within 2 weeks. Shown with a trend arrow and CTG/BWD label.",
+    "warningSignsTitle": "Macro Warning Signs",
+    "warningSignsDesc": "When macro conditions are dangerous, Signa surfaces explicit warning signs in the AI synthesis prompt — positioned right before Claude makes its decision to maximize attention. Three macro warnings can fire:",
+    "warning1": "VIX Backwardation Stress — VIX term structure ratio above 1.10 means spot fear exceeds expected future fear, historically precedes near-term drawdowns.",
+    "warning2": "Yield Curve Inverted — 10Y-2Y spread negative is a recession warning that has preceded every US recession since 1970.",
+    "warning3": "Credit Spread Stress — BBB OAS above 3.0% means the corporate bond market is pricing elevated default risk, often leading equity declines by weeks.",
+    "recoveryRegimeTitle": "RECOVERY Regime",
+    "recoveryRegimeDesc": "A fourth market regime alongside Trending, Volatile, and Crisis. Fires when VIX is falling from crisis levels (20-30 range), SPY has reclaimed its 50-day SMA, and VIX was above 30 within the last 30 days. This prevents false triggers on routine pullbacks — only a genuine post-crisis recovery qualifies. Historically produces the highest risk-adjusted returns of any regime. The brain gives a 10% score boost to HIGH_RISK signals because momentum strategies work exceptionally well during post-crisis recoveries. Beaten-down stocks showing fresh upward momentum have the highest alpha in this phase.",
     "shortInterestTitle": "Short Interest",
     "shortInterestDesc": "Each ticker's short interest (% of shares sold short) is shown on the signal detail page under Fundamentals. High short interest combined with bullish momentum can trigger squeeze potential, which the scoring system rewards with bonus points. Look for this when evaluating HIGH_RISK signals.",
     "probVsSpyTitle": "Probability vs SPY",
@@ -1003,6 +1052,8 @@
     "aggressive": "Aggressive",
     "weekendCrypto": "Weekend Crypto Watchdog",
     "weekendCryptoDesc": "Monitor crypto positions on weekends (hourly). Crypto trades 24/7.",
+    "allowWeekendScans": "Allow Weekend Scans",
+    "allowWeekendScansDesc": "Allow manual scan triggers on Saturdays and Sundays.",
     "subtitle": "AI providers, scanning, thresholds, themes, and language.",
     "confirmSaveMessage": "Are you sure? This will update your signal configuration.",
     "confirm": "Confirm",

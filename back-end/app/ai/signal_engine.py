@@ -336,6 +336,10 @@ def compute_score(
         score = score * 0.85
         regime_adjustment_applied = True
         regime_adjustment_note = "Score reduced 15%: volatile market regime"
+    elif market_regime == "RECOVERY" and bucket == "HIGH_RISK":
+        score = score * 1.10
+        regime_adjustment_applied = True
+        regime_adjustment_note = "Score boosted 10%: recovery regime favors momentum"
     elif market_regime == "CRISIS":
         if bucket == "HIGH_RISK":
             score = 0
