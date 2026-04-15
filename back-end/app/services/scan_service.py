@@ -280,6 +280,9 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             f"({len(core_set)} core + {len(db_additions)} brain-added + {len(discovered)} discovered)"
         )
 
+        import time as _time
+        _scan_t0 = _time.perf_counter()
+
         # ── Phase 1 + Phase 2 + Phase 3 OVERLAP ──
         # Bulk screening (~100s on cold scans, ~5s on warm) is the long pole.
         # Macro snapshot, knowledge block, and macro pulse have NO dependency
@@ -317,6 +320,8 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
 
         # Block on screening (the long pole) before prefiltering
         screening_data = await screening_task
+        _t_screening = _time.perf_counter()
+        logger.info(f"⏱ Phase 1 (screening + macro + knowledge): {_t_screening - _scan_t0:.1f}s")
         _update_progress(10, "filtering")
         watchlist_symbols = queries.get_all_watchlist_symbols()
         # Always include held brain positions in the candidate list, even
@@ -388,6 +393,8 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         total_candidates = len(candidates)
 
         # ── PASS 1: Pre-score all candidates (no AI tokens) ──
+        _t_prepass = _time.perf_counter()
+        logger.info(f"⏱ Phase 2 (macro + regime + knowledge): {_t_prepass - _t_screening:.1f}s")
         _update_progress(20, "prescoring", "Pre-scoring candidates...")
         pre_scores: list[tuple[str, int, str, dict, dict]] = []  # (ticker, score, bucket, tech, fund)
         # Stash the raw price_df + fundamentals from PASS 1 so PASS 2 can
@@ -527,6 +534,8 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         )
 
         # ── PASS 2: Full AI analysis for top candidates ──
+        _t_pass1_done = _time.perf_counter()
+        logger.info(f"⏱ PASS 1 (pre-score {len(pre_scores)} candidates): {_t_pass1_done - _t_prepass:.1f}s")
         _update_progress(45, "analyzing", "AI analysis on top candidates...")
         valid_signals = []
         errors_count = 0
@@ -553,6 +562,8 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
 
         ai_tasks = [_process_ai(item, i) for i, item in enumerate(ai_candidates)]
         ai_results = await asyncio.gather(*ai_tasks)
+        _t_pass2_done = _time.perf_counter()
+        logger.info(f"⏱ PASS 2 (AI synthesis {len(ai_candidates)} candidates): {_t_pass2_done - _t_pass1_done:.1f}s")
         valid_signals.extend(s for s in ai_results if isinstance(s, dict))
 
         # AI failure rate guard: alert if >50% of AI candidates failed synthesis.
@@ -774,9 +785,18 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             current_ticker="",
         )
 
+        _t_end = _time.perf_counter()
         logger.info(
             f"{scan_type} scan complete: {len(valid_signals)} signals, "
             f"{gems_count} GEMs, {duration}s"
+        )
+        logger.info(
+            f"⏱ SCAN TIMING: screening={_t_screening - _scan_t0:.0f}s, "
+            f"macro={_t_prepass - _t_screening:.0f}s, "
+            f"pass1={_t_pass1_done - _t_prepass:.0f}s, "
+            f"pass2={_t_pass2_done - _t_pass1_done:.0f}s, "
+            f"tail={_t_end - _t_pass2_done:.0f}s, "
+            f"total={_t_end - _scan_t0:.0f}s"
         )
 
         return scan_id
