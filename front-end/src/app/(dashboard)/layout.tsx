@@ -79,7 +79,7 @@ function MarketIndicator() {
 
   return (
     <div
-      className="fixed top-4 right-6 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full transition-all cursor-default"
+      className="fixed bottom-4 right-6 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full transition-all cursor-default"
       style={{
         backgroundColor: theme.colors.surface,
         border: `1px solid ${theme.colors.border}`,
@@ -129,7 +129,7 @@ function MarketIndicator() {
 
       {hovered && (
         <div
-          className="absolute top-full right-0 mt-2 rounded-xl p-3 min-w-[220px]"
+          className="absolute bottom-full right-0 mb-2 rounded-xl p-3 min-w-[220px]"
           style={{
             backgroundColor: theme.colors.surface,
             border: `1px solid ${theme.colors.border}`,
@@ -315,12 +315,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <>
       <LeftNav />
-      <div className="hidden md:block">
-        <MarketIndicator />
-      </div>
+      {/* MarketIndicator moved into LeftNav sidebar as a dot + hover panel */}
       {/* Desktop: offset for floating nav */}
       <div className="hidden md:block md:ml-[72px]">
-        <main className="max-w-[1200px] mx-auto px-6 lg:px-8 py-6">
+        <main className="max-w-[1440px] mx-auto px-6 lg:px-8 py-6">
           <div className="min-w-0">{children}</div>
         </main>
       </div>

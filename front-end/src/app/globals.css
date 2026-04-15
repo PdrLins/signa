@@ -14,6 +14,17 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/*
+ * Responsive content scaling for larger screens.
+ * Tailwind text-[Xpx] uses fixed pixels, so changing root font-size
+ * doesn't help. CSS zoom scales everything (fonts, spacing, cards)
+ * proportionally — the minimalist look is preserved, just sized up
+ * so it's readable from a normal desk distance on big monitors.
+ *
+ * 1024-1536px: no zoom (laptop screens, already fine)
+ * 1536px+: 110% zoom (external monitors, iPads in landscape)
+ */
+
 /* Dark theme scrollbars */
 html.dark {
   scrollbar-color: #444 #1e1e1e;
