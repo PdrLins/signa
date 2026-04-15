@@ -25,12 +25,15 @@ export function BottomNav() {
   const [moreOpen, setMoreOpen] = useState(false)
 
   const MORE_ITEMS = useMemo(() => [
-    { label: t.nav.brain, href: '/brain', icon: Brain, exact: true },
+    { label: t.nav.brain, href: '/brain', icon: Brain },
     { label: t.nav.integrations, href: '/integrations', icon: Plug },
     { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle },
     { label: t.nav.logs, href: '/logs', icon: ScrollText },
     { label: t.nav.settings, href: '/settings', icon: Settings },
   ], [t])
+
+  // /brain in More menu uses exact match so /brain/performance doesn't highlight it
+  const EXACT_MORE_HREFS = new Set(['/brain'])
 
   const TABS = useMemo(() => [
     { label: t.nav.overview, href: '/overview', icon: LayoutDashboard },
@@ -44,7 +47,7 @@ export function BottomNav() {
 
   const isMoreActive = useMemo(
     () => MORE_ITEMS.some((item) => {
-      if ((item as any).exact) return pathname === item.href
+      if (EXACT_MORE_HREFS.has(item.href)) return pathname === item.href
       return pathname === item.href || pathname.startsWith(item.href + '/')
     }),
     [MORE_ITEMS, pathname]
@@ -73,7 +76,7 @@ export function BottomNav() {
           >
             <div className="grid grid-cols-3 gap-3">
               {MORE_ITEMS.map((item) => {
-                const isActive = (item as any).exact ? pathname === item.href : (pathname === item.href || pathname.startsWith(item.href + '/'))
+                const isActive = EXACT_MORE_HREFS.has(item.href) ? pathname === item.href : (pathname === item.href || pathname.startsWith(item.href + '/'))
                 return (
                   <Link
                     key={item.href}
