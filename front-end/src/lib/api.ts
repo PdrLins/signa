@@ -24,7 +24,7 @@ const PUBLIC_EXACT = ['/health']
 
 export const client = axios.create({
   baseURL: API_URL,
-  timeout: 8_000,
+  timeout: 15_000,
   headers: { 'Content-Type': 'application/json' },
 })
 

@@ -32,8 +32,17 @@ def get_signals(
     limit: int = 50,
     gems_only: bool = False,
 ) -> list[dict]:
-    """Get latest signals with optional filters."""
-    signals = queries.get_signals(
+    """Get latest signals with optional filters.
+
+    Returns signals WITHOUT live price enrichment. Each signal already
+    has `price_at_signal` (the price when the scan generated it), which
+    is sufficient for the list view. Live price enrichment was causing
+    DNS thread exhaustion during scans because `_fetch_prices_batch`
+    competed with the scan's own yfinance calls for the same DNS pool.
+
+    Live prices are only fetched on the detail page (`get_signals_by_ticker`).
+    """
+    return queries.get_signals(
         bucket=bucket,
         action=action,
         status=status,
@@ -42,7 +51,6 @@ def get_signals(
         limit=limit,
         gems_only=gems_only,
     )
-    return enrich_signals(signals)
 
 
 def get_signals_by_ticker(symbol: str, limit: int = 20) -> list[dict]:

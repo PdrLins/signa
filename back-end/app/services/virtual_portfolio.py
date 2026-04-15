@@ -1139,23 +1139,14 @@ def process_virtual_trades(
     # heat=3: locked (no new entries, let existing positions ride)
     portfolio_heat = 0
 
-    # Factor 1: Portfolio unrealized P&L (do we have gains to protect?)
-    if brain_entry_prices and brain_open_count >= 3:
-        brain_symbols = [r["symbol"] for r in all_open if r.get("source") == "brain"]
-        brain_prices = _fetch_prices_batch(brain_symbols)
-        total_unrealized = 0.0
-        priced_count = 0
-        for r in all_open:
-            if r.get("source") != "brain":
-                continue
-            px, _ = brain_prices.get(r["symbol"], (None, None))
-            ep = float(r.get("entry_price", 0))
-            if px and ep > 0:
-                total_unrealized += ((px - ep) / ep) * 100
-                priced_count += 1
-        avg_unrealized = total_unrealized / priced_count if priced_count else 0
-        if avg_unrealized > 2.0:  # avg position is up >2% — meaningful gains
-            portfolio_heat += 1
+    # Factor 1: Portfolio size as a proxy for unrealized gains.
+    # Previously this fetched live prices for ALL brain positions mid-scan
+    # via _fetch_prices_batch — that caused DNS thread exhaustion because
+    # it competed with the scan's own yfinance calls. Replaced with a
+    # simple position-count heuristic: if we have 8+ positions, we likely
+    # have meaningful gains to protect (the brain only buys winners).
+    if brain_open_count >= 8:
+        portfolio_heat += 1
 
     # Factor 2: Concentration (too many open positions)
     if brain_open_count > 12:
