@@ -1168,7 +1168,7 @@ def process_virtual_trades(
         heat_labels = {1: "cautious", 2: "defensive", 3: "locked"}
         logger.info(
             f"Portfolio heat: {portfolio_heat} ({heat_labels.get(portfolio_heat, 'max')}) — "
-            f"positions={brain_open_count}, avg_pnl={avg_unrealized if brain_entry_prices else 0:+.1f}%, "
+            f"positions={brain_open_count}, "
             f"vix={first_macro.get('vix') if first_macro else '?'}"
         )
 
