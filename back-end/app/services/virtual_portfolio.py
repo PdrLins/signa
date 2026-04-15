@@ -1806,7 +1806,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
                 logger.info(
                     f"Virtual TARGET_HIT suppressed for {symbol} — "
                     f"held {days_held}d, P&L {pnl_pct:+.1f}%, trailing stop active "
-                    f"(letting winner run, trail at ${trailing_stop_price:.2f})"
+                    f"(letting winner run, trail at ${soft_trail:.2f})"
                 )
                 continue  # skip this exit, trailing stop will manage
             exit_reason = "TARGET_HIT"
