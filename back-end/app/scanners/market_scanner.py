@@ -71,12 +71,17 @@ async def get_price_history(ticker: str, period: str = "3mo") -> pd.DataFrame:
     """
     def _fetch():
         t = yf.Ticker(ticker)
-        return t.history(period=period)
+        result = t.history(period=period)
+        # yfinance sometimes returns None instead of an empty DataFrame
+        if result is None:
+            return pd.DataFrame()
+        return result
 
     try:
         df = await asyncio.to_thread(_fetch)
-        if df.empty:
+        if df is None or df.empty:
             logger.warning(f"No price data for {ticker}")
+            return pd.DataFrame()
         return df
     except Exception as e:
         logger.error(f"Failed to fetch price history for {ticker}: {e}")
