@@ -57,12 +57,11 @@ async def logout(request: Request, user: dict = Depends(get_current_user)):
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(request: Request):
-    """Refresh the JWT access token. Accepts expired tokens within a grace window.
+    """Refresh the JWT access token within a 4-hour grace window.
 
-    Grace period: 4 hours. Long enough for a normal work session, short
-    enough that leaving overnight logs you out. Was 24h previously, which
-    meant the silent refresh always succeeded and the user was never
-    kicked out — defeating the purpose of token expiry.
+    After 4 hours of inactivity the refresh fails and the frontend
+    redirects to /login. Was 24h previously — that meant the user was
+    never kicked out because the refresh always succeeded.
     """
     from app.core.security import decode_token_allow_expired
 
