@@ -18,6 +18,9 @@ import {
   ScrollText,
 } from 'lucide-react'
 
+// /brain in More uses exact match so /brain/performance doesn't highlight it
+const EXACT_MORE_HREFS = new Set(['/brain'])
+
 export function BottomNav() {
   const theme = useTheme()
   const pathname = usePathname()
@@ -33,7 +36,7 @@ export function BottomNav() {
   ], [t])
 
   // /brain in More menu uses exact match so /brain/performance doesn't highlight it
-  const EXACT_MORE_HREFS = new Set(['/brain'])
+
 
   const TABS = useMemo(() => [
     { label: t.nav.overview, href: '/overview', icon: LayoutDashboard },

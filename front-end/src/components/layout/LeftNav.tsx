@@ -3,13 +3,11 @@
 import { useState, useEffect, useMemo } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { useQuery } from '@tanstack/react-query'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useAuthStore } from '@/store/authStore'
 import { useAllSignals } from '@/hooks/useSignals'
 import { useStats } from '@/hooks/useStats'
-import { client } from '@/lib/api'
 import { isMarketOpen, DEFAULT_TIMEZONE } from '@/lib/utils'
 import {
   LayoutDashboard,

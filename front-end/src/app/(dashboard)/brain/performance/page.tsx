@@ -791,23 +791,24 @@ export default function BrainPerformancePage() {
 
               {/* Table rows */}
               <div className="space-y-0.5">
-                {trackRecord.ranges.map((row: Record<string, number | string>) => {
-                  const trades = (row.trades as number) || 0
-                  const winRate = (row.win_rate as number) || 0
-                  const avgRet = (row.avg_return_pct as number) || 0
-                  const best = (row.best as number) || 0
-                  const worst = (row.worst as number) || 0
-                  const totalPnl = (row.total_pnl as number) || 0
-                  const wins = (row.wins as number) || 0
-                  const losses = (row.losses as number) || 0
+                {trackRecord.ranges.map((row) => {
+                  const r = row as unknown as Record<string, number | string>
+                  const trades = (r.trades as number) || 0
+                  const winRate = (r.win_rate as number) || 0
+                  const avgRet = (r.avg_return_pct as number) || 0
+                  const best = (r.best as number) || 0
+                  const worst = (r.worst as number) || 0
+                  const totalPnl = (r.total_pnl as number) || 0
+                  const wins = (r.wins as number) || 0
+                  const losses = (r.losses as number) || 0
 
                   return (
                     <div
-                      key={row.score_range as string}
+                      key={r.score_range as string}
                       className="grid grid-cols-6 gap-1 py-2 rounded-lg px-1"
                       style={{ backgroundColor: trades > 0 ? theme.colors.surfaceAlt : 'transparent' }}
                     >
-                      <p className="text-[11px] font-semibold tabular-nums" style={{ color: theme.colors.text }}>{row.score_range}</p>
+                      <p className="text-[11px] font-semibold tabular-nums" style={{ color: theme.colors.text }}>{r.score_range}</p>
                       <p className="text-[11px] tabular-nums text-center" style={{ color: theme.colors.textSub }}>
                         {trades === 0 ? '\u2014' : (
                           <><span style={{ color: theme.colors.up }}>{wins}</span> / <span style={{ color: theme.colors.down }}>{losses}</span></>
