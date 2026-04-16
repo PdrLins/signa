@@ -1315,6 +1315,116 @@ META's target was set at +5.3% ($661) at entry. The stock peaked at +7.8% ($676.
 
 ---
 
+## Day 10 -- April 16, 2026 (Thursday)
+
+**First perfect-5/5 scan day since the DNS incident, +7.40% realized on 10 closes, and one live design bug uncovered: three freshly-opened positions got invalidated within 57 seconds of being bought inside the same MORNING scan.**
+
+### Environment
+- Market: TRENDING (Claude thesis text notes VIX neighborhood, Fear/Greed flipped to greed 57.6)
+- Scans: **5/5 COMPLETE** — PRE_MARKET, MORNING, MIDDAY, PRE_CLOSE, AFTER_CLOSE. First clean day since Day 9's DNS exhaustion.
+- Budget: ~$0 (Claude Local still carrying synthesis, 25+ thesis re-evals via thesis_tracker)
+- Signals per scan: 55–57 (stable)
+- GEMs: 0
+
+### Brain trades
+
+**Opened (6):** ESE @ $297.62 (T1, 82), CCO.TO @ $166.50 (T1, 79), DIR-UN.TO @ $13.99 (T1, 76), HMY @ $17.82 (T2, 72), VZ @ $46.27 (T2, 75), BLK @ $1021.45 (T1, 77 — re-buy, see below).
+
+**Closed (10):**
+
+| Symbol | Scan | Exit reason | P&L % | P&L $ | Peak | Notes |
+|---|---|---|---|---|---|---|
+| **TPL** | MORNING | THESIS_INVALIDATED | **+4.17%** | **+$17.07** | +2.5% over entry | Held 6 days. Exit at 14:02:54. |
+| **WING** | MORNING | THESIS_INVALIDATED | **+4.13%** | **+$7.42** | +8.5% at peak | Held 7 days. Biggest winner by %. |
+| **ETH-USD** | MORNING | TRAILING_STOP | **+2.17%** | **+$48.97** | +5.9% at peak | Crypto. Biggest $ winner. |
+| ESE | PRE_MARKET | THESIS_INVALIDATED | +0.90% | +$2.75 | n/a | Bought Apr 15, out at 10:02. |
+| AGI.TO | (watchdog) | WATCHDOG_EXIT | -0.20% | -$0.13 | n/a | Bearish sentiment, tiny loss. |
+| TSM | MORNING | QUALITY_PRUNE | -0.78% | -$2.89 | -- | Weakening thesis, pruned for slot. |
+| BLK | MORNING | SIGNAL | **-2.87%** | **-$30.71** | -- | Sold on SELL signal. **Re-bought 5h later at $1021.45.** |
+| ESE (#2) | MORNING | THESIS_INVALIDATED | -0.03% | -$0.08 | -- | **Bought and closed inside the SAME scan.** |
+| CCO.TO | MORNING | THESIS_INVALIDATED | -0.02% | -$0.03 | -- | **Bought and closed inside the SAME scan.** |
+| DIR-UN.TO | MORNING | THESIS_INVALIDATED | -0.07% | -$0.01 | -- | **Bought and closed inside the SAME scan.** |
+
+**Realized today: +7.40% | +$42.36** (4W $76.21 / 6L -$33.85). Win-rate 40% but winners are 2.2x bigger than losers by dollars.
+
+### The intra-scan buy→invalidate bug (new)
+
+Three of today's six new entries — **ESE, CCO.TO, DIR-UN.TO** — were opened at `14:01:57` and closed at `14:02:54`, inside the same MORNING scan. Each carried `THESIS_INVALIDATED` as the exit reason with losses of roughly one penny per share.
+
+Sequence in one scan:
+1. Stage 7 (`process_virtual_trades`) opens the three positions from the BUY signals.
+2. Stage 6 (`thesis_tracker`) re-evaluates every OPEN brain position — including the three just opened.
+3. Claude Local re-reads the entry thesis and returns `invalid` (confidence high enough to trigger exit).
+4. `check_virtual_exits` closes them 57 seconds after opening.
+
+Confirmed via `knowledge_events.payload`: `thesis_evaluated` rows with `should_exit=True` exist for ESE, CCO.TO, DIR-UN.TO at timestamps matching the exit clock. The 60-minute re-buy cooldown didn't fire because it only applies *after* a `THESIS_INVALIDATED` close — it doesn't prevent the first invalidation from happening on the same scan that created the position.
+
+**Design gap:** thesis re-eval should skip positions whose `entry_date` is within this scan run. Alternative: a minimum-hold window of one scan cycle before thesis_tracker can invalidate. Either prevents the same-scan flip-flop while keeping the invalidation discipline for real exits (WING, TPL above both exited correctly at +4% after 6–7 days).
+
+### BLK re-buy discipline (not a bug)
+
+BLK closed at `14:01:57` with `SIGNAL` (-2.87%) and re-opened at `19:01:47` at `$1021.45` — **4.5% lower than the original $1069.51 entry**. The 60-min `THESIS_INVALIDATED` cooldown didn't apply (exit_reason was `SIGNAL`, not `THESIS_INVALIDATED`), so re-buy was allowed. The 5-hour gap + the lower entry suggest this was rational — the brain let the sell-signal wash through, then re-entered at a better price when the MIDDAY/PRE_CLOSE scan re-confirmed the setup. Worth watching whether this pattern prints wins.
+
+### Watchdog activity (44 events)
+
+- **HOLD_THROUGH_DIP: 20** — GOOGL 13×, WING 3×, TPL 3×, TSM 1×. GOOGL is burning through the cooldown counter fast; it should be in 1h cooldown by now per the 3-consecutive-holds rule.
+- **ALERT: 19** — HBM 9×, TSM 6×, AGI.TO 2×, BLK 2×. HBM was the most alert-heavy name of the day.
+- **RECOVERY: 4** — all HBM. So HBM alerted 9× and recovered 4× — volatile but ending the day at `thesis=valid`.
+- **CLOSE: 1** — AGI.TO (WATCHDOG_EXIT -0.20%).
+
+GOOGL's 13 HOLD_THROUGH_DIP events in one day are the most for any single ticker this week and suggest the cooldown rule is only partially effective when the name keeps oscillating around thresholds.
+
+### Open positions (8, down from 12 yesterday)
+
+| Symbol | Entry | Score | Tier | Thesis | Notes |
+|---|---|---|---|---|---|
+| BLK | $1021.45 | 77 | T1 | valid | Re-buy at lower price |
+| HMY | $17.82 | 72 | T2 | weakening | New, already weakening |
+| VZ | $46.27 | 75 | T2 | valid | New |
+| CNQ | $45.51 | 77 | T1 | weakening | Day 2 — CNQ saw 5 weakening re-evals today, didn't invalidate |
+| HBM | $25.32 | 80 | T1 | valid | Volatile (9 alerts, 4 recoveries) |
+| GOOGL | $332.32 | 81 | T1 | weakening | 13 HOLD_THROUGH_DIP — watchdog magnet |
+| REGN | $740.85 | 79 | T1 | valid | Steady, day 6 |
+| LYG | $5.57 | 73 | T1 | NULL | The last legacy survivor (pre-Stage-6) |
+
+### Features shipped today
+
+| Feature | Commit | What it does |
+|---|---|---|
+| Per-scan Telegram toggle | `f9a9f34` | `notify_scans_disabled` + ContextVar in scan_service; UI card in /settings; PRE_MARKET silenced by default |
+| Quiet hours to 6:30 AM | `f9a9f34` | `is_quiet_hours()` now minute-aware; window 18:00 → 06:30 ET |
+| How-it-works: watchdog events reference | (pending commit) | New card lists ALERT / ESCALATION / HOLD_THROUGH_DIP / CLOSE / RECOVERY definitions |
+| How-it-works: quiet-hours + per-scan bullets | (pending commit) | `notif7`, `notif8`, updated `scan1` and `notifNote` (5 scans, not 4) |
+| Closed trades load-more | `4fa9f28` | Performance page paginates in 5s; button hides when exhausted |
+| Dashboard widget cap | `4fa9f28` | Explicit `slice(0,5)` so widget stays compact |
+| Dollar P&L on performance | `9160885` | `total_pnl_amount` + sub-line "+$X @ 1 share/trade" on Total Return stat box |
+| Removed `[:5]` cap on recent_closed | `9160885` | Server returns up to 50 closed trades (DB query limit) |
+
+### Week 2 running totals (Apr 13–16)
+
+| Metric | Value |
+|---|---|
+| Trading days | 4 (Mon–Thu) |
+| Brain entries | 12 |
+| Brain closes | 18 |
+| Close win rate | 39% (7W / 11L) |
+| Realized P&L | **+11.97% / +$63.61** |
+| Best trade | META +7.38% / +$34.08 (Wed) |
+| Worst trade | BLK -2.87% / -$30.71 (today) |
+| Currently open | 8 positions |
+| Scans completed | 17/20 (85% — up from 60% last week) |
+
+### Metrics to track tomorrow
+
+- [ ] **Same-scan buy→invalidate** — does it fire again? If yes, gate thesis_tracker on `entry_date < scan_start`.
+- [ ] BLK at $1021.45 — does the re-buy recover, or is it the BLK-sell-signal being right twice in a row?
+- [ ] GOOGL — is the 3-consecutive-holds cooldown actually suppressing Telegram spam? Check alert count vs hold count.
+- [ ] HBM — volatile ending today. Does it close day 2 in the green, or alert another 9 times?
+- [ ] HMY new entry at `weakening` thesis on day 1 — does it invalidate quickly, or recover?
+- [ ] Quiet-hours + per-scan toggle: verify **zero** Telegram messages from tomorrow's PRE_MARKET scan (except the confirmed `urgent=True` OTP path).
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]
