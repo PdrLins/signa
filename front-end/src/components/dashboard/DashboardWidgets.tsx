@@ -392,7 +392,7 @@ export function BrainPerformanceWidget() {
           {data.recent_closed.length > 0 && (
             <div className="pt-2 mt-1" style={{ borderTop: `1px solid ${theme.colors.border}15` }}>
               <div className="flex flex-wrap gap-1.5">
-                {data.recent_closed.map((rc) => (
+                {data.recent_closed.slice(0, 5).map((rc) => (
                   <span key={`${rc.symbol}-${rc.pnl_pct}`} className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ backgroundColor: (rc.is_win ? theme.colors.up : theme.colors.down) + '12', color: rc.is_win ? theme.colors.up : theme.colors.down }}>
                     {rc.symbol} {rc.pnl_pct >= 0 ? '+' : ''}{rc.pnl_pct.toFixed(1)}%
                   </span>

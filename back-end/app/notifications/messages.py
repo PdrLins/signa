@@ -412,15 +412,20 @@ def msg(key: str, **kwargs) -> str:
 
 
 def is_quiet_hours() -> bool:
-    """Check if current time is within notification quiet hours."""
+    """Check if current time is within notification quiet hours.
+
+    Compared in minutes-since-midnight so the window can be set at
+    minute granularity (e.g. 18:00 → 06:30). When end < start the
+    window spans midnight.
+    """
     if not settings.notify_quiet_enabled:
         return False
     from datetime import datetime
     import pytz
     et = datetime.now(pytz.timezone("America/New_York"))
-    hour = et.hour
-    start = settings.notify_quiet_start
-    end = settings.notify_quiet_end
-    if start > end:  # e.g., 18-6 spans midnight
-        return hour >= start or hour < end
-    return start <= hour < end
+    now_mins = et.hour * 60 + et.minute
+    start_mins = settings.notify_quiet_start * 60 + settings.notify_quiet_start_minute
+    end_mins = settings.notify_quiet_end * 60 + settings.notify_quiet_end_minute
+    if start_mins > end_mins:  # spans midnight
+        return now_mins >= start_mins or now_mins < end_mins
+    return start_mins <= now_mins < end_mins

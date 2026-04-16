@@ -2207,7 +2207,10 @@ def get_virtual_summary() -> dict:
                 "peak_price": t.get("peak_price"),
                 "exit_context": _build_exit_context(t),
             }
-            for t in closed_trades[:5]
+            # Send all closed trades fetched (DB query above is `.limit(50)`).
+            # The performance page paginates client-side in batches of 5 via
+            # a "Load more" button; the dashboard widget slices its own view.
+            for t in closed_trades
         ],
         # Per-source breakdown
         "watchlist": {

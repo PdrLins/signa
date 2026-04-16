@@ -204,6 +204,7 @@ export default function BrainPerformancePage() {
   // Group watchdog events by symbol for the monitor grid
   const [watchdogExpandedSymbol, setWatchdogExpandedSymbol] = useState<string | null>(null)
   const [watchdogShowClosed, setWatchdogShowClosed] = useState(false)
+  const [closedVisibleCount, setClosedVisibleCount] = useState(5)
 
   const { data: signalsData } = useQuery<{ signals: { symbol: string; is_discovered?: boolean }[] }>({
     queryKey: ['signals', 'discovered-check'],
@@ -720,7 +721,7 @@ export default function BrainPerformancePage() {
               </p>
             ) : (
               <div className="divide-y" style={{ borderColor: theme.colors.border }}>
-                {brainClosed.map((rc, i) => {
+                {brainClosed.slice(0, closedVisibleCount).map((rc, i) => {
                   const daysHeld = rc.entry_date && rc.exit_date
                     ? Math.max(1, Math.round((new Date(rc.exit_date).getTime() - new Date(rc.entry_date).getTime()) / 86400000))
                     : null
@@ -766,6 +767,15 @@ export default function BrainPerformancePage() {
                   )
                 })}
               </div>
+            )}
+            {brainClosed.length > closedVisibleCount && (
+              <button
+                onClick={() => setClosedVisibleCount(c => c + 5)}
+                className="w-full mt-3 text-[11px] font-semibold py-2 rounded-lg transition-opacity hover:opacity-80"
+                style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.primary, border: `1px solid ${theme.colors.border}` }}
+              >
+                {t.brainPerf.loadMore ?? 'Load more'} ({brainClosed.length - closedVisibleCount})
+              </button>
             )}
           </Card>
 

@@ -605,6 +605,20 @@ export default function HowItWorksPage() {
               </Section>
             </Card>
 
+            {/* Watchdog Event Types */}
+            <Card>
+              <Section title={h.wdEventsTitle}>
+                <P>{h.wdEventsDesc}</P>
+                <ul className="space-y-1.5 mt-2">
+                  <Li>{h.wdEventAlert}</Li>
+                  <Li>{h.wdEventEscalation}</Li>
+                  <Li>{h.wdEventHold}</Li>
+                  <Li>{h.wdEventClose}</Li>
+                  <Li>{h.wdEventRecovery}</Li>
+                </ul>
+              </Section>
+            </Card>
+
             {/* Self-Learning Loop */}
             <Card>
               <Section title={h.learningLoopTitle}>
@@ -908,6 +922,8 @@ export default function HowItWorksPage() {
                   <Li>{h.notif4}</Li>
                   <Li>{h.notif5}</Li>
                   <Li>{h.notif6}</Li>
+                  <Li>{h.notif7}</Li>
+                  <Li>{h.notif8}</Li>
                 </ul>
                 <div className="mt-3">
                   <P>{h.notifNote}</P>

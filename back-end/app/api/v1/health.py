@@ -9,7 +9,24 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.dependencies import get_current_user
+from app.core.scan_schedule import SCAN_SCHEDULE
 from app.scheduler.runner import scheduler
+
+
+def _scan_notifications_map() -> dict[str, bool]:
+    """Return {scan_type: enabled} for every scheduled scan type.
+
+    The internal config stores a comma-separated list of DISABLED scan types
+    (`settings.notify_scans_disabled`). The UI thinks in terms of ENABLED
+    toggles (on = send Telegram), so we invert here. Scan types not listed
+    in `notify_scans_disabled` are enabled by default.
+    """
+    disabled = {
+        s.strip().upper()
+        for s in (settings.notify_scans_disabled or "").split(",")
+        if s.strip()
+    }
+    return {slot.scan_type: slot.scan_type not in disabled for slot in SCAN_SCHEDULE}
 
 
 class AIConfigUpdateRequest(BaseModel):
@@ -30,6 +47,10 @@ class AIConfigUpdateRequest(BaseModel):
     notify_quiet_end: Optional[int] = Field(None, ge=0, le=23)
     watchdog_weekend_crypto: Optional[bool] = None
     allow_weekend_scans: Optional[bool] = None
+    # Per-scan Telegram toggles: map of scan_type -> enabled.
+    # Any scan_type with value `false` is added to `notify_scans_disabled`.
+    # Unknown keys are ignored; omitted keys keep their current value.
+    notify_scans: Optional[dict[str, bool]] = None
 
 
 class BudgetUpdateRequest(BaseModel):
@@ -283,6 +304,9 @@ async def get_ai_config(user: dict = Depends(get_current_user)):
             "weekend_crypto": settings.watchdog_weekend_crypto,
             "allow_weekend_scans": settings.allow_weekend_scans,
         },
+        "notifications": {
+            "scans": _scan_notifications_map(),
+        },
     }
 
 
@@ -351,6 +375,25 @@ async def update_ai_config(
     if body.allow_weekend_scans is not None:
         settings.allow_weekend_scans = body.allow_weekend_scans
 
+    # Per-scan Telegram toggles — merge with the existing disabled set so
+    # omitted scan types keep their current state.
+    if body.notify_scans is not None:
+        valid_types = {slot.scan_type for slot in SCAN_SCHEDULE}
+        current_disabled = {
+            s.strip().upper()
+            for s in (settings.notify_scans_disabled or "").split(",")
+            if s.strip()
+        }
+        for scan_type, enabled in body.notify_scans.items():
+            st = scan_type.upper()
+            if st not in valid_types:
+                continue  # ignore unknown scan types
+            if enabled:
+                current_disabled.discard(st)
+            else:
+                current_disabled.add(st)
+        settings.notify_scans_disabled = ",".join(sorted(current_disabled))
+
     # Audit log config changes
     uid = user.get("user_id")
     insert_audit_log(
@@ -384,5 +427,8 @@ async def update_ai_config(
             "notify_quiet_end": settings.notify_quiet_end,
             "weekend_crypto": settings.watchdog_weekend_crypto,
             "allow_weekend_scans": settings.allow_weekend_scans,
+        },
+        "notifications": {
+            "scans": _scan_notifications_map(),
         },
     }

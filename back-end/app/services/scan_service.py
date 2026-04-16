@@ -225,6 +225,12 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
     start_time = time.time()
     logger.info(f"Starting {scan_type} scan...")
 
+    # Bind scan_type to the async context so nested Telegram sends can
+    # consult `settings.notify_scans_disabled` and suppress themselves for
+    # scans the user has silenced (e.g. PRE_MARKET). Reset in finally below.
+    from app.notifications.scan_context import set_current_scan_type, reset_current_scan_type
+    _scan_ctx_token = set_current_scan_type(scan_type)
+
     # Load bucket cache once for the entire scan (avoids N individual DB queries)
     global _bucket_cache
     try:
@@ -814,6 +820,8 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 current_ticker="",
             )
         raise
+    finally:
+        reset_current_scan_type(_scan_ctx_token)
 
 
 async def _process_candidate(

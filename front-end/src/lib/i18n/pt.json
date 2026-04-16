@@ -492,7 +492,7 @@
     "whoDesc": "Signa foi criado para investidores canadenses que usam plataformas como Wealthsimple, Questrade ou Interactive Brokers. Suporta contas TFSA, RRSP e tributáveis. Quer você prefira ações de dividendos seguras ou jogadas de crescimento agressivo, o Signa classifica cada sinal na categoria certa para sua estratégia.",
     "scanTitle": "Como as Varreduras Funcionam",
     "scanDesc": "Todo dia de negociação (segunda a sexta), o Signa executa 5 varreduras automatizadas em momentos-chave do mercado:",
-    "scan1": "6:00 AM ET — Varredura pré-mercado: captura notícias noturnas, resultados e movimentações pré-mercado antes da abertura.",
+    "scan1": "6:00 AM ET — Varredura pré-mercado: captura notícias noturnas, resultados e movimentações pré-mercado antes da abertura. Alertas no Telegram para esta varredura estão silenciados por padrão (ocorre durante o Horário Silencioso) — reative em Configurações → Notificações de Varredura.",
     "scan2": "10:00 AM ET — Varredura de abertura: confirma ou ajusta sinais após os primeiros 30 minutos de negociação quando dados reais de volume estão disponíveis.",
     "scan2b": "12:00 PM ET — Varredura do meio-dia: preenche a lacuna entre a abertura e o pré-fechamento. Captura reversões da manhã, movimentos do horário de almoço e garante que nenhuma posição fique sem verificação por mais de 2 horas durante o pregão.",
     "scan3": "15:00 ET — Varredura pré-fechamento: identifica mudanças de momentum no fim do dia e oportunidades de última hora antes do fechamento.",
@@ -904,6 +904,13 @@
     "wdNote": "O watchdog usa Grok sentimento ($0.0002/chamada) e Gemini (gratis) apenas quando preocupado — tipicamente 2-3 verificacoes de sentimento por dia. Custo mensal total e aproximadamente $0.03. Verificacoes de preco via Yahoo Finance sao sempre gratuitas.",
     "wdCooldownTitle": "Cooldown do Watchdog",
     "wdCooldownDesc": "Se o watchdog checa o mesmo ticker 3 vezes seguidas e continua mantendo, ele entra em cooldown de 1 hora para reduzir ruido nos alertas. Voce ainda vera todos os eventos registrados, mas nao sera spammado com mensagens do Telegram para um ticker que esta oscilando perto do limite sem realmente cair.",
+    "wdEventsTitle": "Tipos de Evento do Watchdog",
+    "wdEventsDesc": "Cada checagem do watchdog gera um evento. Estes são os rótulos que você verá na página Desempenho do Brain e nos alertas do Telegram:",
+    "wdEventAlert": "ALERT — Primeira vez que o watchdog sinaliza uma posição como preocupante (queda no intervalo >= 2%, perda total >= 2%, próximo do stop, score caiu 10+ pontos ou preocupação composta). O sentimento é consultado e o loop de monitoramento rápido de 5 minutos começa.",
+    "wdEventEscalation": "ESCALATION — A mesma posição continua preocupante numa checagem seguinte e as condições estão piorando. O watchdog monitora de forma mais agressiva e refaz a consulta de sentimento.",
+    "wdEventHold": "HOLD_THROUGH_DIP — A posição está preocupante (preço caiu), mas o sentimento ainda é neutro/otimista, então o brain mantém em vez de vender no pior momento. A checagem se repete a cada 5 minutos. Após 3 eventos consecutivos de HOLD_THROUGH_DIP no mesmo ticker, um cooldown de 1 hora entra em ação para evitar spam no Telegram. Essa é a \"disciplina do comprador de dip\" — não venda só porque o gráfico oscilou.",
+    "wdEventClose": "CLOSE — O watchdog fechou a posição à força. Disparado por sentimento bearish + P&L negativo, saída de emergência (perda total além de -8%, colapso do score abaixo de 50 ou sinal SELL/AVOID em posição perdendo) ou realização de lucro (+3% mantido por 2+ dias).",
+    "wdEventRecovery": "RECOVERY — Uma posição antes preocupante voltou ao preço de entrada ou acima. O nível de alerta é limpo e o monitoramento volta à cadência normal de 15 minutos.",
     "weekendCryptoTitle": "Watchdog Crypto no Fim de Semana",
     "weekendCryptoDesc": "Mercados de crypto operam 24/7, incluindo fins de semana. Quando ativado nas Configuracoes, o brain monitora posicoes crypto a cada hora nos sabados e domingos. Se uma posicao crypto atingir o stop, cair mais de 2%, ou mostrar sentimento bearish, o brain agira -- assim como durante a semana. Posicoes em acoes sao ignoradas nos fins de semana pois os mercados estao fechados. Desativado por padrao para economizar custos de API, mas recomendado se voce mantem posicoes crypto no fim de semana.",
     "fearGreedTitle": "Indice Fear & Greed",
@@ -957,7 +964,9 @@
     "notif4": "Alertas de Posição (stop loss atingido, alvo alcançado, sinal enfraquecendo) são enviados quando você tem posições abertas sendo monitoradas.",
     "notif5": "Todos os alertas aparecem no card de Alertas Recentes no dashboard e no seu chat do Telegram com o bot Signa.",
     "notif6": "Para testar se o Telegram está funcionando, vá à página de Integrações e clique em Enviar Mensagem de Teste.",
-    "notifNote": "Alertas são gerados apenas durante varreduras. As varreduras rodam 4 vezes por dia de segunda a sexta (6h, 10h, 15h, 16:30h ET). Sem varreduras ou alertas nos finais de semana."
+    "notif7": "Horário Silencioso bloqueia todos os alertas não urgentes do Telegram entre 18:00 e 6:30 ET (padrão). Códigos OTP sempre passam. Ajuste a janela em Configurações → Brain Watchdog → Horário Silencioso.",
+    "notif8": "Toggle por varredura: Configurações → Notificações de Varredura permite ativar ou desativar alertas do Telegram para cada varredura agendada (Pré-Mercado, Abertura, Meio-dia, Pré-Fechamento, Pós-Fechamento). Por padrão, a varredura das 6h Pré-Mercado está silenciada — os alertas cairiam dentro do Horário Silencioso de qualquer forma. Desativar uma varredura NÃO impede que ela rode; apenas descarta suas mensagens no Telegram.",
+    "notifNote": "Alertas são gerados apenas durante varreduras. As varreduras rodam 5 vezes por dia de segunda a sexta (6h, 10h, 12h, 15h, 16:30h ET). Sem varreduras ou alertas agendados nos finais de semana — cripto é exceção se o Watchdog de Cripto de Fim de Semana estiver ativado."
   },
   "charts": {
     "allocation": "Alocação de Sinais",
@@ -1041,7 +1050,14 @@
     "quietHours": "Horario Silencioso",
     "quietHoursDesc": "Bloquear notificacoes do Telegram durante estas horas.",
     "quietHoursRange": "{start} PM - {end} AM ET",
-    "quietEnabled": "Ativar horario silencioso"
+    "quietEnabled": "Ativar horario silencioso",
+    "scanNotifications": "Notificações de Varredura",
+    "scanNotificationsDesc": "Escolha quais varreduras agendadas enviam alertas no Telegram.",
+    "scanPreMarket": "Pré-abertura (6:00 AM ET)",
+    "scanMorning": "Abertura (10:00 AM ET)",
+    "scanMidday": "Meio-dia (12:00 PM ET)",
+    "scanPreClose": "Pré-fechamento (3:00 PM ET)",
+    "scanAfterClose": "Após fechamento (4:30 PM ET)"
   },
   "brain": {
     "telegramVerification": "Verificação Telegram",
@@ -1251,6 +1267,7 @@
     "scoreRange": "Faixa de Score",
     "trades": "Trades",
     "avgReturn": "Retorno Médio",
-    "overall": "Geral"
+    "overall": "Geral",
+    "loadMore": "Carregar mais"
   }
 }

@@ -138,9 +138,21 @@ class Settings(BaseSettings):
     watchdog_min_notify_pct: float = 0.5      # Don't send Telegram for moves smaller than this %
 
     # --- Notification Quiet Hours ---
-    notify_quiet_start: int = 18  # 6 PM ET (18:00) -- no notifications after this hour
-    notify_quiet_end: int = 6     # 6 AM ET (06:00) -- notifications resume
+    # Quiet window is [start_hour:start_minute, end_hour:end_minute) in ET.
+    # If end is earlier than start the window spans midnight.
+    notify_quiet_start: int = 18         # 6 PM ET -- quiet begins
+    notify_quiet_start_minute: int = 0
+    notify_quiet_end: int = 6            # 6:30 AM ET -- quiet ends (notifications resume)
+    notify_quiet_end_minute: int = 30
     notify_quiet_enabled: bool = True
+
+    # --- Per-scan Telegram toggle ---
+    # Comma-separated scan_type values whose notifications should be silenced
+    # (PRE_MARKET | MORNING | MIDDAY | PRE_CLOSE | AFTER_CLOSE | MANUAL).
+    # Messages emitted inside a `run_scan` matching any of these types are
+    # dropped before hitting the Telegram API. `urgent=True` sends (e.g. OTP)
+    # still bypass this filter.
+    notify_scans_disabled: str = "PRE_MARKET"
     watchdog_weekend_crypto: bool = False     # Run watchdog on weekends for crypto positions
     allow_weekend_scans: bool = True          # Allow manual scan triggers on weekends
 
