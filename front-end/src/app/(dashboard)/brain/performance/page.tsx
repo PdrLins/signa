@@ -42,9 +42,10 @@ interface TrackStats {
   win_rate: number
   avg_return_pct: number
   total_return_pct: number
+  total_pnl_amount?: number
   avg_unrealized_pnl_pct?: number
-  best_trade: { symbol: string; pnl_pct: number } | null
-  worst_trade: { symbol: string; pnl_pct: number } | null
+  best_trade: { symbol: string; pnl_pct: number; pnl_amount?: number } | null
+  worst_trade: { symbol: string; pnl_pct: number; pnl_amount?: number } | null
 }
 
 interface VirtualTrade {
@@ -345,7 +346,13 @@ export default function BrainPerformancePage() {
             <StatBox
               label="Total Return"
               value={hasClosedData ? `${brain.total_return_pct >= 0 ? '+' : ''}${fmtPct(brain.total_return_pct)}%` : '\u2014'}
-              sub={hasClosedData ? `Avg ${brain.avg_return_pct >= 0 ? '+' : ''}${fmtPct(brain.avg_return_pct)}% per trade` : 'Tracking...'}
+              sub={
+                hasClosedData
+                  ? brain.total_pnl_amount != null
+                    ? `${brain.total_pnl_amount >= 0 ? '+' : '-'}$${Math.abs(brain.total_pnl_amount).toFixed(2)} @ 1 share/trade`
+                    : `Avg ${brain.avg_return_pct >= 0 ? '+' : ''}${fmtPct(brain.avg_return_pct)}% per trade`
+                  : 'Tracking...'
+              }
               color={hasClosedData ? (brain.total_return_pct >= 0 ? theme.colors.up : theme.colors.down) : theme.colors.textSub}
               bgColor={theme.colors.surfaceAlt}
             />

@@ -2116,6 +2116,11 @@ def get_virtual_summary() -> dict:
         win_rate = (wins / total * 100) if total > 0 else 0
         avg_ret = sum(t.get("pnl_pct", 0) for t in trades) / total if total else 0
         total_ret = sum(t.get("pnl_pct", 0) for t in trades)
+        # Dollar P&L assuming one share per trade. `pnl_amount` is already
+        # `exit_price - entry_price` per share (see schema.sql:432), so the
+        # sum is the total realized $ if you had bought exactly one share
+        # of every closed trade.
+        total_pnl_amount = sum(t.get("pnl_amount") or 0 for t in trades)
         best = max(trades, key=lambda t: t.get("pnl_pct", 0)) if trades else None
         worst = min(trades, key=lambda t: t.get("pnl_pct", 0)) if trades else None
         return {
@@ -2125,8 +2130,9 @@ def get_virtual_summary() -> dict:
             "win_rate": round(win_rate, 1),
             "avg_return_pct": round(avg_ret, 2),
             "total_return_pct": round(total_ret, 2),
-            "best_trade": {"symbol": best["symbol"], "pnl_pct": best["pnl_pct"]} if best else None,
-            "worst_trade": {"symbol": worst["symbol"], "pnl_pct": worst["pnl_pct"]} if worst else None,
+            "total_pnl_amount": round(total_pnl_amount, 2),
+            "best_trade": {"symbol": best["symbol"], "pnl_pct": best["pnl_pct"], "pnl_amount": best.get("pnl_amount")} if best else None,
+            "worst_trade": {"symbol": worst["symbol"], "pnl_pct": worst["pnl_pct"], "pnl_amount": worst.get("pnl_amount")} if worst else None,
         }
 
     def _enrich_open_trade(t: dict) -> dict:
