@@ -774,7 +774,7 @@ export default function BrainPerformancePage() {
                 className="w-full mt-3 text-[11px] font-semibold py-2 rounded-lg transition-opacity hover:opacity-80"
                 style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.primary, border: `1px solid ${theme.colors.border}` }}
               >
-                {t.brainPerf.loadMore ?? 'Load more'} ({brainClosed.length - closedVisibleCount})
+                {t.brainPerf.loadMore ?? 'Load more'}
               </button>
             )}
           </Card>
