@@ -1425,6 +1425,131 @@ GOOGL's 13 HOLD_THROUGH_DIP events in one day are the most for any single ticker
 
 ---
 
+## Day 11 -- April 17, 2026 (Thursday)
+
+**Quiet day with only 3 closes, but CNQ's -5.89% loss exposed oil-crash risk, and GOOGL's 2-day HOLD_THROUGH_DIP discipline finally paid off at +2.82%. CPA hit the same-scan bug again (fix coded but not deployed). PRE_CLOSE scan missing — scheduler gap.**
+
+### Yesterday's metrics check
+
+- [x] **Same-scan buy→invalidate** — fired again on CPA (opened 16:01:51, closed 16:02:32, -0.04%). Fix coded in `thesis_tracker.py` but **not deployed** — backend not restarted. Priority for tomorrow.
+- [x] **BLK at $1021.45** — still open, `thesis=valid`, P&L +0.34% at PRE_MARKET. Recovering slowly.
+- [x] **GOOGL** — 6 more HOLD_THROUGH_DIP today, then cleanly exited via THESIS_INVALIDATED at **+2.82% / +$9.36** in the AFTER_CLOSE scan. 19 total hold-through-dip events across 2 days → the discipline paid off.
+- [x] **HBM** — zero watchdog events today. Calmed down completely. `thesis=valid`, P&L ranged +1.74% to +3.91%.
+- [x] **HMY** — flipped from `weakening` to `valid`. **Massive day: -1.74% → +7.94%** by MIDDAY. Still open.
+- [ ] **Quiet-hours / per-scan toggle** — not verified (backend not restarted with new code).
+
+### Environment
+- Market: likely TRENDING (GOOGL thesis text notes continued greed sentiment, HMY gold miner surged)
+- Scans: **4/5 COMPLETE** — PRE_MARKET, MORNING, MIDDAY, AFTER_CLOSE. **PRE_CLOSE missing** (no row in DB at all — scheduler didn't fire, not a scan failure).
+- Budget: ~$0 (Claude Local)
+- Signals per scan: 56–59
+- GEMs: 0
+
+### Brain trades
+
+**Opened (3):** BBD @ $4.28 (T1, 78), CPA @ $129.34 (T2, 81 — same-scan killed), CNQ #3 @ $42.32 (T2, 79 — re-buy after -5.89% exit).
+
+**Closed (3):**
+
+| Symbol | Scan | Exit reason | P&L % | P&L $ | Notes |
+|---|---|---|---|---|---|
+| CNQ | MORNING | THESIS_INVALIDATED | **-5.89%** | **-$2.68** | Oil crashed. Held 3 days. Score was 79 at exit — score said fine, thesis said dead. |
+| CPA | MIDDAY | THESIS_INVALIDATED | -0.04% | -$0.05 | **Same-scan bug** — opened and closed within 41 seconds. |
+| **GOOGL** | AFTER_CLOSE | THESIS_INVALIDATED | **+2.82%** | **+$9.36** | 19 HOLD_THROUGH_DIP events over 2 days. Discipline paid off. |
+
+**Realized today: -3.11% / +$6.63** (1W +$9.36 / 2L -$2.73). Percent says bad day; dollars say green.
+
+### The % vs $ divergence
+
+Today's numbers highlight an important accounting question: the brain closed -3.11% in sum-of-percentages but **+$6.63** in dollars (1 share/trade). This happens because GOOGL trades at $332 while CNQ trades at $42 — a +2.82% GOOGL win is worth $9.36 while a -5.89% CNQ loss costs $2.68. **Dollar P&L is the more meaningful metric** for a portfolio that trades across wildly different price levels. Sum-of-percent is misleading because it gives equal weight to a $4 stock and a $1000 stock.
+
+### CNQ's full lifecycle (bought, crashed, sold, re-bought)
+
+| Date | Event | Price | P&L | Notes |
+|---|---|---|---|---|
+| Apr 14 | Brain BUY | $45.51 | -- | Tier 1, score 77, oil play |
+| Apr 16 PRE_MARKET | thesis=weakening | -- | +1.76% | Still OK |
+| Apr 17 PRE_MARKET | thesis=weakening | -- | +1.76% | Holding |
+| Apr 17 MORNING | **thesis=invalid** | $42.83 | **-5.89%** | Oil crashed. Thesis dead. Exit. |
+| Apr 17 MIDDAY | Brain re-BUY | $42.32 | -- | Tier 2, score 79. 2h after close (cooldown passed). |
+| Apr 17 MIDDAY | thesis=weakening | -- | -0.17% | Already weakening on re-entry |
+| Apr 17 AFTER_CLOSE | thesis=weakening | -- | +1.61% | Bouncing back |
+
+The thesis invalidation at -5.89% was **correct** — it saved the portfolio from a potential -8% catastrophic stop. But the re-buy 2 hours later at $42.32 is questionable: if oil is crashing, why re-enter? The score (79) and the AI both said BUY, but the invalidation reason ("oil price deterioration") presumably still applies. **Question for the brain:** should THESIS_INVALIDATED for macro reasons (commodity crash, sector rotation) extend the cooldown beyond 60 minutes?
+
+### Watchdog activity (20 events)
+
+- **HOLD_THROUGH_DIP: 14** — REGN 8×, GOOGL 6×. REGN is now the heaviest hold-through-dip ticker, day 7.
+- **ALERT: 6** — all CNQ (before and after re-entry). CNQ immediately volatile.
+- **CLOSE: 0** — watchdog didn't force-close anything today; all exits were thesis-driven.
+- **RECOVERY: 0**
+
+### PRE_CLOSE scan gap
+
+PRE_CLOSE (15:00 ET / 19:00 UTC) didn't fire. No row in the DB = APScheduler didn't trigger it. Previous 2 days both completed successfully. Possible causes: process was busy with the MIDDAY scan aftermath, or a brief scheduler misfire. Worth monitoring — one miss in 10 days is tolerable, but consecutive misses mean a scheduler bug.
+
+### Open positions (8)
+
+| Symbol | Entry | Score | Tier | Thesis | Day | Notes |
+|---|---|---|---|---|---|---|
+| CNQ | $42.32 | 79 | T2 | weakening | 0 | Re-bought. Bounced to +1.61% by EOD |
+| BBD | $4.28 | 78 | T1 | weakening | 0 | New, already weakening |
+| BLK | $1021.45 | 77 | T1 | valid | 1 | Re-buy from Day 10, recovering |
+| HMY | $17.82 | 72 | T2 | valid | 1 | Massive run (+7.94% at MIDDAY) |
+| VZ | $46.27 | 75 | T2 | valid | 1 | Stable |
+| HBM | $25.32 | 80 | T1 | valid | 3 | Calmed down, no alerts today |
+| REGN | $740.85 | 79 | T1 | weakening | 7 | 8 HOLD_THROUGH_DIP today. Aging. |
+| LYG | $5.57 | 73 | T1 | NULL | 9 | The legacy survivor |
+
+### Week 2 running totals (Apr 13–17)
+
+| Metric | Value |
+|---|---|
+| Trading days | 5 (Mon–Fri) |
+| Brain entries | 15 |
+| Brain closes | 21 |
+| Close win rate | 38% (8W / 13L) |
+| Realized P&L | **+8.86% / +$70.24** |
+| Best trade (week) | META +7.38% / +$34.08 (Wed) |
+| Worst trade (week) | CNQ -5.89% / -$2.68 (today) |
+| Currently open | 8 positions |
+| Scans completed | 21/25 (84%) |
+
+### All-time running totals (Apr 6–17)
+
+| Metric | Value |
+|---|---|
+| Trading days | 9 |
+| Brain closes | 27 |
+| Win rate | 41% (11W / 16L) |
+| Total realized P&L | **+8.62% / +$134.69** |
+| Best trade | META +7.38% (TARGET_HIT) |
+| Worst trade | CNQ -5.89% (THESIS_INVALIDATED) |
+
+### Learnings and things to improve
+
+1. **Deploy the same-scan fix.** CPA was the second occurrence. Restart the backend to activate the `scan_started_at` guard in `thesis_tracker.py`. This should print `"Thesis re-eval skipped for X: opened this scan"` in tomorrow's logs.
+
+2. **Dollar P&L should be the primary display metric**, not sum-of-percent. Today proved the divergence is real. The % metric says "bad day"; the $ metric says "green day." For a mixed-price portfolio, dollars are truth.
+
+3. **THESIS_INVALIDATED for macro reasons (oil crash) → should the cooldown be longer?** CNQ was re-bought 2 hours after being sold for "oil price deterioration." If oil is crashing, 60 minutes isn't long enough for the macro thesis to recover. Proposal: environment variable `brain_thesis_macro_cooldown_minutes` (default 240 = 4 hours) applied when the thesis invalidation reason mentions sector/commodity/macro themes. This is speculative — needs more data before implementing.
+
+4. **REGN at day 7 with 8 HOLD_THROUGH_DIP events** — aging position that the watchdog keeps flagging but never closes. If thesis stays `weakening` without invalidating for 3+ more days, the time-expiry exit (30 days) is the only backstop. Check if the thesis tracker's "weakening" verdict is just Claude being conservative on a position that should be sold.
+
+5. **PRE_CLOSE scan missing** — one-off or recurring? Track tomorrow.
+
+### Metrics to track tomorrow
+
+- [ ] **Same-scan fix deployed?** Restart backend. Verify `"Thesis re-eval skipped"` debug log on first scan with new entries.
+- [ ] Quiet-hours + per-scan toggle: verify zero Telegram messages from PRE_MARKET scan.
+- [ ] PRE_CLOSE scan: does it fire tomorrow? If missing again → scheduler investigation.
+- [ ] REGN (day 8): still weakening? More hold-through-dip events? At what point does this become a dead position?
+- [ ] CNQ #3 at $42.32: was the re-buy rational? Is oil recovering or still bleeding?
+- [ ] HMY at +7.94%: does the trailing stop activate and lock in the gain, or does it give it all back?
+- [ ] BBD at weakening on day 0: invalidation tomorrow, or stabilization?
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

@@ -77,7 +77,10 @@ THESIS_REEVAL_CONCURRENCY = 3
 THESIS_INVALIDATION_MIN_CONFIDENCE = 60
 
 
-async def reevaluate_open_theses(signals: list[dict]) -> dict[str, dict]:
+async def reevaluate_open_theses(
+    signals: list[dict],
+    scan_started_at: Optional[datetime] = None,
+) -> dict[str, dict]:
     """Re-evaluate every open brain position's thesis. Returns {symbol: ctx_dict}.
 
     Args:
@@ -86,6 +89,16 @@ async def reevaluate_open_theses(signals: list[dict]) -> dict[str, dict]:
             symbol isn't in this scan's signals, we skip its re-eval (no
             fresh data) and the cached `thesis_last_*` from the prior scan
             stays in place.
+        scan_started_at: Timestamp when the current scan began. Positions
+            whose `entry_date` is at-or-after this timestamp were opened
+            earlier in this same scan and MUST NOT be re-evaluated — the
+            thesis has had no time to drift. Day 10 journal documented the
+            bug: three fresh entries (ESE, CCO.TO, DIR-UN.TO) opened at
+            14:01:57 were closed via THESIS_INVALIDATED at 14:02:54 inside
+            the same MORNING scan because Claude re-read the same thesis
+            and returned `invalid` on a position that was 57s old. The
+            60-min re-buy cooldown doesn't help here because it fires
+            AFTER a THESIS_INVALIDATED close, not before one.
 
     Returns:
         dict mapping symbol → context dict that includes:
@@ -136,6 +149,19 @@ async def reevaluate_open_theses(signals: list[dict]) -> dict[str, dict]:
     work: list[dict] = []
     for pos in open_positions:
         sym = pos["symbol"]
+        # Same-scan guard (Day 10 learning): a position opened earlier in
+        # THIS scan has an entry_thesis built from the same signal we're
+        # about to re-read — re-evaluating it is guaranteed to be stale
+        # reasoning at best, or a flip-flop ("buy then sell in 57s") at
+        # worst. Skip anything whose entry_date is at-or-after scan start.
+        if scan_started_at is not None:
+            entry_dt = parse_iso_utc(pos.get("entry_date"))
+            if entry_dt is not None and entry_dt >= scan_started_at:
+                logger.debug(
+                    f"Thesis re-eval skipped for {sym}: opened this scan "
+                    f"(entry={entry_dt.isoformat()} >= scan_start={scan_started_at.isoformat()})"
+                )
+                continue
         if not pos.get("entry_thesis"):
             logger.debug(
                 f"Thesis re-eval skipped for {sym}: no entry_thesis "
