@@ -69,6 +69,7 @@ interface VirtualTrade {
   thesis_status?: string  // valid | weakening | invalid | null (legacy)
   tier_reason?: string    // validated | validated_below_sma50 | low_confidence_high_score | tech_only_confirmed_*
   trade_horizon?: 'SHORT' | 'LONG'
+  direction?: 'LONG' | 'SHORT'
 }
 
 interface ClosedTrade {
@@ -86,6 +87,7 @@ interface ClosedTrade {
   peak_price?: number
   exit_context?: string  // human-readable explanation of why it was sold
   trade_horizon?: 'SHORT' | 'LONG'
+  direction?: 'LONG' | 'SHORT'
 }
 
 interface WatchdogEvent {
@@ -592,6 +594,14 @@ export default function BrainPerformancePage() {
                           >
                             {vt.trade_horizon === 'LONG' ? t.brainPerf.long ?? 'Long' : t.brainPerf.short ?? 'Short'}
                           </span>
+                          {vt.direction === 'SHORT' && (
+                            <span
+                              className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded"
+                              style={{ backgroundColor: theme.colors.down + '18', color: theme.colors.down }}
+                            >
+                              ▼ {t.brainPerf.shortSell ?? 'Short Sell'}
+                            </span>
+                          )}
                           {monitoredSymbols.has(vt.symbol) && (
                             <span className="text-[9px] font-medium px-1.5 py-0.5 rounded flex items-center gap-0.5" style={{ backgroundColor: theme.colors.warning + '18', color: theme.colors.warning }}>
                               <Eye size={8} /> Monitoring
@@ -756,11 +766,11 @@ export default function BrainPerformancePage() {
                             <span
                               className="text-[7px] font-bold uppercase px-1 py-0.5 rounded"
                               style={{
-                                backgroundColor: (rc.trade_horizon === 'LONG' ? theme.colors.primary : theme.colors.warning) + '18',
-                                color: rc.trade_horizon === 'LONG' ? theme.colors.primary : theme.colors.warning,
+                                backgroundColor: (rc.direction === 'SHORT' ? theme.colors.down : rc.trade_horizon === 'LONG' ? theme.colors.primary : theme.colors.warning) + '18',
+                                color: rc.direction === 'SHORT' ? theme.colors.down : rc.trade_horizon === 'LONG' ? theme.colors.primary : theme.colors.warning,
                               }}
                             >
-                              {rc.trade_horizon === 'LONG' ? 'L' : 'S'}
+                              {rc.direction === 'SHORT' ? '▼S' : rc.trade_horizon === 'LONG' ? 'L' : 'S'}
                             </span>
                             <ExitReasonBadge reason={rc.exit_reason} theme={theme} />
                             {daysHeld != null && (

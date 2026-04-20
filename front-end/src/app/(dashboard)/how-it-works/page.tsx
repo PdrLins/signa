@@ -579,6 +579,20 @@ export default function HowItWorksPage() {
               </Section>
             </Card>
 
+            {/* Two-Wallet System */}
+            <Card>
+              <Section title={h.twoWalletTitle}>
+                <P>{h.twoWalletDesc}</P>
+                <div className="space-y-2 mt-2">
+                  <Step title={h.twoWalletLongTitle} desc={h.twoWalletLongDesc} />
+                  <Step title={h.twoWalletShortTitle} desc={h.twoWalletShortDesc} />
+                </div>
+                <div className="mt-3">
+                  <P>{h.twoWalletNote}</P>
+                </div>
+              </Section>
+            </Card>
+
             {/* Virtual Portfolio */}
             <Card>
               <Section title={h.virtualPortfolioTitle}>

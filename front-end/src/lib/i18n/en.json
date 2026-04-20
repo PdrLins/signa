@@ -912,6 +912,13 @@
     "horizonLongDesc": "Thesis re-evaluated once daily (AFTER_CLOSE scan only). Trailing stop: 5% soft / 8% hard below peak — room to breathe through intraday dips. No quality prune — only thesis=invalid or hard stop closes early. Time expiry: 60 days. Watchdog alerts on 4%+ drops only. Used for: SAFE_INCOME bucket, blue chips, sector rotation plays. Goal: ride 10-20%+ trends.",
     "horizonClassification": "Classification rule: SAFE_INCOME bucket → LONG. HIGH_RISK bucket → SHORT. Crypto → SHORT. Near-term catalyst (≤7 days) → SHORT. You can see the badge (Long/Short) next to each position on the Brain Performance page.",
     "horizonWhy": "Why this matters: in the first 2 weeks, WING peaked at +8.5% but was sold at +4.13% (thesis tracker killed it mid-day), HMY peaked at +7.94% but exited at +2.33% (gap-through over weekend). With the LONG classification, these would have had daily-only thesis checks and wider trailing stops — holding through the noise instead of selling at the worst moment.",
+    "twoWalletTitle": "Two-Wallet System: Long + Short Selling",
+    "twoWalletDesc": "The brain runs two independent wallets. The LONG wallet buys stocks it expects to rise (8 slots max). The SHORT wallet bets against stocks it expects to fall (6 slots max). This lets the brain profit from both sides of the market — previously, SELL/AVOID signals were wasted because the brain could only buy.",
+    "twoWalletLongTitle": "▲ Long Wallet (8 positions)",
+    "twoWalletLongDesc": "Buys stocks with BUY signals (score ≥ 65 for High Risk, ≥ 62 for Safe Income). Profits when price rises. Uses the tiered trust model (Tier 1/2/3) with portfolio heat gates. Existing behavior, now capped at 8 positions for concentration.",
+    "twoWalletShortTitle": "▼ Short Wallet (6 positions)",
+    "twoWalletShortDesc": "Short-sells stocks with AVOID signals (score ≤ 40) that Claude has explicitly confirmed as bearish with validated AI. Profits when price drops. Requires: AI-validated bearish thesis, target below entry price, stop above entry price. No tech-only shorts — too risky without AI confirmation. Hard stop at 8% loss (no thesis gate bypass).",
+    "twoWalletNote": "Short selling is riskier than buying — losses are theoretically unlimited if the stock keeps rising. The brain mitigates this with: (1) only AI-validated entries, (2) 8% hard stop that always fires, (3) automatic cover when the signal flips to BUY, (4) 14-day maximum hold. The Short Sell badge (▼) appears on positions in the Performance page.",
     "virtualPortfolioTitle": "Virtual Portfolio (Brain Accuracy)",
     "virtualPortfolioDesc": "Signa automatically tracks what would happen if you followed every signal the brain generates for your watchlisted tickers. No manual input needed — the brain proves its own accuracy.",
     "vp1": "When a watchlisted ticker gets a BUY signal (score 62+), the brain \"virtually buys\" at the current price.",
@@ -1298,6 +1305,7 @@
     "overall": "Overall",
     "loadMore": "Load more",
     "long": "Long",
-    "short": "Short"
+    "short": "Short",
+    "shortSell": "Short Sell"
   }
 }

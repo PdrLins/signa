@@ -137,11 +137,21 @@ class Settings(BaseSettings):
     # Winners were consistently cut early because the thesis tracker ran 5x/day
     # and Claude's conservative bias flagged every extended winner as "weakening".
     # LONG positions now breathe — only 1 re-eval/day, wider trail, no quality prune.
-    horizon_short_trail_pct: float = 5.0       # trailing stop % below peak (SHORT)
-    horizon_long_trail_pct: float = 8.0        # trailing stop % below peak (LONG)
-    horizon_short_expiry_days: int = 7         # max hold for SHORT
-    horizon_long_expiry_days: int = 60         # max hold for LONG
-    horizon_long_min_score: int = 72           # minimum entry score for LONG
+    horizon_short_trail_pct: float = 5.0       # trailing stop % below peak (SHORT horizon)
+    horizon_long_trail_pct: float = 8.0        # trailing stop % below peak (LONG horizon)
+    horizon_short_expiry_days: int = 7         # max hold for SHORT horizon
+    horizon_long_expiry_days: int = 60         # max hold for LONG horizon
+    horizon_long_min_score: int = 72           # minimum entry score for LONG horizon
+
+    # --- Short Selling (direction=SHORT) ---
+    # Two-wallet system: LONG wallet buys winners, SHORT wallet bets against losers.
+    # Separate slot limits concentrate capital on fewer, higher-quality positions.
+    brain_max_open_long: int = 8               # max simultaneous LONG brain positions
+    brain_max_open_short: int = 6              # max simultaneous SHORT brain positions
+    brain_short_max_score: int = 40            # score must be <= this to qualify for short entry
+    brain_short_trail_pct: float = 5.0         # trailing stop % ABOVE trough for shorts
+    brain_short_hard_stop_pct: float = -8.0    # catastrophic stop for shorts (price up 8%)
+    brain_short_expiry_days: int = 14          # max hold for short-direction trades
 
     # --- Brain Watchdog ---
     watchdog_enabled: bool = True

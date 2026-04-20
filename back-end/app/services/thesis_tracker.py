@@ -191,7 +191,11 @@ async def reevaluate_open_theses(
         entry_price = float(pos.get("entry_price") or 0)
         if not entry_price or not live_price:
             continue
-        pnl_pct = (live_price - entry_price) / entry_price * 100
+        direction = pos.get("direction") or "LONG"
+        if direction == "SHORT":
+            pnl_pct = (entry_price - live_price) / entry_price * 100
+        else:
+            pnl_pct = (live_price - entry_price) / entry_price * 100
         entry_dt = parse_iso_utc(pos.get("entry_date")) or datetime.now(timezone.utc)
         days_held = max(0, (datetime.now(timezone.utc) - entry_dt).days)
         work.append({
