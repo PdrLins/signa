@@ -1550,6 +1550,125 @@ PRE_CLOSE (15:00 ET / 19:00 UTC) didn't fire. No row in the DB = APScheduler did
 
 ---
 
+## Day 12 -- April 20, 2026 (Monday)
+
+**No scans ran on Friday (Apr 18) — backend appears to have been down. HMY gapped through its trailing stop over the weekend, losing 5.6% of unrealized gains. Same-scan fix confirmed working. Brain loaded up on 4 Canadian REITs.**
+
+### Day 11 metrics check
+
+- [x] **Same-scan fix deployed and working.** At MIDDAY (16:02), thesis_tracker evaluated REGN and CNQ (existing positions) but skipped JD, CAR-UN.TO, HR-UN.TO, REI-UN.TO (all opened at 16:02:03 in the same MIDDAY scan). Zero same-scan invalidations today. Fix confirmed.
+- [ ] **Quiet-hours / per-scan toggle** — PRE_MARKET ran at 10:00 and the scan completed, but unclear if Telegram was suppressed. Need to verify in Telegram history.
+- [x] **PRE_CLOSE scan** — ran today at 19:00 UTC (normal). Also: the Apr 17 "missing" PRE_CLOSE actually ran late at 22:04 UTC, so no true gap that day.
+- [x] **REGN day 10** — still weakening, 8 more HOLD_THROUGH_DIP today. 16 holds across 2 days. Becoming the new GOOGL pattern.
+- [x] **CNQ #3 at $42.32** — re-buy holding, thesis=valid now, +3.24% at MORNING. Bounced.
+- [x] **HMY at +7.94%** — see incident below. Closed at +2.33%.
+- [?] **BBD at weakening** — confirmed, pruned at -2.34%.
+
+### Environment
+- Market: (resumed after weekend gap)
+- Scans: **5/5 COMPLETE** — PRE_MARKET, MORNING, MIDDAY, PRE_CLOSE, AFTER_CLOSE. Full clean day.
+- **No scans on Apr 18 (Friday)** — 0 rows in DB. Backend appears to have been down. Combined with Saturday/Sunday (no scheduled equity scans), that's a 3-day monitoring gap.
+- Budget: ~$0 (Claude Local)
+- Signals per scan: 56–59
+- GEMs: 0
+
+### Incident: HMY trailing stop gap-through
+
+HMY peaked at **$19.23 (+7.94%)** on Thursday (Apr 17 MIDDAY). With the trailing stop floor fix (Day 9):
+- soft_trail = max($19.23 × 0.97, $17.82) = **$18.65**
+- hard_trail = max($19.23 × 0.95, $17.82) = **$18.27**
+
+The price should have triggered the soft trail at $18.65 (~+4.7%). Instead:
+- **Friday**: no scans (backend down). Price crossed $18.65 undetected.
+- **Saturday/Sunday**: no equity scans (by design).
+- **Monday MORNING scan**: price at $18.24 — already below **both** trails. Hard trail fired at $18.24.
+
+**Result: exited at +2.33% instead of ~+4.7%.** The trailing stop floor prevented a loss (exit above entry), but the 3-day scan gap cost ~$0.41/share in unrealized gains.
+
+**Lesson:** The trailing stop is only as good as the scan frequency. If the backend goes down on a Friday, positions with active trailing stops can gap through over the weekend. This isn't fixable without continuous monitoring or Friday-afternoon manual checks.
+
+### Brain trades
+
+**Opened (5):** JD @ $31.33 (T1, 74 — closed same day), CAR-UN.TO @ $37.26 (T1, 72), REI-UN.TO @ $21.20 (T1, 72), HR-UN.TO @ $10.37 (T1, 72), DIR-UN.TO @ $13.76 (T1, 76).
+
+**Closed (3):**
+
+| Symbol | Exit reason | P&L % | P&L $ | Held | Notes |
+|---|---|---|---|---|---|
+| **HMY** | TRAILING_STOP | **+2.33%** | +$0.42 | 4d | Peaked +7.94%, gapped through soft trail over Fri-Sun |
+| BBD | QUALITY_PRUNE | -2.34% | -$0.10 | 3d | Weakening, pruned for slot |
+| JD | THESIS_INVALIDATED | +0.49% | +$0.15 | 3h | Opened MIDDAY, invalidated PRE_CLOSE. Thesis was shaky at entry. |
+
+**Realized today: +0.48% / +$0.47** (2W / 1L). Marginally green.
+
+### Canadian REIT concentration (new risk)
+
+4 of today's 5 entries are TSX-listed REITs: CAR-UN.TO, REI-UN.TO, HR-UN.TO, DIR-UN.TO. All scored 72–76, all SAFE_INCOME bucket, all Tier 1. If Canadian REITs dip as a sector (rate hike, housing data), the portfolio takes a correlated hit across 4 positions simultaneously.
+
+Currently no sector/correlation limit in the brain. The pre-filter sorts by absolute day change and the brain picks whatever scores highest — it doesn't check what it already holds. **This is the same class of problem as the CNQ macro re-buy:** the brain treats each position independently without portfolio-level awareness.
+
+### JD — thesis invalidated after 3 hours
+
+JD was opened at MIDDAY (16:02) and closed at PRE_CLOSE (19:02) via THESIS_INVALIDATED at +0.49%. This is NOT a same-scan bug (different scans, confirmed by thesis_tracker skip at MIDDAY). But a thesis that dies in one scan cycle was probably weak at entry. The AI synthesized a BUY thesis, then on the very next re-eval said "invalid."
+
+**Question for the brain:** Should there be a minimum thesis confidence at entry? Currently the brain picks anything with score ≥ 72 and target+stop filled. A thesis quality filter (e.g., "Claude's entry confidence must be ≥ 70 for the thesis to count") could prevent these 3-hour flip-flops.
+
+### Watchdog activity (15 events)
+
+- **HOLD_THROUGH_DIP: 9** — REGN 8×, HMY 1× (before close).
+- **ALERT: 3** — BBD 2× (before prune), HBM 1×.
+- **RECOVERY: 3** — HBM 1×, HMY 1×, BBD 1×.
+
+REGN continues its HOLD_THROUGH_DIP marathon: **16 holds across 3 days** (8+8 on Apr 17+20, noting no scans Apr 18–19). Day 10, thesis=weakening. This position is being held on discipline alone.
+
+### Open positions (10, up from 8)
+
+| Symbol | Entry | Score | Tier | Thesis | Day | Notes |
+|---|---|---|---|---|---|---|
+| DIR-UN.TO | $13.76 | 76 | T1 | valid | 0 | New REIT |
+| REI-UN.TO | $21.20 | 72 | T1 | weakening | 0 | New REIT, already weakening |
+| HR-UN.TO | $10.37 | 72 | T1 | valid | 0 | New REIT |
+| CAR-UN.TO | $37.26 | 72 | T1 | valid | 0 | New REIT |
+| CNQ | $42.32 | 79 | T2 | valid | 3 | Oil re-buy, bounced to +3.24% |
+| BLK | $1021.45 | 77 | T1 | valid | 4 | Stable |
+| VZ | $46.27 | 75 | T2 | weakening | 4 | Slipping |
+| HBM | $25.32 | 80 | T1 | valid | 6 | Calmed, 1 alert today |
+| REGN | $740.85 | 79 | T1 | weakening | 10 | 16 hold-through-dips in 3 days |
+| LYG | $5.57 | 73 | T1 | NULL | 12 | The legacy survivor |
+
+### All-time running totals (Apr 6–20)
+
+| Metric | Value |
+|---|---|
+| Trading days | 10 |
+| Brain closes | 30 |
+| Win rate | 43% (13W / 17L) |
+| Total realized P&L | **+9.10% / +$135.16** |
+| Best trade | META +7.38% (TARGET_HIT) |
+| Worst trade | CNQ -5.89% (THESIS_INVALIDATED) |
+| Open positions | 10 |
+
+### Things to improve
+
+1. **Backend uptime on Fridays.** No scans ran Apr 18, causing HMY's gap-through. If the backend crashed or was manually stopped, it needs a keep-alive mechanism (process manager, systemd, or at minimum a cron ping). This is the single biggest preventable loss today.
+
+2. **Sector concentration limit.** 4 Canadian REITs opened in one day. The brain should check what it already holds and limit to ≤ 2 positions in the same sector/sub-sector. This requires a sector classifier on each ticker (the `bucket` field is too coarse — all 4 REITs are SAFE_INCOME just like BLK and VZ).
+
+3. **Thesis quality at entry.** JD's thesis died in 3 hours. A minimum-confidence gate at entry time (not just at re-eval) could prevent these weak entries. Current: any BUY with score ≥ 72 + target + stop. Proposed: also require Claude's thesis confidence ≥ 70 at synthesis time.
+
+4. **REGN at day 10 with 16 holds.** The hold discipline is being tested — this position hasn't meaningfully recovered and keeps alerting. If thesis stays `weakening` through day 15 without invalidating, the 30-day time expiry is the only exit. Should there be a "chronic weakening" exit before 30 days?
+
+### Metrics to track tomorrow
+
+- [ ] **Backend uptime** — did all 5 scans complete?
+- [ ] **Canadian REITs** — REI-UN.TO already weakening. Do the other 3 hold valid?
+- [ ] **REGN day 11** — more holds, or does it finally invalidate/recover?
+- [ ] **VZ at weakening day 4** — approaching the prune zone?
+- [ ] **LYG day 12** — the legacy NULL-thesis position. Does it ever close, or does it ride the 30-day expiry?
+- [ ] Verify Telegram was suppressed for PRE_MARKET scan (quiet hours + per-scan toggle).
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]
