@@ -492,7 +492,7 @@
     "whoDesc": "Signa is built for Canadian investors who use platforms like Wealthsimple, Questrade, or Interactive Brokers. It supports TFSA, RRSP, and taxable accounts. Whether you prefer safe dividend stocks or high-growth momentum plays, Signa classifies every signal into the right bucket for your strategy.",
     "scanTitle": "How Scans Work",
     "scanDesc": "Every trading day (Monday to Friday), Signa runs 5 automated scans at key market moments:",
-    "scan1": "6:00 AM ET — Pre-market scan: catches overnight news, earnings, and pre-market movers before the bell rings.",
+    "scan1": "6:00 AM ET — Pre-market scan: catches overnight news, earnings, and pre-market movers before the bell rings. Telegram alerts for this scan are silenced by default (it runs during Quiet Hours) — re-enable in Settings → Scan Notifications.",
     "scan2": "10:00 AM ET — Market open scan: confirms or adjusts signals after the first 30 minutes of trading when real volume data is available.",
     "scan2b": "12:00 PM ET — Midday scan: fills the gap between market open and pre-close. Catches morning reversals, lunch-hour moves, and ensures no position goes unchecked for more than 2 hours during trading.",
     "scan3": "3:00 PM ET — Pre-close scan: identifies end-of-day momentum shifts and last-minute opportunities before the close.",
@@ -904,6 +904,14 @@
     "readingDetail10": "Signa Brain Says — AI-generated insights specific to this ticker, including key points (positive, warning, or info), relevant brain knowledge, and the historical track record for this score range.",
     "readingDetail11": "Signal History — Previous signals for this ticker so you can see if the recommendation has been consistent or changing.",
     "readingDetailExample": "Example: ENB.TO at score 69 with 'Dividend Reliability: Strong' and 'Macro: Neutral' pills. The probability chip shows '64% vs SPY'. Brain says it's a solid Safe Income play with 4.2% dividend yield and low debt. Short interest is only 1.2% — no squeeze risk. The fundamentals are strong but macro conditions (VIX elevated) are keeping the score below BUY threshold.",
+    "horizonTitle": "Trade Horizon: Short vs Long",
+    "horizonDesc": "Every brain position is classified as SHORT or LONG at entry. This controls how aggressively the brain monitors and exits the trade. The split exists because winners were consistently cut early — the thesis tracker ran 5x/day and Claude's conservative bias flagged every extended winner as \"weakening.\"",
+    "horizonShortTitle": "SHORT — Momentum capture (1-7 days)",
+    "horizonShortDesc": "Thesis re-evaluated every scan (5x/day). Trailing stop: 3% soft / 5% hard below peak. Quality prune active on days 2-7 for losing positions. Time expiry: 7 days. Watchdog alerts on 2%+ drops. Used for: HIGH_RISK bucket, crypto, near-term catalysts (≤7 days). Goal: quick 2-5% captures.",
+    "horizonLongTitle": "LONG — Trend riding (up to 60 days)",
+    "horizonLongDesc": "Thesis re-evaluated once daily (AFTER_CLOSE scan only). Trailing stop: 5% soft / 8% hard below peak — room to breathe through intraday dips. No quality prune — only thesis=invalid or hard stop closes early. Time expiry: 60 days. Watchdog alerts on 4%+ drops only. Used for: SAFE_INCOME bucket, blue chips, sector rotation plays. Goal: ride 10-20%+ trends.",
+    "horizonClassification": "Classification rule: SAFE_INCOME bucket → LONG. HIGH_RISK bucket → SHORT. Crypto → SHORT. Near-term catalyst (≤7 days) → SHORT. You can see the badge (Long/Short) next to each position on the Brain Performance page.",
+    "horizonWhy": "Why this matters: in the first 2 weeks, WING peaked at +8.5% but was sold at +4.13% (thesis tracker killed it mid-day), HMY peaked at +7.94% but exited at +2.33% (gap-through over weekend). With the LONG classification, these would have had daily-only thesis checks and wider trailing stops — holding through the noise instead of selling at the worst moment.",
     "virtualPortfolioTitle": "Virtual Portfolio (Brain Accuracy)",
     "virtualPortfolioDesc": "Signa automatically tracks what would happen if you followed every signal the brain generates for your watchlisted tickers. No manual input needed — the brain proves its own accuracy.",
     "vp1": "When a watchlisted ticker gets a BUY signal (score 62+), the brain \"virtually buys\" at the current price.",
@@ -924,6 +932,13 @@
     "wdNote": "The watchdog uses Grok sentiment ($0.0002/call) and Gemini (free) only when concerned — typically 2-3 sentiment checks per day. Total monthly cost is roughly $0.03. Price checks via Yahoo Finance are always free.",
     "wdCooldownTitle": "Watchdog Cooldown",
     "wdCooldownDesc": "If the watchdog checks the same ticker 3 times in a row and keeps holding, it enters a 1-hour cooldown to reduce alert noise. You'll still see all events logged, but you won't get spammed with Telegram messages for a ticker that's hovering near a threshold without actually breaking down.",
+    "wdEventsTitle": "Watchdog Event Types",
+    "wdEventsDesc": "Every watchdog check produces one event. These are the labels you'll see on the Brain Performance page and in Telegram alerts:",
+    "wdEventAlert": "ALERT — First time the watchdog flags a position as concerned (interval drop >= 2%, total loss >= 2%, near stop, score dropped 10+ points, or composite concern). Sentiment is fetched and the 5-minute faster-monitoring loop begins.",
+    "wdEventEscalation": "ESCALATION — Same position is still concerned on a subsequent check and conditions are getting worse. The watchdog keeps monitoring more aggressively and re-runs sentiment.",
+    "wdEventHold": "HOLD_THROUGH_DIP — Position is concerned (price dipped) but sentiment is still neutral/bullish, so the brain holds instead of selling at a bad moment. The check repeats every 5 minutes. After 3 consecutive HOLD_THROUGH_DIP events on the same ticker, a 1-hour cooldown kicks in to stop Telegram spam. This is the \"dip buyer's discipline\" — don't sell just because the chart wiggled.",
+    "wdEventClose": "CLOSE — Watchdog force-closed the position. Triggered by bearish sentiment + negative P&L, an emergency exit (total loss beyond -8%, score collapse below 50, or SELL/AVOID signal on a losing position), or a profit-take (+3% held 2+ days).",
+    "wdEventRecovery": "RECOVERY — A previously-concerned position bounced back to entry or above. The alert level clears and monitoring returns to the normal 15-minute cadence.",
     "weekendCryptoTitle": "Weekend Crypto Watchdog",
     "weekendCryptoDesc": "Crypto markets trade 24/7, including weekends. When enabled in Settings, the brain monitors crypto positions every hour on Saturdays and Sundays. If a crypto position hits a stop, drops more than 2%, or shows bearish sentiment, the brain will act -- just like during the week. Equity positions are skipped on weekends since stock markets are closed. This is off by default to save on API costs, but recommended if you hold crypto positions over the weekend.",
     "fearGreedTitle": "Fear & Greed Index",
@@ -977,7 +992,9 @@
     "notif4": "Position Alerts (stop loss hit, target reached, signal weakening) are sent when you have open positions being monitored.",
     "notif5": "All alerts appear in the Recent Alerts card on the dashboard and in your Telegram chat with the Signa bot.",
     "notif6": "To test if Telegram is working, go to the Integrations page and click Send Test Message.",
-    "notifNote": "Alerts are only generated during scans. Scans run 4 times per day Mon-Fri (6 AM, 10 AM, 3 PM, 4:30 PM ET). No scans or alerts on weekends."
+    "notif7": "Quiet Hours silence every non-urgent Telegram alert between 6:00 PM and 6:30 AM ET (default). OTP codes always go through. Adjust the window in Settings → Brain Watchdog → Quiet Hours.",
+    "notif8": "Per-scan toggle: Settings → Scan Notifications lets you turn Telegram alerts on or off for each scheduled scan (Pre-Market, Market Open, Midday, Pre-Close, After Close). By default the 6:00 AM Pre-Market scan is silenced — its alerts would land during Quiet Hours anyway. Disabling a scan does NOT stop it from running; it only drops its Telegram messages.",
+    "notifNote": "Alerts are only generated during scans. Scans run 5 times per day Mon-Fri (6 AM, 10 AM, 12 PM, 3 PM, 4:30 PM ET). No scheduled scans or alerts on weekends — crypto is the exception if Weekend Crypto Watchdog is enabled."
   },
   "charts": {
     "allocation": "Signal Allocation",
@@ -1061,7 +1078,14 @@
     "quietHours": "Quiet Hours",
     "quietHoursDesc": "Block Telegram notifications during these hours.",
     "quietHoursRange": "{start} PM - {end} AM ET",
-    "quietEnabled": "Enable quiet hours"
+    "quietEnabled": "Enable quiet hours",
+    "scanNotifications": "Scan Notifications",
+    "scanNotificationsDesc": "Choose which scheduled scans send Telegram alerts.",
+    "scanPreMarket": "Pre-market (6:00 AM ET)",
+    "scanMorning": "Market open (10:00 AM ET)",
+    "scanMidday": "Midday (12:00 PM ET)",
+    "scanPreClose": "Pre-close (3:00 PM ET)",
+    "scanAfterClose": "After close (4:30 PM ET)"
   },
   "brain": {
     "telegramVerification": "Telegram Verification",
@@ -1271,6 +1295,9 @@
     "scoreRange": "Score Range",
     "trades": "Trades",
     "avgReturn": "Avg Return",
-    "overall": "Overall"
+    "overall": "Overall",
+    "loadMore": "Load more",
+    "long": "Long",
+    "short": "Short"
   }
 }

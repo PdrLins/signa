@@ -223,7 +223,17 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         • Brain notification queue (created fresh per scan, drained at end).
     """
     start_time = time.time()
+    # Datetime equivalent of start_time, used as the scan boundary for
+    # stage-ordering guards (e.g. thesis_tracker must not re-evaluate
+    # positions opened earlier in THIS scan — see Day 10 journal).
+    scan_started_at = datetime.now(timezone.utc)
     logger.info(f"Starting {scan_type} scan...")
+
+    # Bind scan_type to the async context so nested Telegram sends can
+    # consult `settings.notify_scans_disabled` and suppress themselves for
+    # scans the user has silenced (e.g. PRE_MARKET). Reset in finally below.
+    from app.notifications.scan_context import set_current_scan_type, reset_current_scan_type
+    _scan_ctx_token = set_current_scan_type(scan_type)
 
     # Load bucket cache once for the entire scan (avoids N individual DB queries)
     global _bucket_cache
@@ -738,7 +748,11 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             # thesis is still valid (catastrophic carve-out at hard_stop_pct).
             try:
                 from app.services import thesis_tracker
-                thesis_results = await thesis_tracker.reevaluate_open_theses(valid_signals)
+                thesis_results = await thesis_tracker.reevaluate_open_theses(
+                    valid_signals,
+                    scan_started_at=scan_started_at,
+                    scan_type=scan_type,
+                )
                 if thesis_results:
                     invalidated = thesis_tracker.execute_thesis_invalidation_exits(
                         thesis_results, brain_notifications,
@@ -814,6 +828,8 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 current_ticker="",
             )
         raise
+    finally:
+        reset_current_scan_type(_scan_ctx_token)
 
 
 async def _process_candidate(

@@ -131,6 +131,18 @@ class Settings(BaseSettings):
     # explicitly named this fix. Set to 0 to disable.
     brain_thesis_rebuy_cooldown_minutes: int = 60
 
+    # --- Trade Horizon (SHORT vs LONG) ---
+    # SHORT: momentum trades, 1-7d hold, tight trail, every-scan thesis re-eval.
+    # LONG: trend trades, up to 60d, wide trail, daily thesis re-eval (AFTER_CLOSE only).
+    # Winners were consistently cut early because the thesis tracker ran 5x/day
+    # and Claude's conservative bias flagged every extended winner as "weakening".
+    # LONG positions now breathe — only 1 re-eval/day, wider trail, no quality prune.
+    horizon_short_trail_pct: float = 5.0       # trailing stop % below peak (SHORT)
+    horizon_long_trail_pct: float = 8.0        # trailing stop % below peak (LONG)
+    horizon_short_expiry_days: int = 7         # max hold for SHORT
+    horizon_long_expiry_days: int = 60         # max hold for LONG
+    horizon_long_min_score: int = 72           # minimum entry score for LONG
+
     # --- Brain Watchdog ---
     watchdog_enabled: bool = True
     watchdog_pnl_alert_pct: float = 2.0       # Alert if P&L drops this % in one interval
@@ -138,9 +150,21 @@ class Settings(BaseSettings):
     watchdog_min_notify_pct: float = 0.5      # Don't send Telegram for moves smaller than this %
 
     # --- Notification Quiet Hours ---
-    notify_quiet_start: int = 18  # 6 PM ET (18:00) -- no notifications after this hour
-    notify_quiet_end: int = 6     # 6 AM ET (06:00) -- notifications resume
+    # Quiet window is [start_hour:start_minute, end_hour:end_minute) in ET.
+    # If end is earlier than start the window spans midnight.
+    notify_quiet_start: int = 18         # 6 PM ET -- quiet begins
+    notify_quiet_start_minute: int = 0
+    notify_quiet_end: int = 6            # 6:30 AM ET -- quiet ends (notifications resume)
+    notify_quiet_end_minute: int = 30
     notify_quiet_enabled: bool = True
+
+    # --- Per-scan Telegram toggle ---
+    # Comma-separated scan_type values whose notifications should be silenced
+    # (PRE_MARKET | MORNING | MIDDAY | PRE_CLOSE | AFTER_CLOSE | MANUAL).
+    # Messages emitted inside a `run_scan` matching any of these types are
+    # dropped before hitting the Telegram API. `urgent=True` sends (e.g. OTP)
+    # still bypass this filter.
+    notify_scans_disabled: str = "PRE_MARKET"
     watchdog_weekend_crypto: bool = False     # Run watchdog on weekends for crypto positions
     allow_weekend_scans: bool = True          # Allow manual scan triggers on weekends
 

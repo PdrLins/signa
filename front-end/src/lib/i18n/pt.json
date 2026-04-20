@@ -492,7 +492,7 @@
     "whoDesc": "Signa foi criado para investidores canadenses que usam plataformas como Wealthsimple, Questrade ou Interactive Brokers. Suporta contas TFSA, RRSP e tributáveis. Quer você prefira ações de dividendos seguras ou jogadas de crescimento agressivo, o Signa classifica cada sinal na categoria certa para sua estratégia.",
     "scanTitle": "Como as Varreduras Funcionam",
     "scanDesc": "Todo dia de negociação (segunda a sexta), o Signa executa 5 varreduras automatizadas em momentos-chave do mercado:",
-    "scan1": "6:00 AM ET — Varredura pré-mercado: captura notícias noturnas, resultados e movimentações pré-mercado antes da abertura.",
+    "scan1": "6:00 AM ET — Varredura pré-mercado: captura notícias noturnas, resultados e movimentações pré-mercado antes da abertura. Alertas no Telegram para esta varredura estão silenciados por padrão (ocorre durante o Horário Silencioso) — reative em Configurações → Notificações de Varredura.",
     "scan2": "10:00 AM ET — Varredura de abertura: confirma ou ajusta sinais após os primeiros 30 minutos de negociação quando dados reais de volume estão disponíveis.",
     "scan2b": "12:00 PM ET — Varredura do meio-dia: preenche a lacuna entre a abertura e o pré-fechamento. Captura reversões da manhã, movimentos do horário de almoço e garante que nenhuma posição fique sem verificação por mais de 2 horas durante o pregão.",
     "scan3": "15:00 ET — Varredura pré-fechamento: identifica mudanças de momentum no fim do dia e oportunidades de última hora antes do fechamento.",
@@ -884,6 +884,14 @@
     "readingDetail10": "Signa Brain Diz — Insights gerados por IA especificos para este ticker, incluindo pontos-chave (positivo, alerta ou info), conhecimento relevante do brain, e o historico de desempenho para esta faixa de score.",
     "readingDetail11": "Historico de Sinais — Sinais anteriores para este ticker para ver se a recomendacao tem sido consistente ou mudando.",
     "readingDetailExample": "Exemplo: ENB.TO com score 69 e pills 'Confiabilidade Dividendo: Forte' e 'Macro: Neutro'. O chip de probabilidade mostra '64% vs SPY'. O Brain diz que e uma jogada solida de Renda Segura com 4.2% de dividend yield e baixa divida. Short interest e apenas 1.2% — sem risco de squeeze. Os fundamentos sao fortes mas condicoes macro (VIX elevado) estao mantendo o score abaixo do limite de COMPRA.",
+    "horizonTitle": "Horizonte do Trade: Curto vs Longo",
+    "horizonDesc": "Toda posição do brain é classificada como CURTO ou LONGO na entrada. Isso controla quão agressivamente o brain monitora e sai do trade. A separação existe porque os vencedores eram consistentemente cortados cedo — o rastreador de tese rodava 5x/dia e o viés conservador do Claude sinalizava todo vencedor estendido como \"enfraquecendo.\"",
+    "horizonShortTitle": "CURTO — Captura de momentum (1-7 dias)",
+    "horizonShortDesc": "Tese reavaliada a cada varredura (5x/dia). Trailing stop: 3% suave / 5% duro abaixo do pico. Poda de qualidade ativa nos dias 2-7 para posições perdendo. Expiração: 7 dias. Alertas do watchdog em quedas de 2%+. Usado para: bucket HIGH_RISK, cripto, catalisadores de curto prazo (≤7 dias). Meta: capturas rápidas de 2-5%.",
+    "horizonLongTitle": "LONGO — Surfando tendências (até 60 dias)",
+    "horizonLongDesc": "Tese reavaliada uma vez por dia (apenas na varredura AFTER_CLOSE). Trailing stop: 5% suave / 8% duro abaixo do pico — espaço para respirar durante quedas intradiárias. Sem poda de qualidade — apenas tese=inválida ou stop duro fecha antecipadamente. Expiração: 60 dias. Alertas do watchdog apenas em quedas de 4%+. Usado para: bucket SAFE_INCOME, blue chips, rotação setorial. Meta: surfar tendências de 10-20%+.",
+    "horizonClassification": "Regra de classificação: bucket SAFE_INCOME → LONGO. bucket HIGH_RISK → CURTO. Cripto → CURTO. Catalisador de curto prazo (≤7 dias) → CURTO. Você pode ver o badge (Longo/Curto) ao lado de cada posição na página Desempenho do Brain.",
+    "horizonWhy": "Por que isso importa: nas primeiras 2 semanas, WING atingiu +8.5% mas foi vendido a +4.13% (rastreador de tese matou no meio do dia), HMY atingiu +7.94% mas saiu a +2.33% (gap no fim de semana). Com a classificação LONGO, teriam verificação de tese apenas diária e trailing stops mais largos — segurando através do ruído em vez de vender no pior momento.",
     "virtualPortfolioTitle": "Portfólio Virtual (Precisão do Brain)",
     "virtualPortfolioDesc": "O Signa rastreia automaticamente o que aconteceria se você seguisse cada sinal que o brain gera para os tickers nos seus favoritos. Sem entrada manual — o brain prova sua própria precisão.",
     "vp1": "Quando um ticker favoritado recebe um sinal de COMPRA (score 62+), o brain \"compra virtualmente\" no preço atual.",
@@ -904,6 +912,13 @@
     "wdNote": "O watchdog usa Grok sentimento ($0.0002/chamada) e Gemini (gratis) apenas quando preocupado — tipicamente 2-3 verificacoes de sentimento por dia. Custo mensal total e aproximadamente $0.03. Verificacoes de preco via Yahoo Finance sao sempre gratuitas.",
     "wdCooldownTitle": "Cooldown do Watchdog",
     "wdCooldownDesc": "Se o watchdog checa o mesmo ticker 3 vezes seguidas e continua mantendo, ele entra em cooldown de 1 hora para reduzir ruido nos alertas. Voce ainda vera todos os eventos registrados, mas nao sera spammado com mensagens do Telegram para um ticker que esta oscilando perto do limite sem realmente cair.",
+    "wdEventsTitle": "Tipos de Evento do Watchdog",
+    "wdEventsDesc": "Cada checagem do watchdog gera um evento. Estes são os rótulos que você verá na página Desempenho do Brain e nos alertas do Telegram:",
+    "wdEventAlert": "ALERT — Primeira vez que o watchdog sinaliza uma posição como preocupante (queda no intervalo >= 2%, perda total >= 2%, próximo do stop, score caiu 10+ pontos ou preocupação composta). O sentimento é consultado e o loop de monitoramento rápido de 5 minutos começa.",
+    "wdEventEscalation": "ESCALATION — A mesma posição continua preocupante numa checagem seguinte e as condições estão piorando. O watchdog monitora de forma mais agressiva e refaz a consulta de sentimento.",
+    "wdEventHold": "HOLD_THROUGH_DIP — A posição está preocupante (preço caiu), mas o sentimento ainda é neutro/otimista, então o brain mantém em vez de vender no pior momento. A checagem se repete a cada 5 minutos. Após 3 eventos consecutivos de HOLD_THROUGH_DIP no mesmo ticker, um cooldown de 1 hora entra em ação para evitar spam no Telegram. Essa é a \"disciplina do comprador de dip\" — não venda só porque o gráfico oscilou.",
+    "wdEventClose": "CLOSE — O watchdog fechou a posição à força. Disparado por sentimento bearish + P&L negativo, saída de emergência (perda total além de -8%, colapso do score abaixo de 50 ou sinal SELL/AVOID em posição perdendo) ou realização de lucro (+3% mantido por 2+ dias).",
+    "wdEventRecovery": "RECOVERY — Uma posição antes preocupante voltou ao preço de entrada ou acima. O nível de alerta é limpo e o monitoramento volta à cadência normal de 15 minutos.",
     "weekendCryptoTitle": "Watchdog Crypto no Fim de Semana",
     "weekendCryptoDesc": "Mercados de crypto operam 24/7, incluindo fins de semana. Quando ativado nas Configuracoes, o brain monitora posicoes crypto a cada hora nos sabados e domingos. Se uma posicao crypto atingir o stop, cair mais de 2%, ou mostrar sentimento bearish, o brain agira -- assim como durante a semana. Posicoes em acoes sao ignoradas nos fins de semana pois os mercados estao fechados. Desativado por padrao para economizar custos de API, mas recomendado se voce mantem posicoes crypto no fim de semana.",
     "fearGreedTitle": "Indice Fear & Greed",
@@ -957,7 +972,9 @@
     "notif4": "Alertas de Posição (stop loss atingido, alvo alcançado, sinal enfraquecendo) são enviados quando você tem posições abertas sendo monitoradas.",
     "notif5": "Todos os alertas aparecem no card de Alertas Recentes no dashboard e no seu chat do Telegram com o bot Signa.",
     "notif6": "Para testar se o Telegram está funcionando, vá à página de Integrações e clique em Enviar Mensagem de Teste.",
-    "notifNote": "Alertas são gerados apenas durante varreduras. As varreduras rodam 4 vezes por dia de segunda a sexta (6h, 10h, 15h, 16:30h ET). Sem varreduras ou alertas nos finais de semana."
+    "notif7": "Horário Silencioso bloqueia todos os alertas não urgentes do Telegram entre 18:00 e 6:30 ET (padrão). Códigos OTP sempre passam. Ajuste a janela em Configurações → Brain Watchdog → Horário Silencioso.",
+    "notif8": "Toggle por varredura: Configurações → Notificações de Varredura permite ativar ou desativar alertas do Telegram para cada varredura agendada (Pré-Mercado, Abertura, Meio-dia, Pré-Fechamento, Pós-Fechamento). Por padrão, a varredura das 6h Pré-Mercado está silenciada — os alertas cairiam dentro do Horário Silencioso de qualquer forma. Desativar uma varredura NÃO impede que ela rode; apenas descarta suas mensagens no Telegram.",
+    "notifNote": "Alertas são gerados apenas durante varreduras. As varreduras rodam 5 vezes por dia de segunda a sexta (6h, 10h, 12h, 15h, 16:30h ET). Sem varreduras ou alertas agendados nos finais de semana — cripto é exceção se o Watchdog de Cripto de Fim de Semana estiver ativado."
   },
   "charts": {
     "allocation": "Alocação de Sinais",
@@ -1041,7 +1058,14 @@
     "quietHours": "Horario Silencioso",
     "quietHoursDesc": "Bloquear notificacoes do Telegram durante estas horas.",
     "quietHoursRange": "{start} PM - {end} AM ET",
-    "quietEnabled": "Ativar horario silencioso"
+    "quietEnabled": "Ativar horario silencioso",
+    "scanNotifications": "Notificações de Varredura",
+    "scanNotificationsDesc": "Escolha quais varreduras agendadas enviam alertas no Telegram.",
+    "scanPreMarket": "Pré-abertura (6:00 AM ET)",
+    "scanMorning": "Abertura (10:00 AM ET)",
+    "scanMidday": "Meio-dia (12:00 PM ET)",
+    "scanPreClose": "Pré-fechamento (3:00 PM ET)",
+    "scanAfterClose": "Após fechamento (4:30 PM ET)"
   },
   "brain": {
     "telegramVerification": "Verificação Telegram",
@@ -1251,6 +1275,9 @@
     "scoreRange": "Faixa de Score",
     "trades": "Trades",
     "avgReturn": "Retorno Médio",
-    "overall": "Geral"
+    "overall": "Geral",
+    "loadMore": "Carregar mais",
+    "long": "Longo",
+    "short": "Curto"
   }
 }

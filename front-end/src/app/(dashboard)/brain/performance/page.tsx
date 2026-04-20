@@ -42,9 +42,10 @@ interface TrackStats {
   win_rate: number
   avg_return_pct: number
   total_return_pct: number
+  total_pnl_amount?: number
   avg_unrealized_pnl_pct?: number
-  best_trade: { symbol: string; pnl_pct: number } | null
-  worst_trade: { symbol: string; pnl_pct: number } | null
+  best_trade: { symbol: string; pnl_pct: number; pnl_amount?: number } | null
+  worst_trade: { symbol: string; pnl_pct: number; pnl_amount?: number } | null
 }
 
 interface VirtualTrade {
@@ -67,6 +68,7 @@ interface VirtualTrade {
   market_regime?: string
   thesis_status?: string  // valid | weakening | invalid | null (legacy)
   tier_reason?: string    // validated | validated_below_sma50 | low_confidence_high_score | tech_only_confirmed_*
+  trade_horizon?: 'SHORT' | 'LONG'
 }
 
 interface ClosedTrade {
@@ -83,6 +85,7 @@ interface ClosedTrade {
   exit_price?: number
   peak_price?: number
   exit_context?: string  // human-readable explanation of why it was sold
+  trade_horizon?: 'SHORT' | 'LONG'
 }
 
 interface WatchdogEvent {
@@ -204,6 +207,7 @@ export default function BrainPerformancePage() {
   // Group watchdog events by symbol for the monitor grid
   const [watchdogExpandedSymbol, setWatchdogExpandedSymbol] = useState<string | null>(null)
   const [watchdogShowClosed, setWatchdogShowClosed] = useState(false)
+  const [closedVisibleCount, setClosedVisibleCount] = useState(5)
 
   const { data: signalsData } = useQuery<{ signals: { symbol: string; is_discovered?: boolean }[] }>({
     queryKey: ['signals', 'discovered-check'],
@@ -344,7 +348,13 @@ export default function BrainPerformancePage() {
             <StatBox
               label="Total Return"
               value={hasClosedData ? `${brain.total_return_pct >= 0 ? '+' : ''}${fmtPct(brain.total_return_pct)}%` : '\u2014'}
-              sub={hasClosedData ? `Avg ${brain.avg_return_pct >= 0 ? '+' : ''}${fmtPct(brain.avg_return_pct)}% per trade` : 'Tracking...'}
+              sub={
+                hasClosedData
+                  ? brain.total_pnl_amount != null
+                    ? `${brain.total_pnl_amount >= 0 ? '+' : '-'}$${Math.abs(brain.total_pnl_amount).toFixed(2)} @ 1 share/trade`
+                    : `Avg ${brain.avg_return_pct >= 0 ? '+' : ''}${fmtPct(brain.avg_return_pct)}% per trade`
+                  : 'Tracking...'
+              }
               color={hasClosedData ? (brain.total_return_pct >= 0 ? theme.colors.up : theme.colors.down) : theme.colors.textSub}
               bgColor={theme.colors.surfaceAlt}
             />
@@ -573,6 +583,15 @@ export default function BrainPerformancePage() {
                           <Badge variant={vt.bucket === 'SAFE_INCOME' ? 'safe' : 'risk'}>
                             {vt.bucket === 'SAFE_INCOME' ? 'Safe' : 'Risk'}
                           </Badge>
+                          <span
+                            className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded"
+                            style={{
+                              backgroundColor: (vt.trade_horizon === 'LONG' ? theme.colors.primary : theme.colors.warning) + '18',
+                              color: vt.trade_horizon === 'LONG' ? theme.colors.primary : theme.colors.warning,
+                            }}
+                          >
+                            {vt.trade_horizon === 'LONG' ? t.brainPerf.long ?? 'Long' : t.brainPerf.short ?? 'Short'}
+                          </span>
                           {monitoredSymbols.has(vt.symbol) && (
                             <span className="text-[9px] font-medium px-1.5 py-0.5 rounded flex items-center gap-0.5" style={{ backgroundColor: theme.colors.warning + '18', color: theme.colors.warning }}>
                               <Eye size={8} /> Monitoring
@@ -720,7 +739,7 @@ export default function BrainPerformancePage() {
               </p>
             ) : (
               <div className="divide-y" style={{ borderColor: theme.colors.border }}>
-                {brainClosed.map((rc, i) => {
+                {brainClosed.slice(0, closedVisibleCount).map((rc, i) => {
                   const daysHeld = rc.entry_date && rc.exit_date
                     ? Math.max(1, Math.round((new Date(rc.exit_date).getTime() - new Date(rc.entry_date).getTime()) / 86400000))
                     : null
@@ -734,6 +753,15 @@ export default function BrainPerformancePage() {
                               : <TrendingDown size={14} style={{ color: theme.colors.down }} />
                             }
                             <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{rc.symbol}</span>
+                            <span
+                              className="text-[7px] font-bold uppercase px-1 py-0.5 rounded"
+                              style={{
+                                backgroundColor: (rc.trade_horizon === 'LONG' ? theme.colors.primary : theme.colors.warning) + '18',
+                                color: rc.trade_horizon === 'LONG' ? theme.colors.primary : theme.colors.warning,
+                              }}
+                            >
+                              {rc.trade_horizon === 'LONG' ? 'L' : 'S'}
+                            </span>
                             <ExitReasonBadge reason={rc.exit_reason} theme={theme} />
                             {daysHeld != null && (
                               <span className="text-[9px] tabular-nums px-1 py-0.5 rounded" style={{ color: theme.colors.textHint, backgroundColor: theme.colors.surface }}>
@@ -766,6 +794,15 @@ export default function BrainPerformancePage() {
                   )
                 })}
               </div>
+            )}
+            {brainClosed.length > closedVisibleCount && (
+              <button
+                onClick={() => setClosedVisibleCount(c => c + 5)}
+                className="w-full mt-3 text-[11px] font-semibold py-2 rounded-lg transition-opacity hover:opacity-80"
+                style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.primary, border: `1px solid ${theme.colors.border}` }}
+              >
+                {t.brainPerf.loadMore ?? 'Load more'}
+              </button>
             )}
           </Card>
 

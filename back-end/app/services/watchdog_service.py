@@ -172,7 +172,7 @@ async def run_watchdog() -> dict:
 
     # Get open brain positions
     result = db.table("virtual_trades") \
-        .select("id, symbol, entry_price, entry_date, entry_score, stop_loss, source, bucket, market_regime, target_price") \
+        .select("id, symbol, entry_price, entry_date, entry_score, stop_loss, source, bucket, market_regime, target_price, trade_horizon") \
         .eq("status", "OPEN") \
         .eq("source", "brain") \
         .execute()
@@ -285,14 +285,22 @@ async def run_watchdog() -> dict:
         current_score = latest_sig_data.get("score", 0)
         days_held = days_since(trade.get("entry_date"))
 
+        # LONG positions get relaxed watchdog thresholds: wider drop
+        # tolerance (4% vs 2%) and no composite concern. The thesis
+        # tracker (daily) handles LONG exits — the watchdog's job for
+        # LONG is only to catch catastrophic moves, not routine dips.
+        horizon = trade.get("trade_horizon") or "SHORT"
+        interval_threshold = settings.watchdog_pnl_alert_pct * (2.0 if horizon == "LONG" else 1.0)
+        bleed_threshold = -4.0 if horizon == "LONG" else -2.0
+
         # 1. Interval drop (sudden move)
-        if pnl_since_last <= -settings.watchdog_pnl_alert_pct:
+        if pnl_since_last <= -interval_threshold:
             reasons.append(f"P&L dropped {pnl_since_last:+.1f}% since last check")
         # 2. Stop proximity
         if stop_distance_pct <= settings.watchdog_stop_proximity_pct:
             reasons.append(f"Price within {stop_distance_pct:.1f}% of stop loss")
-        # 3. Total unrealized loss > 2% (cut losers fast to protect monthly profit target)
-        if pnl_total_pct <= -2.0:
+        # 3. Total unrealized loss (SHORT: >2%, LONG: >4%)
+        if pnl_total_pct <= bleed_threshold:
             reasons.append(f"Total unrealized loss {pnl_total_pct:+.1f}% (slow bleed)")
         # 4. Score deterioration
         if entry_score > 0 and current_score > 0:
@@ -300,11 +308,9 @@ async def run_watchdog() -> dict:
             if score_drop >= 10:
                 reasons.append(f"Score deterioration: {entry_score} -> {current_score} (-{score_drop}pts)")
         # 5. Composite concern: weakest position + losing + held > 1 day
-        #    A marginal position (lowest score) that's losing money after day 1
-        #    should be reviewed even if no single threshold was crossed.
-        #    Goal: cut losers fast to protect monthly 1-2% target.
+        #    Skipped for LONG — they're expected to dip and recover.
         is_weakest = (entry_score <= weakest_entry_score)
-        if is_weakest and pnl_total_pct <= -2.0 and days_held >= 1 and not reasons:
+        if horizon != "LONG" and is_weakest and pnl_total_pct <= -2.0 and days_held >= 1 and not reasons:
             reasons.append(
                 f"Composite concern: weakest position (score {entry_score}) "
                 f"+ losing {pnl_total_pct:+.1f}% + held {days_held}d"

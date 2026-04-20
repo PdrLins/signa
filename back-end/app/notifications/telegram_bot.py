@@ -166,8 +166,18 @@ async def send_message(chat_id: str, text: str, parse_mode: str = "HTML", urgent
     ping endpoint which needs to verify the send actually succeeded.
     """
     from app.notifications.messages import is_quiet_hours
+    from app.notifications.scan_context import (
+        get_current_scan_type,
+        is_scan_notifications_disabled,
+    )
     if not urgent and is_quiet_hours():
         logger.debug(f"Telegram message suppressed (quiet hours): {text[:50]}...")
+        return False
+    if not urgent and is_scan_notifications_disabled():
+        logger.debug(
+            f"Telegram message suppressed (scan {get_current_scan_type()} "
+            f"disabled): {text[:50]}..."
+        )
         return False
     try:
         client = _get_http_client()

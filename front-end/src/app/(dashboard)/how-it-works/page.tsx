@@ -562,6 +562,23 @@ export default function HowItWorksPage() {
               </Section>
             </Card>
 
+            {/* Trade Horizon: SHORT vs LONG */}
+            <Card>
+              <Section title={h.horizonTitle}>
+                <P>{h.horizonDesc}</P>
+                <div className="space-y-2 mt-2">
+                  <Step title={h.horizonShortTitle} desc={h.horizonShortDesc} />
+                  <Step title={h.horizonLongTitle} desc={h.horizonLongDesc} />
+                </div>
+                <div className="mt-3">
+                  <P>{h.horizonClassification}</P>
+                </div>
+                <div className="mt-3">
+                  <P>{h.horizonWhy}</P>
+                </div>
+              </Section>
+            </Card>
+
             {/* Virtual Portfolio */}
             <Card>
               <Section title={h.virtualPortfolioTitle}>
@@ -602,6 +619,20 @@ export default function HowItWorksPage() {
             <Card>
               <Section title={h.wdCooldownTitle}>
                 <P>{h.wdCooldownDesc}</P>
+              </Section>
+            </Card>
+
+            {/* Watchdog Event Types */}
+            <Card>
+              <Section title={h.wdEventsTitle}>
+                <P>{h.wdEventsDesc}</P>
+                <ul className="space-y-1.5 mt-2">
+                  <Li>{h.wdEventAlert}</Li>
+                  <Li>{h.wdEventEscalation}</Li>
+                  <Li>{h.wdEventHold}</Li>
+                  <Li>{h.wdEventClose}</Li>
+                  <Li>{h.wdEventRecovery}</Li>
+                </ul>
               </Section>
             </Card>
 
@@ -908,6 +939,8 @@ export default function HowItWorksPage() {
                   <Li>{h.notif4}</Li>
                   <Li>{h.notif5}</Li>
                   <Li>{h.notif6}</Li>
+                  <Li>{h.notif7}</Li>
+                  <Li>{h.notif8}</Li>
                 </ul>
                 <div className="mt-3">
                   <P>{h.notifNote}</P>

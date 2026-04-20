@@ -48,7 +48,25 @@ interface AIProviderConfig {
     weekend_crypto: boolean
     allow_weekend_scans?: boolean
   }
+  notifications?: {
+    scans: Record<string, boolean>
+  }
 }
+
+type ScanLabelKey =
+  | 'scanPreMarket'
+  | 'scanMorning'
+  | 'scanMidday'
+  | 'scanPreClose'
+  | 'scanAfterClose'
+
+const SCAN_LABEL_KEYS: { type: string; labelKey: ScanLabelKey }[] = [
+  { type: 'PRE_MARKET', labelKey: 'scanPreMarket' },
+  { type: 'MORNING', labelKey: 'scanMorning' },
+  { type: 'MIDDAY', labelKey: 'scanMidday' },
+  { type: 'PRE_CLOSE', labelKey: 'scanPreClose' },
+  { type: 'AFTER_CLOSE', labelKey: 'scanAfterClose' },
+]
 
 const PROVIDER_META: Record<string, { name: string; icon: typeof Brain; color: string }> = {
   claude: { name: 'Claude', icon: Brain, color: '#D97706' },
@@ -239,6 +257,7 @@ export default function SettingsPage() {
   const [quietEnd, setQuietEnd] = useState(6)
   const [weekendCrypto, setWeekendCrypto] = useState(false)
   const [allowWeekendScans, setAllowWeekendScans] = useState(true)
+  const [scanNotifs, setScanNotifs] = useState<Record<string, boolean>>({})
   const [dirty, setDirty] = useState(false)
   const [confirmSave, setConfirmSave] = useState(false)
 
@@ -268,6 +287,9 @@ export default function SettingsPage() {
           setAllowWeekendScans(aiConfig.watchdog.allow_weekend_scans)
         }
       }
+      if (aiConfig.notifications?.scans) {
+        setScanNotifs(aiConfig.notifications.scans)
+      }
     }
   }, [aiConfig])
 
@@ -290,13 +312,14 @@ export default function SettingsPage() {
         notify_quiet_end: quietEnd,
         watchdog_weekend_crypto: weekendCrypto,
         allow_weekend_scans: allowWeekendScans,
+        notify_scans: scanNotifs,
       })
       toast.show(t.settings.configSaved, 'success')
       setDirty(false)
     } catch {
       toast.show(t.settings.configSaveFailed, 'error')
     }
-  }, [synthProviders, sentProviders, aiEnabled, aiLimit, maxCandidates, scoreBuySafe, scoreBuyRisk, scoreHold, wdMinNotify, wdPnlAlert, brainMaxOpen, quietEnabled, quietStart, quietEnd, weekendCrypto, allowWeekendScans, toast, t])
+  }, [synthProviders, sentProviders, aiEnabled, aiLimit, maxCandidates, scoreBuySafe, scoreBuyRisk, scoreHold, wdMinNotify, wdPnlAlert, brainMaxOpen, quietEnabled, quietStart, quietEnd, weekendCrypto, allowWeekendScans, scanNotifs, toast, t])
 
   const handleLogout = () => {
     logout()
@@ -464,6 +487,44 @@ export default function SettingsPage() {
               />
             </button>
           </div>
+        </div>
+      </Card>
+
+      {/* Per-scan Telegram toggles */}
+      <Card>
+        <div className="mb-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+            {t.settings.scanNotifications ?? 'Scan Notifications'}
+          </p>
+          <p className="text-[10px] mt-1" style={{ color: theme.colors.textHint }}>
+            {t.settings.scanNotificationsDesc ?? 'Choose which scheduled scans send Telegram alerts.'}
+          </p>
+        </div>
+        <div className="space-y-2">
+          {SCAN_LABEL_KEYS.map(({ type, labelKey }) => {
+            const enabled = scanNotifs[type] ?? true
+            const label = t.settings[labelKey]
+            return (
+              <div
+                key={type}
+                className="flex items-center justify-between rounded-xl px-3 py-2.5"
+                style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}` }}
+              >
+                <p className="text-sm font-medium" style={{ color: theme.colors.text }}>{label}</p>
+                <button
+                  onClick={() => { setScanNotifs({ ...scanNotifs, [type]: !enabled }); setDirty(true) }}
+                  aria-label={label}
+                  className="w-11 h-6 rounded-full transition-all relative"
+                  style={{ backgroundColor: enabled ? theme.colors.primary : theme.colors.border }}
+                >
+                  <div
+                    className="w-5 h-5 rounded-full bg-white absolute top-0.5 transition-all"
+                    style={{ left: enabled ? 22 : 2 }}
+                  />
+                </button>
+              </div>
+            )
+          })}
         </div>
       </Card>
 
