@@ -80,6 +80,7 @@ THESIS_INVALIDATION_MIN_CONFIDENCE = 60
 async def reevaluate_open_theses(
     signals: list[dict],
     scan_started_at: Optional[datetime] = None,
+    scan_type: Optional[str] = None,
 ) -> dict[str, dict]:
     """Re-evaluate every open brain position's thesis. Returns {symbol: ctx_dict}.
 
@@ -119,7 +120,7 @@ async def reevaluate_open_theses(
         db.table("virtual_trades")
         .select("id, symbol, entry_price, entry_date, entry_score, "
                 "entry_thesis, entry_thesis_keywords, market_regime, bucket, "
-                "target_price, stop_loss, source")
+                "target_price, stop_loss, source, trade_horizon")
         .eq("status", "OPEN")
         .eq("source", "brain")
         .execute()
@@ -162,6 +163,18 @@ async def reevaluate_open_theses(
                     f"(entry={entry_dt.isoformat()} >= scan_start={scan_started_at.isoformat()})"
                 )
                 continue
+        # LONG positions only get thesis re-eval during the AFTER_CLOSE scan.
+        # This is the core of the SHORT/LONG split: LONG winners were being
+        # killed by 5x/day conservative re-evals (WING +8.5% → +4.13%,
+        # HMY +7.94% → +2.33%). One daily check catches real thesis death
+        # while letting the trend compound intraday.
+        horizon = pos.get("trade_horizon") or "SHORT"
+        if horizon == "LONG" and scan_type and scan_type != "AFTER_CLOSE":
+            logger.debug(
+                f"Thesis re-eval skipped for {sym}: LONG horizon, "
+                f"scan_type={scan_type} (only re-evals at AFTER_CLOSE)"
+            )
+            continue
         if not pos.get("entry_thesis"):
             logger.debug(
                 f"Thesis re-eval skipped for {sym}: no entry_thesis "

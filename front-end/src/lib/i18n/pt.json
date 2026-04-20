@@ -884,6 +884,14 @@
     "readingDetail10": "Signa Brain Diz — Insights gerados por IA especificos para este ticker, incluindo pontos-chave (positivo, alerta ou info), conhecimento relevante do brain, e o historico de desempenho para esta faixa de score.",
     "readingDetail11": "Historico de Sinais — Sinais anteriores para este ticker para ver se a recomendacao tem sido consistente ou mudando.",
     "readingDetailExample": "Exemplo: ENB.TO com score 69 e pills 'Confiabilidade Dividendo: Forte' e 'Macro: Neutro'. O chip de probabilidade mostra '64% vs SPY'. O Brain diz que e uma jogada solida de Renda Segura com 4.2% de dividend yield e baixa divida. Short interest e apenas 1.2% — sem risco de squeeze. Os fundamentos sao fortes mas condicoes macro (VIX elevado) estao mantendo o score abaixo do limite de COMPRA.",
+    "horizonTitle": "Horizonte do Trade: Curto vs Longo",
+    "horizonDesc": "Toda posição do brain é classificada como CURTO ou LONGO na entrada. Isso controla quão agressivamente o brain monitora e sai do trade. A separação existe porque os vencedores eram consistentemente cortados cedo — o rastreador de tese rodava 5x/dia e o viés conservador do Claude sinalizava todo vencedor estendido como \"enfraquecendo.\"",
+    "horizonShortTitle": "CURTO — Captura de momentum (1-7 dias)",
+    "horizonShortDesc": "Tese reavaliada a cada varredura (5x/dia). Trailing stop: 3% suave / 5% duro abaixo do pico. Poda de qualidade ativa nos dias 2-7 para posições perdendo. Expiração: 7 dias. Alertas do watchdog em quedas de 2%+. Usado para: bucket HIGH_RISK, cripto, catalisadores de curto prazo (≤7 dias). Meta: capturas rápidas de 2-5%.",
+    "horizonLongTitle": "LONGO — Surfando tendências (até 60 dias)",
+    "horizonLongDesc": "Tese reavaliada uma vez por dia (apenas na varredura AFTER_CLOSE). Trailing stop: 5% suave / 8% duro abaixo do pico — espaço para respirar durante quedas intradiárias. Sem poda de qualidade — apenas tese=inválida ou stop duro fecha antecipadamente. Expiração: 60 dias. Alertas do watchdog apenas em quedas de 4%+. Usado para: bucket SAFE_INCOME, blue chips, rotação setorial. Meta: surfar tendências de 10-20%+.",
+    "horizonClassification": "Regra de classificação: bucket SAFE_INCOME → LONGO. bucket HIGH_RISK → CURTO. Cripto → CURTO. Catalisador de curto prazo (≤7 dias) → CURTO. Você pode ver o badge (Longo/Curto) ao lado de cada posição na página Desempenho do Brain.",
+    "horizonWhy": "Por que isso importa: nas primeiras 2 semanas, WING atingiu +8.5% mas foi vendido a +4.13% (rastreador de tese matou no meio do dia), HMY atingiu +7.94% mas saiu a +2.33% (gap no fim de semana). Com a classificação LONGO, teriam verificação de tese apenas diária e trailing stops mais largos — segurando através do ruído em vez de vender no pior momento.",
     "virtualPortfolioTitle": "Portfólio Virtual (Precisão do Brain)",
     "virtualPortfolioDesc": "O Signa rastreia automaticamente o que aconteceria se você seguisse cada sinal que o brain gera para os tickers nos seus favoritos. Sem entrada manual — o brain prova sua própria precisão.",
     "vp1": "Quando um ticker favoritado recebe um sinal de COMPRA (score 62+), o brain \"compra virtualmente\" no preço atual.",
@@ -1268,6 +1276,8 @@
     "trades": "Trades",
     "avgReturn": "Retorno Médio",
     "overall": "Geral",
-    "loadMore": "Carregar mais"
+    "loadMore": "Carregar mais",
+    "long": "Longo",
+    "short": "Curto"
   }
 }

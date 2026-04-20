@@ -464,6 +464,12 @@ CREATE TABLE IF NOT EXISTS virtual_trades (
     thesis_last_checked_at TIMESTAMPTZ,
     thesis_last_status     VARCHAR,     -- 'valid' | 'weakening' | 'invalid' | NULL
     thesis_last_reason     TEXT,
+    -- Trade horizon: SHORT (momentum, 1-7d, tight trail, every-scan re-eval)
+    -- vs LONG (trend, up to 60d, wide trail, daily re-eval only). Classified
+    -- at entry by bucket + AI catalyst timeline. Drives exit rules, thesis
+    -- re-eval frequency, and watchdog alert thresholds.
+    trade_horizon          VARCHAR DEFAULT 'SHORT',  -- 'SHORT' | 'LONG'
+    peak_price             DOUBLE PRECISION,  -- already exists via ALTER below
     created_at      TIMESTAMPTZ DEFAULT now(),
     -- updated_at lets us prove that a closed row was never mutated after close.
     -- Pair with the trigger below + status='OPEN' guards in app code.
@@ -494,6 +500,8 @@ ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS thesis_last_checked_at TIMES
 ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS thesis_last_status VARCHAR;
 ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS thesis_last_reason TEXT;
 CREATE INDEX IF NOT EXISTS idx_virtual_trades_thesis_status ON virtual_trades(thesis_last_status) WHERE status = 'OPEN';
+-- Trade horizon (SHORT = momentum, LONG = trend)
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS trade_horizon VARCHAR DEFAULT 'SHORT';
 
 
 -- 18b. AI RETRY QUEUE (tickers whose AI synthesis failed — retry on next scan)

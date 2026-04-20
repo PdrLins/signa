@@ -562,6 +562,23 @@ export default function HowItWorksPage() {
               </Section>
             </Card>
 
+            {/* Trade Horizon: SHORT vs LONG */}
+            <Card>
+              <Section title={h.horizonTitle}>
+                <P>{h.horizonDesc}</P>
+                <div className="space-y-2 mt-2">
+                  <Step title={h.horizonShortTitle} desc={h.horizonShortDesc} />
+                  <Step title={h.horizonLongTitle} desc={h.horizonLongDesc} />
+                </div>
+                <div className="mt-3">
+                  <P>{h.horizonClassification}</P>
+                </div>
+                <div className="mt-3">
+                  <P>{h.horizonWhy}</P>
+                </div>
+              </Section>
+            </Card>
+
             {/* Virtual Portfolio */}
             <Card>
               <Section title={h.virtualPortfolioTitle}>

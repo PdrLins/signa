@@ -1490,6 +1490,20 @@ def process_virtual_trades(
                     if float(stop) < max_crypto_stop:
                         stop = round(max_crypto_stop, 2)
 
+                # Classify trade horizon. LONG positions get daily thesis
+                # re-eval (AFTER_CLOSE only), wider trailing stop (8%), and
+                # 60-day expiry — letting winners compound instead of being
+                # killed by 5x/day conservative thesis re-evals.
+                # SHORT: crypto (24/7 volatile), HIGH_RISK (momentum), or
+                # near-term catalyst <= 7 days.
+                _is_crypto = sig.get("asset_type") == "CRYPTO" or symbol.endswith("-USD")
+                _catalyst_days = sig.get("catalyst_days") or 999
+                _bucket = sig.get("bucket") or ""
+                if _is_crypto or _bucket == "HIGH_RISK" or _catalyst_days <= 7:
+                    _horizon = "SHORT"
+                else:
+                    _horizon = "LONG"
+
                 db.table("virtual_trades").insert({
                     "user_id": brain_user_id,
                     "symbol": symbol,
@@ -1506,6 +1520,7 @@ def process_virtual_trades(
                     "entry_tier": brain_tier,
                     "trust_multiplier": trust_multiplier,
                     "tier_reason": tier_reason,
+                    "trade_horizon": _horizon,
                     # Snapshot for the learning loop — see _record_brain_outcome.
                     # We snapshot at insert because the regime can shift between
                     # entry and close, and pattern_stats matches on the regime
@@ -1648,7 +1663,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         db.table("virtual_trades")
         .select("id, symbol, entry_price, entry_score, entry_date, source, "
                 "target_price, stop_loss, bucket, market_regime, "
-                "thesis_last_status, peak_price")
+                "thesis_last_status, peak_price, trade_horizon")
         .eq("status", "OPEN")
         .execute()
     )
@@ -1741,8 +1756,20 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         # incident (Day 9): peak +3.9%, hard trail was $202.24 but entry
         # was $204.94. Position swung from +3.9% to -3.61% before the
         # trail caught it. With the floor: exit at breakeven instead.
-        soft_trail = max(peak * 0.97, entry_price) if trailing_active else None
-        hard_trail = max(peak * 0.95, entry_price) if trailing_active else None
+        #
+        # SHORT vs LONG trail widths: SHORT uses tight 3%/5% trails for
+        # quick captures. LONG uses wider 5%/8% trails to ride trends —
+        # the thesis tracker (once daily for LONG) handles the real exits;
+        # the trail is just the safety net.
+        horizon = trade.get("trade_horizon") or "SHORT"
+        if horizon == "LONG":
+            soft_pct = 1.0 - settings.horizon_long_trail_pct / 100 * 0.6  # ~5% for 8% config
+            hard_pct = 1.0 - settings.horizon_long_trail_pct / 100        # 8%
+        else:
+            soft_pct = 0.97  # 3%
+            hard_pct = 0.95  # 5%
+        soft_trail = max(peak * soft_pct, entry_price) if trailing_active else None
+        hard_trail = max(peak * hard_pct, entry_price) if trailing_active else None
 
         thesis_status = (trade.get("thesis_last_status") or "").lower()
 
@@ -1807,7 +1834,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
                 continue  # skip this exit, trailing stop will manage
             exit_reason = "TARGET_HIT"
             targets_hit += 1
-        elif days_held >= max_days:
+        elif days_held >= (settings.horizon_long_expiry_days if horizon == "LONG" else settings.horizon_short_expiry_days):
             exit_reason = "TIME_EXPIRED"
             expired += 1
 
@@ -1829,7 +1856,10 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         # VZ -1.80% (day 1, Claude=HOLD, falling knife). It does NOT
         # catch positions with valid thesis or positions Claude still
         # likes — those deserve time to play out.
-        if not exit_reason and trade.get("source") == "brain":
+        # LONG positions skip quality prune — they're held for the trend,
+        # not for short-term score confirmation. Only thesis=invalid or
+        # the hard stop closes a LONG position early.
+        if not exit_reason and trade.get("source") == "brain" and horizon != "LONG":
             latest_sig = current_scores_full.get(symbol) if 'current_scores_full' in dir() else None
             # Use the signal action from the batch we already fetched
             latest_action = None
@@ -2032,7 +2062,7 @@ def get_virtual_summary() -> dict:
     # All trades
     open_result = (
         db.table("virtual_trades")
-        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status, tier_reason")
+        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status, tier_reason, trade_horizon")
         .eq("status", "OPEN")
         .order("entry_date", desc=True)
         .execute()
@@ -2043,7 +2073,7 @@ def get_virtual_summary() -> dict:
         db.table("virtual_trades")
         .select("symbol, entry_price, exit_price, pnl_pct, pnl_amount, is_win, "
                 "entry_date, exit_date, entry_score, exit_score, bucket, source, exit_reason, "
-                "peak_price, thesis_last_reason, tier_reason")
+                "peak_price, thesis_last_reason, tier_reason, trade_horizon")
         .eq("status", "CLOSED")
         .order("exit_date", desc=True)
         .limit(50)
@@ -2163,6 +2193,7 @@ def get_virtual_summary() -> dict:
             "market_regime": sig.get("market_regime"),
             "thesis_status": t.get("thesis_last_status"),  # valid/weakening/invalid/None
             "tier_reason": t.get("tier_reason"),
+            "trade_horizon": t.get("trade_horizon") or "SHORT",
         }
 
         if current:
@@ -2212,6 +2243,7 @@ def get_virtual_summary() -> dict:
                 "exit_price": t.get("exit_price"),
                 "peak_price": t.get("peak_price"),
                 "exit_context": _build_exit_context(t),
+                "trade_horizon": t.get("trade_horizon") or "SHORT",
             }
             # Send all closed trades fetched (DB query above is `.limit(50)`).
             # The performance page paginates client-side in batches of 5 via

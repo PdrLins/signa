@@ -749,7 +749,9 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             try:
                 from app.services import thesis_tracker
                 thesis_results = await thesis_tracker.reevaluate_open_theses(
-                    valid_signals, scan_started_at=scan_started_at,
+                    valid_signals,
+                    scan_started_at=scan_started_at,
+                    scan_type=scan_type,
                 )
                 if thesis_results:
                     invalidated = thesis_tracker.execute_thesis_invalidation_exits(

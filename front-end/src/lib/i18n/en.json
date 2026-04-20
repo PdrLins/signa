@@ -904,6 +904,14 @@
     "readingDetail10": "Signa Brain Says — AI-generated insights specific to this ticker, including key points (positive, warning, or info), relevant brain knowledge, and the historical track record for this score range.",
     "readingDetail11": "Signal History — Previous signals for this ticker so you can see if the recommendation has been consistent or changing.",
     "readingDetailExample": "Example: ENB.TO at score 69 with 'Dividend Reliability: Strong' and 'Macro: Neutral' pills. The probability chip shows '64% vs SPY'. Brain says it's a solid Safe Income play with 4.2% dividend yield and low debt. Short interest is only 1.2% — no squeeze risk. The fundamentals are strong but macro conditions (VIX elevated) are keeping the score below BUY threshold.",
+    "horizonTitle": "Trade Horizon: Short vs Long",
+    "horizonDesc": "Every brain position is classified as SHORT or LONG at entry. This controls how aggressively the brain monitors and exits the trade. The split exists because winners were consistently cut early — the thesis tracker ran 5x/day and Claude's conservative bias flagged every extended winner as \"weakening.\"",
+    "horizonShortTitle": "SHORT — Momentum capture (1-7 days)",
+    "horizonShortDesc": "Thesis re-evaluated every scan (5x/day). Trailing stop: 3% soft / 5% hard below peak. Quality prune active on days 2-7 for losing positions. Time expiry: 7 days. Watchdog alerts on 2%+ drops. Used for: HIGH_RISK bucket, crypto, near-term catalysts (≤7 days). Goal: quick 2-5% captures.",
+    "horizonLongTitle": "LONG — Trend riding (up to 60 days)",
+    "horizonLongDesc": "Thesis re-evaluated once daily (AFTER_CLOSE scan only). Trailing stop: 5% soft / 8% hard below peak — room to breathe through intraday dips. No quality prune — only thesis=invalid or hard stop closes early. Time expiry: 60 days. Watchdog alerts on 4%+ drops only. Used for: SAFE_INCOME bucket, blue chips, sector rotation plays. Goal: ride 10-20%+ trends.",
+    "horizonClassification": "Classification rule: SAFE_INCOME bucket → LONG. HIGH_RISK bucket → SHORT. Crypto → SHORT. Near-term catalyst (≤7 days) → SHORT. You can see the badge (Long/Short) next to each position on the Brain Performance page.",
+    "horizonWhy": "Why this matters: in the first 2 weeks, WING peaked at +8.5% but was sold at +4.13% (thesis tracker killed it mid-day), HMY peaked at +7.94% but exited at +2.33% (gap-through over weekend). With the LONG classification, these would have had daily-only thesis checks and wider trailing stops — holding through the noise instead of selling at the worst moment.",
     "virtualPortfolioTitle": "Virtual Portfolio (Brain Accuracy)",
     "virtualPortfolioDesc": "Signa automatically tracks what would happen if you followed every signal the brain generates for your watchlisted tickers. No manual input needed — the brain proves its own accuracy.",
     "vp1": "When a watchlisted ticker gets a BUY signal (score 62+), the brain \"virtually buys\" at the current price.",
@@ -1288,6 +1296,8 @@
     "trades": "Trades",
     "avgReturn": "Avg Return",
     "overall": "Overall",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "long": "Long",
+    "short": "Short"
   }
 }
