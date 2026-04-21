@@ -763,15 +763,14 @@ export default function BrainPerformancePage() {
                               : <TrendingDown size={14} style={{ color: theme.colors.down }} />
                             }
                             <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{rc.symbol}</span>
-                            <span
-                              className="text-[7px] font-bold uppercase px-1 py-0.5 rounded"
-                              style={{
-                                backgroundColor: (rc.direction === 'SHORT' ? theme.colors.down : rc.trade_horizon === 'LONG' ? theme.colors.primary : theme.colors.warning) + '18',
-                                color: rc.direction === 'SHORT' ? theme.colors.down : rc.trade_horizon === 'LONG' ? theme.colors.primary : theme.colors.warning,
-                              }}
-                            >
-                              {rc.direction === 'SHORT' ? '▼S' : rc.trade_horizon === 'LONG' ? 'L' : 'S'}
-                            </span>
+                            {rc.direction === 'SHORT' && (
+                              <span
+                                className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded"
+                                style={{ backgroundColor: theme.colors.down + '18', color: theme.colors.down }}
+                              >
+                                ▼ {t.brainPerf.shortSell ?? 'Short'}
+                              </span>
+                            )}
                             <ExitReasonBadge reason={rc.exit_reason} theme={theme} />
                             {daysHeld != null && (
                               <span className="text-[9px] tabular-nums px-1 py-0.5 rounded" style={{ color: theme.colors.textHint, backgroundColor: theme.colors.surface }}>
