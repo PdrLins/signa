@@ -59,7 +59,7 @@ The brain only auto-buys signals that meet ONE of these tiers:
   -----------------------------------------------------
     Requires:
       • ai_status == "validated" (AI synthesis succeeded with confidence ≥ 50)
-      • score >= 72  (BRAIN_MIN_SCORE)
+      • score >= 75  (BRAIN_MIN_SCORE)
     Rationale: This is the high-conviction default. The AI ran cleanly,
     blockers were checked, the composite score is strong. Buy at full Kelly.
 
@@ -223,9 +223,13 @@ from app.services.price_cache import _fetch_prices_batch
 # (Oct 2024 - Apr 2025) — raising any of these reduces buy frequency but
 # increases per-trade win rate. Lowering them does the reverse.
 
-BRAIN_MIN_SCORE = 72
+BRAIN_MIN_SCORE = 75
 """Tier 1 floor — validated AI signals must clear this score to be bought.
-Backtest shows 60.6% win rate at 72+ for SAFE_INCOME, 52.6% for HIGH_RISK."""
+Raised from 72 to 75 on Day 13 (Apr 21) after observing that every losing
+rotation/churn event over Days 11-13 came from score 72-74 entries:
+JD (74, thesis died in 3h), REI-UN.TO/CAR-UN.TO/HR-UN.TO (all 72, rotated
+out at losses within 24h). Score 78+ entries were solid. Patience over
+slot-filling — the brain now sits when nothing great is available."""
 
 BRAIN_TIER2_MIN_SCORE = 80
 """Tier 2 floor — low-confidence AI signals need a higher score bar (80+)
