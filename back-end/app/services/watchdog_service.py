@@ -172,7 +172,7 @@ async def run_watchdog() -> dict:
 
     # Get open brain positions
     result = db.table("virtual_trades") \
-        .select("id, symbol, entry_price, entry_date, entry_score, stop_loss, source, bucket, market_regime, target_price, trade_horizon") \
+        .select("id, symbol, entry_price, entry_date, entry_score, stop_loss, source, bucket, market_regime, target_price, trade_horizon, direction") \
         .eq("status", "OPEN") \
         .eq("source", "brain") \
         .execute()
@@ -502,8 +502,14 @@ async def _close_virtual_trade(db, trade: dict, exit_price: float, exit_reason: 
     (see WATCHDOG_FORCE_SELL above), so the same hard limit applies.
     """
     entry_price = float(trade["entry_price"])
-    pnl_pct = ((exit_price - entry_price) / entry_price) * 100
-    pnl_amount = exit_price - entry_price
+    # Direction-aware P&L: SHORT profits when price drops, LONG when price rises.
+    direction = trade.get("direction") or "LONG"
+    if direction == "SHORT":
+        pnl_pct = ((entry_price - exit_price) / entry_price) * 100
+        pnl_amount = entry_price - exit_price
+    else:
+        pnl_pct = ((exit_price - entry_price) / entry_price) * 100
+        pnl_amount = exit_price - entry_price
     now_iso = datetime.now(timezone.utc).isoformat()
 
     # Get latest score

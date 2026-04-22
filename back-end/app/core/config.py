@@ -142,6 +142,11 @@ class Settings(BaseSettings):
     horizon_short_expiry_days: int = 7         # max hold for SHORT horizon
     horizon_long_expiry_days: int = 60         # max hold for LONG horizon
     horizon_long_min_score: int = 72           # minimum entry score for LONG horizon
+    # LONG positions require N consecutive AVOID/SELL signals before closing
+    # (prevents single-signal shake-outs like CCO.TO Day 14: opened 19h prior,
+    # closed on one MORNING AVOID at +1.49% while the trend was intact).
+    # Set to 1 to revert to immediate-exit (pre-Day 14 behavior).
+    brain_long_signal_exit_threshold: int = 2
 
     # --- Short Selling (direction=SHORT) ---
     # Two-wallet system: LONG wallet buys winners, SHORT wallet bets against losers.

@@ -593,6 +593,23 @@ export default function HowItWorksPage() {
               </Section>
             </Card>
 
+            {/* Consecutive-AVOID Delay */}
+            <Card>
+              <Section title={h.signalDelayTitle}>
+                <P>{h.signalDelayDesc}</P>
+                <div className="mt-3">
+                  <P>{h.signalDelayWhy}</P>
+                </div>
+              </Section>
+            </Card>
+
+            {/* Minimum Entry Score */}
+            <Card>
+              <Section title={h.minScoreTitle}>
+                <P>{h.minScoreDesc}</P>
+              </Section>
+            </Card>
+
             {/* Virtual Portfolio */}
             <Card>
               <Section title={h.virtualPortfolioTitle}>

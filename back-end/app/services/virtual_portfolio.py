@@ -570,7 +570,14 @@ def _exit_is_thesis_protected(pos: dict, exit_reason: str, pnl_pct: float) -> bo
         return False
     # Catastrophic carve-out: always exit, regardless of thesis. A wrong
     # Claude call must never blow up the position past the hard limit.
-    if pnl_pct <= settings.brain_thesis_hard_stop_pct:
+    # Direction-aware threshold: shorts use brain_short_hard_stop_pct
+    # (semantically identical to long at -8.0 today, but configurable).
+    direction = pos.get("direction") or "LONG"
+    hard_stop_threshold = (
+        settings.brain_short_hard_stop_pct if direction == "SHORT"
+        else settings.brain_thesis_hard_stop_pct
+    )
+    if pnl_pct <= hard_stop_threshold:
         return False
     if exit_reason == "ROTATION":
         return False
@@ -1144,7 +1151,10 @@ def process_virtual_trades(
                 # ROTATION exits write correct trade_outcomes rows and
                 # the learning loop can match (bucket, regime) patterns.
                 # Missing any of these silently corrupts pattern_stats data.
-                "bucket, market_regime, target_price, stop_loss")
+                "bucket, market_regime, target_price, stop_loss, "
+                # direction + trade_horizon + consecutive_avoid_count gate
+                # the LONG signal-exit delay (Day 14 fix).
+                "direction, trade_horizon, consecutive_avoid_count")
         .eq("status", "OPEN")
         .execute()
     )
@@ -1294,6 +1304,26 @@ def process_virtual_trades(
         is_watchlisted = symbol in watchlist_symbols
         is_crypto = sig.get("asset_type") == "CRYPTO" or (symbol or "").endswith("-USD")
 
+        # Reset consecutive_avoid_count on any open LONG position for this
+        # symbol when the fresh signal is NOT AVOID/SELL. This prevents a
+        # stale counter from 2 days ago from triggering an immediate close
+        # on the next AVOID.
+        if action not in ("SELL", "AVOID"):
+            for pos in all_open:
+                if (
+                    pos["symbol"] == symbol
+                    and pos.get("source") == "brain"
+                    and int(pos.get("consecutive_avoid_count") or 0) > 0
+                ):
+                    db.table("virtual_trades").update(
+                        {"consecutive_avoid_count": 0}
+                    ).eq("id", pos["id"]).eq("status", "OPEN").execute()
+                    pos["consecutive_avoid_count"] = 0
+                    logger.info(
+                        f"Virtual AVOID counter RESET for {symbol} — "
+                        f"fresh signal is {action}, trend intact"
+                    )
+
         # ── SELL: close all open positions for this symbol ──
         if action in ("SELL", "AVOID"):
             # Pre-market SELLs on equities can't fill — flag the position for
@@ -1333,8 +1363,13 @@ def process_virtual_trades(
                     )
 
                 entry_price = float(pos["entry_price"])
-                pnl_pct = ((price - entry_price) / entry_price) * 100
-                pnl_amount = price - entry_price
+                # Direction-aware P&L (Day 14 audit fix): a SHORT position
+                # hit by a BUY→AVOID signal (which means the short signal
+                # got stronger) uses inverted P&L. Hardcoding long-side
+                # logic inverts learning-loop + notification P&L for shorts.
+                _pos_dir = pos.get("direction") or "LONG"
+                pnl_pct = _calc_pnl_pct(entry_price, price, _pos_dir)
+                pnl_amount = _calc_pnl_amount(entry_price, price, _pos_dir)
                 is_win = pnl_pct > 0
                 source = pos.get("source", "watchlist")
 
@@ -1350,6 +1385,40 @@ def process_virtual_trades(
                         f"(P&L {pnl_pct:+.1f}%, action was {action}, holding through)"
                     )
                     continue
+
+                # LONG/LONG exit-delay gate (Day 14 fix): a LONG-direction
+                # position with LONG trade_horizon needs N consecutive
+                # AVOID/SELL signals before closing. This prevents
+                # single-signal shake-outs where Claude's "AVOID" on one
+                # scan is just noise (morning volume lull, one-off RSI
+                # print) and the trend is actually intact. CCO.TO on
+                # Day 14 opened at PRE_CLOSE, closed on next MORNING at
+                # +1.49% — a win, but the trend had room to run.
+                pos_direction = pos.get("direction") or "LONG"
+                pos_horizon = pos.get("trade_horizon") or "SHORT"
+                if (
+                    source == "brain"
+                    and pos_direction == "LONG"
+                    and pos_horizon == "LONG"
+                    and not sig.get("_review_forced")
+                ):
+                    new_count = int(pos.get("consecutive_avoid_count") or 0) + 1
+                    threshold = settings.brain_long_signal_exit_threshold
+                    if new_count < threshold:
+                        db.table("virtual_trades").update(
+                            {"consecutive_avoid_count": new_count}
+                        ).eq("id", pos["id"]).eq("status", "OPEN").execute()
+                        logger.info(
+                            f"Virtual SIGNAL exit DELAYED for {symbol} (LONG) — "
+                            f"avoid count {new_count}/{threshold}, P&L {pnl_pct:+.1f}%. "
+                            f"Holding through first flip, waiting for confirmation."
+                        )
+                        continue
+                    # count reached threshold — close normally, counter doesn't matter after close
+                    logger.info(
+                        f"Virtual SIGNAL exit CONFIRMED for {symbol} (LONG) — "
+                        f"{threshold} consecutive AVOIDs, closing at P&L {pnl_pct:+.1f}%"
+                    )
 
                 # Status guard: the .eq("status", "OPEN") prevents this UPDATE
                 # from ever mutating an already-closed row. Belt-and-braces
@@ -1532,7 +1601,10 @@ def process_virtual_trades(
                     w_prices = _fetch_prices_batch([w_symbol])
                     w_current, _ = w_prices.get(w_symbol, (None, None))
                     w_exit_price = w_current if w_current else price
-                    w_pnl = ((w_exit_price - w_entry) / w_entry) * 100 if w_entry > 0 else 0
+                    # Direction-aware P&L for the rotated-out position.
+                    w_direction = weakest.get("direction") or "LONG"
+                    w_pnl = _calc_pnl_pct(w_entry, w_exit_price, w_direction) if w_entry > 0 else 0
+                    w_pnl_amount = _calc_pnl_amount(w_entry, w_exit_price, w_direction)
                     # Status guard prevents this UPDATE from ever mutating
                     # an already-closed row. Combined with the lazy-recompute
                     # of `weakest` above, the rotation flow can no longer
@@ -1543,7 +1615,7 @@ def process_virtual_trades(
                         "exit_date": now,
                         "exit_score": score,
                         "pnl_pct": round(w_pnl, 2),
-                        "pnl_amount": round(w_exit_price - w_entry, 2),
+                        "pnl_amount": round(w_pnl_amount, 2),
                         "is_win": w_pnl > 0,
                         "exit_reason": "ROTATION",
                     }).eq("id", weakest["id"]).eq("status", "OPEN").execute()
@@ -2297,7 +2369,7 @@ def get_virtual_summary() -> dict:
     # All trades
     open_result = (
         db.table("virtual_trades")
-        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status, tier_reason, trade_horizon")
+        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status, tier_reason, trade_horizon, direction, consecutive_avoid_count")
         .eq("status", "OPEN")
         .order("entry_date", desc=True)
         .execute()
@@ -2430,6 +2502,7 @@ def get_virtual_summary() -> dict:
             "tier_reason": t.get("tier_reason"),
             "trade_horizon": t.get("trade_horizon") or "SHORT",
             "direction": t.get("direction") or "LONG",
+            "consecutive_avoid_count": t.get("consecutive_avoid_count") or 0,
         }
 
         if current:

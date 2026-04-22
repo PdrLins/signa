@@ -919,6 +919,11 @@
     "twoWalletShortTitle": "▼ Short Wallet (6 positions)",
     "twoWalletShortDesc": "Short-sells stocks with AVOID signals (score ≤ 40) that Claude has explicitly confirmed as bearish with validated AI. Profits when price drops. Requires: AI-validated bearish thesis, target below entry price, stop above entry price. No tech-only shorts — too risky without AI confirmation. Hard stop at 8% loss (no thesis gate bypass).",
     "twoWalletNote": "Short selling is riskier than buying — losses are theoretically unlimited if the stock keeps rising. The brain mitigates this with: (1) only AI-validated entries, (2) 8% hard stop that always fires, (3) automatic cover when the signal flips to BUY, (4) 14-day maximum hold. The Short Sell badge (▼) appears on positions in the Performance page.",
+    "signalDelayTitle": "Consecutive-AVOID Delay (LONG positions)",
+    "signalDelayDesc": "LONG-direction + LONG-horizon positions don't close on a single AVOID signal. Instead the brain waits for TWO consecutive AVOID/SELL signals before exiting. A single AVOID increments a counter and logs 'Hold 1/2'; if the next scan flips back to BUY or HOLD the counter resets. This prevents single-signal shake-outs where Claude's 'AVOID' on one scan is just noise (morning volume lull, one-off RSI print) and the trend is actually intact.",
+    "signalDelayWhy": "Why this exists: on Day 14, CCO.TO was closed on a single MORNING AVOID after being held just 19 hours — a winning exit (+1.49%) but the trend had room to run. The LONG-horizon design is about holding through noise. A single contrarian signal is noise; two in a row is a real reversal. SHORT-direction positions and SHORT-horizon positions still close immediately on a single flip — they're meant for quick captures, not trend riding.",
+    "minScoreTitle": "Minimum Entry Score: 75",
+    "minScoreDesc": "The brain's minimum entry score for Tier 1 (validated AI) is 75. Raised from 72 on Day 13 after every losing rotation/churn event over Days 11-13 came from score 72-74 entries (JD 74 — thesis died in 3h; REI-UN.TO, CAR-UN.TO, HR-UN.TO all 72 — rotated out at losses within 24h). Score 78+ entries were consistently solid. The brain now sits when nothing great is available rather than filling slots with mediocre picks.",
     "virtualPortfolioTitle": "Virtual Portfolio (Brain Accuracy)",
     "virtualPortfolioDesc": "Signa automatically tracks what would happen if you followed every signal the brain generates for your watchlisted tickers. No manual input needed — the brain proves its own accuracy.",
     "vp1": "When a watchlisted ticker gets a BUY signal (score 62+), the brain \"virtually buys\" at the current price.",
@@ -1306,6 +1311,8 @@
     "loadMore": "Load more",
     "long": "Long",
     "short": "Short",
-    "shortSell": "Short Sell"
+    "shortSell": "Short Sell",
+    "holdingThrough": "Hold {n}/2",
+    "holdingThroughTooltip": "LONG position holding through AVOID signal — waits for 2 consecutive AVOIDs before closing"
   }
 }

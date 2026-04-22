@@ -70,6 +70,7 @@ interface VirtualTrade {
   tier_reason?: string    // validated | validated_below_sma50 | low_confidence_high_score | tech_only_confirmed_*
   trade_horizon?: 'SHORT' | 'LONG'
   direction?: 'LONG' | 'SHORT'
+  consecutive_avoid_count?: number
 }
 
 interface ClosedTrade {
@@ -600,6 +601,15 @@ export default function BrainPerformancePage() {
                               style={{ backgroundColor: theme.colors.down + '18', color: theme.colors.down }}
                             >
                               ▼ {t.brainPerf.shortSell ?? 'Short Sell'}
+                            </span>
+                          )}
+                          {(vt.consecutive_avoid_count ?? 0) > 0 && (
+                            <span
+                              className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded"
+                              style={{ backgroundColor: theme.colors.warning + '18', color: theme.colors.warning }}
+                              title={t.brainPerf.holdingThroughTooltip ?? 'LONG position holding through AVOID signal — waits for 2 consecutive AVOIDs before closing'}
+                            >
+                              {(t.brainPerf.holdingThrough ?? 'Hold {n}/2').replace('{n}', String(vt.consecutive_avoid_count))}
                             </span>
                           )}
                           {monitoredSymbols.has(vt.symbol) && (

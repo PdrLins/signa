@@ -511,6 +511,11 @@ ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS trade_horizon VARCHAR DEFAUL
 ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS direction VARCHAR DEFAULT 'LONG';
 ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS trough_price DOUBLE PRECISION;
 CREATE INDEX IF NOT EXISTS idx_virtual_trades_direction ON virtual_trades(direction) WHERE status = 'OPEN';
+-- Consecutive AVOID/SELL signal counter (LONG-horizon exit delay). Day 14 fix:
+-- CCO.TO closed on a single MORNING AVOID after 19h as LONG — contradicting
+-- the "hold through noise" design. LONG positions now require 2+ consecutive
+-- AVOID signals before closing; counter resets on any BUY/HOLD.
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS consecutive_avoid_count INT DEFAULT 0;
 
 
 -- 18b. AI RETRY QUEUE (tickers whose AI synthesis failed — retry on next scan)

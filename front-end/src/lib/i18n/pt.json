@@ -899,6 +899,11 @@
     "twoWalletShortTitle": "▼ Carteira Venda (6 posições)",
     "twoWalletShortDesc": "Vende a descoberto ações com sinais AVOID (score ≤ 40) que o Claude confirmou explicitamente como bearish com IA validada. Lucra quando o preço cai. Requer: tese bearish validada pela IA, alvo abaixo do preço de entrada, stop acima do preço de entrada. Sem shorts apenas técnicos — muito arriscado sem confirmação da IA. Stop duro em 8% de perda (sem bypass de tese).",
     "twoWalletNote": "Venda a descoberto é mais arriscada que compra — perdas são teoricamente ilimitadas se a ação continuar subindo. O brain mitiga com: (1) apenas entradas validadas pela IA, (2) stop duro de 8% que sempre dispara, (3) cobertura automática quando sinal vira BUY, (4) prazo máximo de 14 dias. O badge Venda a Descoberto (▼) aparece nas posições na página de Desempenho.",
+    "signalDelayTitle": "Atraso em AVOID Consecutivo (posições LONGAS)",
+    "signalDelayDesc": "Posições direção=LONGA + horizonte=LONGO não fecham em um único sinal AVOID. Em vez disso, o brain aguarda DOIS sinais AVOID/SELL consecutivos antes de sair. Um único AVOID incrementa um contador e registra 'Segurando 1/2'; se a próxima varredura voltar a BUY ou HOLD, o contador reseta. Isso previne saídas prematuras quando o AVOID do Claude em uma varredura é apenas ruído (queda de volume da manhã, RSI pontual) e a tendência está intacta.",
+    "signalDelayWhy": "Por que isso existe: no Dia 14, CCO.TO foi fechada em um único AVOID da MANHÃ após ser mantida apenas 19 horas — uma saída vencedora (+1,49%) mas a tendência tinha espaço para rodar. O design de horizonte LONGO é para segurar através do ruído. Um único sinal contrário é ruído; dois em sequência é reversão real. Posições direção=CURTA e horizonte=CURTO ainda fecham imediatamente em um único flip — elas são para capturas rápidas, não para seguir tendência.",
+    "minScoreTitle": "Score Mínimo de Entrada: 75",
+    "minScoreDesc": "O score mínimo do brain para Tier 1 (IA validada) é 75. Aumentado de 72 no Dia 13 após cada evento de rotação/churn perdedor nos Dias 11-13 vir de entradas com score 72-74 (JD 74 — tese morreu em 3h; REI-UN.TO, CAR-UN.TO, HR-UN.TO todas em 72 — rotacionadas no vermelho em 24h). Entradas com score 78+ foram consistentemente sólidas. O brain agora senta quando nada ótimo está disponível em vez de preencher vagas com escolhas medianas.",
     "virtualPortfolioTitle": "Portfólio Virtual (Precisão do Brain)",
     "virtualPortfolioDesc": "O Signa rastreia automaticamente o que aconteceria se você seguisse cada sinal que o brain gera para os tickers nos seus favoritos. Sem entrada manual — o brain prova sua própria precisão.",
     "vp1": "Quando um ticker favoritado recebe um sinal de COMPRA (score 62+), o brain \"compra virtualmente\" no preço atual.",
@@ -1286,6 +1291,8 @@
     "loadMore": "Carregar mais",
     "long": "Longo",
     "short": "Curto",
-    "shortSell": "Venda a Descoberto"
+    "shortSell": "Venda a Descoberto",
+    "holdingThrough": "Segurando {n}/2",
+    "holdingThroughTooltip": "Posição LONGA segurando através de sinal AVOID — aguarda 2 AVOIDs consecutivos antes de fechar"
   }
 }
