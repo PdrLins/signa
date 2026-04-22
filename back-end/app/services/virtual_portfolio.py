@@ -2004,6 +2004,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         target = float(trade["target_price"]) if trade.get("target_price") else None
         stop = float(trade["stop_loss"]) if trade.get("stop_loss") else None
         direction = trade.get("direction") or "LONG"
+        horizon = trade.get("trade_horizon") or "SHORT"
         pnl_pct = _calc_pnl_pct(entry_price, current_price, direction)
 
         # Parse entry_date for age check
@@ -2043,7 +2044,6 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
                     pass
             trough = entry_price  # not used for LONG trail calc
             trailing_active = peak >= entry_price * 1.03
-            horizon = trade.get("trade_horizon") or "SHORT"
             if horizon == "LONG":
                 soft_pct = 1.0 - settings.horizon_long_trail_pct / 100 * 0.6
                 hard_pct = 1.0 - settings.horizon_long_trail_pct / 100
@@ -2195,6 +2195,37 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
                     "exit_score": str(current_scores.get(symbol, 0)),
                     "verdict": "Position underperforming with deteriorating thesis — slot freed for stronger pick.",
                 }))
+
+        # ── STAGNATION_PRUNE: LONG/LONG dead-capital detection (Day 14) ──
+        # Targets REGN-type holds: week+ with no meaningful movement and the
+        # thesis drifting weakening/invalid. Distinct from QUALITY_PRUNE
+        # (which needs pnl < 0 and days 2-7) — this catches the flat dead
+        # trades that sit in a slot producing ~0% for weeks. Preserves real
+        # LONG winners by requiring |pnl| < 2% (winners up 3%+ don't match).
+        if (
+            not exit_reason
+            and trade.get("source") == "brain"
+            and direction == "LONG"
+            and horizon == "LONG"
+            and days_held >= settings.brain_stagnation_min_days
+            and abs(pnl_pct) < settings.brain_stagnation_pnl_range_pct
+            and thesis_status in ("weakening", "invalid")
+        ):
+            exit_reason = "STAGNATION_PRUNE"
+            logger.info(
+                f"Virtual STAGNATION PRUNE: {symbol} at {pnl_pct:+.2f}% "
+                f"(held {days_held}d, thesis={thesis_status}, "
+                f"|pnl| < {settings.brain_stagnation_pnl_range_pct}% for a week+) — "
+                f"dead capital, freeing slot"
+            )
+            notifications.append(("brain_sell", {
+                "symbol": symbol, "price": f"{current_price:.2f}",
+                "pnl": f"{pnl_pct:+.2f}",
+                "reason": f"Stagnation prune (held {days_held}d, thesis {thesis_status}, no meaningful movement)",
+                "entry_score": str(trade.get("entry_score", 0)),
+                "exit_score": str(current_scores.get(symbol, 0)),
+                "verdict": "Position has gone nowhere for a week+ with deteriorating thesis — freeing slot for something that moves.",
+            }))
 
         if not exit_reason:
             continue
@@ -2443,6 +2474,9 @@ def get_virtual_summary() -> dict:
         if reason == "QUALITY_PRUNE":
             thesis = t.get("thesis_last_status") or "none"
             return f"Pruned: losing position with {thesis} thesis — slot freed for a stronger pick"
+        if reason == "STAGNATION_PRUNE":
+            thesis = t.get("thesis_last_status") or "none"
+            return f"Stagnation prune: held a week+ with no meaningful movement and {thesis} thesis — dead capital, slot freed"
         if reason == "ROTATION":
             return "Rotated out for a stronger candidate"
         return reason or "Unknown"

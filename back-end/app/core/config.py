@@ -148,6 +148,15 @@ class Settings(BaseSettings):
     # Set to 1 to revert to immediate-exit (pre-Day 14 behavior).
     brain_long_signal_exit_threshold: int = 2
 
+    # STAGNATION_PRUNE (Day 14 learning): LONG/LONG positions that produce
+    # nothing meaningful for a week+ are dead capital. REGN held 12 days for
+    # +0.77% at +$5.73 — a "win" on paper but 0.06%/day is worse than sitting
+    # in cash. This rule cuts them: held >= N days, |pnl| < X%, thesis
+    # weakening/invalid → PRUNE. Frees the slot for something that actually
+    # moves. Set days to 999 to disable.
+    brain_stagnation_min_days: int = 7
+    brain_stagnation_pnl_range_pct: float = 2.0
+
     # --- Short Selling (direction=SHORT) ---
     # Two-wallet system: LONG wallet buys winners, SHORT wallet bets against losers.
     # Separate slot limits concentrate capital on fewer, higher-quality positions.

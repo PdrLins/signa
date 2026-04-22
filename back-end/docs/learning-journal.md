@@ -1780,6 +1780,159 @@ All LONG/LONG. Short wallet still empty.
 
 ---
 
+## Day 14 -- April 22, 2026 (Wednesday)
+
+**The most important day of engineering so far: spotted a real design gap (CCO.TO got shaken out of a LONG on a single MORNING AVOID at +1.49%), designed + built the consecutive-AVOID delay, ran a code audit that caught FIVE critical bugs in the short-selling path (P&L inversion across signal exits, rotation exits, and watchdog close), raised BRAIN_MIN_SCORE from 72 to 75, deployed all of it mid-day. REGN finally closed green at +0.77% / +$5.73 after 12 days and 14 more hold-through-dip events. Net day: +$6.95 dollars (though -2.11% sum-of-pct).**
+
+### Environment
+- Scans: **5/5 COMPLETE** — PRE_MARKET, MORNING, MIDDAY, PRE_CLOSE, AFTER_CLOSE
+- Signals per scan: 53-57
+- GEMs: 0
+- Short candidates: 0 (market still bullish)
+- Budget: ~$0 (Claude Local)
+
+### The CCO.TO incident and design fix
+
+CCO.TO was opened Apr 21 at PRE_CLOSE at $161.84 (score 80, LONG/LONG). Today's MORNING scan (14:02) flipped the action from BUY to AVOID with the same score (80). The reasoning: Bollinger position 74.6%, volume z-score -2.08 — buying participation fading. The brain closed it at $164.25 = **+1.49% / +$2.41 in 19 hours**.
+
+Ordinary win, right? **No.** At MIDDAY (16:02), the signal flipped BACK to BUY, and the brain re-bought at $164.96 — 0.4% HIGHER than the exit. The sell was premature. This is the exact pattern the LONG-horizon design was supposed to prevent, but the signal-exit path was never gated by horizon.
+
+**Design gap identified:**
+- LONG-horizon was protected from thesis tracker (daily-only re-eval) ✓
+- LONG-horizon had wider trailing stops (5%/8% vs 3%/5%) ✓
+- LONG-horizon relaxed watchdog thresholds ✓
+- LONG-horizon did **NOT** have signal-exit protection ❌
+
+**The fix built today: consecutive-AVOID delay.** LONG-direction + LONG-horizon positions require **2 consecutive AVOID/SELL signals** before closing. A single flip increments `consecutive_avoid_count` to 1 and the position is held; if the next scan flips back to BUY/HOLD the counter resets. If CCO.TO had been closed on the 2nd AVOID, today's sell wouldn't have fired — the MIDDAY scan flipped back to BUY and would have reset the counter to 0.
+
+Schema: new `consecutive_avoid_count INT DEFAULT 0` column. Config: `brain_long_signal_exit_threshold = 2` (tunable). UI: `Hold 1/2` badge appears on open positions while delay is active.
+
+### The audit that saved us from corrupt short-selling data
+
+After building the consecutive-AVOID delay, I ran a full audit of all brain-related Python code. **The audit caught FIVE critical bugs in the short-selling path that had been sitting there since the Day 12 ship:**
+
+| # | Bug | Impact if shorts had opened |
+|---|---|---|
+| 1 | Watchdog SELECT missing `direction` column | Every SHORT watchdog P&L calc would fall through to LONG default — **inverted P&L in alerts** |
+| 2 | Watchdog `_close_virtual_trade` hardcoded LONG P&L | SHORT closes would write inverted P&L to DB + learning loop |
+| 3 | SELL/AVOID signal exit P&L hardcoded LONG | Winning shorts would log as losses on SIGNAL exit |
+| 4 | ROTATION exit P&L hardcoded LONG | SHORT rotations inverted in trade_outcomes |
+| 5 | Hard-stop carve-out ignored `brain_short_hard_stop_pct` | Semantically wrong, currently harmless because both = -8.0 |
+
+**Why zero corrupted data exists in the DB**: no shorts have opened yet (market too bullish, no AVOID + validated AI + score ≤ 40 combo has appeared since Day 12). The bugs were latent. The audit caught them before any short ever exercised them. **This is exactly why the review passes memory rule exists** — the ~30min audit prevented what would have been days of debugging wrong learning-loop data.
+
+All 5 bugs fixed + verified. Also added `consecutive_avoid_count` to the API response and open-trades SELECT so the frontend could render it.
+
+### Brain trades
+
+**Opened (2):** CCO.TO @ $164.96 (T1, 80, LONG/LONG — re-buy), HIMS @ $28.39 (T1, 79, LONG/SHORT — HIGH_RISK bucket).
+
+**Closed (4):**
+
+| Symbol | Exit reason | P&L % | P&L $ | Held | Notes |
+|---|---|---|---|---|---|
+| CCO.TO | SIGNAL (pre-fix) | +1.49% | +$2.41 | 19h | The shake-out that triggered today's design. Re-bought 2h later at +0.4%. |
+| VZ | WATCHDOG_EXIT | -2.31% | -$1.07 | 6d | Bearish sentiment + negative P&L. Day 5 at weakening → watchdog called it. |
+| LYG | ROTATION | -2.06% | -$0.12 | 14d | The legacy NULL-thesis position finally cycled out. Replaced by HIMS. |
+| **REGN** | **THESIS_INVALIDATED** | **+0.77%** | **+$5.73** | **12d** | **The LONG-horizon discipline paid off.** 14 more hold-through-dip events today before Claude finally invalidated the thesis at AFTER_CLOSE. Exited green. |
+
+**Realized today: -2.11% / +$6.95** (2W / 2L). Dollar-positive day despite the percentage being negative — REGN's $5.73 win on a $740 stock dwarfs VZ's -$1.07 loss on a $46 stock. **This is the % vs $ divergence story again, and why $ is the honest metric.**
+
+### The REGN story — LONG discipline working as designed
+
+REGN was the real win today. Let me trace it:
+
+- Apr 10: opened at $740.85, score 79, LONG/LONG, thesis=valid
+- Apr 11-21: 11 days held, ~30+ hold-through-dip events across that span, thesis bounced weakening/valid
+- Apr 22 (today): 14 MORE hold-through-dip events during market hours
+- Apr 22 AFTER_CLOSE scan: Claude's thesis re-eval returns `invalid`, exit fires at +0.77%
+
+**Under the pre-Day-10 system**, REGN would have been closed weeks ago — the thesis tracker running 5x/day would have produced a "weakening" call, the quality prune would have fired on a losing week, or the watchdog would have bled it out on a 2% total loss threshold.
+
+**Under the LONG-horizon system that shipped Day 12:**
+- Thesis re-eval only at AFTER_CLOSE (not 5x/day) → avoided the noise kills
+- Trailing stop widened to 5%/8% → never activated (REGN peak was maybe +1.5%)
+- Quality prune disabled for LONG → no "slot freed" forced exit
+- Watchdog bleed threshold 4% (not 2%) → didn't force close through the ranging
+- Result: held 12 days, exited green when the real thesis died
+
+**REGN is the validation of the LONG-horizon design.** A winning exit we would have missed under the old rules. The +$5.73 alone is ~4x what we'd have captured at a premature exit.
+
+### BRAIN_MIN_SCORE raised to 75
+
+Mid-afternoon I also raised the minimum entry score from 72 to 75. Day 13 evidence: every losing rotation/churn event over Days 11-13 came from score 72-74 entries. JD (74), REI-UN.TO (72), CAR-UN.TO (72), HR-UN.TO (72). Score 78+ entries were solid.
+
+Today's entries both passed the new bar: CCO.TO re-buy at 80, HIMS at 79.
+
+### Watchdog + thesis tracker verification
+
+- **Watchdog events**: 17 total. 14 HOLD_THROUGH_DIP (all REGN before close), 2 ALERT + 1 CLOSE (VZ). Clean elsewhere — LONG-horizon relaxed thresholds holding.
+- **Thesis events**: 6 total, **all at AFTER_CLOSE 20:32 UTC**. LONG-horizon daily-only gate working perfectly. Down from the Day 10-11 pattern of 25+ re-evals per day.
+
+### Open positions (7, down from 8)
+
+| Symbol | Entry | Score | Days | Direction | Horizon | Thesis | Count |
+|---|---|---|---|---|---|---|---|
+| HIMS | $28.39 | 79 | 0 | LONG | SHORT | valid | 0 |
+| CCO.TO | $164.96 | 80 | 0 | LONG | LONG | weakening | 0 |
+| BBD | $4.09 | 78 | 1 | LONG | LONG | valid | 0 |
+| HPQ | $20.75 | 77 | 1 | LONG | LONG | weakening | 0 |
+| DIR-UN.TO | $13.76 | 76 | 2 | LONG | LONG | weakening | 0 |
+| CNQ | $42.32 | 79 | 5 | LONG | LONG | valid | 0 |
+| BLK | $1021.45 | 77 | 6 | LONG | LONG | valid | 0 |
+
+Still no shorts. The new `consecutive_avoid_count` column is populated at 0 on all positions — first real test comes when any position gets an AVOID signal.
+
+### Features shipped today
+
+| Feature | What it does |
+|---|---|
+| Consecutive-AVOID delay | LONG/LONG positions require 2 consecutive AVOIDs before closing. New DB column + config + 2 code paths. |
+| Counter reset on BUY/HOLD | If a position gets AVOID then BUY, the counter resets to 0. No stale state. |
+| UI badge `Hold 1/2` | Performance page shows warning-colored badge when a position is mid-delay. Tooltip explains the rule. |
+| Audit fix: watchdog direction column | SELECT now includes direction — watchdog correctly computes SHORT P&L |
+| Audit fix: watchdog close P&L | `_close_virtual_trade` direction-aware |
+| Audit fix: SELL/AVOID P&L | process_virtual_trades SIGNAL exit direction-aware |
+| Audit fix: ROTATION P&L | Rotation close direction-aware |
+| Audit fix: hard-stop carve-out | Uses `brain_short_hard_stop_pct` for SHORT positions |
+| API: `consecutive_avoid_count` exposed | Available in `_enrich_open_trade` and open-trades SELECT |
+| How-it-works: two new cards | Consecutive-AVOID delay explanation + Minimum Entry Score 75 |
+
+### All-time running totals (Apr 6–22)
+
+| Metric | Value |
+|---|---|
+| Trading days | 12 |
+| Brain closes | 38 |
+| Win rate | 42% (16W / 22L) |
+| Total realized P&L | **+$141.45** (+$6.95 from Day 13) |
+| Best trade | META +7.38% / +$46.33 |
+| Worst trade | CNQ -5.89% / -$2.68 |
+| Best $ win today | REGN +$5.73 (LONG-horizon validation) |
+| Open positions | 7 |
+
+### Things to learn / improve (what comes next)
+
+1. **Watch the consecutive-AVOID delay activate.** First time any LONG position gets an AVOID signal, check the logs for `"Virtual SIGNAL exit DELAYED for X (LONG) — avoid count 1/2"`. Then watch: does the next scan reset (BUY/HOLD) or confirm (second AVOID → close)?
+
+2. **The CCO.TO re-buy paradox remains.** Today's CCO.TO exited at $164.25, re-entered at $164.96. Net cost to the brain: 0.4% on the round-trip. With the consecutive-AVOID delay, this specific pattern won't happen again — but **there's a class of mirror trades** (SELL/rebuy within a day) that still leak value. Worth watching if the delay alone is sufficient.
+
+3. **REGN's success is the case study for LONG holds.** The 12-day discipline produced the day's best dollar win. Without the LONG-horizon design: REGN would have been killed weeks ago under the old thesis tracker or quality prune. This is proof the strategic framework is right.
+
+4. **Sector concentration still unaddressed.** The REITs are resolved for now (LYG out, DIR-UN.TO remaining). If a bearish sector day hits, the brain's still not sector-aware.
+
+5. **Short wallet empty for another day.** At current threshold (40), no candidates. If we hit 5-7 consecutive bearish days with zero shorts, loosen to 45. Not yet.
+
+### Metrics to track tomorrow
+
+- [ ] Does any position hit `consecutive_avoid_count = 1` tomorrow? First real test of the delay.
+- [ ] HIMS (new, SHORT horizon) — does it fire a 1-7 day momentum trade, or get cut early?
+- [ ] CCO.TO re-buy at $164.96 — does it recover toward the $171.26 target, or flip to AVOID again?
+- [ ] CNQ at +3.24%ish, day 5 — approaching target $48.50?
+- [ ] HPQ at weakening day 1 — survives, or gets pruned/exited?
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

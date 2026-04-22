@@ -159,6 +159,7 @@ function ExitReasonBadge({ reason, theme }: { reason?: string; theme: ReturnType
     STOP_HIT: { label: 'Stop Hit', color: theme.colors.down },
     TRAILING_STOP: { label: 'Trailing Stop', color: theme.colors.up },
     QUALITY_PRUNE: { label: 'Pruned', color: theme.colors.warning },
+    STAGNATION_PRUNE: { label: 'Stagnant', color: theme.colors.warning },
     PROFIT_TAKE: { label: 'Profit Take', color: theme.colors.up },
     TIME_EXPIRED: { label: 'Expired', color: theme.colors.warning },
     SIGNAL: { label: 'Signal', color: theme.colors.primary },
