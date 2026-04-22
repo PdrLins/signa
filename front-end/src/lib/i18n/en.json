@@ -912,6 +912,18 @@
     "horizonLongDesc": "Thesis re-evaluated once daily (AFTER_CLOSE scan only). Trailing stop: 5% soft / 8% hard below peak — room to breathe through intraday dips. No quality prune — only thesis=invalid or hard stop closes early. Time expiry: 60 days. Watchdog alerts on 4%+ drops only. Used for: SAFE_INCOME bucket, blue chips, sector rotation plays. Goal: ride 10-20%+ trends.",
     "horizonClassification": "Classification rule: SAFE_INCOME bucket → LONG. HIGH_RISK bucket → SHORT. Crypto → SHORT. Near-term catalyst (≤7 days) → SHORT. You can see the badge (Long/Short) next to each position on the Brain Performance page.",
     "horizonWhy": "Why this matters: in the first 2 weeks, WING peaked at +8.5% but was sold at +4.13% (thesis tracker killed it mid-day), HMY peaked at +7.94% but exited at +2.33% (gap-through over weekend). With the LONG classification, these would have had daily-only thesis checks and wider trailing stops — holding through the noise instead of selling at the worst moment.",
+    "twoWalletTitle": "Two-Wallet System: Long + Short Selling",
+    "twoWalletDesc": "The brain runs two independent wallets. The LONG wallet buys stocks it expects to rise (8 slots max). The SHORT wallet bets against stocks it expects to fall (6 slots max). This lets the brain profit from both sides of the market — previously, SELL/AVOID signals were wasted because the brain could only buy.",
+    "twoWalletLongTitle": "▲ Long Wallet (8 positions)",
+    "twoWalletLongDesc": "Buys stocks with BUY signals (score ≥ 65 for High Risk, ≥ 62 for Safe Income). Profits when price rises. Uses the tiered trust model (Tier 1/2/3) with portfolio heat gates. Existing behavior, now capped at 8 positions for concentration.",
+    "twoWalletShortTitle": "▼ Short Wallet (6 positions)",
+    "twoWalletShortDesc": "Short-sells stocks with AVOID signals (score ≤ 40) that Claude has explicitly confirmed as bearish with validated AI. Profits when price drops. Requires: AI-validated bearish thesis, target below entry price, stop above entry price. No tech-only shorts — too risky without AI confirmation. Hard stop at 8% loss (no thesis gate bypass).",
+    "twoWalletNote": "Short selling is riskier than buying — losses are theoretically unlimited if the stock keeps rising. The brain mitigates this with: (1) only AI-validated entries, (2) 8% hard stop that always fires, (3) automatic cover when the signal flips to BUY, (4) 14-day maximum hold. The Short Sell badge (▼) appears on positions in the Performance page.",
+    "signalDelayTitle": "Consecutive-AVOID Delay (LONG positions)",
+    "signalDelayDesc": "LONG-direction + LONG-horizon positions don't close on a single AVOID signal. Instead the brain waits for TWO consecutive AVOID/SELL signals before exiting. A single AVOID increments a counter and logs 'Hold 1/2'; if the next scan flips back to BUY or HOLD the counter resets. This prevents single-signal shake-outs where Claude's 'AVOID' on one scan is just noise (morning volume lull, one-off RSI print) and the trend is actually intact.",
+    "signalDelayWhy": "Why this exists: on Day 14, CCO.TO was closed on a single MORNING AVOID after being held just 19 hours — a winning exit (+1.49%) but the trend had room to run. The LONG-horizon design is about holding through noise. A single contrarian signal is noise; two in a row is a real reversal. SHORT-direction positions and SHORT-horizon positions still close immediately on a single flip — they're meant for quick captures, not trend riding.",
+    "minScoreTitle": "Minimum Entry Score: 75",
+    "minScoreDesc": "The brain's minimum entry score for Tier 1 (validated AI) is 75. Raised from 72 on Day 13 after every losing rotation/churn event over Days 11-13 came from score 72-74 entries (JD 74 — thesis died in 3h; REI-UN.TO, CAR-UN.TO, HR-UN.TO all 72 — rotated out at losses within 24h). Score 78+ entries were consistently solid. The brain now sits when nothing great is available rather than filling slots with mediocre picks.",
     "virtualPortfolioTitle": "Virtual Portfolio (Brain Accuracy)",
     "virtualPortfolioDesc": "Signa automatically tracks what would happen if you followed every signal the brain generates for your watchlisted tickers. No manual input needed — the brain proves its own accuracy.",
     "vp1": "When a watchlisted ticker gets a BUY signal (score 62+), the brain \"virtually buys\" at the current price.",
@@ -1298,6 +1310,9 @@
     "overall": "Overall",
     "loadMore": "Load more",
     "long": "Long",
-    "short": "Short"
+    "short": "Short",
+    "shortSell": "Short Sell",
+    "holdingThrough": "Hold {n}/2",
+    "holdingThroughTooltip": "LONG position holding through AVOID signal — waits for 2 consecutive AVOIDs before closing"
   }
 }

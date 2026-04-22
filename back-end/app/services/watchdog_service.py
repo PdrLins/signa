@@ -172,7 +172,7 @@ async def run_watchdog() -> dict:
 
     # Get open brain positions
     result = db.table("virtual_trades") \
-        .select("id, symbol, entry_price, entry_date, entry_score, stop_loss, source, bucket, market_regime, target_price, trade_horizon") \
+        .select("id, symbol, entry_price, entry_date, entry_score, stop_loss, source, bucket, market_regime, target_price, trade_horizon, direction") \
         .eq("status", "OPEN") \
         .eq("source", "brain") \
         .execute()
@@ -274,9 +274,16 @@ async def run_watchdog() -> dict:
         stop = float(trade["stop_loss"]) if trade.get("stop_loss") else None
 
         # Compute metrics
-        pnl_total_pct = ((current_price - entry_price) / entry_price) * 100
-        pnl_since_last = ((current_price - state.last_price) / state.last_price) * 100 if state.last_price > 0 else 0
-        stop_distance_pct = ((current_price - stop) / current_price) * 100 if stop else 999
+        # Direction-aware P&L: SHORT profits when price drops, LONG when price rises.
+        _dir = trade.get("direction") or "LONG"
+        if _dir == "SHORT":
+            pnl_total_pct = ((entry_price - current_price) / entry_price) * 100
+            pnl_since_last = ((state.last_price - current_price) / state.last_price) * 100 if state.last_price > 0 else 0
+            stop_distance_pct = ((stop - current_price) / current_price) * 100 if stop else 999
+        else:
+            pnl_total_pct = ((current_price - entry_price) / entry_price) * 100
+            pnl_since_last = ((current_price - state.last_price) / state.last_price) * 100 if state.last_price > 0 else 0
+            stop_distance_pct = ((current_price - stop) / current_price) * 100 if stop else 999
 
         # Check triggers
         reasons = []
@@ -495,8 +502,14 @@ async def _close_virtual_trade(db, trade: dict, exit_price: float, exit_reason: 
     (see WATCHDOG_FORCE_SELL above), so the same hard limit applies.
     """
     entry_price = float(trade["entry_price"])
-    pnl_pct = ((exit_price - entry_price) / entry_price) * 100
-    pnl_amount = exit_price - entry_price
+    # Direction-aware P&L: SHORT profits when price drops, LONG when price rises.
+    direction = trade.get("direction") or "LONG"
+    if direction == "SHORT":
+        pnl_pct = ((entry_price - exit_price) / entry_price) * 100
+        pnl_amount = entry_price - exit_price
+    else:
+        pnl_pct = ((exit_price - entry_price) / entry_price) * 100
+        pnl_amount = exit_price - entry_price
     now_iso = datetime.now(timezone.utc).isoformat()
 
     # Get latest score

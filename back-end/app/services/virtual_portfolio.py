@@ -59,7 +59,7 @@ The brain only auto-buys signals that meet ONE of these tiers:
   -----------------------------------------------------
     Requires:
       • ai_status == "validated" (AI synthesis succeeded with confidence ≥ 50)
-      • score >= 72  (BRAIN_MIN_SCORE)
+      • score >= 75  (BRAIN_MIN_SCORE)
     Rationale: This is the high-conviction default. The AI ran cleanly,
     blockers were checked, the composite score is strong. Buy at full Kelly.
 
@@ -223,9 +223,13 @@ from app.services.price_cache import _fetch_prices_batch
 # (Oct 2024 - Apr 2025) — raising any of these reduces buy frequency but
 # increases per-trade win rate. Lowering them does the reverse.
 
-BRAIN_MIN_SCORE = 72
+BRAIN_MIN_SCORE = 75
 """Tier 1 floor — validated AI signals must clear this score to be bought.
-Backtest shows 60.6% win rate at 72+ for SAFE_INCOME, 52.6% for HIGH_RISK."""
+Raised from 72 to 75 on Day 13 (Apr 21) after observing that every losing
+rotation/churn event over Days 11-13 came from score 72-74 entries:
+JD (74, thesis died in 3h), REI-UN.TO/CAR-UN.TO/HR-UN.TO (all 72, rotated
+out at losses within 24h). Score 78+ entries were solid. Patience over
+slot-filling — the brain now sits when nothing great is available."""
 
 BRAIN_TIER2_MIN_SCORE = 80
 """Tier 2 floor — low-confidence AI signals need a higher score bar (80+)
@@ -469,6 +473,50 @@ def _eval_brain_trust_tier(sig: dict, portfolio_heat: int = 0) -> tuple[int, flo
 # track) but only BRAIN trades drive hypothesis evidence — watchlist is
 # the user's exploratory list, not the brain's autonomous decisions.
 
+def _eval_brain_short_tier(sig: dict) -> tuple[int, float, str]:
+    """Decide whether a signal qualifies as a SHORT (sell) entry.
+
+    Only AI-validated bearish signals with score <= brain_short_max_score
+    qualify. No tech-only shorts — too risky without AI confirmation.
+
+    Returns (tier, trust_multiplier, reason). tier=0 means rejected.
+    """
+    score = sig.get("score", 100) or 100
+    ai_status = sig.get("ai_status", "skipped")
+    action = sig.get("action")
+
+    # Must be AI-validated AVOID with low score
+    if ai_status != "validated":
+        return 0, 0.0, "short_requires_validated_ai"
+    if action != "AVOID":
+        return 0, 0.0, "short_requires_avoid_action"
+    if score > settings.brain_short_max_score:
+        return 0, 0.0, f"short_score_too_high_{score}"
+
+    # Must have target and stop defined
+    price = float(sig.get("price_at_signal") or 0)
+    target_p = sig.get("target_price")
+    stop_p = sig.get("stop_loss")
+    if not target_p or not stop_p or not price:
+        return 0, 0.0, "short_missing_levels"
+
+    target_p = float(target_p)
+    stop_p = float(stop_p)
+
+    # For a valid short: target < current price < stop
+    # (target is lower = where we take profit, stop is higher = where we cut loss)
+    if not (target_p < price < stop_p):
+        return 0, 0.0, f"short_levels_wrong_direction"
+
+    # Check bearish sentiment if available (Grok only runs for HIGH_RISK)
+    gd = sig.get("grok_data") or {}
+    if isinstance(gd, dict) and gd.get("score") is not None:
+        if gd["score"] > 40:  # not bearish enough
+            return 0, 0.0, f"short_sentiment_not_bearish_{gd['score']}"
+
+    return 1, 1.0, "short_validated_bearish"
+
+
 def _extract_thesis_keywords(sig: dict) -> dict:
     """Snapshot the structured conditions that justified an entry.
 
@@ -522,7 +570,14 @@ def _exit_is_thesis_protected(pos: dict, exit_reason: str, pnl_pct: float) -> bo
         return False
     # Catastrophic carve-out: always exit, regardless of thesis. A wrong
     # Claude call must never blow up the position past the hard limit.
-    if pnl_pct <= settings.brain_thesis_hard_stop_pct:
+    # Direction-aware threshold: shorts use brain_short_hard_stop_pct
+    # (semantically identical to long at -8.0 today, but configurable).
+    direction = pos.get("direction") or "LONG"
+    hard_stop_threshold = (
+        settings.brain_short_hard_stop_pct if direction == "SHORT"
+        else settings.brain_thesis_hard_stop_pct
+    )
+    if pnl_pct <= hard_stop_threshold:
         return False
     if exit_reason == "ROTATION":
         return False
@@ -1096,7 +1151,10 @@ def process_virtual_trades(
                 # ROTATION exits write correct trade_outcomes rows and
                 # the learning loop can match (bucket, regime) patterns.
                 # Missing any of these silently corrupts pattern_stats data.
-                "bucket, market_regime, target_price, stop_loss")
+                "bucket, market_regime, target_price, stop_loss, "
+                # direction + trade_horizon + consecutive_avoid_count gate
+                # the LONG signal-exit delay (Day 14 fix).
+                "direction, trade_horizon, consecutive_avoid_count")
         .eq("status", "OPEN")
         .execute()
     )
@@ -1111,14 +1169,24 @@ def process_virtual_trades(
     # bug that allowed the rotation logic to overwrite already-closed rows
     # with new is_win values computed from a fresh live price.
     open_watchlist: set[str] = set()
-    open_brain: set[str] = set()
+    open_brain: set[str] = set()         # all brain (long + short)
+    open_brain_long: set[str] = set()    # brain LONG positions only
+    open_brain_short: set[str] = set()   # brain SHORT positions only
     brain_open_count = 0
+    brain_long_count = 0
+    brain_short_count = 0
     brain_entry_prices: list[float] = []
     for r in all_open:
         if r.get("source") == "brain":
             open_brain.add(r["symbol"])
             brain_open_count += 1
             brain_entry_prices.append(float(r.get("entry_price", 0)))
+            if r.get("direction") == "SHORT":
+                open_brain_short.add(r["symbol"])
+                brain_short_count += 1
+            else:
+                open_brain_long.add(r["symbol"])
+                brain_long_count += 1
         else:
             open_watchlist.add(r["symbol"])
 
@@ -1236,6 +1304,26 @@ def process_virtual_trades(
         is_watchlisted = symbol in watchlist_symbols
         is_crypto = sig.get("asset_type") == "CRYPTO" or (symbol or "").endswith("-USD")
 
+        # Reset consecutive_avoid_count on any open LONG position for this
+        # symbol when the fresh signal is NOT AVOID/SELL. This prevents a
+        # stale counter from 2 days ago from triggering an immediate close
+        # on the next AVOID.
+        if action not in ("SELL", "AVOID"):
+            for pos in all_open:
+                if (
+                    pos["symbol"] == symbol
+                    and pos.get("source") == "brain"
+                    and int(pos.get("consecutive_avoid_count") or 0) > 0
+                ):
+                    db.table("virtual_trades").update(
+                        {"consecutive_avoid_count": 0}
+                    ).eq("id", pos["id"]).eq("status", "OPEN").execute()
+                    pos["consecutive_avoid_count"] = 0
+                    logger.info(
+                        f"Virtual AVOID counter RESET for {symbol} — "
+                        f"fresh signal is {action}, trend intact"
+                    )
+
         # ── SELL: close all open positions for this symbol ──
         if action in ("SELL", "AVOID"):
             # Pre-market SELLs on equities can't fill — flag the position for
@@ -1275,8 +1363,13 @@ def process_virtual_trades(
                     )
 
                 entry_price = float(pos["entry_price"])
-                pnl_pct = ((price - entry_price) / entry_price) * 100
-                pnl_amount = price - entry_price
+                # Direction-aware P&L (Day 14 audit fix): a SHORT position
+                # hit by a BUY→AVOID signal (which means the short signal
+                # got stronger) uses inverted P&L. Hardcoding long-side
+                # logic inverts learning-loop + notification P&L for shorts.
+                _pos_dir = pos.get("direction") or "LONG"
+                pnl_pct = _calc_pnl_pct(entry_price, price, _pos_dir)
+                pnl_amount = _calc_pnl_amount(entry_price, price, _pos_dir)
                 is_win = pnl_pct > 0
                 source = pos.get("source", "watchlist")
 
@@ -1292,6 +1385,40 @@ def process_virtual_trades(
                         f"(P&L {pnl_pct:+.1f}%, action was {action}, holding through)"
                     )
                     continue
+
+                # LONG/LONG exit-delay gate (Day 14 fix): a LONG-direction
+                # position with LONG trade_horizon needs N consecutive
+                # AVOID/SELL signals before closing. This prevents
+                # single-signal shake-outs where Claude's "AVOID" on one
+                # scan is just noise (morning volume lull, one-off RSI
+                # print) and the trend is actually intact. CCO.TO on
+                # Day 14 opened at PRE_CLOSE, closed on next MORNING at
+                # +1.49% — a win, but the trend had room to run.
+                pos_direction = pos.get("direction") or "LONG"
+                pos_horizon = pos.get("trade_horizon") or "SHORT"
+                if (
+                    source == "brain"
+                    and pos_direction == "LONG"
+                    and pos_horizon == "LONG"
+                    and not sig.get("_review_forced")
+                ):
+                    new_count = int(pos.get("consecutive_avoid_count") or 0) + 1
+                    threshold = settings.brain_long_signal_exit_threshold
+                    if new_count < threshold:
+                        db.table("virtual_trades").update(
+                            {"consecutive_avoid_count": new_count}
+                        ).eq("id", pos["id"]).eq("status", "OPEN").execute()
+                        logger.info(
+                            f"Virtual SIGNAL exit DELAYED for {symbol} (LONG) — "
+                            f"avoid count {new_count}/{threshold}, P&L {pnl_pct:+.1f}%. "
+                            f"Holding through first flip, waiting for confirmation."
+                        )
+                        continue
+                    # count reached threshold — close normally, counter doesn't matter after close
+                    logger.info(
+                        f"Virtual SIGNAL exit CONFIRMED for {symbol} (LONG) — "
+                        f"{threshold} consecutive AVOIDs, closing at P&L {pnl_pct:+.1f}%"
+                    )
 
                 # Status guard: the .eq("status", "OPEN") prevents this UPDATE
                 # from ever mutating an already-closed row. Belt-and-braces
@@ -1338,6 +1465,45 @@ def process_virtual_trades(
                         "verdict": verdict,
                     }))
             continue
+
+        # ── COVER: close SHORT positions when signal turns bullish ──
+        # If we're short a stock and the signal flips to BUY (or strong HOLD
+        # with score >= 65), the bearish thesis is dead — cover the short.
+        if action == "BUY" and symbol in open_brain_short:
+            for pos in all_open:
+                if pos["symbol"] != symbol or pos.get("direction") != "SHORT":
+                    continue
+                entry_price_pos = float(pos["entry_price"])
+                cover_pnl_pct = _calc_pnl_pct(entry_price_pos, price, "SHORT")
+                cover_pnl_amount = _calc_pnl_amount(entry_price_pos, price, "SHORT")
+                db.table("virtual_trades").update({
+                    "status": "CLOSED",
+                    "exit_price": price,
+                    "exit_date": now,
+                    "exit_score": score,
+                    "pnl_pct": round(cover_pnl_pct, 2),
+                    "pnl_amount": round(cover_pnl_amount, 2),
+                    "is_win": cover_pnl_pct > 0,
+                    "exit_reason": "SIGNAL",
+                    "exit_action": action,
+                }).eq("id", pos["id"]).eq("status", "OPEN").execute()
+                sells += 1
+                brain_short_count = max(0, brain_short_count - 1)
+                brain_open_count = max(0, brain_open_count - 1)
+                open_brain_short.discard(symbol)
+                open_brain.discard(symbol)
+                logger.info(
+                    f"Virtual COVER [brain]: {symbol} @ ${price:.2f} "
+                    f"(signal flipped to BUY, P&L {cover_pnl_pct:+.1f}%)"
+                )
+                notifications.append(("brain_sell", {
+                    "symbol": symbol, "price": f"{price:.2f}",
+                    "pnl": f"{cover_pnl_pct:+.1f}",
+                    "reason": f"SHORT covered — signal flipped to BUY (score {score})",
+                    "entry_score": str(pos.get("entry_score", 0)),
+                    "exit_score": str(score),
+                    "verdict": f"Bearish thesis invalidated by bullish signal.",
+                }))
 
         # By here, action is not SELL/AVOID (handled above with continue).
         # It can be BUY, HOLD, or anything else. Brain will evaluate via tier logic.
@@ -1405,7 +1571,7 @@ def process_virtual_trades(
             # The +5 margin avoids constant churn on small score differences.
             # We use entry_score as the tie-breaker; higher entry_score
             # implied a more confident initial decision.
-            if brain_open_count >= settings.brain_max_open:
+            if brain_long_count >= settings.brain_max_open_long:
                 # Recompute the weakest brain position from the LIVE state
                 # of `open_brain` (which reflects any SELLs and rotations
                 # that happened earlier in this scan). The previous design
@@ -1435,7 +1601,10 @@ def process_virtual_trades(
                     w_prices = _fetch_prices_batch([w_symbol])
                     w_current, _ = w_prices.get(w_symbol, (None, None))
                     w_exit_price = w_current if w_current else price
-                    w_pnl = ((w_exit_price - w_entry) / w_entry) * 100 if w_entry > 0 else 0
+                    # Direction-aware P&L for the rotated-out position.
+                    w_direction = weakest.get("direction") or "LONG"
+                    w_pnl = _calc_pnl_pct(w_entry, w_exit_price, w_direction) if w_entry > 0 else 0
+                    w_pnl_amount = _calc_pnl_amount(w_entry, w_exit_price, w_direction)
                     # Status guard prevents this UPDATE from ever mutating
                     # an already-closed row. Combined with the lazy-recompute
                     # of `weakest` above, the rotation flow can no longer
@@ -1446,7 +1615,7 @@ def process_virtual_trades(
                         "exit_date": now,
                         "exit_score": score,
                         "pnl_pct": round(w_pnl, 2),
-                        "pnl_amount": round(w_exit_price - w_entry, 2),
+                        "pnl_amount": round(w_pnl_amount, 2),
                         "is_win": w_pnl > 0,
                         "exit_reason": "ROTATION",
                     }).eq("id", weakest["id"]).eq("status", "OPEN").execute()
@@ -1535,7 +1704,9 @@ def process_virtual_trades(
                 }).execute()
                 buys += 1
                 brain_open_count += 1
-                open_brain.add(symbol)  # block any further inserts this scan
+                brain_long_count += 1
+                open_brain.add(symbol)
+                open_brain_long.add(symbol)
                 logger.info(
                     f"Virtual BUY [brain] T{brain_tier}: {symbol} @ ${price:.2f} "
                     f"(score {score}, tier={tier_reason}, trust={trust_multiplier:.0%})"
@@ -1566,7 +1737,82 @@ def process_virtual_trades(
                 except Exception:
                     pass
 
-    return {"buys": buys, "sells": sells}
+    # ── Track 3: Brain SHORT entries (bearish bets) ──────────────
+    # Evaluate AVOID signals as potential short positions. This runs
+    # AFTER the BUY track so we never short a symbol we just bought,
+    # and AFTER the SELL track so symbols that flipped to AVOID are
+    # already closed on the long side before we consider shorting.
+    shorts_opened = 0
+    for sig in signals:
+        symbol = sig.get("symbol")
+        action = sig.get("action")
+        score = sig.get("score", 100) or 100
+        price = sig.get("price_at_signal")
+
+        if not symbol or not price or action != "AVOID":
+            continue
+        # Don't short something we hold long, or already short
+        if symbol in open_brain_long or symbol in open_brain_short:
+            continue
+        if brain_short_count >= settings.brain_max_open_short:
+            continue
+
+        short_tier, short_mult, short_reason = _eval_brain_short_tier(sig)
+        if short_tier == 0:
+            continue
+
+        target = sig.get("target_price")
+        stop = sig.get("stop_loss")
+        if not target or not stop:
+            continue
+
+        # Horizon for shorts: default SHORT (momentum), but stable
+        # bearish thesis could be LONG (held up to 14 days either way).
+        _horizon = "SHORT"
+
+        db.table("virtual_trades").insert({
+            "user_id": brain_user_id,
+            "symbol": symbol,
+            "action": "SHORT_SELL",
+            "entry_price": float(price),
+            "entry_date": now,
+            "entry_score": score,
+            "status": "OPEN",
+            "bucket": sig.get("bucket"),
+            "signal_style": sig.get("signal_style"),
+            "source": "brain",
+            "target_price": float(target),
+            "stop_loss": float(stop),
+            "entry_tier": 1,
+            "trust_multiplier": short_mult,
+            "tier_reason": short_reason,
+            "trade_horizon": _horizon,
+            "direction": "SHORT",
+            "trough_price": float(price),  # initial trough = entry price
+            "market_regime": sig.get("market_regime"),
+            "entry_thesis": (sig.get("reasoning") or "")[:500],
+            "entry_thesis_keywords": _extract_thesis_keywords(sig),
+        }).execute()
+
+        shorts_opened += 1
+        brain_short_count += 1
+        brain_open_count += 1
+        open_brain_short.add(symbol)
+        open_brain.add(symbol)
+        logger.info(
+            f"Virtual SHORT [brain]: {symbol} @ ${float(price):.2f} "
+            f"(score {score}, target ${float(target):.2f}, stop ${float(stop):.2f})"
+        )
+        notifications.append(("brain_sell", {
+            "symbol": symbol, "score": str(score),
+            "price": f"{float(price):.2f}",
+            "pnl": "0.0",
+            "reason": f"SHORT entry — bearish signal (score {score})",
+            "entry_score": str(score), "exit_score": str(score),
+            "verdict": f"Brain opened SHORT bet against {symbol}.",
+        }))
+
+    return {"buys": buys, "sells": sells, "shorts": shorts_opened}
 
 
 async def flush_brain_notifications(notifications: BrainNotificationQueue) -> int:
@@ -1607,6 +1853,48 @@ async def flush_brain_notifications(notifications: BrainNotificationQueue) -> in
             logger.debug(f"Brain notification enqueue failed ({key}): {e}")
     notifications.clear()
     return sent
+
+
+# ── Direction-aware helpers (LONG vs SHORT) ──────────────────────
+
+def _calc_pnl_pct(entry_price: float, current_price: float, direction: str) -> float:
+    """P&L percentage respecting trade direction.
+
+    LONG:  profit when price rises   → (current - entry) / entry
+    SHORT: profit when price drops   → (entry - current) / entry
+    """
+    if direction == "SHORT":
+        return (entry_price - current_price) / entry_price * 100
+    return (current_price - entry_price) / entry_price * 100
+
+
+def _calc_pnl_amount(entry_price: float, current_price: float, direction: str) -> float:
+    """Dollar P&L per share respecting trade direction."""
+    if direction == "SHORT":
+        return entry_price - current_price
+    return current_price - entry_price
+
+
+def _is_stop_hit(current_price: float, stop_loss: float, direction: str) -> bool:
+    """Check if stop loss is hit (direction-aware).
+
+    LONG:  stop fires when price drops BELOW stop
+    SHORT: stop fires when price rises ABOVE stop
+    """
+    if direction == "SHORT":
+        return current_price >= stop_loss
+    return current_price <= stop_loss
+
+
+def _is_target_hit(current_price: float, target_price: float, direction: str) -> bool:
+    """Check if target is hit (direction-aware).
+
+    LONG:  target fires when price rises ABOVE target
+    SHORT: target fires when price drops BELOW target
+    """
+    if direction == "SHORT":
+        return current_price <= target_price
+    return current_price >= target_price
 
 
 def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
@@ -1663,7 +1951,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         db.table("virtual_trades")
         .select("id, symbol, entry_price, entry_score, entry_date, source, "
                 "target_price, stop_loss, bucket, market_regime, "
-                "thesis_last_status, peak_price, trade_horizon")
+                "thesis_last_status, peak_price, trade_horizon, direction, trough_price")
         .eq("status", "OPEN")
         .execute()
     )
@@ -1715,70 +2003,82 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
 
         target = float(trade["target_price"]) if trade.get("target_price") else None
         stop = float(trade["stop_loss"]) if trade.get("stop_loss") else None
-        pnl_pct = ((current_price - entry_price) / entry_price) * 100
+        direction = trade.get("direction") or "LONG"
+        horizon = trade.get("trade_horizon") or "SHORT"
+        pnl_pct = _calc_pnl_pct(entry_price, current_price, direction)
 
         # Parse entry_date for age check
         days_held = days_since(trade.get("entry_date"), now=now)
 
-        # ── Peak price tracking for trailing stop ──
-        # Track the highest price since entry. Updated every scan so the
-        # trailing stop ratchets upward as the position wins.
-        peak = float(trade.get("peak_price") or entry_price)
-        if current_price > peak:
-            peak = current_price
-            try:
-                db.table("virtual_trades").update(
-                    {"peak_price": peak}
-                ).eq("id", trade["id"]).execute()
-            except Exception:
-                pass  # non-critical, will retry next scan
-
-        # Trailing stop is "active" once the position has been at least 3%
-        # above entry at ANY point (peak_price >= entry * 1.03). Once
-        # active, two levels protect the position:
-        #
-        #   SOFT trail (3% below peak): thesis-gated. Only fires when
-        #     thesis is weakening or invalid. If thesis is valid, a 3%
-        #     pullback is treated as noise — a portfolio manager wouldn't
-        #     sell a fundamentally sound stock on a routine dip.
-        #
-        #   HARD trail (5% below peak): always fires regardless of thesis.
-        #     If the price drops 5% from peak, something real is happening
-        #     and we protect gains unconditionally.
-        #
-        # This was refined after PBR-A (Apr 14): the 3% mechanical stop
-        # sold at +1.13% on a routine pullback while the thesis was only
-        # "weakening" — a portfolio manager would have checked the context
-        # before selling.
-        trailing_active = peak >= entry_price * 1.03
-        # Trail levels are floored at entry_price — once a position was up
-        # 3%+, the worst exit should be breakeven, NEVER a loss. The RRX
-        # incident (Day 9): peak +3.9%, hard trail was $202.24 but entry
-        # was $204.94. Position swung from +3.9% to -3.61% before the
-        # trail caught it. With the floor: exit at breakeven instead.
-        #
-        # SHORT vs LONG trail widths: SHORT uses tight 3%/5% trails for
-        # quick captures. LONG uses wider 5%/8% trails to ride trends —
-        # the thesis tracker (once daily for LONG) handles the real exits;
-        # the trail is just the safety net.
-        horizon = trade.get("trade_horizon") or "SHORT"
-        if horizon == "LONG":
-            soft_pct = 1.0 - settings.horizon_long_trail_pct / 100 * 0.6  # ~5% for 8% config
-            hard_pct = 1.0 - settings.horizon_long_trail_pct / 100        # 8%
+        # ── Peak / trough tracking for trailing stop ──
+        # LONG positions track peak (highest), SHORT positions track trough (lowest).
+        # Updated every scan so the trailing stop ratchets in the winning direction.
+        if direction == "SHORT":
+            # SHORT: track lowest price (trough). Trail fires when price RISES above trough + X%.
+            trough = float(trade.get("trough_price") or entry_price)
+            if current_price < trough:
+                trough = current_price
+                try:
+                    db.table("virtual_trades").update(
+                        {"trough_price": trough}
+                    ).eq("id", trade["id"]).execute()
+                except Exception:
+                    pass
+            peak = entry_price  # not used for SHORT trail calc
+            # SHORT trailing: active when position has been 3%+ profitable (price dropped 3%+ from entry)
+            trailing_active = trough <= entry_price * 0.97
+            trail_pct = settings.brain_short_trail_pct / 100
+            # For shorts: trail is ABOVE trough (price rising back toward us = danger)
+            soft_trail = trough * (1 + trail_pct * 0.6) if trailing_active else None
+            hard_trail = trough * (1 + trail_pct) if trailing_active else None
         else:
-            soft_pct = 0.97  # 3%
-            hard_pct = 0.95  # 5%
-        soft_trail = max(peak * soft_pct, entry_price) if trailing_active else None
-        hard_trail = max(peak * hard_pct, entry_price) if trailing_active else None
+            # LONG: track highest price (peak). Trail fires when price DROPS below peak - X%.
+            peak = float(trade.get("peak_price") or entry_price)
+            if current_price > peak:
+                peak = current_price
+                try:
+                    db.table("virtual_trades").update(
+                        {"peak_price": peak}
+                    ).eq("id", trade["id"]).execute()
+                except Exception:
+                    pass
+            trough = entry_price  # not used for LONG trail calc
+            trailing_active = peak >= entry_price * 1.03
+            if horizon == "LONG":
+                soft_pct = 1.0 - settings.horizon_long_trail_pct / 100 * 0.6
+                hard_pct = 1.0 - settings.horizon_long_trail_pct / 100
+            else:
+                soft_pct = 0.97
+                hard_pct = 0.95
+            # Floor at entry_price — once up 3%+, worst exit is breakeven (RRX Day 9 fix).
+            soft_trail = max(peak * soft_pct, entry_price) if trailing_active else None
+            hard_trail = max(peak * hard_pct, entry_price) if trailing_active else None
 
         thesis_status = (trade.get("thesis_last_status") or "").lower()
 
         # Determine exit reason (priority: stop > hard_trail > soft_trail > target > time)
+        # Uses direction-aware helpers for stop/target checks.
         exit_reason = None
-        if stop and current_price <= stop:
+        if stop and _is_stop_hit(current_price, stop, direction):
             exit_reason = "STOP_HIT"
             stops_hit += 1
-        elif trailing_active and current_price <= hard_trail:
+        elif trailing_active and direction == "SHORT" and current_price >= hard_trail:
+            # SHORT hard trailing stop — price bounced back above trough + trail_pct
+            exit_reason = "TRAILING_STOP"
+            profit_takes += 1
+            logger.info(
+                f"Virtual TRAILING STOP (hard, SHORT): {symbol} at {pnl_pct:+.1f}% "
+                f"(trough ${trough:.2f}, hard trail ${hard_trail:.2f}, now ${current_price:.2f})"
+            )
+            notifications.append(("brain_sell", {
+                "symbol": symbol, "price": f"{current_price:.2f}",
+                "pnl": f"{pnl_pct:+.1f}",
+                "reason": f"Short trailing stop (trough ${trough:.2f}, bounced {trail_pct*100:.0f}%)",
+                "entry_score": str(trade.get("entry_score", 0)),
+                "exit_score": str(current_scores.get(symbol, 0)),
+                "verdict": "Short trailing stop — price bouncing back, locking in gains.",
+            }))
+        elif trailing_active and direction != "SHORT" and current_price <= hard_trail:
             # Hard trailing stop — always fires, no thesis check.
             # 5% from peak means something real is happening.
             exit_reason = "TRAILING_STOP"
@@ -1795,33 +2095,36 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
                 "exit_score": str(current_scores.get(symbol, 0)),
                 "verdict": "Hard trailing stop fired — 5% drop from peak.",
             }))
-        elif trailing_active and current_price <= soft_trail:
+        elif trailing_active and soft_trail is not None and (
+            (direction == "SHORT" and current_price >= soft_trail)
+            or (direction != "SHORT" and current_price <= soft_trail)
+        ):
             # Soft trailing stop — thesis-gated.
             # If thesis is valid, this is just noise. Hold.
-            # If thesis is weakening/invalid, price confirms — sell.
+            # If thesis is weakening/invalid, price confirms — exit.
+            ref_label = f"trough ${trough:.2f}" if direction == "SHORT" else f"peak ${peak:.2f}"
             if thesis_status == "valid":
                 logger.info(
                     f"Virtual TRAILING STOP suppressed for {symbol} — thesis still valid "
-                    f"(peak ${peak:.2f}, soft trail ${soft_trail:.2f}, now ${current_price:.2f}, "
+                    f"({ref_label}, soft trail ${soft_trail:.2f}, now ${current_price:.2f}, "
                     f"P&L {pnl_pct:+.1f}%). Holding through noise."
                 )
-                # Don't exit — treat as noise. The hard trail at 5% is the safety net.
             else:
                 exit_reason = "TRAILING_STOP"
                 profit_takes += 1
                 logger.info(
                     f"Virtual TRAILING STOP (soft, thesis={thesis_status}): {symbol} at {pnl_pct:+.1f}% "
-                    f"(peak ${peak:.2f}, soft trail ${soft_trail:.2f}, now ${current_price:.2f})"
+                    f"({ref_label}, soft trail ${soft_trail:.2f}, now ${current_price:.2f})"
                 )
                 notifications.append(("brain_sell", {
                     "symbol": symbol, "price": f"{current_price:.2f}",
                     "pnl": f"{pnl_pct:+.1f}",
-                    "reason": f"Trailing stop (peak ${peak:.2f}, thesis {thesis_status})",
+                    "reason": f"Trailing stop ({ref_label}, thesis {thesis_status})",
                     "entry_score": str(trade.get("entry_score", 0)),
                     "exit_score": str(current_scores.get(symbol, 0)),
-                    "verdict": f"Thesis was {thesis_status}, price drop confirmed — locked in gains.",
+                    "verdict": f"Thesis was {thesis_status}, price move confirmed — locked in gains.",
                 }))
-        elif target and current_price >= target:
+        elif target and _is_target_hit(current_price, target, direction):
             # Suppress TARGET_HIT for young, winning positions — let the
             # trailing stop manage the exit instead. After 7 days, the
             # fixed target fires to close the trade.
@@ -1834,7 +2137,11 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
                 continue  # skip this exit, trailing stop will manage
             exit_reason = "TARGET_HIT"
             targets_hit += 1
-        elif days_held >= (settings.horizon_long_expiry_days if horizon == "LONG" else settings.horizon_short_expiry_days):
+        elif days_held >= (
+            settings.brain_short_expiry_days if direction == "SHORT"
+            else settings.horizon_long_expiry_days if (trade.get("trade_horizon") or "SHORT") == "LONG"
+            else settings.horizon_short_expiry_days
+        ):
             exit_reason = "TIME_EXPIRED"
             expired += 1
 
@@ -1889,6 +2196,37 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
                     "verdict": "Position underperforming with deteriorating thesis — slot freed for stronger pick.",
                 }))
 
+        # ── STAGNATION_PRUNE: LONG/LONG dead-capital detection (Day 14) ──
+        # Targets REGN-type holds: week+ with no meaningful movement and the
+        # thesis drifting weakening/invalid. Distinct from QUALITY_PRUNE
+        # (which needs pnl < 0 and days 2-7) — this catches the flat dead
+        # trades that sit in a slot producing ~0% for weeks. Preserves real
+        # LONG winners by requiring |pnl| < 2% (winners up 3%+ don't match).
+        if (
+            not exit_reason
+            and trade.get("source") == "brain"
+            and direction == "LONG"
+            and horizon == "LONG"
+            and days_held >= settings.brain_stagnation_min_days
+            and abs(pnl_pct) < settings.brain_stagnation_pnl_range_pct
+            and thesis_status in ("weakening", "invalid")
+        ):
+            exit_reason = "STAGNATION_PRUNE"
+            logger.info(
+                f"Virtual STAGNATION PRUNE: {symbol} at {pnl_pct:+.2f}% "
+                f"(held {days_held}d, thesis={thesis_status}, "
+                f"|pnl| < {settings.brain_stagnation_pnl_range_pct}% for a week+) — "
+                f"dead capital, freeing slot"
+            )
+            notifications.append(("brain_sell", {
+                "symbol": symbol, "price": f"{current_price:.2f}",
+                "pnl": f"{pnl_pct:+.2f}",
+                "reason": f"Stagnation prune (held {days_held}d, thesis {thesis_status}, no meaningful movement)",
+                "entry_score": str(trade.get("entry_score", 0)),
+                "exit_score": str(current_scores.get(symbol, 0)),
+                "verdict": "Position has gone nowhere for a week+ with deteriorating thesis — freeing slot for something that moves.",
+            }))
+
         if not exit_reason:
             continue
 
@@ -1909,7 +2247,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
             elif exit_reason == "TIME_EXPIRED": expired -= 1
             continue
 
-        pnl_amount = current_price - entry_price
+        pnl_amount = _calc_pnl_amount(entry_price, current_price, direction)
         is_win = pnl_pct > 0
         source = trade.get("source", "watchlist")
 
@@ -2062,7 +2400,7 @@ def get_virtual_summary() -> dict:
     # All trades
     open_result = (
         db.table("virtual_trades")
-        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status, tier_reason, trade_horizon")
+        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status, tier_reason, trade_horizon, direction, consecutive_avoid_count")
         .eq("status", "OPEN")
         .order("entry_date", desc=True)
         .execute()
@@ -2136,6 +2474,9 @@ def get_virtual_summary() -> dict:
         if reason == "QUALITY_PRUNE":
             thesis = t.get("thesis_last_status") or "none"
             return f"Pruned: losing position with {thesis} thesis — slot freed for a stronger pick"
+        if reason == "STAGNATION_PRUNE":
+            thesis = t.get("thesis_last_status") or "none"
+            return f"Stagnation prune: held a week+ with no meaningful movement and {thesis} thesis — dead capital, slot freed"
         if reason == "ROTATION":
             return "Rotated out for a stronger candidate"
         return reason or "Unknown"
@@ -2194,13 +2535,16 @@ def get_virtual_summary() -> dict:
             "thesis_status": t.get("thesis_last_status"),  # valid/weakening/invalid/None
             "tier_reason": t.get("tier_reason"),
             "trade_horizon": t.get("trade_horizon") or "SHORT",
+            "direction": t.get("direction") or "LONG",
+            "consecutive_avoid_count": t.get("consecutive_avoid_count") or 0,
         }
 
         if current:
-            pnl_pct = ((current - entry_price) / entry_price) * 100
+            _d = t.get("direction") or "LONG"
+            pnl_pct = _calc_pnl_pct(entry_price, current, _d)
             enriched["current_price"] = round(current, 2)
             enriched["unrealized_pnl_pct"] = round(pnl_pct, 2)
-            enriched["unrealized_pnl_amount"] = round(current - entry_price, 2)
+            enriched["unrealized_pnl_amount"] = round(_calc_pnl_amount(entry_price, current, _d), 2)
 
         return enriched
 
@@ -2244,6 +2588,7 @@ def get_virtual_summary() -> dict:
                 "peak_price": t.get("peak_price"),
                 "exit_context": _build_exit_context(t),
                 "trade_horizon": t.get("trade_horizon") or "SHORT",
+                "direction": t.get("direction") or "LONG",
             }
             # Send all closed trades fetched (DB query above is `.limit(50)`).
             # The performance page paginates client-side in batches of 5 via

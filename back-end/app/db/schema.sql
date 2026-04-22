@@ -469,7 +469,12 @@ CREATE TABLE IF NOT EXISTS virtual_trades (
     -- at entry by bucket + AI catalyst timeline. Drives exit rules, thesis
     -- re-eval frequency, and watchdog alert thresholds.
     trade_horizon          VARCHAR DEFAULT 'SHORT',  -- 'SHORT' | 'LONG'
-    peak_price             DOUBLE PRECISION,  -- already exists via ALTER below
+    -- Direction: LONG (buy, profit when price rises) vs SHORT (short sell,
+    -- profit when price drops). ORTHOGONAL to trade_horizon — you can have
+    -- a SHORT-direction + LONG-horizon trade (bearish trend bet held weeks).
+    direction              VARCHAR DEFAULT 'LONG',   -- 'LONG' | 'SHORT'
+    peak_price             DOUBLE PRECISION,  -- highest price since entry (LONG trailing stop)
+    trough_price           DOUBLE PRECISION,  -- lowest price since entry (SHORT trailing stop)
     created_at      TIMESTAMPTZ DEFAULT now(),
     -- updated_at lets us prove that a closed row was never mutated after close.
     -- Pair with the trigger below + status='OPEN' guards in app code.
@@ -502,6 +507,15 @@ ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS thesis_last_reason TEXT;
 CREATE INDEX IF NOT EXISTS idx_virtual_trades_thesis_status ON virtual_trades(thesis_last_status) WHERE status = 'OPEN';
 -- Trade horizon (SHORT = momentum, LONG = trend)
 ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS trade_horizon VARCHAR DEFAULT 'SHORT';
+-- Trade direction (LONG = buy, SHORT = short sell)
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS direction VARCHAR DEFAULT 'LONG';
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS trough_price DOUBLE PRECISION;
+CREATE INDEX IF NOT EXISTS idx_virtual_trades_direction ON virtual_trades(direction) WHERE status = 'OPEN';
+-- Consecutive AVOID/SELL signal counter (LONG-horizon exit delay). Day 14 fix:
+-- CCO.TO closed on a single MORNING AVOID after 19h as LONG — contradicting
+-- the "hold through noise" design. LONG positions now require 2+ consecutive
+-- AVOID signals before closing; counter resets on any BUY/HOLD.
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS consecutive_avoid_count INT DEFAULT 0;
 
 
 -- 18b. AI RETRY QUEUE (tickers whose AI synthesis failed — retry on next scan)

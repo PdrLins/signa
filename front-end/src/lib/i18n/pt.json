@@ -892,6 +892,18 @@
     "horizonLongDesc": "Tese reavaliada uma vez por dia (apenas na varredura AFTER_CLOSE). Trailing stop: 5% suave / 8% duro abaixo do pico — espaço para respirar durante quedas intradiárias. Sem poda de qualidade — apenas tese=inválida ou stop duro fecha antecipadamente. Expiração: 60 dias. Alertas do watchdog apenas em quedas de 4%+. Usado para: bucket SAFE_INCOME, blue chips, rotação setorial. Meta: surfar tendências de 10-20%+.",
     "horizonClassification": "Regra de classificação: bucket SAFE_INCOME → LONGO. bucket HIGH_RISK → CURTO. Cripto → CURTO. Catalisador de curto prazo (≤7 dias) → CURTO. Você pode ver o badge (Longo/Curto) ao lado de cada posição na página Desempenho do Brain.",
     "horizonWhy": "Por que isso importa: nas primeiras 2 semanas, WING atingiu +8.5% mas foi vendido a +4.13% (rastreador de tese matou no meio do dia), HMY atingiu +7.94% mas saiu a +2.33% (gap no fim de semana). Com a classificação LONGO, teriam verificação de tese apenas diária e trailing stops mais largos — segurando através do ruído em vez de vender no pior momento.",
+    "twoWalletTitle": "Sistema Duas Carteiras: Compra + Venda a Descoberto",
+    "twoWalletDesc": "O brain opera duas carteiras independentes. A carteira COMPRA compra ações que espera subir (8 vagas max). A carteira VENDA aposta contra ações que espera cair (6 vagas max). Isso permite lucrar dos dois lados do mercado — antes, sinais SELL/AVOID eram desperdiçados porque o brain só podia comprar.",
+    "twoWalletLongTitle": "▲ Carteira Compra (8 posições)",
+    "twoWalletLongDesc": "Compra ações com sinais BUY (score ≥ 65 para Alto Risco, ≥ 62 para Renda Segura). Lucra quando o preço sobe. Usa o modelo de confiança em camadas (Tier 1/2/3) com gates de calor. Comportamento existente, agora limitado a 8 posições para concentração.",
+    "twoWalletShortTitle": "▼ Carteira Venda (6 posições)",
+    "twoWalletShortDesc": "Vende a descoberto ações com sinais AVOID (score ≤ 40) que o Claude confirmou explicitamente como bearish com IA validada. Lucra quando o preço cai. Requer: tese bearish validada pela IA, alvo abaixo do preço de entrada, stop acima do preço de entrada. Sem shorts apenas técnicos — muito arriscado sem confirmação da IA. Stop duro em 8% de perda (sem bypass de tese).",
+    "twoWalletNote": "Venda a descoberto é mais arriscada que compra — perdas são teoricamente ilimitadas se a ação continuar subindo. O brain mitiga com: (1) apenas entradas validadas pela IA, (2) stop duro de 8% que sempre dispara, (3) cobertura automática quando sinal vira BUY, (4) prazo máximo de 14 dias. O badge Venda a Descoberto (▼) aparece nas posições na página de Desempenho.",
+    "signalDelayTitle": "Atraso em AVOID Consecutivo (posições LONGAS)",
+    "signalDelayDesc": "Posições direção=LONGA + horizonte=LONGO não fecham em um único sinal AVOID. Em vez disso, o brain aguarda DOIS sinais AVOID/SELL consecutivos antes de sair. Um único AVOID incrementa um contador e registra 'Segurando 1/2'; se a próxima varredura voltar a BUY ou HOLD, o contador reseta. Isso previne saídas prematuras quando o AVOID do Claude em uma varredura é apenas ruído (queda de volume da manhã, RSI pontual) e a tendência está intacta.",
+    "signalDelayWhy": "Por que isso existe: no Dia 14, CCO.TO foi fechada em um único AVOID da MANHÃ após ser mantida apenas 19 horas — uma saída vencedora (+1,49%) mas a tendência tinha espaço para rodar. O design de horizonte LONGO é para segurar através do ruído. Um único sinal contrário é ruído; dois em sequência é reversão real. Posições direção=CURTA e horizonte=CURTO ainda fecham imediatamente em um único flip — elas são para capturas rápidas, não para seguir tendência.",
+    "minScoreTitle": "Score Mínimo de Entrada: 75",
+    "minScoreDesc": "O score mínimo do brain para Tier 1 (IA validada) é 75. Aumentado de 72 no Dia 13 após cada evento de rotação/churn perdedor nos Dias 11-13 vir de entradas com score 72-74 (JD 74 — tese morreu em 3h; REI-UN.TO, CAR-UN.TO, HR-UN.TO todas em 72 — rotacionadas no vermelho em 24h). Entradas com score 78+ foram consistentemente sólidas. O brain agora senta quando nada ótimo está disponível em vez de preencher vagas com escolhas medianas.",
     "virtualPortfolioTitle": "Portfólio Virtual (Precisão do Brain)",
     "virtualPortfolioDesc": "O Signa rastreia automaticamente o que aconteceria se você seguisse cada sinal que o brain gera para os tickers nos seus favoritos. Sem entrada manual — o brain prova sua própria precisão.",
     "vp1": "Quando um ticker favoritado recebe um sinal de COMPRA (score 62+), o brain \"compra virtualmente\" no preço atual.",
@@ -1278,6 +1290,9 @@
     "overall": "Geral",
     "loadMore": "Carregar mais",
     "long": "Longo",
-    "short": "Curto"
+    "short": "Curto",
+    "shortSell": "Venda a Descoberto",
+    "holdingThrough": "Segurando {n}/2",
+    "holdingThroughTooltip": "Posição LONGA segurando através de sinal AVOID — aguarda 2 AVOIDs consecutivos antes de fechar"
   }
 }
