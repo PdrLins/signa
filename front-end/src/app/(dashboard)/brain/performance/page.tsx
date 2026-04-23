@@ -120,31 +120,9 @@ interface WalletSummary {
   updated_at?: string | null
 }
 
-// Must stay in sync with backend `wallet.TxnType` (app/services/wallet.py).
-type WalletTxnType =
-  | 'DEPOSIT'
-  | 'WITHDRAW'
-  | 'BUY'
-  | 'SELL'
-  | 'SHORT_OPEN'
-  | 'SHORT_COVER'
-  | 'LEGACY_SELL'
-  | 'LEGACY_COVER'
-  | 'LEGACY_BASELINE'
-
-interface WalletTransaction {
-  id: string
-  transaction_type: WalletTxnType
-  amount: number
-  balance_after: number
-  collateral_after: number
-  trade_id?: string | null
-  symbol?: string | null
-  shares?: number | null
-  price?: number | null
-  description?: string | null
-  created_at: string
-}
+// WalletTransaction / WalletTxnType types will be added here when the
+// transactions history view ships. Keeping them out until there's a
+// consumer avoids dead-type drift against backend `wallet.TxnType`.
 
 interface WatchdogEvent {
   symbol: string
