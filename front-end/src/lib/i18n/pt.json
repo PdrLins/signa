@@ -1330,6 +1330,7 @@
     "legacyTooltip": "Trade anterior à carteira — P&L mostrado por ação. Quando fecha, o preço de saída entra na carteira como LEGACY_SELL.",
     "transactions": "Transações",
     "noTransactions": "Nenhuma transação ainda",
+    "balanceAfter": "saldo",
     "walletTradeBadge": "Carteira",
     "ariaDepositFunds": "Depositar fundos",
     "ariaWithdrawFunds": "Sacar fundos",

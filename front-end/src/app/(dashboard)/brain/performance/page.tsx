@@ -120,9 +120,38 @@ interface WalletSummary {
   updated_at?: string | null
 }
 
-// WalletTransaction / WalletTxnType types will be added here when the
-// transactions history view ships. Keeping them out until there's a
-// consumer avoids dead-type drift against backend `wallet.TxnType`.
+// Must stay in sync with backend `wallet.TxnType` (app/services/wallet.py).
+type WalletTxnType =
+  | 'DEPOSIT'
+  | 'WITHDRAW'
+  | 'BUY'
+  | 'SELL'
+  | 'SHORT_OPEN'
+  | 'SHORT_COVER'
+  | 'LEGACY_SELL'
+  | 'LEGACY_COVER'
+  | 'LEGACY_BASELINE'
+
+interface WalletTransaction {
+  id: string
+  transaction_type: WalletTxnType
+  amount: number
+  balance_after: number
+  collateral_after: number
+  trade_id?: string | null
+  symbol?: string | null
+  shares?: number | null
+  price?: number | null
+  description?: string | null
+  created_at: string
+}
+
+interface WalletTransactionList {
+  transactions: WalletTransaction[]
+  count: number
+  limit: number
+  offset: number
+}
 
 interface WatchdogEvent {
   symbol: string
@@ -437,6 +466,159 @@ function WalletCard() {
 }
 
 
+// ── Wallet History (transactions ledger) ──
+// Inline expansion, no modal. Collapsed by default so the card stays
+// quiet when the user doesn't need it; expands to the latest 20 rows
+// with "Load more" for pagination.
+
+const TXN_COLOR: Record<WalletTxnType, 'up' | 'down' | 'warning' | 'primary' | 'textHint'> = {
+  DEPOSIT: 'up',
+  WITHDRAW: 'down',
+  BUY: 'primary',
+  SELL: 'up',
+  SHORT_OPEN: 'warning',
+  SHORT_COVER: 'primary',
+  LEGACY_SELL: 'up',
+  LEGACY_COVER: 'up',
+  LEGACY_BASELINE: 'textHint',
+}
+
+function fmtTxnDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: DEFAULT_TIMEZONE,
+    })
+  } catch {
+    return iso.slice(0, 16)
+  }
+}
+
+const TXN_PAGE_SIZE = 20
+
+function WalletHistory() {
+  const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
+  const [expanded, setExpanded] = useState(false)
+  const [limit, setLimit] = useState(TXN_PAGE_SIZE)
+
+  const { data, isFetching } = useQuery<WalletTransactionList>({
+    queryKey: ['wallet', 'transactions', limit],
+    queryFn: async () =>
+      (await client.get<WalletTransactionList>(`/wallet/transactions?limit=${limit}`)).data,
+    enabled: expanded,
+    staleTime: 30_000,
+  })
+
+  const txns = data?.transactions ?? []
+  const hasMore = txns.length === limit
+
+  return (
+    <Card>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between"
+        aria-label={t.wallet?.transactions ?? 'Transactions'}
+      >
+        <div className="flex items-center gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+            {t.wallet?.transactions ?? 'Transactions'}
+          </p>
+          {txns.length > 0 && (
+            <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textHint }}>
+              {txns.length}{hasMore ? '+' : ''}
+            </span>
+          )}
+        </div>
+        {expanded ? <ChevronUp size={14} style={{ color: theme.colors.textHint }} /> : <ChevronDown size={14} style={{ color: theme.colors.textHint }} />}
+      </button>
+
+      {expanded && (
+        <div className="mt-3">
+          {isFetching && txns.length === 0 && (
+            <Skeleton width="100%" height={120} borderRadius={8} />
+          )}
+          {!isFetching && txns.length === 0 && (
+            <p className="text-[11px]" style={{ color: theme.colors.textHint }}>
+              {t.wallet?.noTransactions ?? 'No transactions yet'}
+            </p>
+          )}
+          {txns.length > 0 && (
+            <div className="divide-y" style={{ borderColor: theme.colors.border }}>
+              {txns.map((tx) => {
+                const colorKey = TXN_COLOR[tx.transaction_type]
+                const color = theme.colors[colorKey]
+                const sign = tx.amount > 0 ? '+' : tx.amount < 0 ? '-' : ''
+                return (
+                  <div key={tx.id} className="flex items-start justify-between gap-3 py-2.5">
+                    <div className="flex items-start gap-2 min-w-0 flex-1">
+                      <span
+                        className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 tabular-nums"
+                        style={{ backgroundColor: color + '18', color, letterSpacing: '0.04em' }}
+                      >
+                        {tx.transaction_type.replace('_', ' ')}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {tx.symbol && (
+                            <span className="text-[11px] font-semibold" style={{ color: theme.colors.text }}>
+                              {tx.symbol}
+                            </span>
+                          )}
+                          {tx.shares != null && tx.shares > 0 && (
+                            <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textHint }}>
+                              {tx.shares.toFixed(4)} sh
+                            </span>
+                          )}
+                          {tx.price != null && (
+                            <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textHint }}>
+                              @ ${tx.price.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                        {tx.description && (
+                          <p className="text-[10px] mt-0.5 truncate" style={{ color: theme.colors.textSub }}>
+                            {tx.description}
+                          </p>
+                        )}
+                        <p className="text-[9px] mt-0.5" style={{ color: theme.colors.textHint }}>
+                          {fmtTxnDate(tx.created_at)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 tabular-nums">
+                      <p className="text-[12px] font-bold" style={{ color: tx.amount === 0 ? theme.colors.textHint : color }}>
+                        {sign}${Math.abs(tx.amount).toFixed(2)}
+                      </p>
+                      <p className="text-[9px]" style={{ color: theme.colors.textHint }}>
+                        {t.wallet?.balanceAfter ?? 'bal'} ${tx.balance_after.toFixed(2)}
+                      </p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {hasMore && (
+            <button
+              onClick={() => setLimit(limit + TXN_PAGE_SIZE)}
+              disabled={isFetching}
+              className="w-full mt-3 text-[11px] font-semibold py-2 rounded-lg transition-opacity hover:opacity-80 disabled:opacity-50"
+              style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.primary, border: `1px solid ${theme.colors.border}` }}
+            >
+              {isFetching ? '…' : (t.brainPerf.loadMore ?? 'Load more')}
+            </button>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+
 // ── Main page ──
 
 export default function BrainPerformancePage() {
@@ -581,6 +763,10 @@ export default function BrainPerformancePage() {
               deposit/withdraw refreshes it instantly without waiting on
               the full virtual-portfolio summary. */}
           <WalletCard />
+
+          {/* Transactions ledger — collapsed by default. Click to see
+              every deposit, buy, sell, legacy liquidation, etc. */}
+          <WalletHistory />
 
           {/* Hero stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

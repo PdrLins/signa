@@ -1350,6 +1350,7 @@
     "legacyTooltip": "Pre-wallet legacy trade — P&L shown per-share. When it closes, the exit price flows into the wallet as a LEGACY_SELL entry.",
     "transactions": "Transactions",
     "noTransactions": "No transactions yet",
+    "balanceAfter": "bal",
     "walletTradeBadge": "Wallet",
     "ariaDepositFunds": "Deposit funds",
     "ariaWithdrawFunds": "Withdraw funds",
