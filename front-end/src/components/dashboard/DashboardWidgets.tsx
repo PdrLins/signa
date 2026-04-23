@@ -332,17 +332,34 @@ export function BrainPerformanceWidget() {
         ) : null}
       </div>
 
-      {/* Portfolio value row — this is Wallet + Reserved + Holdings.
-          Label says "Portfolio" so it's clear this number tracks the
-          market, not the spendable cash. */}
+      {/* Portfolio row + breakdown. Portfolio = Wallet + Reserved +
+          Holdings; the three sub-items explain what moves and what
+          doesn't. Keeps the widget consistent with the wallet card on
+          /brain/performance so users see the same mental model. */}
       {data.wallet && data.wallet.initial_deposit > 0 && (
-        <div className="flex items-baseline justify-between mb-3 pb-2" style={{ borderBottom: `1px solid ${theme.colors.border}30` }}>
-          <span className="text-[9px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
-            {t.wallet?.portfolio ?? 'Portfolio'}
-          </span>
-          <span className="text-[14px] font-bold tabular-nums" style={{ color: theme.colors.text }}>
-            {formatMoney(data.wallet.total_value)}
-          </span>
+        <div className="mb-3 pb-2" style={{ borderBottom: `1px solid ${theme.colors.border}30` }}>
+          <div className="flex items-baseline justify-between mb-1.5">
+            <span className="text-[9px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
+              {t.wallet?.portfolio ?? 'Portfolio'}
+            </span>
+            <span className="text-[14px] font-bold tabular-nums" style={{ color: theme.colors.text }}>
+              {formatMoney(data.wallet.total_value)}
+            </span>
+          </div>
+          <div className="flex items-baseline justify-between text-[10px] tabular-nums" style={{ color: theme.colors.textSub }}>
+            <span>{t.wallet?.title ?? 'Wallet'}</span>
+            <span>{formatMoney(data.wallet.balance)}</span>
+          </div>
+          <div className="flex items-baseline justify-between text-[10px] tabular-nums" style={{ color: theme.colors.textSub }}>
+            <span>{t.wallet?.holdings ?? 'Holdings'}</span>
+            <span>{formatMoney(data.wallet.open_positions_value)}</span>
+          </div>
+          {data.wallet.collateral_reserved > 0 && (
+            <div className="flex items-baseline justify-between text-[10px] tabular-nums" style={{ color: theme.colors.textSub }}>
+              <span>{t.wallet?.reserved ?? 'Reserved'}</span>
+              <span>{formatMoney(data.wallet.collateral_reserved)}</span>
+            </div>
+          )}
         </div>
       )}
 
