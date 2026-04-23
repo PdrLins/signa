@@ -289,23 +289,22 @@ function WalletCard() {
 
   return (
     <Card>
+      {/* Hero: WALLET = spendable cash (Pocket). Doesn't move unless you
+          deposit, withdraw, or a trade settles. Portfolio / Holdings /
+          Reserved live as secondary panels below — those change with the
+          market, so they're deliberately NOT the big number. */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <p className="text-[10px] uppercase tracking-wide mb-1" style={{ color: theme.colors.textHint }}>
             {t.wallet?.title ?? 'Brain Wallet'}
           </p>
-          <div className="flex items-baseline gap-3 flex-wrap">
+          <div className="flex items-baseline gap-2 flex-wrap">
             <p className="text-2xl font-bold tabular-nums" style={{ color: theme.colors.text }}>
-              {formatMoney(wallet.total_value)}
+              {formatMoney(wallet.balance)}
             </p>
-            {wallet.initial_deposit > 0 && (
-              <span className="text-[12px] font-bold tabular-nums" style={{ color: roiColor }}>
-                {roiSign}{formatPct(wallet.roi_pct)}%
-                <span className="ml-1 text-[10px] font-normal" style={{ color: theme.colors.textHint }}>
-                  {t.wallet?.roi ?? 'ROI'}
-                </span>
-              </span>
-            )}
+            <span className="text-[11px]" style={{ color: theme.colors.textHint }}>
+              {t.wallet?.spendable ?? 'spendable'}
+            </span>
           </div>
         </div>
         {mode === 'idle' && (
@@ -332,17 +331,30 @@ function WalletCard() {
         )}
       </div>
 
-      {/* Three-part breakdown — Pocket (spendable cash) + Reserved
-          (locked for shorts) + Holdings (mark-to-market of all open
-          positions, both wallet and legacy). These three sum to
-          total_value above. */}
+      {/* Three-part secondary panels. Portfolio = Wallet+Reserved+Holdings
+          and carries ROI because THAT's what tracks return over time.
+          Holdings = mark-to-market of open positions (moves with the
+          market). Reserved = cash locked against open shorts. */}
       <div className="grid grid-cols-3 gap-2 mb-2">
         <div className="rounded-lg px-3 py-2" style={{ backgroundColor: theme.colors.surfaceAlt }}>
           <p className="text-[9px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
-            {t.wallet?.pocket ?? 'Pocket'}
+            {t.wallet?.portfolio ?? 'Portfolio'}
           </p>
           <p className="text-sm font-bold tabular-nums" style={{ color: theme.colors.text }}>
-            {formatMoney(wallet.balance)}
+            {formatMoney(wallet.total_value)}
+          </p>
+          {wallet.initial_deposit > 0 && (
+            <p className="text-[10px] font-semibold tabular-nums" style={{ color: roiColor }}>
+              {roiSign}{formatPct(wallet.roi_pct)}% {t.wallet?.roi ?? 'ROI'}
+            </p>
+          )}
+        </div>
+        <div className="rounded-lg px-3 py-2" style={{ backgroundColor: theme.colors.surfaceAlt }}>
+          <p className="text-[9px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
+            {t.wallet?.holdings ?? 'Holdings'}
+          </p>
+          <p className="text-sm font-bold tabular-nums" style={{ color: theme.colors.text }}>
+            {formatMoney(holdings)}
           </p>
         </div>
         <div className="rounded-lg px-3 py-2" style={{ backgroundColor: theme.colors.surfaceAlt }}>
@@ -351,14 +363,6 @@ function WalletCard() {
           </p>
           <p className="text-sm font-bold tabular-nums" style={{ color: wallet.collateral_reserved > 0 ? theme.colors.warning : theme.colors.text }}>
             {formatMoney(wallet.collateral_reserved)}
-          </p>
-        </div>
-        <div className="rounded-lg px-3 py-2" style={{ backgroundColor: theme.colors.surfaceAlt }}>
-          <p className="text-[9px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
-            {t.wallet?.holdings ?? 'Holdings'}
-          </p>
-          <p className="text-sm font-bold tabular-nums" style={{ color: theme.colors.text }}>
-            {formatMoney(holdings)}
           </p>
         </div>
       </div>

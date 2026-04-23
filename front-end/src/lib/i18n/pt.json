@@ -1310,6 +1310,8 @@
     "cash": "Disponível",
     "reserved": "Reservado",
     "invested": "Investido",
+    "portfolio": "Portfólio",
+    "spendable": "disponível para gastar",
     "totalValue": "Valor Total",
     "roi": "Retorno",
     "deposit": "Depositar",

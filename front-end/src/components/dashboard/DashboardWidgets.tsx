@@ -332,12 +332,13 @@ export function BrainPerformanceWidget() {
         ) : null}
       </div>
 
-      {/* Wallet total value row (Day 15). Shown above the win-rate grid
-          so the eye lands on the real $ number first. */}
+      {/* Portfolio value row — this is Wallet + Reserved + Holdings.
+          Label says "Portfolio" so it's clear this number tracks the
+          market, not the spendable cash. */}
       {data.wallet && data.wallet.initial_deposit > 0 && (
         <div className="flex items-baseline justify-between mb-3 pb-2" style={{ borderBottom: `1px solid ${theme.colors.border}30` }}>
           <span className="text-[9px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
-            {t.wallet?.totalValue ?? 'Total Value'}
+            {t.wallet?.portfolio ?? 'Portfolio'}
           </span>
           <span className="text-[14px] font-bold tabular-nums" style={{ color: theme.colors.text }}>
             {formatMoney(data.wallet.total_value)}

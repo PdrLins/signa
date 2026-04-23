@@ -1330,6 +1330,8 @@
     "cash": "Cash",
     "reserved": "Reserved",
     "invested": "Invested",
+    "portfolio": "Portfolio",
+    "spendable": "spendable",
     "totalValue": "Total Value",
     "roi": "ROI",
     "deposit": "Deposit",
