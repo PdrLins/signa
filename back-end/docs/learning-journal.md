@@ -2035,6 +2035,105 @@ Every fix is covered by type-check + parse-check. Schema comment updated to incl
 
 ---
 
+## Day 16 — April 23, 2026 (Thursday)
+
+**Metrics:** Wallet shipped and funded. First wallet BUY fired cleanly (IONQ). 6 scans all green. 0 brain closes today. Portfolio −0.31% intraday vs baseline.
+
+### The ship
+
+Day 15 wallet went live today. Sequence:
+
+- **10:12 UTC** — Pedro POSTed `/wallet/deposit $5000`. First-deposit path fired: legacy snapshot grabbed $1,344.53 mark-to-market across the 7 open pre-wallet positions, folded into initial_deposit. Baseline locked at **$6,344.53**. Two ledger rows written: `DEPOSIT +$5000` and `LEGACY_BASELINE $0` (informational).
+- **10:38 UTC** — manual scan. Produced the first wallet BUY.
+
+### First wallet BUY
+
+**IONQ @ $44.46**, Tier-1 validated (score 79), SHORT horizon (momentum 1-7d). Full success path:
+
+- `virtual_trades` row inserted with `is_wallet_trade=true`, `shares=11.2461` (fractional), `position_size_usd=$500.00` (exact 10% of $5k Tier-1)
+- `wallet_transactions` got a `BUY` row: `amount=-500.00`, `balance_after=$4500.00`, `trade_id` linked, `symbol=IONQ`, `shares=11.2461`, `price=$44.46`, description `"BUY 11.2461 IONQ @ $44.46"`
+- Pocket: $5,000 → $4,500 ✓
+- Holdings: $1,350 → $1,849 (+$500 at cost; drifted to $1,825 by EOD)
+- Portfolio: effectively unchanged at open ($6,349 → $6,349), drifted to $6,325 by EOD on market moves
+
+### Scan activity
+
+6 scans today (PRE_MARKET, MORNING, MANUAL, MIDDAY, PRE_CLOSE, AFTER_CLOSE), 53–55 signals each. Only 1 new entry all day. **No brain closes.** The brain's discipline held — 54 signals × 6 scans = 324 signal evaluations, only IONQ cleared the Tier-1 gate. BRAIN_MIN_SCORE=75 is doing its job.
+
+### End-of-day position status
+
+| Symbol | Wallet? | Dir/Hz | Entry | Now | P&L | Thesis |
+|---|---|---|---|---|---|---|
+| IONQ | 📦 wallet | LONG/SHORT | $44.46 | $43.63 | −1.87% | weakening |
+| CCO.TO | 🗂 legacy | LONG/LONG | $164.96 | $169.47 | +2.73% | weakening |
+| HIMS | 🗂 legacy | LONG/SHORT | $28.39 | $28.15 | −0.85% | valid |
+| BBD | 🗂 legacy | LONG/LONG | $4.09 | $3.94 | −3.67% | valid |
+| HPQ | 🗂 legacy | LONG/LONG | $20.75 | $20.14 | −2.94% | weakening |
+| DIR-UN.TO | 🗂 legacy | LONG/LONG | $13.76 | $13.82 | +0.44% | weakening |
+| CNQ | 🗂 legacy | LONG/LONG | $42.32 | $45.43 | +7.35% | valid |
+| BLK | 🗂 legacy | LONG/LONG | $1,021.45 | $1,053.47 | +3.13% | valid |
+
+**Portfolio EOD:** Pocket $4,500 + Reserved $0 + Holdings $1,825.09 = **$6,325.09** (−$19.44 / −0.31% from baseline).
+
+### Observations
+
+1. **IONQ already `weakening` on Day 0.** Opened at $44.46, now $43.63 (−1.87%) with Claude's thesis degrading. Prime candidate for QUALITY_PRUNE or TRAILING_STOP on tomorrow's MORNING scan. First wallet BUY may also be first wallet SELL — will validate the `credit_for_long_sell` path in prod.
+2. **CNQ approaching target.** +7.35%, target was $48.50, currently $45.43. Needs another $3 to trigger TARGET_HIT. If it fires, that's the **first LEGACY_SELL in prod** — will confirm the legacy-drain path writes a ledger row with `amount = exit_price = $48.50` and Pocket grows accordingly.
+3. **BLK stealthily winning.** +3.13% with thesis=valid on a $1,021 entry. It's the heaviest single legacy — when it eventually closes, its ~$1k proceeds flow straight into Pocket, which will roughly double the wallet's spendable capital. Watching.
+4. **REGN and LYG closed yesterday** (Apr 22), before the wallet existed, so no LEGACY_SELL rows. Those are the last closes that will ever bypass the wallet.
+5. **The `HOLD 1/2` experience worked correctly.** CCO.TO went into the 1/2 counter state at some point during the day, then flipped back to BUY/HOLD on the next scan — counter reset to 0, badge cleared. Day-14 design validated on first live exercise.
+6. **No STAGNATION_PRUNE fired** despite 4 positions at thesis=weakening. Reason: the rule requires `|pnl_pct| < 2%` AND `days_held >= 7`. BBD and HPQ are in the drawdown but fresh enough that stagnation doesn't match yet.
+
+### What broke / what didn't
+
+- Zero errors in logs (searched for "FAILED" in wallet context). No ledger gaps.
+- GET /wallet endpoint and the ['wallet'] React Query key are responsive — deposit feedback was instant, dashboard widget synced within 5 min.
+- Transactions history view built mid-afternoon at user request — collapsible card under the wallet, fetches `/wallet/transactions`, currently shows 3 rows (DEPOSIT, LEGACY_BASELINE, BUY IONQ).
+
+### Unexercised-in-prod paths
+
+Still haven't been exercised live:
+- `LEGACY_SELL` / `LEGACY_COVER` (no legacy has closed since deposit)
+- `SHORT_OPEN` / `SHORT_COVER` (no AVOID ≤ 40 signal qualified)
+- Wallet LONG `SELL` (IONQ is still open)
+- `close_virtual_trade` skipped=True race path (no race observed)
+
+All have pure-math coverage and the code is read from the same paths exercised above. Risk is low but first real exercise matters — Day 17 is likely to hit at least LEGACY_SELL if CNQ hits target or any `weakening` position gets QUALITY_PRUNE'd.
+
+### Actual learnings (not just observations)
+
+**1. Three-round review discipline paid off on first-contact.**
+Zero bugs on first live exercise of the wallet system. Between the initial ship and deploy: 3 parallel review agents × 3 rounds caught 14+ issues (thesis_tracker bypass, race double-credit, ROI top-up drift, wallet_enabled zombie trades, concurrency, get_wallet race, error-swallowing, more). Every one of those would have been a bug found the hard way in production. The "Always Run Review Passes" rule is validated again — 50 minutes of reviews prevented days of debugging. Keep doing this.
+
+**2. IONQ validated at entry, thesis "weakening" same day — the conservative-bias pattern is back.**
+The memory `Weakening Thesis ≠ Sell` exists because Claude's thesis re-eval flags winners as weakening mid-hold. Today we watched it do the same thing to a *new* position: entered at score 79 validated at 10:38 UTC, by 20:30 UTC (AFTER_CLOSE scan) thesis is "weakening" at −1.87%. That's Claude re-reading the same data through a more cautious lens a few hours later. **Proposed Day 17 rule to consider:** new positions get a 24-hour grace period where thesis cannot drop below "valid" — only price-based exits (stop/hard_trail) can close them in the first day. Prevents same-day self-defeat on fresh convictions.
+
+**3. 324 signal evaluations → 1 entry today. The gate is very tight.**
+6 scans × ~54 signals/scan = 324 evaluations, 1 passed (IONQ at score 79). At this rate the wallet opens ~20 positions/month. That's fine for quality, but two implications:
+- Meaningful dollar P&L requires meaningful deployment. Right now Pocket is 71% of portfolio ($4,500 of $6,325). The brain is holding cash, not playing.
+- If the month yields 20 entries with 42% win rate and average return +0.1% per trade (current stats), that's ~$100 of P&L on a $6k portfolio — 1.6%. At or below Pedro's stated 1-2% monthly profit target. **Either we lower the gate slightly (back to BRAIN_MIN_SCORE=72 or 73) and eat more marginal entries, or we stay disciplined and accept lower volume.** Worth revisiting after 2-3 weeks of wallet data.
+
+**4. The wallet reframe clarified the mental model — and exposed a pre-existing UX leak.**
+When Pedro asked "why is the wallet value changing?", the bug was conceptual, not computational. Calling the total-portfolio number "wallet" conflates two distinct things (cash vs positions). The rename (Wallet = Pocket, Portfolio = the composite) took 20 lines of code but eliminated the category error. **Lesson: naming is a correctness issue, not a cosmetic one.** If a field can be interpreted two ways, it WILL be misread, even by the designer.
+
+**5. Transactions audit trail was built but not surfaced — caught by the user asking "where did the $500 go?".**
+The `wallet_transactions` ledger captured every mutation from Day 15, but there was no UI for it until Pedro asked for one today. **Lesson: a ledger without a view is a log file.** If you write an audit table during the initial ship, wire a basic view for it at the same time — otherwise the first user-facing bug report will be "I can't tell what happened." Cost to add today: ~90 lines of React. Would have been ~90 lines on Day 15 too.
+
+**6. Fractional shares introduce sub-cent rounding drift. Monitor, don't fix yet.**
+IONQ allocation $500.00 → 11.2461 shares @ $44.46 = $499.97. Per-trade drift of ~$0.02-0.03. Over hundreds of trades, could accumulate to $1-5 of "missing" Pocket vs expected. Not a bug (we round shares to 6 decimals), but worth tracking. If after 100 trades the `total_deposited - total_withdrawn - current_total_value ≠ realized_pnl_sum` by more than a dollar, we have drift worth fixing.
+
+### Metrics to track Day 17
+
+- [ ] Does IONQ survive the MORNING scan, or does the thesis-weakening Day-0 pattern trigger an early exit (if so → implement the 24-hour grace period)?
+- [ ] Does CNQ hit TARGET_HIT at $48.50 → first LEGACY_SELL ledger row writes correctly (amount = $48.50, balance_after grows by same)?
+- [ ] Any position drops enough to trigger QUALITY_PRUNE (pnl<0, days_held 2-7, thesis not valid, Claude not BUY)?
+- [ ] Portfolio ROI at EOD — does it close positive or negative vs $6,344.53 baseline?
+- [ ] Wallet spendable balance — still $4,500 at EOD, or did a close credit it?
+- [ ] Any watchdog escalations during the day (every 15 min during market hours)?
+- [ ] Signal-to-entry rate after another day of data: if still ~1/300+, is the gate too tight?
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]
