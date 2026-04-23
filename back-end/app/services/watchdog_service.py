@@ -170,9 +170,11 @@ async def run_watchdog() -> dict:
 
     db = get_client()
 
-    # Get open brain positions
+    # Shared close-field list: close_virtual_trade needs user_id, shares,
+    # position_size_usd, is_wallet_trade, direction to settle the wallet.
+    from app.services.virtual_portfolio import VIRTUAL_TRADES_CLOSE_FIELDS
     result = db.table("virtual_trades") \
-        .select("id, symbol, entry_price, entry_date, entry_score, stop_loss, source, bucket, market_regime, target_price, trade_horizon, direction") \
+        .select(VIRTUAL_TRADES_CLOSE_FIELDS) \
         .eq("status", "OPEN") \
         .eq("source", "brain") \
         .execute()
@@ -371,7 +373,10 @@ async def run_watchdog() -> dict:
                 force_sell_reason = f"Signal changed to {ca} with negative P&L"
 
         if force_sell_reason:
-            await _close_virtual_trade(db, trade, current_price, "WATCHDOG_FORCE_SELL")
+            did_close = await _close_virtual_trade(db, trade, current_price, "WATCHDOG_FORCE_SELL")
+            if not did_close:
+                logger.info(f"Watchdog: {symbol} force-sell already handled by another path; no duplicate alert.")
+                continue
             closes += 1
             pending_events.append({
                 "symbol": symbol, "event_type": EVENT_CLOSE, "action_taken": "force_closed",
@@ -404,7 +409,10 @@ async def run_watchdog() -> dict:
         }
 
         if sentiment_label == "bearish" and pnl_total_pct < 0:
-            await _close_virtual_trade(db, trade, current_price, "WATCHDOG_EXIT")
+            did_close = await _close_virtual_trade(db, trade, current_price, "WATCHDOG_EXIT")
+            if not did_close:
+                logger.info(f"Watchdog: {symbol} bearish-exit already handled by another path; no duplicate alert.")
+                continue
             closes += 1
             pending_events.append({**event_base, "event_type": EVENT_CLOSE, "action_taken": "closed", "notes": reason})
 
@@ -483,8 +491,10 @@ async def _get_quick_sentiment(ticker: str) -> dict:
         return {"score": 50, "label": "neutral", "confidence": 0}
 
 
-async def _close_virtual_trade(db, trade: dict, exit_price: float, exit_reason: str):
-    """Close a virtual trade from the watchdog.
+async def _close_virtual_trade(db, trade: dict, exit_price: float, exit_reason: str) -> bool:
+    """Close a virtual trade from the watchdog. Returns True if the close
+    happened, False if another path (scan / thesis tracker) already
+    closed this row.
 
     INTENTIONALLY NOT GATED BY `_exit_is_thesis_protected`. The thesis gate
     in `virtual_portfolio.py` only protects scan-driven exits (SIGNAL,
@@ -500,44 +510,24 @@ async def _close_virtual_trade(db, trade: dict, exit_price: float, exit_reason: 
     business overriding that. The catastrophic carve-out (-8% pnl) that
     the scan-path uses is ALSO the watchdog's first force-sell trigger
     (see WATCHDOG_FORCE_SELL above), so the same hard limit applies.
-    """
-    entry_price = float(trade["entry_price"])
-    # Direction-aware P&L: SHORT profits when price drops, LONG when price rises.
-    direction = trade.get("direction") or "LONG"
-    if direction == "SHORT":
-        pnl_pct = ((entry_price - exit_price) / entry_price) * 100
-        pnl_amount = entry_price - exit_price
-    else:
-        pnl_pct = ((exit_price - entry_price) / entry_price) * 100
-        pnl_amount = exit_price - entry_price
-    now_iso = datetime.now(timezone.utc).isoformat()
 
-    # Get latest score
+    Routes through the shared `close_virtual_trade` helper in
+    `virtual_portfolio.py` so wallet settlement (Day 15) and the learning
+    loop fire the same way regardless of which path triggered the exit.
+    The returned bool lets callers skip Telegram alerts + event inserts
+    when another path beat us to the close (otherwise the user gets
+    duplicate "closed at X" notifications for the same exit).
+    """
+    # Get latest score for the close payload
     sig = db.table("signals").select("score").eq("symbol", trade["symbol"]) \
         .order("created_at", desc=True).limit(1).execute()
     exit_score = sig.data[0].get("score") if sig.data else None
 
-    # Status guard: never mutate an already-closed row. The watchdog runs
-    # off a snapshot loaded earlier in the cycle — if a parallel scan
-    # already closed this trade, the OPEN filter makes this a no-op
-    # instead of overwriting the prior close.
-    db.table("virtual_trades").update({
-        "status": "CLOSED",
-        "exit_price": exit_price,
-        "exit_date": now_iso,
-        "exit_score": exit_score,
-        "pnl_pct": round(pnl_pct, 2),
-        "pnl_amount": round(pnl_amount, 2),
-        "is_win": pnl_pct > 0,
-        "exit_reason": exit_reason,
-    }).eq("id", trade["id"]).eq("status", "OPEN").execute()
-
-    # Forward to the learning loop. Best-effort — never blocks the close.
-    # Watchdog only acts on brain trades, but the helper double-checks
-    # source internally so this stays safe.
     try:
-        from app.services.virtual_portfolio import _record_brain_outcome
-        _record_brain_outcome(trade, exit_price, exit_score, exit_reason, pnl_pct)
+        from app.services.virtual_portfolio import close_virtual_trade
+        close_res = close_virtual_trade(trade, exit_price, exit_reason, exit_score)
+        return not close_res.get("skipped", False)
     except Exception as e:
         from loguru import logger
-        logger.warning(f"Watchdog failed to record outcome for {trade.get('symbol')}: {e}")
+        logger.exception(f"Watchdog close failed for {trade.get('symbol')}: {e}")
+        return False

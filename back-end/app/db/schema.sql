@@ -517,6 +517,61 @@ CREATE INDEX IF NOT EXISTS idx_virtual_trades_direction ON virtual_trades(direct
 -- AVOID signals before closing; counter resets on any BUY/HOLD.
 ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS consecutive_avoid_count INT DEFAULT 0;
 
+-- Wallet-based virtual portfolio (Day 15 ship). Every brain trade opened
+-- after wallet launch is sized as a % of wallet balance. `shares` is
+-- fractional to match wallet-dollar allocation (e.g. $1,000 at $164.96
+-- entry = 6.0625 shares). Existing pre-launch rows keep these NULL and
+-- are treated as legacy 1-share holdings — they close on their own rules
+-- without touching the wallet.
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS shares DOUBLE PRECISION;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS position_size_usd DOUBLE PRECISION;
+ALTER TABLE virtual_trades ADD COLUMN IF NOT EXISTS is_wallet_trade BOOLEAN DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_virtual_trades_is_wallet ON virtual_trades(is_wallet_trade) WHERE status = 'OPEN';
+
+
+-- 18c. BRAIN WALLET (singleton per user) — the brain's virtual cash pool.
+-- New brain trades deduct from `balance`; shorts reserve 100% of position
+-- value in `collateral_reserved`. App code enforces balance >= 0 and
+-- collateral_reserved >= 0 (Supabase client can't reliably set CHECK
+-- constraints through its API).
+CREATE TABLE IF NOT EXISTS brain_wallet (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id                 UUID REFERENCES users(id) ON DELETE CASCADE,
+    balance                 DOUBLE PRECISION NOT NULL DEFAULT 0,    -- free cash
+    collateral_reserved     DOUBLE PRECISION NOT NULL DEFAULT 0,    -- held for open shorts
+    initial_deposit         DOUBLE PRECISION NOT NULL DEFAULT 0,    -- first deposit, for ROI baseline
+    total_deposited         DOUBLE PRECISION NOT NULL DEFAULT 0,    -- running sum of deposits
+    total_withdrawn         DOUBLE PRECISION NOT NULL DEFAULT 0,    -- running sum of withdrawals
+    created_at              TIMESTAMPTZ DEFAULT now(),
+    updated_at              TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_brain_wallet_user ON brain_wallet(user_id);
+
+
+-- 18d. WALLET TRANSACTIONS — append-only audit ledger. Never UPDATE,
+-- never DELETE. Every mutation to brain_wallet writes a row here with
+-- the post-mutation snapshot of balance + collateral so wallet state at
+-- any point in time can be reconstructed.
+CREATE TABLE IF NOT EXISTS wallet_transactions (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id             UUID REFERENCES users(id) ON DELETE CASCADE,
+    transaction_type    VARCHAR NOT NULL,
+        -- DEPOSIT | WITHDRAW | BUY | SELL | SHORT_OPEN | SHORT_COVER
+        -- | LEGACY_SELL | LEGACY_COVER | LEGACY_BASELINE (informational)
+    amount              DOUBLE PRECISION NOT NULL,   -- signed: credit=+, debit=-
+    balance_after       DOUBLE PRECISION NOT NULL,   -- brain_wallet.balance after this tx
+    collateral_after    DOUBLE PRECISION NOT NULL,   -- brain_wallet.collateral_reserved after this tx
+    trade_id            UUID REFERENCES virtual_trades(id) ON DELETE SET NULL,
+    symbol              VARCHAR,
+    shares              DOUBLE PRECISION,
+    price               DOUBLE PRECISION,
+    description         TEXT,
+    created_at          TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_user_date ON wallet_transactions(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_trade ON wallet_transactions(trade_id) WHERE trade_id IS NOT NULL;
+
 
 -- 18b. AI RETRY QUEUE (tickers whose AI synthesis failed — retry on next scan)
 -- When synthesis errors out (transient API issue, timeout, all providers down),
@@ -605,6 +660,8 @@ DROP TRIGGER IF EXISTS trg_signal_knowledge_updated ON signal_knowledge;
 CREATE TRIGGER trg_signal_knowledge_updated BEFORE UPDATE ON signal_knowledge FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 DROP TRIGGER IF EXISTS virtual_trades_updated_at ON virtual_trades;
 CREATE TRIGGER virtual_trades_updated_at BEFORE UPDATE ON virtual_trades FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS trg_brain_wallet_updated ON brain_wallet;
+CREATE TRIGGER trg_brain_wallet_updated BEFORE UPDATE ON brain_wallet FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 
 -- ============================================================

@@ -1933,6 +1933,108 @@ Still no shorts. The new `consecutive_avoid_count` column is populated at 0 on a
 
 ---
 
+## Day 15 -- April 22, 2026 (Wednesday evening ship)
+
+**Metrics:** 38 cumulative closes · total realized +$141.45 "per share" · the number sounds tiny but it's +47% annualized on a pretend 1-share capital base
+
+### The observation
+
+`pnl_amount` on closed virtual trades was per-share — `exit_price - entry_price` on 1 implicit share. A +5% win on a $5 stock realized $0.25; the same % on a $1,000 stock realized $50; both summed into `total_pnl_amount` as if the units were comparable. Running total: "+$141.45 since launch" was meaningless. No scale, no compounding, no visible risk.
+
+### The ship: wallet-based virtual portfolio
+
+Two new tables (`brain_wallet`, `wallet_transactions`), three new columns on `virtual_trades` (`shares`, `position_size_usd`, `is_wallet_trade`), a new `app/services/wallet.py` service, a new `app/api/v1/wallet.py` router, and a shared `close_virtual_trade()` helper that every exit path now funnels through. Plus frontend: wallet card on the performance page, inline deposit/withdraw, share counts on open/closed rows, dashboard widget showing wallet ROI, and a new "Brain Wallet" section on the how-it-works page.
+
+### Sizing rules (codified)
+
+- Tier 1 (trust 1.0): 10% of balance
+- Tier 1 (trust 0.5): 5% (existing half-trust downgrade)
+- Tier 2 / Tier 3: 5%
+- Hard cap: 15% (matches `kelly.MAX_POSITION_PCT`)
+- Below $100 free balance: skip the entry (log, don't crash)
+- SHORT: 100% of position value reserved as collateral on open; released ± P&L on cover
+
+### The per-share → total-dollar transition
+
+Every exit path — SELL/AVOID signal close, SHORT cover, ROTATION, STOP_HIT, TARGET_HIT, TRAILING_STOP, TIME_EXPIRED, QUALITY_PRUNE, STAGNATION_PRUNE, THESIS_INVALIDATED, and the watchdog's emergency close — now calls `close_virtual_trade()`. For wallet trades (`is_wallet_trade=True`), the helper writes TOTAL-dollar `pnl_amount` (shares × per-share P&L) to `virtual_trades` and credits the wallet with either `proceeds_usd` (LONG close) or `original_allocation + pnl_usd` (SHORT cover). For legacy trades, per-share semantics are preserved so the 38 closed rows pre-launch stay interpretable.
+
+### Legacy vs wallet split
+
+The 7 currently-open brain positions (CNQ, BLK, DIR-UN.TO, REGN, HPQ, CCO.TO re-buy, etc.) were opened before Day 15. They carry `is_wallet_trade=False`, run to completion on their own exit rules, and never touch the wallet. When they close they still store per-share `pnl_amount`. The frontend closed-trade row shows a subtle "Legacy 1-share" badge so the mixed population isn't confusing. All new trades after the ship are wallet trades.
+
+### Why the initial_deposit is locked
+
+Once set on the first deposit, it never updates. If Pedro starts with $10k, tops up to $15k mid-month, the ROI baseline stays $10k. Otherwise every deposit would reset the ROI math and you'd never know if you've actually made money. Top-ups grow `total_deposited` (separate counter), not the baseline.
+
+### Atomicity without real transactions
+
+Supabase's Python client has no real DB transactions. Best-effort pattern: (1) read wallet, (2) insert trade row, (3) update wallet + insert ledger row. If (3) fails after (2), the trade exists but wallet state is out of sync — logged loudly with enough info to reconstruct. We do NOT roll back the trade; the brain's autonomy depends on the trade being OPEN even if the ledger errored.
+
+### What breaks if we're wrong
+
+- If `calc_position_size_usd` over-commits (bug in the math), multiple concurrent BUYs could push balance below 0. Safety: every `_apply_update` clamps to 0 and logs. Floor at -1e-6 treats float noise as zero.
+- If a wallet trade closes but `debit_for_long_buy`/`release_for_short_cover` errors, the wallet row has zero audit trail for that delta. The ledger insert is wrapped in try/except with loud logging — we keep the wallet math correct but note the missing row.
+- If a legacy trade's shares/position_size_usd fields somehow get populated, `close_virtual_trade` would treat it as a wallet trade and try to settle. Defensive: only settle when `is_wallet_trade=True` AND `shares > 0`.
+
+### What Pedro has to do
+
+1. Run the DDL in Supabase SQL Editor (two new CREATE TABLEs, three ALTER TABLEs, one new trigger).
+2. Restart the backend.
+3. Call `POST /api/v1/wallet/deposit {"amount": 10000}` (or use the UI button).
+4. Watch the next scan. Any new brain trade will be a wallet trade with `shares` populated; existing 7 opens stay legacy.
+
+### Why this matters
+
+Everything downstream — the self-learning loop, the pattern graduation threshold, Telegram alerts, the watchdog's `-8%` hard stop — these have all been reasoning about P&L in percent. Adding meaningful dollar P&L doesn't change the decision-making, but it changes what "success" looks like. A +2% monthly ROI target (the stated goal) now corresponds to a specific dollar number on the wallet card instead of an abstract metric.
+
+### Metrics to track Day 16
+
+- [ ] First wallet BUY after deposit: does `virtual_trades` row land with correct `shares`, `position_size_usd`, `is_wallet_trade=True`?
+- [ ] Wallet balance after first BUY: does it equal `deposit - allocation`? A `wallet_transactions` row with `transaction_type='BUY'` should exist linked to the trade.
+- [ ] When a legacy position closes, does its exit price flow into the wallet as a `LEGACY_SELL` ledger row? Does the Holdings number on the wallet card shrink by the right amount?
+- [ ] Does the performance page render the wallet card at the top, with total value + ROI? Does the "Legacy 1-share" badge show on the old closed rows?
+- [ ] Any underflow warnings in logs? Any "wallet_transactions insert FAILED" errors?
+
+### Pre-deploy reframe (same day, after the first review pass)
+
+Original Day 15 ship treated legacy positions as *outside the wallet entirely* — they closed on their own rules and never touched the balance. After a conversation with Pedro, the mental model shifted:
+
+- **Pocket** = spendable cash (what used to be just "balance")
+- **Reserved** = collateral locked for open shorts (unchanged)
+- **Holdings** = mark-to-market of ALL open brain positions, both wallet and legacy
+- **Total Value** = Pocket + Reserved + Holdings
+
+**Legacy-drain semantics**: when a legacy LONG closes, the exit price is credited into Pocket as a `LEGACY_SELL` ledger entry ("sold the 1-share I had, proceeds go in the pocket"). When a legacy SHORT covers, the per-share P&L is credited as a `LEGACY_COVER` entry. Over weeks, as the 7 pre-wallet opens hit their exits, the whole portfolio drains into wallet-native cash.
+
+**ROI baseline** (initial_deposit): snapshots the current mark-to-market of legacy holdings at the moment of the FIRST deposit. If Pedro deposits $5k with $3k of legacy in Holdings, initial_deposit = $8k. Without this snapshot, every legacy close would look like "free money flowing in" and ROI would read artificially high for the first few weeks.
+
+**Why this matters**: otherwise the Day 15 ledger would be a house of cards. A legacy BLK close at $438 with no wallet wiring would just... leave the wallet at exactly the deposit amount while Holdings disappeared — a missing $438 in the audit trail. Now the trail is honest: Pocket grows by $438, Holdings shrinks by $438, total_value unchanged.
+
+**Implementation added after the initial ship**:
+- `wallet.calculate_open_positions_value` extended to cover wallet LONG + wallet SHORT P&L + legacy LONG + legacy SHORT P&L (was: wallet LONG only)
+- `wallet.deposit` snapshots legacy holdings on first-deposit; writes an informational `LEGACY_BASELINE` ledger row
+- `wallet.credit_for_legacy_sell` / `credit_for_legacy_cover` — new settlement paths for legacy closes
+- `close_virtual_trade` now settles legacy brain closes into the wallet (previously: no-op for legacy)
+- Frontend wallet card renames "Invested" → "Holdings" and uses "Pocket" for the free balance
+
+### Third-round review fixes (same-day pre-deploy hardening)
+
+A third review pass after the Pocket+Holdings reframe caught five more issues that would have produced silent wrong numbers in production:
+
+1. **Top-up ROI drift (CRITICAL)**. `initial_deposit` was frozen on the FIRST deposit forever. A $3k top-up on an $8k wallet would inflate `total_value` by $3k while the baseline stayed $8k → ROI would read +37.5% from zero real gain. Fixed by making `initial_deposit` a "committed capital basis" that grows 1:1 with each deposit and shrinks 1:1 with each withdrawal. First-deposit legacy snapshot still folds in.
+
+2. **Callers ignoring `skipped=True` (CRITICAL)**. The earlier fix added a race-guard to `close_virtual_trade` that returns `{"skipped": True}` when the status-guarded UPDATE matches zero rows (a parallel path already closed the trade). But all six callers (scan SIGNAL, SHORT cover, ROTATION, price-based exit, thesis_tracker, watchdog x2) unconditionally ran post-close bookkeeping — counters incremented, Telegram alerts fired, learning-loop events logged. On a real race the user would get a duplicate "closed at X" Telegram and the summary counters would over-report. Fixed by checking the return and short-circuiting on every caller.
+
+3. **Silent legacy-snapshot failure (HIGH)**. `_calculate_legacy_holdings_value` swallowed price-fetch errors and returned 0. On first deposit with a yfinance timeout that meant baseline = cash-only, and every legacy close that followed would look like free money flowing in. Fixed with `strict=True` on the first-deposit path — if legacy positions exist and we can't price them, raise `LegacySnapshotFailed` which the API maps to HTTP 503 so the user retries.
+
+4. **Concurrent wallet-mutation race (HIGH)**. Two near-simultaneous deposits (double-click, API retry, scan + user) could both read balance=X and both write balance=X+amount, losing the second amount. Fixed with a per-user `threading.RLock` wrapping every wallet mutation (deposit, withdraw, all trade-driven credits/debits). Single-process safe; cross-process would need a Postgres `UPDATE … RETURNING` rewrite — flagged as known limitation since Signa runs single-worker.
+
+5. **QUALITY_PRUNE `latest_action` always None (MEDIUM, pre-existing)**. The per-scan signal SELECT at check_virtual_exits only loaded `symbol, score` — but the QUALITY_PRUNE gate reads `action` to check if Claude still wants the position. Since `action` was never loaded, `latest_action` was always None, and the gate's "Claude doesn't want it" rule effectively reduced to "always true", firing QUALITY_PRUNE on every losing position 2-7 days old. Fixed by loading `action` into a parallel `current_actions` dict.
+
+Every fix is covered by type-check + parse-check. Schema comment updated to include the new transaction types (LEGACY_SELL, LEGACY_COVER, LEGACY_BASELINE).
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

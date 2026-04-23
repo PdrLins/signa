@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { client } from '@/lib/api'
-import { relativeTime, DEFAULT_TIMEZONE, formatPrice } from '@/lib/utils'
+import { relativeTime, DEFAULT_TIMEZONE, formatPrice, formatPct, formatMoney } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -42,7 +42,13 @@ interface TrackStats {
   win_rate: number
   avg_return_pct: number
   total_return_pct: number
-  total_pnl_amount?: number
+  // Wallet vs legacy split. pnl_amount semantics differ: wallet trades
+  // store TOTAL dollars, legacy store per-share — summing across them
+  // would mix units, so the two totals are reported separately.
+  wallet_closed_count?: number
+  legacy_closed_count?: number
+  total_pnl_amount_wallet?: number
+  total_pnl_amount_legacy?: number
   avg_unrealized_pnl_pct?: number
   best_trade: { symbol: string; pnl_pct: number; pnl_amount?: number } | null
   worst_trade: { symbol: string; pnl_pct: number; pnl_amount?: number } | null
@@ -71,11 +77,19 @@ interface VirtualTrade {
   trade_horizon?: 'SHORT' | 'LONG'
   direction?: 'LONG' | 'SHORT'
   consecutive_avoid_count?: number
+  // Wallet fields (Day 15). `is_wallet_trade=false` means a legacy 1-share
+  // position from before the wallet existed — these render with a subtle
+  // "legacy" badge and their unrealized_pnl_amount is per-share.
+  is_wallet_trade?: boolean
+  shares?: number
+  position_size_usd?: number
+  current_position_value?: number
 }
 
 interface ClosedTrade {
   symbol: string
   pnl_pct: number
+  pnl_amount?: number
   is_win: boolean
   source: string
   exit_reason?: string
@@ -89,6 +103,47 @@ interface ClosedTrade {
   exit_context?: string  // human-readable explanation of why it was sold
   trade_horizon?: 'SHORT' | 'LONG'
   direction?: 'LONG' | 'SHORT'
+  is_wallet_trade?: boolean
+  shares?: number
+  position_size_usd?: number
+}
+
+interface WalletSummary {
+  balance: number
+  collateral_reserved: number
+  total_value: number
+  initial_deposit: number
+  total_deposited: number
+  total_withdrawn: number
+  roi_pct: number
+  open_positions_value: number
+  updated_at?: string | null
+}
+
+// Must stay in sync with backend `wallet.TxnType` (app/services/wallet.py).
+type WalletTxnType =
+  | 'DEPOSIT'
+  | 'WITHDRAW'
+  | 'BUY'
+  | 'SELL'
+  | 'SHORT_OPEN'
+  | 'SHORT_COVER'
+  | 'LEGACY_SELL'
+  | 'LEGACY_COVER'
+  | 'LEGACY_BASELINE'
+
+interface WalletTransaction {
+  id: string
+  transaction_type: WalletTxnType
+  amount: number
+  balance_after: number
+  collateral_after: number
+  trade_id?: string | null
+  symbol?: string | null
+  shares?: number | null
+  price?: number | null
+  description?: string | null
+  created_at: string
 }
 
 interface WatchdogEvent {
@@ -115,6 +170,7 @@ interface VirtualSummary extends TrackStats {
   watchlist: TrackStats
   brain: TrackStats
   watchdog?: WatchdogSummary
+  wallet?: WalletSummary | null
 }
 
 // Format an ISO timestamp as a short ET date, e.g. "Apr 6". Used so users
@@ -130,11 +186,6 @@ function fmtShortDate(iso?: string): string {
   } catch {
     return '--'
   }
-}
-
-// Format a P&L percentage with 2 decimals, avoiding "-0.00" for near-zero values.
-function fmtPct(v: number): string {
-  return Math.abs(v) < 0.005 ? '0.00' : v.toFixed(2)
 }
 
 // ── Small components ──
@@ -183,6 +234,226 @@ function getEventTypeColor(eventType: string, theme: ReturnType<typeof useTheme>
   }
   return map[eventType] || theme.colors.textHint
 }
+
+// ── Wallet Card (Day 15) ──
+// Inline — no modal. Pedro's design preference is "inline editing, no
+// modals" (memory). Deposit / withdraw toggle an input row in-place.
+//
+// Self-fetches via its own ['wallet'] query so deposit/withdraw can
+// invalidate just this slice — the full dashboard doesn't refetch when
+// the user funds the wallet.
+
+function WalletCard() {
+  const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
+  const queryClient = useQueryClient()
+
+  const { data: wallet } = useQuery<WalletSummary>({
+    queryKey: ['wallet'],
+    queryFn: async () => (await client.get<WalletSummary>('/wallet')).data,
+    staleTime: 30_000,
+  })
+
+  const [mode, setMode] = useState<'idle' | 'deposit' | 'withdraw'>('idle')
+  const [amount, setAmount] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Clear the error whenever the user opens a new editor (deposit /
+  // withdraw) or types — a stale "insufficient balance" from a prior
+  // attempt shouldn't reappear on the next open.
+  const openMode = useCallback((next: 'deposit' | 'withdraw') => {
+    setError(null)
+    setAmount('')
+    setMode(next)
+  }, [])
+
+  const submit = useCallback(async () => {
+    setError(null)
+    const parsed = parseFloat(amount)
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setError(t.wallet?.invalidAmount ?? 'Enter a positive amount')
+      return
+    }
+    setBusy(true)
+    try {
+      const path = mode === 'deposit' ? '/wallet/deposit' : '/wallet/withdraw'
+      await client.post(path, { amount: parsed })
+      // Invalidate the wallet slice first (this card re-renders instantly);
+      // the full summary key has other consumers (widgets, other pages)
+      // that need the refresh but shouldn't block the user's feedback.
+      await queryClient.invalidateQueries({ queryKey: ['wallet'] })
+      queryClient.invalidateQueries({ queryKey: ['stats', 'virtual-portfolio'] })
+      setAmount('')
+      setMode('idle')
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(detail ?? (t.wallet?.requestFailed ?? 'Request failed'))
+    } finally {
+      setBusy(false)
+    }
+  }, [amount, mode, queryClient, t.wallet])
+
+  const cancel = useCallback(() => {
+    setMode('idle')
+    setAmount('')
+    setError(null)
+  }, [])
+
+  if (!wallet) return null
+
+  const roiColor = wallet.roi_pct >= 0 ? theme.colors.up : theme.colors.down
+  const roiSign = wallet.roi_pct >= 0 ? '+' : ''
+  // Holdings = mark-to-market of ALL open brain positions. Can legitimately
+  // go negative if open SHORTs are losing more than LONGs are winning —
+  // don't clamp; show the truth.
+  const holdings = wallet.open_positions_value
+
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-wide mb-1" style={{ color: theme.colors.textHint }}>
+            {t.wallet?.title ?? 'Brain Wallet'}
+          </p>
+          <div className="flex items-baseline gap-3 flex-wrap">
+            <p className="text-2xl font-bold tabular-nums" style={{ color: theme.colors.text }}>
+              {formatMoney(wallet.total_value)}
+            </p>
+            {wallet.initial_deposit > 0 && (
+              <span className="text-[12px] font-bold tabular-nums" style={{ color: roiColor }}>
+                {roiSign}{formatPct(wallet.roi_pct)}%
+                <span className="ml-1 text-[10px] font-normal" style={{ color: theme.colors.textHint }}>
+                  {t.wallet?.roi ?? 'ROI'}
+                </span>
+              </span>
+            )}
+          </div>
+        </div>
+        {mode === 'idle' && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => openMode('deposit')}
+              className="text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-opacity hover:opacity-80"
+              style={{ backgroundColor: theme.colors.up + '18', color: theme.colors.up }}
+              aria-label={t.wallet?.ariaDepositFunds ?? 'Deposit funds'}
+            >
+              + {t.wallet?.deposit ?? 'Deposit'}
+            </button>
+            {wallet.balance > 0 && (
+              <button
+                onClick={() => openMode('withdraw')}
+                className="text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-opacity hover:opacity-80"
+                style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.textSub, border: `1px solid ${theme.colors.border}` }}
+                aria-label={t.wallet?.ariaWithdrawFunds ?? 'Withdraw funds'}
+              >
+                − {t.wallet?.withdraw ?? 'Withdraw'}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Three-part breakdown — Pocket (spendable cash) + Reserved
+          (locked for shorts) + Holdings (mark-to-market of all open
+          positions, both wallet and legacy). These three sum to
+          total_value above. */}
+      <div className="grid grid-cols-3 gap-2 mb-2">
+        <div className="rounded-lg px-3 py-2" style={{ backgroundColor: theme.colors.surfaceAlt }}>
+          <p className="text-[9px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
+            {t.wallet?.pocket ?? 'Pocket'}
+          </p>
+          <p className="text-sm font-bold tabular-nums" style={{ color: theme.colors.text }}>
+            {formatMoney(wallet.balance)}
+          </p>
+        </div>
+        <div className="rounded-lg px-3 py-2" style={{ backgroundColor: theme.colors.surfaceAlt }}>
+          <p className="text-[9px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
+            {t.wallet?.reserved ?? 'Reserved'}
+          </p>
+          <p className="text-sm font-bold tabular-nums" style={{ color: wallet.collateral_reserved > 0 ? theme.colors.warning : theme.colors.text }}>
+            {formatMoney(wallet.collateral_reserved)}
+          </p>
+        </div>
+        <div className="rounded-lg px-3 py-2" style={{ backgroundColor: theme.colors.surfaceAlt }}>
+          <p className="text-[9px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
+            {t.wallet?.holdings ?? 'Holdings'}
+          </p>
+          <p className="text-sm font-bold tabular-nums" style={{ color: theme.colors.text }}>
+            {formatMoney(holdings)}
+          </p>
+        </div>
+      </div>
+
+      {/* Inline deposit / withdraw editor */}
+      {mode !== 'idle' && (
+        <div
+          className="mt-2 rounded-lg p-3 flex items-center gap-2 flex-wrap"
+          style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}` }}
+        >
+          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
+            {mode === 'deposit' ? (t.wallet?.depositAmount ?? 'Deposit amount') : (t.wallet?.withdrawAmount ?? 'Withdraw amount')}
+          </span>
+          <input
+            type="number"
+            value={amount}
+            autoFocus
+            min="0"
+            step="0.01"
+            placeholder="0.00"
+            onChange={(e) => {
+              setAmount(e.target.value)
+              // Typing clears the previous-attempt error so it doesn't
+              // stick around looking like it relates to the new value.
+              if (error) setError(null)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !busy) submit()
+              if (e.key === 'Escape') cancel()
+            }}
+            className="text-[12px] font-bold tabular-nums px-2 py-1 rounded flex-1 min-w-[80px] outline-none"
+            style={{
+              backgroundColor: theme.colors.surface,
+              color: theme.colors.text,
+              border: `1px solid ${theme.colors.border}`,
+            }}
+            aria-label={t.wallet?.ariaAmount ?? 'Amount'}
+          />
+          <button
+            onClick={submit}
+            disabled={busy || !amount}
+            className="text-[10px] font-semibold px-3 py-1.5 rounded-lg transition-opacity hover:opacity-80 disabled:opacity-40"
+            style={{
+              backgroundColor: mode === 'deposit' ? theme.colors.up : theme.colors.warning,
+              color: '#fff',
+            }}
+          >
+            {busy ? '…' : mode === 'deposit' ? (t.wallet?.confirmDeposit ?? 'Add Funds') : (t.wallet?.confirmWithdraw ?? 'Withdraw')}
+          </button>
+          <button
+            onClick={cancel}
+            disabled={busy}
+            className="text-[10px] px-2 py-1.5 rounded-lg transition-opacity hover:opacity-80"
+            style={{ color: theme.colors.textHint }}
+            aria-label={t.wallet?.ariaCancel ?? 'Cancel'}
+          >
+            {t.wallet?.cancel ?? 'Cancel'}
+          </button>
+          {error && (
+            <p className="text-[10px] w-full" style={{ color: theme.colors.down }}>{error}</p>
+          )}
+        </div>
+      )}
+
+      {wallet.initial_deposit === 0 && mode === 'idle' && (
+        <p className="text-[10px] mt-2" style={{ color: theme.colors.textHint }}>
+          {t.wallet?.emptyHint ?? 'Deposit funds to let the brain open wallet-sized trades. Until then, new entries are skipped.'}
+        </p>
+      )}
+    </Card>
+  )
+}
+
 
 // ── Main page ──
 
@@ -324,13 +595,18 @@ export default function BrainPerformancePage() {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
         <div className="space-y-6">
 
+          {/* Wallet card (Day 15) — self-fetches its own slice so
+              deposit/withdraw refreshes it instantly without waiting on
+              the full virtual-portfolio summary. */}
+          <WalletCard />
+
           {/* Hero stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatBox
               label="Open Positions"
               value={String(brain.open_count)}
               sub={brainTrades.length > 0 && avgUnrealizedPnl !== 0
-                ? `Avg P&L ${avgUnrealizedPnl >= 0 ? '+' : ''}${fmtPct(avgUnrealizedPnl)}%`
+                ? `Avg P&L ${avgUnrealizedPnl >= 0 ? '+' : ''}${formatPct(avgUnrealizedPnl)}%`
                 : undefined}
               color={theme.colors.text}
               bgColor={theme.colors.surfaceAlt}
@@ -351,14 +627,27 @@ export default function BrainPerformancePage() {
             />
             <StatBox
               label="Total Return"
-              value={hasClosedData ? `${brain.total_return_pct >= 0 ? '+' : ''}${fmtPct(brain.total_return_pct)}%` : '\u2014'}
-              sub={
-                hasClosedData
-                  ? brain.total_pnl_amount != null
-                    ? `${brain.total_pnl_amount >= 0 ? '+' : '-'}$${Math.abs(brain.total_pnl_amount).toFixed(2)} @ 1 share/trade`
-                    : `Avg ${brain.avg_return_pct >= 0 ? '+' : ''}${fmtPct(brain.avg_return_pct)}% per trade`
-                  : 'Tracking...'
-              }
+              value={hasClosedData ? `${brain.total_return_pct >= 0 ? '+' : ''}${formatPct(brain.total_return_pct)}%` : '\u2014'}
+              sub={(() => {
+                // Mixed population during migration: wallet trades carry
+                // TOTAL-dollar P&L, legacy trades carry per-share P&L.
+                // Surface both so neither number is misleading.
+                if (!hasClosedData) return 'Tracking...'
+                const wallet$ = brain.total_pnl_amount_wallet ?? 0
+                const legacy$ = brain.total_pnl_amount_legacy ?? 0
+                const walletCount = brain.wallet_closed_count ?? 0
+                const legacyCount = brain.legacy_closed_count ?? 0
+                if (walletCount > 0 && legacyCount === 0) {
+                  return `${wallet$ >= 0 ? '+' : '-'}$${Math.abs(wallet$).toFixed(2)} realized`
+                }
+                if (walletCount === 0 && legacyCount > 0) {
+                  return `${legacy$ >= 0 ? '+' : '-'}$${Math.abs(legacy$).toFixed(2)} @ 1 share/trade`
+                }
+                if (walletCount > 0 && legacyCount > 0) {
+                  return `${wallet$ >= 0 ? '+' : '-'}$${Math.abs(wallet$).toFixed(2)} wallet + ${legacy$ >= 0 ? '+' : '-'}$${Math.abs(legacy$).toFixed(2)} legacy/share`
+                }
+                return `Avg ${brain.avg_return_pct >= 0 ? '+' : ''}${formatPct(brain.avg_return_pct)}% per trade`
+              })()}
               color={hasClosedData ? (brain.total_return_pct >= 0 ? theme.colors.up : theme.colors.down) : theme.colors.textSub}
               bgColor={theme.colors.surfaceAlt}
             />
@@ -380,7 +669,7 @@ export default function BrainPerformancePage() {
                   <TrendingUp size={14} style={{ color: theme.colors.up }} />
                   <span className="text-[11px]" style={{ color: theme.colors.textHint }}>Best</span>
                   <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{brain.best_trade.symbol}</span>
-                  <span className="text-[12px] font-bold tabular-nums" style={{ color: theme.colors.up }}>+{fmtPct(brain.best_trade.pnl_pct)}%</span>
+                  <span className="text-[12px] font-bold tabular-nums" style={{ color: theme.colors.up }}>+{formatPct(brain.best_trade.pnl_pct)}%</span>
                 </div>
               )}
               {brain.worst_trade && (
@@ -388,7 +677,7 @@ export default function BrainPerformancePage() {
                   <TrendingDown size={14} style={{ color: theme.colors.down }} />
                   <span className="text-[11px]" style={{ color: theme.colors.textHint }}>Worst</span>
                   <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{brain.worst_trade.symbol}</span>
-                  <span className="text-[12px] font-bold tabular-nums" style={{ color: theme.colors.down }}>{fmtPct(brain.worst_trade.pnl_pct)}%</span>
+                  <span className="text-[12px] font-bold tabular-nums" style={{ color: theme.colors.down }}>{formatPct(brain.worst_trade.pnl_pct)}%</span>
                 </div>
               )}
             </div>
@@ -521,7 +810,7 @@ export default function BrainPerformancePage() {
                                   </div>
                                   <div className="flex items-center gap-2 shrink-0">
                                     <span className="text-[10px] font-bold tabular-nums" style={{ color: pnlColor }}>
-                                      {evt.pnl_pct >= 0 ? '+' : ''}{fmtPct(evt.pnl_pct)}%
+                                      {evt.pnl_pct >= 0 ? '+' : ''}{formatPct(evt.pnl_pct)}%
                                     </span>
                                     <span className="text-[9px]" style={{ color: theme.colors.textHint }}>{relativeTime(evt.created_at)}</span>
                                   </div>
@@ -549,7 +838,7 @@ export default function BrainPerformancePage() {
               </p>
               {brainTrades.length > 0 && avgUnrealizedPnl !== 0 && (
                 <span className="text-[11px] font-bold tabular-nums" style={{ color: avgUnrealizedPnl >= 0 ? theme.colors.up : theme.colors.down }}>
-                  {avgUnrealizedPnl >= 0 ? '+' : ''}{fmtPct(avgUnrealizedPnl)}% avg
+                  {avgUnrealizedPnl >= 0 ? '+' : ''}{formatPct(avgUnrealizedPnl)}% avg
                 </span>
               )}
             </div>
@@ -639,12 +928,27 @@ export default function BrainPerformancePage() {
                               {vt.days_held}d
                             </span>
                           )}
-                          <span className="text-[11px] tabular-nums" style={{ color: theme.colors.textHint }}>
-                            ${Number(vt.entry_price).toFixed(2)}
-                          </span>
+                          {/* Wallet trades show "${size} ·" inline — makes the
+                              position size visible at a glance. Legacy (1-share)
+                              trades keep the plain price. */}
+                          {vt.is_wallet_trade && vt.position_size_usd ? (
+                            <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textHint }}>
+                              ${vt.position_size_usd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                              {' @ '}${Number(vt.entry_price).toFixed(2)}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] tabular-nums" style={{ color: theme.colors.textHint }}>
+                              ${Number(vt.entry_price).toFixed(2)}
+                            </span>
+                          )}
                           {hasPnl && (
                             <span className="text-[12px] font-bold tabular-nums" style={{ color: pnlColor }}>
-                              {vt.unrealized_pnl_pct! >= 0 ? '+' : ''}{fmtPct(vt.unrealized_pnl_pct!)}%
+                              {vt.unrealized_pnl_pct! >= 0 ? '+' : ''}{formatPct(vt.unrealized_pnl_pct!)}%
+                              {vt.is_wallet_trade && vt.unrealized_pnl_amount != null && (
+                                <span className="ml-1 text-[10px] font-normal" style={{ color: pnlColor }}>
+                                  ({vt.unrealized_pnl_amount >= 0 ? '+' : '-'}${Math.abs(vt.unrealized_pnl_amount).toFixed(2)})
+                                </span>
+                              )}
                             </span>
                           )}
                           <span className="text-[11px] font-semibold tabular-nums px-1.5 py-0.5 rounded" style={{
@@ -670,6 +974,30 @@ export default function BrainPerformancePage() {
                               <span className="text-[10px]" style={{ color: theme.colors.textHint }}>Entry</span>
                               <span className="text-[11px] font-medium tabular-nums" style={{ color: theme.colors.text }}>${Number(vt.entry_price).toFixed(2)}</span>
                             </div>
+                            {vt.is_wallet_trade && vt.shares != null && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px]" style={{ color: theme.colors.textHint }}>Shares</span>
+                                <span className="text-[11px] font-medium tabular-nums" style={{ color: theme.colors.text }}>
+                                  {vt.shares.toFixed(4)}
+                                </span>
+                              </div>
+                            )}
+                            {vt.is_wallet_trade && vt.position_size_usd != null && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px]" style={{ color: theme.colors.textHint }}>Invested</span>
+                                <span className="text-[11px] font-medium tabular-nums" style={{ color: theme.colors.text }}>
+                                  ${vt.position_size_usd.toFixed(2)}
+                                </span>
+                              </div>
+                            )}
+                            {vt.is_wallet_trade && vt.current_position_value != null && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px]" style={{ color: theme.colors.textHint }}>Now worth</span>
+                                <span className="text-[11px] font-medium tabular-nums" style={{ color: pnlColor }}>
+                                  ${vt.current_position_value.toFixed(2)}
+                                </span>
+                              </div>
+                            )}
                             {vt.current_price != null && (
                               <div className="flex items-center justify-between">
                                 <span className="text-[10px]" style={{ color: theme.colors.textHint }}>Now</span>
@@ -783,6 +1111,15 @@ export default function BrainPerformancePage() {
                               </span>
                             )}
                             <ExitReasonBadge reason={rc.exit_reason} theme={theme} />
+                            {!rc.is_wallet_trade && (
+                              <span
+                                className="text-[8px] font-medium px-1.5 py-0.5 rounded"
+                                style={{ backgroundColor: theme.colors.border + '50', color: theme.colors.textHint }}
+                                title={t.wallet?.legacyTooltip ?? 'Pre-wallet legacy trade — P&L shown per-share'}
+                              >
+                                {t.wallet?.legacyBadge ?? 'Legacy 1-share'}
+                              </span>
+                            )}
                             {daysHeld != null && (
                               <span className="text-[9px] tabular-nums px-1 py-0.5 rounded" style={{ color: theme.colors.textHint, backgroundColor: theme.colors.surface }}>
                                 {daysHeld}d
@@ -795,6 +1132,9 @@ export default function BrainPerformancePage() {
                             )}
                           </div>
                           <div className="text-[10px] tabular-nums pl-[22px]" style={{ color: theme.colors.textHint }}>
+                            {rc.is_wallet_trade && rc.position_size_usd != null && (
+                              <span style={{ color: theme.colors.textSub }}>${rc.position_size_usd.toFixed(0)} · </span>
+                            )}
                             {fmtShortDate(rc.entry_date)} {formatPrice(rc.entry_price)} → {fmtShortDate(rc.exit_date)} {formatPrice(rc.exit_price)}
                             {rc.peak_price != null && (
                               <span style={{ color: theme.colors.textSub }}> (peak {formatPrice(rc.peak_price)})</span>
@@ -806,9 +1146,16 @@ export default function BrainPerformancePage() {
                             </div>
                           )}
                         </div>
-                        <span className="text-[13px] font-bold tabular-nums shrink-0" style={{ color: rc.is_win ? theme.colors.up : theme.colors.down }}>
-                          {rc.pnl_pct >= 0 ? '+' : ''}{fmtPct(rc.pnl_pct)}%
-                        </span>
+                        <div className="flex flex-col items-end shrink-0">
+                          <span className="text-[13px] font-bold tabular-nums" style={{ color: rc.is_win ? theme.colors.up : theme.colors.down }}>
+                            {rc.pnl_pct >= 0 ? '+' : ''}{formatPct(rc.pnl_pct)}%
+                          </span>
+                          {rc.is_wallet_trade && rc.pnl_amount != null && (
+                            <span className="text-[10px] font-medium tabular-nums" style={{ color: rc.is_win ? theme.colors.up : theme.colors.down }}>
+                              {rc.pnl_amount >= 0 ? '+' : '-'}${Math.abs(rc.pnl_amount).toFixed(2)}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </Link>
                   )
@@ -879,17 +1226,17 @@ export default function BrainPerformancePage() {
                       <p className="text-[11px] tabular-nums text-center" style={{
                         color: trades === 0 ? theme.colors.textHint : avgRet >= 0 ? theme.colors.up : theme.colors.down,
                       }}>
-                        {trades === 0 ? '\u2014' : `${avgRet >= 0 ? '+' : ''}${fmtPct(avgRet)}%`}
+                        {trades === 0 ? '\u2014' : `${avgRet >= 0 ? '+' : ''}${formatPct(avgRet)}%`}
                       </p>
                       <p className="text-[10px] tabular-nums text-center" style={{ color: theme.colors.textHint }}>
                         {trades === 0 ? '\u2014' : (
-                          <><span style={{ color: theme.colors.up }}>{fmtPct(best)}%</span> / <span style={{ color: theme.colors.down }}>{fmtPct(worst)}%</span></>
+                          <><span style={{ color: theme.colors.up }}>{formatPct(best)}%</span> / <span style={{ color: theme.colors.down }}>{formatPct(worst)}%</span></>
                         )}
                       </p>
                       <p className="text-[11px] font-semibold tabular-nums text-right" style={{
                         color: trades === 0 ? theme.colors.textHint : totalPnl >= 0 ? theme.colors.up : theme.colors.down,
                       }}>
-                        {trades === 0 ? '\u2014' : `${totalPnl >= 0 ? '+' : ''}${fmtPct(totalPnl)}%`}
+                        {trades === 0 ? '\u2014' : `${totalPnl >= 0 ? '+' : ''}${formatPct(totalPnl)}%`}
                       </p>
                     </div>
                   )

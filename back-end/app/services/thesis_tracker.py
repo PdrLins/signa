@@ -116,11 +116,11 @@ async def reevaluate_open_theses(
         return {}
 
     db = get_client()
+    # Shared close-field list plus the thesis-re-eval extras.
+    from app.services.virtual_portfolio import VIRTUAL_TRADES_CLOSE_FIELDS
     open_positions = (
         db.table("virtual_trades")
-        .select("id, symbol, entry_price, entry_date, entry_score, "
-                "entry_thesis, entry_thesis_keywords, market_regime, bucket, "
-                "target_price, stop_loss, source, trade_horizon")
+        .select(VIRTUAL_TRADES_CLOSE_FIELDS + ", entry_thesis, entry_thesis_keywords")
         .eq("status", "OPEN")
         .eq("source", "brain")
         .execute()
@@ -416,10 +416,14 @@ def execute_thesis_invalidation_exits(
     except Exception as e:
         logger.warning(f"thesis_tracker batch latest-score query failed: {e}")
 
-    from app.services.virtual_portfolio import _record_brain_outcome
+    # Route every THESIS_INVALIDATED close through the shared helper so
+    # wallet settlement + learning loop fire consistently. Direct UPDATEs
+    # from here (the old path) silently bypassed the wallet — a
+    # wallet-LONG closed via THESIS_INVALIDATED would leak its full
+    # position size because the proceeds never got credited back.
+    from app.services.virtual_portfolio import close_virtual_trade
 
     closed = 0
-    now_iso = datetime.now(timezone.utc).isoformat()
     for ctx in invalid_ctxs:
         pos = ctx["position"]
         sym = pos["symbol"]
@@ -429,23 +433,24 @@ def execute_thesis_invalidation_exits(
             logger.warning(f"Cannot exit {sym} via thesis_invalidated: no price")
             continue
         pnl_pct = ctx["pnl_pct"]
-        pnl_amount = live_price - entry_price
         is_win = pnl_pct > 0
         exit_score = latest_scores.get(sym)
 
         try:
-            db.table("virtual_trades").update({
-                "status": "CLOSED",
-                "exit_price": float(live_price),
-                "exit_date": now_iso,
-                "exit_score": exit_score,
-                "pnl_pct": round(pnl_pct, 2),
-                "pnl_amount": round(pnl_amount, 2),
-                "is_win": is_win,
-                "exit_reason": "THESIS_INVALIDATED",
-            }).eq("id", pos["id"]).eq("status", "OPEN").execute()
+            close_res = close_virtual_trade(
+                pos, float(live_price), "THESIS_INVALIDATED", exit_score,
+            )
         except Exception as e:
             logger.warning(f"Failed to close {sym} via thesis_invalidated: {e}")
+            continue
+
+        # Skip the event log + Telegram alert if another path already
+        # closed this row — don't double-announce a close we didn't do.
+        if close_res.get("skipped"):
+            logger.info(
+                f"thesis_invalidated for {sym} skipped — row already closed by "
+                f"another path; no audit event or notification sent."
+            )
             continue
 
         closed += 1
@@ -456,8 +461,6 @@ def execute_thesis_invalidation_exits(
             f"Virtual THESIS_INVALIDATED [brain]: {emoji} {sym} @ ${live_price:.2f} "
             f"(entry ${entry_price:.2f}, P&L {pnl_pct:+.1f}%, reason: {thesis_reason})"
         )
-
-        _record_brain_outcome(pos, float(live_price), exit_score, "THESIS_INVALIDATED", pnl_pct)
 
         log_event(
             EVENT_THESIS_INVALIDATED_EXIT,

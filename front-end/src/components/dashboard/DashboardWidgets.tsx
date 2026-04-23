@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { client } from '@/lib/api'
-import { relativeTime } from '@/lib/utils'
+import { relativeTime, formatPct, formatMoney } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -258,6 +258,18 @@ interface TrackStats {
   worst_trade: { symbol: string; pnl_pct: number } | null
 }
 
+interface WalletSummary {
+  balance: number
+  collateral_reserved: number
+  total_value: number
+  initial_deposit: number
+  total_deposited: number
+  total_withdrawn: number
+  roi_pct: number
+  open_positions_value: number
+  updated_at?: string | null
+}
+
 interface VirtualSummary extends TrackStats {
   open_trades: Array<{ symbol: string; entry_price: number; entry_score: number; source: string }>
   recent_closed: Array<{ symbol: string; pnl_pct: number; is_win: boolean; source: string }>
@@ -268,6 +280,7 @@ interface VirtualSummary extends TrackStats {
     positions_monitored: number
     recent_events: { symbol: string; event_type: string; created_at: string }[]
   }
+  wallet?: WalletSummary | null
 }
 
 export function BrainPerformanceWidget() {
@@ -305,12 +318,32 @@ export function BrainPerformanceWidget() {
             {t.overview.brainPerformance}
           </span>
         </div>
-        {data.closed_count > 0 && (
+        {/* When the wallet has been funded, prefer wallet ROI over the
+            per-share total_return_pct — it's the number that actually
+            describes capital performance. */}
+        {data.wallet && data.wallet.initial_deposit > 0 ? (
+          <span className="text-[11px] font-bold tabular-nums" style={{ color: data.wallet.roi_pct >= 0 ? theme.colors.up : theme.colors.down }}>
+            {data.wallet.roi_pct >= 0 ? '+' : ''}{formatPct(data.wallet.roi_pct)}% ROI
+          </span>
+        ) : data.closed_count > 0 ? (
           <span className="text-[11px] font-bold tabular-nums" style={{ color: data.total_return_pct >= 0 ? theme.colors.up : theme.colors.down }}>
             {data.total_return_pct >= 0 ? '+' : ''}{data.total_return_pct.toFixed(1)}%
           </span>
-        )}
+        ) : null}
       </div>
+
+      {/* Wallet total value row (Day 15). Shown above the win-rate grid
+          so the eye lands on the real $ number first. */}
+      {data.wallet && data.wallet.initial_deposit > 0 && (
+        <div className="flex items-baseline justify-between mb-3 pb-2" style={{ borderBottom: `1px solid ${theme.colors.border}30` }}>
+          <span className="text-[9px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>
+            {t.wallet?.totalValue ?? 'Total Value'}
+          </span>
+          <span className="text-[14px] font-bold tabular-nums" style={{ color: theme.colors.text }}>
+            {formatMoney(data.wallet.total_value)}
+          </span>
+        </div>
+      )}
 
       {!hasData ? (
         <p className="text-[11px]" style={{ color: theme.colors.textHint }}>

@@ -112,6 +112,18 @@ class Settings(BaseSettings):
     virtual_trade_max_days: int = 30  # Auto-close virtual trades after N days
     brain_max_open: int = 20          # Max simultaneous brain positions
 
+    # --- Wallet (Day 15 ship) ---
+    # Brain virtual portfolio is wallet-based. Positions are sized as a %
+    # of wallet balance; shorts reserve 100% of position value as collateral.
+    # Legacy pre-launch positions (is_wallet_trade=False) keep their per-share
+    # math and don't touch the wallet when they close.
+    wallet_enabled: bool = True
+    wallet_starting_balance: float = 10000.0     # default first-deposit amount
+    wallet_position_pct_tier1: float = 10.0      # Tier 1 (full trust) = 10% of balance
+    wallet_position_pct_tier2_3: float = 5.0     # Tier 2/3 (half trust) = 5% of balance
+    wallet_max_position_pct: float = 15.0        # hard cap (matches kelly.MAX_POSITION_PCT)
+    wallet_min_balance_for_trade: float = 100.0  # below this, skip new entries
+
     # --- Brain Thesis Tracking (Stage 6) ---
     # When enabled, every scan re-evaluates the thesis on every open brain
     # position via Claude. Positions whose thesis is invalidated are closed

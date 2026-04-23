@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from app.api.v1 import auth, brain, health, learning, logs, portfolio, positions, scans, signals, stats, tickers, watchlist
+from app.api.v1 import auth, brain, health, learning, logs, portfolio, positions, scans, signals, stats, tickers, wallet, watchlist
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.middleware.audit import AuditMiddleware
@@ -91,6 +91,7 @@ app.include_router(brain.router, prefix=api_prefix)
 app.include_router(learning.router, prefix=api_prefix)
 app.include_router(logs.router, prefix=api_prefix)
 app.include_router(health.router, prefix=api_prefix)
+app.include_router(wallet.router, prefix=api_prefix)
 
 
 @app.post("/api/v1/telegram/webhook")

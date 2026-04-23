@@ -23,6 +23,25 @@ export function formatPrice(v: number | null | undefined): string {
   return `$${Number(v).toFixed(2)}`
 }
 
+/**
+ * Format a percentage value with 2 decimals, avoiding "-0.00" for
+ * near-zero values. Use for P&L %, ROI, win-rate deltas.
+ */
+export function formatPct(v: number): string {
+  return Math.abs(v) < 0.005 ? '0.00' : v.toFixed(2)
+}
+
+/**
+ * Format a dollar amount with thousands separators, e.g. `$10,428.50`.
+ * Use for wallet totals, holdings, deposits — anywhere a user reads
+ * the whole number and commas aid legibility. `formatPrice` is for
+ * raw per-share prices where grouping noise hurts.
+ */
+export function formatMoney(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '--'
+  return `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 /** Mask IPv4 addresses — show only last octet, e.g. ***.***.***.123 */
 export function maskIp(text: string): string {
   return text.replace(

@@ -1142,19 +1142,12 @@ def process_virtual_trades(
     # snapshot. This avoids N+1 queries inside the per-signal loop. The
     # snapshot is read-only for lookups; mutations to the DB happen via
     # targeted updates by row id.
+    # process_virtual_trades also needs pending_review_at (pre-market
+    # review flow) and consecutive_avoid_count (Day-14 LONG exit delay),
+    # so we extend the shared close-field list.
     open_result = (
         db.table("virtual_trades")
-        .select("id, symbol, entry_price, entry_date, entry_score, source, "
-                "pending_review_at, thesis_last_status, "
-                # bucket + market_regime + target_price + stop_loss are
-                # required by _record_brain_outcome so that SIGNAL and
-                # ROTATION exits write correct trade_outcomes rows and
-                # the learning loop can match (bucket, regime) patterns.
-                # Missing any of these silently corrupts pattern_stats data.
-                "bucket, market_regime, target_price, stop_loss, "
-                # direction + trade_horizon + consecutive_avoid_count gate
-                # the LONG signal-exit delay (Day 14 fix).
-                "direction, trade_horizon, consecutive_avoid_count")
+        .select(VIRTUAL_TRADES_CLOSE_FIELDS + ", pending_review_at, consecutive_avoid_count")
         .eq("status", "OPEN")
         .execute()
     )
@@ -1208,11 +1201,10 @@ def process_virtual_trades(
     portfolio_heat = 0
 
     # Factor 1: Portfolio size as a proxy for unrealized gains.
-    # Previously this fetched live prices for ALL brain positions mid-scan
-    # via _fetch_prices_batch — that caused DNS thread exhaustion because
-    # it competed with the scan's own yfinance calls. Replaced with a
-    # simple position-count heuristic: if we have 8+ positions, we likely
-    # have meaningful gains to protect (the brain only buys winners).
+    # Position-count heuristic — a mid-scan live-price fetch over all
+    # brain positions caused DNS thread exhaustion against the scan's own
+    # yfinance calls, so we use count instead: 8+ positions usually means
+    # meaningful gains to protect (the brain only buys winners).
     if brain_open_count >= 8:
         portfolio_heat += 1
 
@@ -1276,6 +1268,14 @@ def process_virtual_trades(
     # Resolve once: brain runs single-tenant, every insert is stamped with
     # this user_id so the rows are correctly attributed and queryable.
     brain_user_id = queries.get_brain_user_id()
+
+    # Load wallet once; `running_balance` tracks decrements locally so a
+    # second BUY in the same scan sizes off the post-first-BUY balance.
+    # `get_wallet` lazy-creates a zeroed row on first access — until the
+    # user deposits, running_balance is 0 and every entry is skipped.
+    from app.services import wallet as wallet_svc
+    _wlt_initial = wallet_svc.get_wallet(brain_user_id) if settings.wallet_enabled else None
+    running_balance: float = float(_wlt_initial["balance"]) if _wlt_initial else 0.0
 
     now = datetime.now(timezone.utc).isoformat()
     market_open = _is_us_market_open()
@@ -1420,23 +1420,19 @@ def process_virtual_trades(
                         f"{threshold} consecutive AVOIDs, closing at P&L {pnl_pct:+.1f}%"
                     )
 
-                # Status guard: the .eq("status", "OPEN") prevents this UPDATE
-                # from ever mutating an already-closed row. Belt-and-braces
-                # against the SELL→rotation race that previously allowed a
-                # later signal to overwrite a closed trade's pnl/is_win.
-                db.table("virtual_trades").update({
-                    "status": "CLOSED",
-                    "exit_price": price,
-                    "exit_date": now,
-                    "exit_score": score,
-                    "exit_action": action,
-                    "pnl_pct": round(pnl_pct, 2),
-                    "pnl_amount": round(pnl_amount, 2),
-                    "is_win": is_win,
-                    "exit_reason": "SIGNAL",
-                }).eq("id", pos["id"]).eq("status", "OPEN").execute()
+                # Route through close_virtual_trade so wallet settlement +
+                # learning loop fire for every close, and the pnl math is
+                # computed once regardless of which path triggered the exit.
+                # If another path (watchdog / earlier scan) already closed
+                # this row, the helper returns skipped=True so we don't
+                # double-count or send a duplicate Telegram alert.
+                close_res = close_virtual_trade(
+                    pos, price, "SIGNAL", score,
+                    exit_action=action, exit_date_iso=now,
+                )
+                if close_res.get("skipped"):
+                    continue
                 sells += 1
-                _record_brain_outcome(pos, price, score, "SIGNAL", pnl_pct)
 
                 # Refresh in-memory state so the rotation block later in this
                 # scan doesn't pick this just-closed position as a rotation
@@ -1475,18 +1471,12 @@ def process_virtual_trades(
                     continue
                 entry_price_pos = float(pos["entry_price"])
                 cover_pnl_pct = _calc_pnl_pct(entry_price_pos, price, "SHORT")
-                cover_pnl_amount = _calc_pnl_amount(entry_price_pos, price, "SHORT")
-                db.table("virtual_trades").update({
-                    "status": "CLOSED",
-                    "exit_price": price,
-                    "exit_date": now,
-                    "exit_score": score,
-                    "pnl_pct": round(cover_pnl_pct, 2),
-                    "pnl_amount": round(cover_pnl_amount, 2),
-                    "is_win": cover_pnl_pct > 0,
-                    "exit_reason": "SIGNAL",
-                    "exit_action": action,
-                }).eq("id", pos["id"]).eq("status", "OPEN").execute()
+                close_res = close_virtual_trade(
+                    pos, price, "SIGNAL", score,
+                    exit_action=action, exit_date_iso=now,
+                )
+                if close_res.get("skipped"):
+                    continue
                 sells += 1
                 brain_short_count = max(0, brain_short_count - 1)
                 brain_open_count = max(0, brain_open_count - 1)
@@ -1601,25 +1591,21 @@ def process_virtual_trades(
                     w_prices = _fetch_prices_batch([w_symbol])
                     w_current, _ = w_prices.get(w_symbol, (None, None))
                     w_exit_price = w_current if w_current else price
-                    # Direction-aware P&L for the rotated-out position.
+                    # Direction-aware P&L for the rotated-out position (kept
+                    # as a local for the logger + notification below; the
+                    # close helper computes the stored version itself).
                     w_direction = weakest.get("direction") or "LONG"
                     w_pnl = _calc_pnl_pct(w_entry, w_exit_price, w_direction) if w_entry > 0 else 0
-                    w_pnl_amount = _calc_pnl_amount(w_entry, w_exit_price, w_direction)
-                    # Status guard prevents this UPDATE from ever mutating
-                    # an already-closed row. Combined with the lazy-recompute
-                    # of `weakest` above, the rotation flow can no longer
-                    # overwrite a closed trade's financial fields.
-                    db.table("virtual_trades").update({
-                        "status": "CLOSED",
-                        "exit_price": w_exit_price,
-                        "exit_date": now,
-                        "exit_score": score,
-                        "pnl_pct": round(w_pnl, 2),
-                        "pnl_amount": round(w_pnl_amount, 2),
-                        "is_win": w_pnl > 0,
-                        "exit_reason": "ROTATION",
-                    }).eq("id", weakest["id"]).eq("status", "OPEN").execute()
-                    _record_brain_outcome(weakest, w_exit_price, score, "ROTATION", w_pnl)
+                    close_res = close_virtual_trade(
+                        weakest, w_exit_price, "ROTATION", score,
+                        exit_date_iso=now,
+                    )
+                    if close_res.get("skipped"):
+                        # Another path (watchdog/parallel scan) already closed
+                        # the weakest. Our local counters are now stale and
+                        # capacity may or may not be free. Skip inserting the
+                        # new position this round — next scan will reassess.
+                        continue
                     open_brain.discard(w_symbol)
                     brain_open_count -= 1
                     logger.info(
@@ -1673,7 +1659,14 @@ def process_virtual_trades(
                 else:
                     _horizon = "LONG"
 
-                db.table("virtual_trades").insert({
+                sizing = _compute_wallet_fields(
+                    running_balance, brain_tier, trust_multiplier, price, symbol, kind="BUY",
+                )
+                if sizing is None:
+                    continue
+                allocation_usd, shares, wallet_fields = sizing
+
+                ins_result = db.table("virtual_trades").insert({
                     "user_id": brain_user_id,
                     "symbol": symbol,
                     "action": "BUY",
@@ -1701,7 +1694,35 @@ def process_virtual_trades(
                     # THESIS_INVALIDATED exits when the reason is gone.
                     "entry_thesis": (sig.get("reasoning") or "")[:500],
                     "entry_thesis_keywords": _extract_thesis_keywords(sig),
+                    **wallet_fields,
                 }).execute()
+
+                new_trade_id = ins_result.data[0]["id"] if ins_result.data else None
+                # Settle the wallet AFTER insert — we need the trade_id on
+                # the audit ledger row. Only runs when the wallet is enabled
+                # AND allocation is positive (disabled path skips wallet math
+                # entirely). If this fails after the insert succeeded, the
+                # error log names the orphan so it can be reconciled; we do
+                # NOT roll back the trade because the brain's autonomy
+                # depends on the trade being open even if wallet errored.
+                if settings.wallet_enabled and allocation_usd > 0:
+                    try:
+                        wallet_svc.debit_for_long_buy(
+                            user_id=brain_user_id,
+                            allocation_usd=allocation_usd,
+                            trade_id=new_trade_id,
+                            symbol=symbol,
+                            shares=shares,
+                            price=price,
+                        )
+                        running_balance = max(0.0, running_balance - allocation_usd)
+                    except Exception as e:
+                        logger.error(
+                            f"Wallet debit FAILED for {symbol} (trade {new_trade_id}, "
+                            f"allocation ${allocation_usd:.2f}): {e}. Trade row exists; "
+                            f"wallet balance is NOT deducted — reconcile manually."
+                        )
+
                 buys += 1
                 brain_open_count += 1
                 brain_long_count += 1
@@ -1770,7 +1791,17 @@ def process_virtual_trades(
         # bearish thesis could be LONG (held up to 14 days either way).
         _horizon = "SHORT"
 
-        db.table("virtual_trades").insert({
+        # Shorts use Tier-1 sizing (10% of balance) scaled by short_mult;
+        # 100% of the allocation gets reserved as collateral when
+        # reserve_for_short_open runs below.
+        sizing = _compute_wallet_fields(
+            running_balance, 1, short_mult, float(price), symbol, kind="SHORT",
+        )
+        if sizing is None:
+            continue
+        short_allocation_usd, short_shares, short_wallet_fields = sizing
+
+        ins_result = db.table("virtual_trades").insert({
             "user_id": brain_user_id,
             "symbol": symbol,
             "action": "SHORT_SELL",
@@ -1792,7 +1823,27 @@ def process_virtual_trades(
             "market_regime": sig.get("market_regime"),
             "entry_thesis": (sig.get("reasoning") or "")[:500],
             "entry_thesis_keywords": _extract_thesis_keywords(sig),
+            **short_wallet_fields,
         }).execute()
+
+        new_short_id = ins_result.data[0]["id"] if ins_result.data else None
+        if settings.wallet_enabled and short_allocation_usd > 0:
+            try:
+                wallet_svc.reserve_for_short_open(
+                    user_id=brain_user_id,
+                    allocation_usd=short_allocation_usd,
+                    trade_id=new_short_id,
+                    symbol=symbol,
+                    shares=short_shares,
+                    price=float(price),
+                )
+                running_balance = max(0.0, running_balance - short_allocation_usd)
+            except Exception as e:
+                logger.error(
+                    f"Wallet reserve FAILED for SHORT {symbol} (trade {new_short_id}, "
+                    f"allocation ${short_allocation_usd:.2f}): {e}. Trade row exists; "
+                    f"collateral NOT reserved — reconcile manually."
+                )
 
         shorts_opened += 1
         brain_short_count += 1
@@ -1875,6 +1926,350 @@ def _calc_pnl_amount(entry_price: float, current_price: float, direction: str) -
     return current_price - entry_price
 
 
+# Column list for any SELECT that feeds `close_virtual_trade`. If the
+# helper ever needs another field, add it here in one place instead of
+# updating each caller — missing a SELECT is the class of bug that
+# silently skips wallet settlement or recomputes per-share math wrong.
+VIRTUAL_TRADES_CLOSE_FIELDS = (
+    "id, user_id, symbol, entry_price, entry_date, entry_score, source, "
+    "bucket, market_regime, target_price, stop_loss, direction, trade_horizon, "
+    "thesis_last_status, peak_price, trough_price, "
+    "shares, position_size_usd, is_wallet_trade"
+)
+
+
+def _compute_wallet_fields(
+    running_balance: float,
+    tier: int,
+    trust_multiplier: float,
+    price: float,
+    symbol: str,
+    *,
+    kind: str,
+) -> tuple[float, float, dict] | None:
+    """Size a new brain entry and produce the extra virtual_trades fields.
+
+    Returns (allocation_usd, shares, wallet_fields_dict) on success, or
+    None when the entry should be skipped (wallet below the floor).
+    Logs the skip reason internally so both BUY and SHORT call sites
+    stay symmetric — `kind` just flavors the log line.
+
+    When `settings.wallet_enabled` is False the trade inserts as legacy
+    (is_wallet_trade=False, no shares/position_size) — matches pre-Day-15
+    behavior and lets ops disable the wallet without orphaning rows.
+    """
+    from app.services import wallet as wallet_svc
+
+    if not settings.wallet_enabled:
+        return 0.0, 0.0, {"is_wallet_trade": False}
+
+    allocation_usd = wallet_svc.calc_position_size_usd(running_balance, tier, trust_multiplier)
+    if allocation_usd <= 0:
+        floor_reason = (
+            "balance below minimum"
+            if running_balance < settings.wallet_min_balance_for_trade
+            else f"allocation at tier {tier} is < ${settings.wallet_min_balance_for_trade:.0f}"
+        )
+        logger.info(
+            f"Virtual {kind} skipped for {symbol}: {floor_reason} "
+            f"(balance=${running_balance:.2f}, tier={tier})"
+        )
+        return None
+
+    shares = allocation_usd / price if price else 0.0
+    return allocation_usd, shares, {
+        "shares": round(shares, 6),
+        "position_size_usd": round(allocation_usd, 2),
+        "is_wallet_trade": True,
+    }
+
+
+def _mark_to_market_one(
+    *,
+    entry_price: float,
+    current_price: float,
+    direction: str,
+    is_wallet_trade: bool,
+    shares: float,
+) -> float:
+    """What is one open brain position worth in dollars right now?
+
+    Four cases — wallet vs legacy × LONG vs SHORT — each with different
+    cash semantics:
+      • Wallet LONG : shares × current_price
+      • Wallet SHORT: (entry − current) × shares — just the unrealized
+                      P&L; the collateral lives in wallet.collateral_reserved
+      • Legacy LONG : 1 × current_price (1-share implicit)
+      • Legacy SHORT: entry − current (per-share P&L, no collateral)
+    """
+    is_short = (direction or "LONG").upper() == "SHORT"
+    if is_wallet_trade:
+        if is_short:
+            return (entry_price - current_price) * shares
+        return current_price * shares
+    # Legacy 1-share implicit
+    if is_short:
+        return entry_price - current_price
+    return current_price
+
+
+def calculate_brain_holdings_value(
+    user_id: str | None = None,
+    *,
+    legacy_only: bool = False,
+    strict: bool = False,
+) -> float:
+    """Sum the mark-to-market value of open brain positions for the user.
+
+    Covers wallet LONG + wallet SHORT P&L + legacy LONG + legacy SHORT P&L.
+    Lives here (not in wallet.py) because this function owns virtual_trades
+    schema knowledge and the price fetch.
+
+    Args:
+        legacy_only: restrict to pre-wallet 1-share positions. Used once
+            per user on the FIRST deposit to snapshot the ROI baseline.
+        strict: raise `LegacySnapshotFailed` if any position has no price.
+            Only meaningful when legacy_only=True: we must never silently
+            baseline at cash-only when legacy positions exist.
+    """
+    from app.services.wallet import _resolve_user_id, LegacySnapshotFailed
+
+    uid = _resolve_user_id(user_id)
+    if not uid:
+        return 0.0
+    try:
+        db = get_client()
+        query = (
+            db.table("virtual_trades")
+            .select("symbol, shares, entry_price, direction, is_wallet_trade")
+            .eq("user_id", uid)
+            .eq("status", "OPEN")
+            .eq("source", "brain")
+        )
+        if legacy_only:
+            query = query.eq("is_wallet_trade", False)
+        rows = query.execute().data or []
+        if not rows:
+            return 0.0
+        symbols = list({r["symbol"] for r in rows if r.get("symbol")})
+        price_map = _fetch_prices_batch(symbols)
+        total = 0.0
+        missing: list[str] = []
+        for r in rows:
+            price_tuple = price_map.get(r["symbol"])
+            price = price_tuple[0] if price_tuple else None
+            if not price:
+                missing.append(r["symbol"])
+                continue
+            total += _mark_to_market_one(
+                entry_price=float(r.get("entry_price") or 0),
+                current_price=float(price),
+                direction=r.get("direction") or "LONG",
+                is_wallet_trade=bool(r.get("is_wallet_trade")),
+                shares=float(r.get("shares") or 0),
+            )
+        if missing and strict:
+            raise LegacySnapshotFailed(
+                f"Could not price {len(missing)} position(s): {', '.join(missing)}. "
+                f"Refusing to baseline ROI at cash-only — retry when the price feed recovers."
+            )
+        return total
+    except LegacySnapshotFailed:
+        raise
+    except Exception as e:
+        if strict:
+            raise LegacySnapshotFailed(f"Holdings snapshot failed: {e}") from e
+        logger.warning(f"calculate_brain_holdings_value failed: {e}")
+        return 0.0
+
+
+def _sum_holdings_from_enriched(enriched_open: list[dict]) -> float:
+    """Sum holdings from rows that already went through `_enrich_open_trade`.
+
+    Used by `get_virtual_summary` so we don't re-SELECT virtual_trades or
+    re-fetch prices for a value we just computed row-by-row. Enriched
+    rows already carry `current_price`, `entry_price`, `direction`,
+    `is_wallet_trade`, and (for wallet trades) `shares` +
+    `current_position_value` — so we can reuse `_mark_to_market_one`.
+    """
+    total = 0.0
+    for t in enriched_open:
+        if t.get("source") != "brain":
+            continue
+        current_price = t.get("current_price")
+        if current_price is None:
+            continue
+        total += _mark_to_market_one(
+            entry_price=float(t.get("entry_price") or 0),
+            current_price=float(current_price),
+            direction=t.get("direction") or "LONG",
+            is_wallet_trade=bool(t.get("is_wallet_trade")),
+            shares=float(t.get("shares") or 0),
+        )
+    return total
+
+
+def close_virtual_trade(
+    trade: dict,
+    exit_price: float,
+    exit_reason: str,
+    exit_score: int | None,
+    exit_action: str | None = None,
+    exit_date_iso: str | None = None,
+) -> dict:
+    """The one true close path: pnl math, DB UPDATE, wallet settlement, learning loop.
+
+    Every exit site in this module and in watchdog_service funnels through
+    here so the math is computed one way. Three things happen:
+
+      1. Compute pnl_pct + direction-aware per-share dollar P&L. For wallet
+         trades (is_wallet_trade=True), store TOTAL-dollar P&L (shares ×
+         per-share). For legacy trades (pre-wallet), store per-share — that
+         matches the historical pnl_amount semantics so existing closed
+         rows remain consistent.
+
+      2. UPDATE virtual_trades with status='CLOSED' + the close fields,
+         guarded by .eq("status", "OPEN") to prevent race-condition
+         overwrites (scan + watchdog running in parallel).
+
+      3. If is_wallet_trade, settle the wallet: credit proceeds on LONG
+         close, release collateral + P&L on SHORT close. The wallet layer
+         writes its own audit ledger entry.
+
+      4. Forward to the learning loop via _record_brain_outcome (best-effort).
+
+    Args:
+        trade: The loaded virtual_trades row. Must include at minimum id,
+            symbol, entry_price, direction, source, and (for wallet trades)
+            shares, position_size_usd, is_wallet_trade, user_id.
+        exit_price: Price at which the trade is being closed.
+        exit_reason: STOP_HIT, TARGET_HIT, TRAILING_STOP, SIGNAL, etc.
+        exit_score: Latest signal score at close time (for telemetry).
+        exit_action: Signal action that triggered this close (set only for
+            SIGNAL exits — SELL, AVOID). None for price-driven closes.
+        exit_date_iso: ISO timestamp to write. Defaults to now(UTC).
+
+    Returns:
+        dict with keys pnl_pct, pnl_amount_stored, is_win — so callers can
+        log / notify without recomputing.
+    """
+    db = get_client()
+    entry_price = float(trade["entry_price"])
+    direction = trade.get("direction") or "LONG"
+    pnl_pct = _calc_pnl_pct(entry_price, exit_price, direction)
+    per_share_pnl = _calc_pnl_amount(entry_price, exit_price, direction)
+    is_win = pnl_pct > 0
+
+    is_wallet = bool(trade.get("is_wallet_trade"))
+    shares = float(trade.get("shares") or 0)
+    position_size_usd = float(trade.get("position_size_usd") or 0)
+
+    if is_wallet and shares > 0:
+        # Wallet trades store TOTAL-dollar P&L so the field is meaningful
+        # without needing `shares` re-joined at summary time.
+        pnl_amount_stored = per_share_pnl * shares
+    else:
+        # Legacy 1-share trades keep per-share semantics (historical compat).
+        pnl_amount_stored = per_share_pnl
+
+    now_iso = exit_date_iso or datetime.now(timezone.utc).isoformat()
+
+    patch: dict = {
+        "status": "CLOSED",
+        "exit_price": exit_price,
+        "exit_date": now_iso,
+        "exit_score": exit_score,
+        "pnl_pct": round(pnl_pct, 2),
+        "pnl_amount": round(pnl_amount_stored, 2),
+        "is_win": is_win,
+        "exit_reason": exit_reason,
+    }
+    if exit_action is not None:
+        patch["exit_action"] = exit_action
+
+    # Status guard: the .eq("status", "OPEN") here prevents this UPDATE from
+    # overwriting a row that another parallel path (watchdog / rotation)
+    # already closed. Belt-and-braces — without this, a race between the
+    # scan SIGNAL close and a concurrent watchdog close could double-write
+    # the pnl fields. Inspect the result: if no rows matched (the row was
+    # already closed by another path), skip wallet settlement so we don't
+    # double-credit the wallet for the same trade.
+    update_result = (
+        db.table("virtual_trades")
+        .update(patch)
+        .eq("id", trade["id"])
+        .eq("status", "OPEN")
+        .execute()
+    )
+    if not (update_result.data or []):
+        logger.info(
+            f"close_virtual_trade: {trade.get('symbol')} already closed "
+            f"by another path ({exit_reason}) — skipping wallet + learning."
+        )
+        return {
+            "pnl_pct": pnl_pct,
+            "pnl_amount_stored": pnl_amount_stored,
+            "is_win": is_win,
+            "skipped": True,
+        }
+
+    # Wallet settlement routing:
+    #   wallet + shares>0 → full settle (BUY/SELL/SHORT_OPEN/SHORT_COVER)
+    #   brain legacy      → 1-share liquidation (LEGACY_SELL / LEGACY_COVER)
+    #   watchlist         → no wallet touch
+    source = trade.get("source", "")
+    sym = trade["symbol"]
+    user_id = trade.get("user_id")
+    try:
+        from app.services import wallet as wallet_svc
+        if is_wallet and shares > 0:
+            pnl_usd_total = per_share_pnl * shares
+            if direction == "SHORT":
+                wallet_svc.release_for_short_cover(
+                    user_id=user_id, original_allocation_usd=position_size_usd,
+                    pnl_usd=pnl_usd_total, trade_id=trade["id"], symbol=sym,
+                    shares=shares, price=exit_price, exit_reason=exit_reason,
+                )
+            else:
+                wallet_svc.credit_for_long_sell(
+                    user_id=user_id, proceeds_usd=shares * exit_price,
+                    pnl_usd=pnl_usd_total, trade_id=trade["id"], symbol=sym,
+                    shares=shares, price=exit_price, exit_reason=exit_reason,
+                )
+        elif not is_wallet and source == "brain":
+            # per_share_pnl IS the full cash event for a 1-share legacy.
+            if direction == "SHORT":
+                wallet_svc.credit_for_legacy_cover(
+                    user_id=user_id, pnl_usd=per_share_pnl,
+                    trade_id=trade["id"], symbol=sym, exit_reason=exit_reason,
+                )
+            else:
+                wallet_svc.credit_for_legacy_sell(
+                    user_id=user_id, exit_price=exit_price,
+                    trade_id=trade["id"], symbol=sym, exit_reason=exit_reason,
+                )
+    except Exception as e:
+        logger.error(
+            f"Wallet settlement FAILED for {sym} ({exit_reason}, "
+            f"direction={direction}, is_wallet={is_wallet}): {e}. "
+            f"Row is closed; reconstruct from wallet_transactions if needed."
+        )
+
+    # Learning loop. Best-effort: the close must NEVER fail because the
+    # learner had a hiccup. _record_brain_outcome is already defensive
+    # about watchlist trades (no-op for non-brain).
+    try:
+        _record_brain_outcome(trade, exit_price, exit_score, exit_reason, pnl_pct)
+    except Exception as e:
+        logger.warning(f"Failed to record outcome for {trade.get('symbol')}: {e}")
+
+    return {
+        "pnl_pct": pnl_pct,
+        "pnl_amount_stored": pnl_amount_stored,
+        "is_win": is_win,
+    }
+
+
 def _is_stop_hit(current_price: float, stop_loss: float, direction: str) -> bool:
     """Check if stop loss is hit (direction-aware).
 
@@ -1949,9 +2344,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
 
     open_result = (
         db.table("virtual_trades")
-        .select("id, symbol, entry_price, entry_score, entry_date, source, "
-                "target_price, stop_loss, bucket, market_regime, "
-                "thesis_last_status, peak_price, trade_horizon, direction, trough_price")
+        .select(VIRTUAL_TRADES_CLOSE_FIELDS)
         .eq("status", "OPEN")
         .execute()
     )
@@ -1963,11 +2356,14 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
     symbols = list({t["symbol"] for t in open_trades})
     prices = _fetch_prices_batch(symbols)
 
-    # Batch fetch latest signal scores for exit tracking (1 query instead of N)
+    # Batch-fetch latest score + action for every open symbol (1 query
+    # instead of N). QUALITY_PRUNE reads `action` to gate on "Claude
+    # still wants this position"; score feeds the rollback telemetry.
     current_scores: dict[str, int] = {}
+    current_actions: dict[str, str] = {}
     sig_result = (
         db.table("signals")
-        .select("symbol, score")
+        .select("symbol, score, action")
         .in_("symbol", symbols)
         .order("created_at", desc=True)
         .execute()
@@ -1976,6 +2372,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         sym = row.get("symbol")
         if sym and sym not in current_scores:
             current_scores[sym] = row.get("score", 0)
+            current_actions[sym] = row.get("action")
 
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
@@ -1984,6 +2381,17 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
     targets_hit = 0
     expired = 0
     profit_takes = 0
+
+    def _rollback_counter(reason: str) -> None:
+        """Undo whichever counter was pre-incremented for this exit_reason.
+        Trailing stops increment `profit_takes` in the detection block
+        below — keep the two in sync or the summary log miscounts.
+        Defined once here rather than per-iteration inside the loop."""
+        nonlocal stops_hit, targets_hit, profit_takes, expired
+        if reason == "STOP_HIT": stops_hit -= 1
+        elif reason == "TARGET_HIT": targets_hit -= 1
+        elif reason == "TRAILING_STOP": profit_takes -= 1
+        elif reason == "TIME_EXPIRED": expired -= 1
 
     for trade in open_trades:
         symbol = trade["symbol"]
@@ -2167,13 +2575,7 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         # not for short-term score confirmation. Only thesis=invalid or
         # the hard stop closes a LONG position early.
         if not exit_reason and trade.get("source") == "brain" and horizon != "LONG":
-            latest_sig = current_scores_full.get(symbol) if 'current_scores_full' in dir() else None
-            # Use the signal action from the batch we already fetched
-            latest_action = None
-            for row in (sig_result.data or []):
-                if row.get("symbol") == symbol:
-                    latest_action = row.get("action")
-                    break
+            latest_action = current_actions.get(symbol)
 
             if (
                 pnl_pct < 0
@@ -2240,33 +2642,26 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
                 f"Virtual {exit_reason} SUPPRESSED for {symbol} — thesis still valid "
                 f"(P&L {pnl_pct:+.1f}%, holding through the noise)"
             )
-            # Roll back the counter we incremented when we set exit_reason
-            if exit_reason == "STOP_HIT": stops_hit -= 1
-            elif exit_reason == "TARGET_HIT": targets_hit -= 1
-            elif exit_reason == "PROFIT_TAKE": profit_takes -= 1
-            elif exit_reason == "TIME_EXPIRED": expired -= 1
+            _rollback_counter(exit_reason)
             continue
 
-        pnl_amount = _calc_pnl_amount(entry_price, current_price, direction)
         is_win = pnl_pct > 0
         source = trade.get("source", "watchlist")
-
         exit_score = current_scores.get(symbol)
 
-        # Status guard: never mutate an already-closed row.
-        db.table("virtual_trades").update({
-            "status": "CLOSED",
-            "exit_price": current_price,
-            "exit_date": now_iso,
-            "exit_score": exit_score,
-            "pnl_pct": round(pnl_pct, 2),
-            "pnl_amount": round(pnl_amount, 2),
-            "is_win": is_win,
-            "exit_reason": exit_reason,
-        }).eq("id", trade["id"]).eq("status", "OPEN").execute()
-        # Forward to learning loop. The trade dict carries bucket +
-        # market_regime from the SELECT above, so no extra query.
-        _record_brain_outcome(trade, current_price, exit_score, exit_reason, pnl_pct)
+        # Route through close_virtual_trade — wallet settlement, learning
+        # loop, and DB update all happen in one place. The pnl_pct used
+        # above for thesis gating is the same per-share % the helper
+        # computes internally. If the row was closed by another path
+        # between our SELECT and the UPDATE, the helper returns
+        # skipped=True and we roll back the counter we pre-incremented.
+        close_res = close_virtual_trade(
+            trade, current_price, exit_reason, exit_score,
+            exit_date_iso=now_iso,
+        )
+        if close_res.get("skipped"):
+            _rollback_counter(exit_reason)
+            continue
 
         emoji = "✅" if is_win else "❌"
         logger.info(
@@ -2397,10 +2792,15 @@ def get_virtual_summary() -> dict:
 
     db = get_client()
 
-    # All trades
+    # All trades. Wallet fields (shares, position_size_usd, is_wallet_trade)
+    # are pulled so the frontend can render "6.06 shares @ $164.96 ($1,000
+    # invested)" and distinguish wallet trades from legacy 1-share rows.
     open_result = (
         db.table("virtual_trades")
-        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, target_price, stop_loss, thesis_last_status, tier_reason, trade_horizon, direction, consecutive_avoid_count")
+        .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, "
+                "target_price, stop_loss, thesis_last_status, tier_reason, trade_horizon, "
+                "direction, consecutive_avoid_count, "
+                "shares, position_size_usd, is_wallet_trade")
         .eq("status", "OPEN")
         .order("entry_date", desc=True)
         .execute()
@@ -2411,7 +2811,8 @@ def get_virtual_summary() -> dict:
         db.table("virtual_trades")
         .select("symbol, entry_price, exit_price, pnl_pct, pnl_amount, is_win, "
                 "entry_date, exit_date, entry_score, exit_score, bucket, source, exit_reason, "
-                "peak_price, thesis_last_reason, tier_reason, trade_horizon")
+                "peak_price, thesis_last_reason, tier_reason, trade_horizon, direction, "
+                "shares, position_size_usd, is_wallet_trade")
         .eq("status", "CLOSED")
         .order("exit_date", desc=True)
         .limit(50)
@@ -2482,16 +2883,20 @@ def get_virtual_summary() -> dict:
         return reason or "Unknown"
 
     def _calc_stats(trades: list[dict]) -> dict:
+        # pnl_amount semantics depend on is_wallet_trade: wallet trades
+        # store TOTAL dollars, legacy trades store per-share. Summing
+        # across the mix is apples-and-oranges, so the two totals are
+        # reported separately. The frontend picks whichever is non-zero
+        # or renders both when migration populations coexist.
         total = len(trades)
         wins = sum(1 for t in trades if t.get("is_win"))
         win_rate = (wins / total * 100) if total > 0 else 0
         avg_ret = sum(t.get("pnl_pct", 0) for t in trades) / total if total else 0
         total_ret = sum(t.get("pnl_pct", 0) for t in trades)
-        # Dollar P&L assuming one share per trade. `pnl_amount` is already
-        # `exit_price - entry_price` per share (see schema.sql:432), so the
-        # sum is the total realized $ if you had bought exactly one share
-        # of every closed trade.
-        total_pnl_amount = sum(t.get("pnl_amount") or 0 for t in trades)
+        wallet_trades = [t for t in trades if t.get("is_wallet_trade")]
+        legacy_trades = [t for t in trades if not t.get("is_wallet_trade")]
+        total_pnl_amount_wallet = sum(t.get("pnl_amount") or 0 for t in wallet_trades)
+        total_pnl_amount_legacy = sum(t.get("pnl_amount") or 0 for t in legacy_trades)
         best = max(trades, key=lambda t: t.get("pnl_pct", 0)) if trades else None
         worst = min(trades, key=lambda t: t.get("pnl_pct", 0)) if trades else None
         return {
@@ -2501,7 +2906,10 @@ def get_virtual_summary() -> dict:
             "win_rate": round(win_rate, 1),
             "avg_return_pct": round(avg_ret, 2),
             "total_return_pct": round(total_ret, 2),
-            "total_pnl_amount": round(total_pnl_amount, 2),
+            "wallet_closed_count": len(wallet_trades),
+            "legacy_closed_count": len(legacy_trades),
+            "total_pnl_amount_wallet": round(total_pnl_amount_wallet, 2),
+            "total_pnl_amount_legacy": round(total_pnl_amount_legacy, 2),
             "best_trade": {"symbol": best["symbol"], "pnl_pct": best["pnl_pct"], "pnl_amount": best.get("pnl_amount")} if best else None,
             "worst_trade": {"symbol": worst["symbol"], "pnl_pct": worst["pnl_pct"], "pnl_amount": worst.get("pnl_amount")} if worst else None,
         }
@@ -2516,6 +2924,10 @@ def get_virtual_summary() -> dict:
 
         # Get signal reasoning (why the brain picked this)
         sig = signal_context.get(symbol, {})
+
+        is_wallet = bool(t.get("is_wallet_trade"))
+        shares_open = float(t.get("shares") or 0)
+        position_size_usd = float(t.get("position_size_usd") or 0)
 
         enriched = {
             "symbol": symbol,
@@ -2537,14 +2949,28 @@ def get_virtual_summary() -> dict:
             "trade_horizon": t.get("trade_horizon") or "SHORT",
             "direction": t.get("direction") or "LONG",
             "consecutive_avoid_count": t.get("consecutive_avoid_count") or 0,
+            # Wallet metadata — frontend uses these to render "6.06 shares
+            # @ $164.96 ($1,000 invested)" rows and to distinguish wallet
+            # trades from legacy 1-share holdings with a subtle badge.
+            "is_wallet_trade": is_wallet,
+            "shares": round(shares_open, 6) if shares_open else None,
+            "position_size_usd": round(position_size_usd, 2) if position_size_usd else None,
         }
 
         if current:
             _d = t.get("direction") or "LONG"
             pnl_pct = _calc_pnl_pct(entry_price, current, _d)
+            per_share_pnl = _calc_pnl_amount(entry_price, current, _d)
             enriched["current_price"] = round(current, 2)
             enriched["unrealized_pnl_pct"] = round(pnl_pct, 2)
-            enriched["unrealized_pnl_amount"] = round(_calc_pnl_amount(entry_price, current, _d), 2)
+            # For wallet trades, unrealized_pnl_amount is TOTAL dollars so
+            # the UI can show "+$42.15" without re-deriving shares. For
+            # legacy trades it stays per-share (1 implicit share).
+            if is_wallet and shares_open > 0:
+                enriched["unrealized_pnl_amount"] = round(per_share_pnl * shares_open, 2)
+                enriched["current_position_value"] = round(current * shares_open, 2)
+            else:
+                enriched["unrealized_pnl_amount"] = round(per_share_pnl, 2)
 
         return enriched
 
@@ -2562,6 +2988,21 @@ def get_virtual_summary() -> dict:
     watchlist_closed = [t for t in closed_trades if t.get("source") == "watchlist"]
     brain_closed = [t for t in closed_trades if t.get("source") == "brain"]
 
+    # Wallet summary (Day 15). Sum Holdings from the rows we already
+    # enriched — reuses the price batch + per-trade math that
+    # `_enrich_open_trade` just did, instead of kicking off a second
+    # virtual_trades SELECT + price fetch through the wallet service.
+    try:
+        from app.services import wallet as wallet_svc
+        open_positions_value = _sum_holdings_from_enriched(enriched_open)
+        wallet_summary_dict = wallet_svc.wallet_summary(
+            user_id=None,  # default to brain user
+            open_positions_value=open_positions_value,
+        )
+    except Exception as e:
+        logger.warning(f"Wallet summary failed: {e}")
+        wallet_summary_dict = None
+
     result = {
         "open_count": len(open_trades),
         "open_trades": enriched_open,
@@ -2571,6 +3012,7 @@ def get_virtual_summary() -> dict:
             {
                 "symbol": t["symbol"],
                 "pnl_pct": t["pnl_pct"],
+                "pnl_amount": t.get("pnl_amount"),
                 "is_win": t["is_win"],
                 "source": t.get("source", "watchlist"),
                 "exit_reason": t.get("exit_reason"),
@@ -2589,6 +3031,11 @@ def get_virtual_summary() -> dict:
                 "exit_context": _build_exit_context(t),
                 "trade_horizon": t.get("trade_horizon") or "SHORT",
                 "direction": t.get("direction") or "LONG",
+                # Wallet metadata so the UI can render "$1,000 invested,
+                # +$42 realized" for wallet closes vs legacy per-share rows.
+                "is_wallet_trade": bool(t.get("is_wallet_trade")),
+                "shares": t.get("shares"),
+                "position_size_usd": t.get("position_size_usd"),
             }
             # Send all closed trades fetched (DB query above is `.limit(50)`).
             # The performance page paginates client-side in batches of 5 via
@@ -2608,6 +3055,10 @@ def get_virtual_summary() -> dict:
         },
         # Watchdog summary
         "watchdog": _get_watchdog_summary(db, len(brain_open_enriched)),
+        # Wallet state (Day 15) — balance, collateral, total_value, ROI.
+        # None when the wallet module failed or no users exist. UI should
+        # hide the wallet card gracefully in that case.
+        "wallet": wallet_summary_dict,
     }
 
     _vp_cache.set("summary", result)

@@ -610,6 +610,30 @@ export default function HowItWorksPage() {
               </Section>
             </Card>
 
+            {/* Brain Wallet (Day 15) */}
+            <Card>
+              <Section title={h.walletCashTitle}>
+                <P>{h.walletCashDesc}</P>
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-2" style={{ color: theme.colors.text }}>
+                    {h.walletSizingTitle}
+                  </h3>
+                  <ul className="space-y-1.5 mt-2">
+                    <Li>{h.walletTier1}</Li>
+                    <Li>{h.walletTier2}</Li>
+                    <Li>{h.walletShortCollateral}</Li>
+                    <Li>{h.walletMinBalance}</Li>
+                  </ul>
+                </div>
+                <div className="mt-3">
+                  <P>{h.walletDepositWithdraw}</P>
+                </div>
+                <div className="mt-3">
+                  <P>{h.walletLegacyNote}</P>
+                </div>
+              </Section>
+            </Card>
+
             {/* Virtual Portfolio */}
             <Card>
               <Section title={h.virtualPortfolioTitle}>
