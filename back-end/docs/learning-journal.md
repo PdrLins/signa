@@ -2134,6 +2134,106 @@ IONQ allocation $500.00 → 11.2461 shares @ $44.46 = $499.97. Per-trade drift o
 
 ---
 
+## Day 17 — April 27, 2026 (Monday)
+
+**Metrics:** First "terrible day" feeling — 4 small losses, churn-y trading. But the day's real story is structural: a 17-day-old discovery bug surfaced that explains why the brain has felt boring. Half the universe was re-bucketed. Four code fixes shipped to plug the structural hole and prevent the churn.
+
+### What today actually was (small)
+
+- 4 closes, **all losses**, total realized **−$24.24**:
+  - 📦 SOUN QUALITY_PRUNE −$12.87 (entry Friday, pruned today at −2.85%)
+  - 📦 IONQ QUALITY_PRUNE −$10.01 (entry Apr 23, exit predicted on Day 16, fired today at −2.00%)
+  - 📦 BCE.TO THESIS_INVALIDATED −$0.85 (**opened 19:02, closed 20:32** — 90-minute round-trip)
+  - 🗂 CCO.TO TRAILING_STOP −$0.51 (legacy → first **LEGACY_SELL in prod**, $164.45 into Pocket — Day-15 path validated for real)
+- 2 opens: 📦 TFC ($451), 📦 BCE.TO ($211, immediately closed)
+- **Portfolio Apr 23 → Apr 27: −$16.04 / −0.25%** across 3 trading days. Felt worse than it was.
+
+### What today actually was (huge — the structural discovery)
+
+The user asked "why didn't we ever get OKLO?" That single question surfaced a class of bug that had been silently shaping every signal for 17 days.
+
+**The finding:** 435 of 439 active tickers (99%) were bucketed `SAFE_INCOME`. Only 4 were `HIGH_RISK`. The discovery auto-add path (when the brain BUYs an unknown ticker, or when `_classify_bucket` sees a new symbol) defaulted to `SAFE_INCOME` for any name that wasn't in the small hardcoded HIGH_RISK list — and `upsert_ticker` then re-stamped that bucket every scan. Once classified wrong, a ticker was wrong for life.
+
+**Why this hurt:** SAFE_INCOME weights `dividend_reliability` 35%. A non-dividend stock takes a 35% scoring haircut and caps out at ~60. Below the 75 Tier-1 floor. Below the top-15 AI candidate cut. **Claude has literally never analyzed OKLO**, despite it being scanned 11 times since Apr 10.
+
+**Symptoms this explained:**
+- Day 16: 0 GEMs in 324 evaluations. **Mathematically guaranteed** when score 85+ is unreachable for non-dividend stocks.
+- Day 16: brain only opened 1 position (IONQ — one of the 4 correctly-seeded HIGH_RISK names) across 6 scans of 54 signals each.
+- Multiple weeks: every brain BUY was a dividend-paying name (BLK, CCO.TO, BCE.TO, TFC, CCO.TO). The mechanism rewarded what it could score.
+- The "brain feels boring" sense the user described — that wasn't conservatism, it was a mis-calibrated bucket weighting half the universe out of contention.
+
+### What we shipped today (4 fixes)
+
+**1. One-time re-bucket (`scripts/audit_ticker_buckets.py`)**
+- Dry-run-first audit script with explicit `--apply` gate
+- Heuristic: crypto → HIGH_RISK; dividend > 0 → SAFE_INCOME; mcap < $50B no-div → HIGH_RISK; growth-sector no-div → HIGH_RISK; else SAFE_INCOME
+- 223 tickers reclassified SAFE_INCOME → HIGH_RISK, 0 the other way
+- Universe is now 227 HIGH_RISK / 212 SAFE_INCOME
+
+**2. `_classify_bucket` uses dividend + mcap (`scan_service.py`)**
+- The screening dict already contains `dividend_yield` and `market_cap` from market_scanner
+- Same heuristic as the audit script — no first-scan ticker should land mis-bucketed again
+
+**3. `upsert_ticker` sticky on bucket (`db/queries.py`)**
+- Bucket is now set on insert and NOT overwritten on subsequent calls
+- Means manual audits (or a future `brain_editor` UI) can correct a bucket without it being silently undone by the next scan
+- Rows update `name/exchange/is_active` but bucket only fills if previously NULL
+
+**4. Day-0 grace period + QUALITY_PRUNE magnitude gate (`virtual_portfolio.py`, `config.py`)**
+- New positions immune to THESIS_INVALIDATED + QUALITY_PRUNE for first `new_position_grace_hours` (default 24h)
+- QUALITY_PRUNE now requires `pnl_pct < -brain_quality_prune_min_loss_pct` (default 3%)
+- Stop / target / trailing / time-expired still fire normally; -8% catastrophic stop still fires through grace
+- Both knobs configurable
+
+### Predictions from Day 16 — how they landed
+
+| Day 16 prediction | Outcome |
+|---|---|
+| IONQ exits early via thesis-related path | ✓ QUALITY_PRUNE at −2.00% today |
+| CNQ hits TARGET_HIT (first LEGACY_SELL) | ✗ Still open at +6.38%, didn't reach $48.50 |
+| HPQ becomes QUALITY_PRUNE candidate | ✗ Position closed/disappeared earlier — needs investigation |
+| First LEGACY_SELL in prod | ✓ CCO.TO @ $164.45 — TRAILING_STOP path |
+| BLK closes "clean" with proceeds into Pocket | ✗ Still open at +3.47% |
+
+2 of 5 predictions hit. The legacy-drain path was validated by both LEGACY_SELL (CCO.TO) and the SELL path (IONQ wallet trade) — Day-15's full wallet design is now end-to-end exercised in prod.
+
+### What today's data actually taught us
+
+**1. The user's "feeling" was a bug.** When the user said "we're not discovering good things," that wasn't venting — it was the only signal that the OKLO/IONQ/SOUN class of stocks was systematically excluded. Error logs were clean. Scans were running. Positions were opening. Everything looked fine — but the OUTCOMES were biased. **Lesson: when a qualitative complaint contradicts the system's intended behavior, investigate. The user is the integration test.**
+
+**2. Bugs in default classifiers are invisible until you measure outcome quality.** OKLO sat at score 60 for 17 days. Nothing was broken. Nothing logged an error. The brain just never bought it. The bug surfaced only when someone asked "why this specific ticker?" Class of bug worth watching for elsewhere — anywhere we have a default-on-unknown classifier (sectors? regimes? buckets? tier reasons?). **Run periodic distribution audits.**
+
+**3. Sticky-by-default is the right pattern for classifications.** `upsert_ticker` re-stamping bucket every scan was the silent erasure mechanism — even if `_classify_bucket` had a one-off bug fixed in v2, every existing wrong row would be re-corrupted by the next scan. Persistent classifications should require explicit override, not silently drift on every write.
+
+**4. The wallet's first round-trip exposed the conservative-bias pattern in fresh-position thesis re-eval.** BCE.TO opened-and-closed in 90 minutes is the cleanest data point yet for the Day-0 grace period (already shipped). If tomorrow we see "Day-0 grace: THESIS_INVALIDATED suppressed" log lines and those positions then either survive or exit on price-based reasons, the grace period worked.
+
+**5. QUALITY_PRUNE was a death-by-paper-cuts problem.** Two prunes today (SOUN −2.85%, IONQ −2.00%) for $22.88 of realized loss. Pre-wallet, those would have been ~$0.20 of "per-share" loss; post-wallet, they're real $10 hits. The rule was tuned for the per-share era. The −3% magnitude gate restores its original intent: only prune when there's actually a meaningful loss to cut.
+
+**6. Three predictions missed because they assumed yesterday's tape would continue.** CNQ didn't hit target, HPQ vanished, BLK didn't close — the market's behavior between Apr 23 and Apr 27 (Friday + Monday) shifted enough to invalidate single-day extrapolation. **Lesson: predictions about specific tickers tomorrow are weak. Predictions about system patterns (does code path X fire correctly?) are reliable.**
+
+### What we should learn from tomorrow's data
+
+**Verifying today's fixes worked:**
+- [ ] Score distribution shifts up — expect a meaningful number of HIGH_RISK signals at 75+, possibly first 85+ scores in weeks
+- [ ] AI candidate cut composition changes — top 15 should include OKLO-class names instead of being all dividend-payers
+- [ ] First GEM in many weeks (score ≥ 85, sentiment ≥ 80, catalyst ≤ 30d, R/R ≥ 3.0, no red flags)
+- [ ] Day-0 grace fires somewhere — log line "Day-0 grace: THESIS_INVALIDATED suppressed for SYMBOL" should appear if any new position has thesis flipped within 24h
+- [ ] No QUALITY_PRUNE fires on positions with pnl_pct > −3%
+
+**Pattern questions:**
+- [ ] Does the brain start opening **more** positions per day now that more tickers can break Tier-1? Or does Pedro's BRAIN_MIN_SCORE=75 floor still keep it tight?
+- [ ] If new entries cluster in HIGH_RISK (newly accessible) — does win rate hold, drop, or improve vs the dividend-heavy historical mix?
+- [ ] Are we entering the same names Claude was analyzing (where AI status was validated) just at higher scores now? Or are entirely new names appearing in the candidate pool?
+
+**Open hypothesis to confirm or reject over the next 1-2 weeks:**
+- The brain was "boring" because the mis-bucketing acted like a quality filter that kept it in dividend safety. Now that the filter is removed, will quality stay the same / improve / collapse? **If win rate drops below 35% for 5+ days, the SAFE_INCOME default was actually serving a useful function** — the dividend floor was filtering for stable companies. We may need to add a different quality gate (e.g., minimum profit margin or revenue growth) to replace what we just removed.
+
+### Personal note on today
+
+The day felt bad because of the small-loss churn (4 in a row, all losses). But the structural fix that came out of it is one of the highest-leverage changes in the project so far. We turned 17 days of accumulated mis-classification into a corrected universe + a permanent guard against re-occurrence in about 90 minutes of work. Felt-bad-but-was-good day.
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

@@ -709,13 +709,20 @@ def credit_for_legacy_sell(
     trade_id: str | None,
     symbol: str,
     exit_reason: str = "",
+    pnl_usd: float | None = None,
 ) -> None:
-    """Credit 1 × exit_price into the wallet when a pre-wallet LONG closes."""
+    """Credit 1 × exit_price into the wallet when a pre-wallet LONG closes.
+
+    `pnl_usd` is the per-share realized P&L (exit - entry). Optional
+    for backward compat but caller should pass it whenever known so
+    the ledger row carries enough context to render win/loss in UI.
+    """
     uid = _resolve_user_id(user_id)
     if not uid:
         logger.error(f"credit_for_legacy_sell: no user_id — cannot settle for {symbol}")
         return
     proceeds = float(exit_price)
+    pnl_str = f", P&L ${pnl_usd:+.2f}" if pnl_usd is not None else ""
     _settle(
         uid,
         txn_type=TxnType.LEGACY_SELL,
@@ -727,7 +734,7 @@ def credit_for_legacy_sell(
         shares=1.0,
         price=proceeds,
         description=(
-            f"Legacy sale: {symbol} @ ${proceeds:.2f} "
+            f"Legacy sale: {symbol} @ ${proceeds:.2f}{pnl_str} "
             f"(pre-wallet 1-share position{_reason_suffix(exit_reason)})"
         ),
     )

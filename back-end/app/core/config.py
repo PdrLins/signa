@@ -124,6 +124,18 @@ class Settings(BaseSettings):
     wallet_max_position_pct: float = 15.0        # hard cap (matches kelly.MAX_POSITION_PCT)
     wallet_min_balance_for_trade: float = 100.0  # below this, skip new entries
 
+    # --- Day-0 grace period ---
+    # New brain positions are immune to thesis-driven exits
+    # (THESIS_INVALIDATED, QUALITY_PRUNE) for the first N hours after
+    # entry. Reason: Claude's thesis re-eval has flagged fresh entries
+    # as "weakening"/"invalid" within hours of opening (IONQ Apr 23 →
+    # weakening same day; BCE.TO Apr 27 → invalidated 90 min after
+    # entry). The conservative bias re-reads fresh data more cautiously
+    # before price has a chance to confirm or refute. Price-based exits
+    # (STOP_HIT, TARGET_HIT, TRAILING_STOP, TIME_EXPIRED) still fire;
+    # the -8% catastrophic stop also still applies.
+    new_position_grace_hours: float = 24.0
+
     # --- Brain Thesis Tracking (Stage 6) ---
     # When enabled, every scan re-evaluates the thesis on every open brain
     # position via Claude. Positions whose thesis is invalidated are closed
@@ -159,6 +171,14 @@ class Settings(BaseSettings):
     # closed on one MORNING AVOID at +1.49% while the trend was intact).
     # Set to 1 to revert to immediate-exit (pre-Day 14 behavior).
     brain_long_signal_exit_threshold: int = 2
+
+    # QUALITY_PRUNE magnitude floor (Day 17 learning): the prune rule
+    # used to fire on any pnl < 0, but with the wallet active a 1-2%
+    # drawdown locks in real $ losses ($10-20 per Tier-1 trade) on
+    # positions that would likely recover. Floor at 3%: positions need
+    # to be down at least this much before the prune fires. Symmetric
+    # with the 3% trailing-stop activation threshold.
+    brain_quality_prune_min_loss_pct: float = 3.0
 
     # STAGNATION_PRUNE (Day 14 learning): LONG/LONG positions that produce
     # nothing meaningful for a week+ are dead capital. REGN held 12 days for

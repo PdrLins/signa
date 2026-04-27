@@ -1248,9 +1248,28 @@ def _classify_bucket(ticker: str, screening: dict) -> str:
     if ticker in high_risk_tickers:
         return "HIGH_RISK"
 
-    # 3. Heuristic fallback (sector-based only, NOT day_change)
-    sector = (screening.get("sector") or "").lower()
-    if sector in ("energy", "basic materials", "materials"):
+    # 3. Heuristic fallback. Mirrors `scripts/audit_ticker_buckets.py`
+    # so first-scan classification matches the audit's verdict — no
+    # dividend OR small-cap-in-growth-sector → HIGH_RISK. The brain's
+    # SAFE_INCOME bucket weights `dividend_reliability` 35%, so a
+    # non-dividend stock dumped into SAFE_INCOME is mathematically
+    # capped near 60. Sending it to HIGH_RISK lets sentiment + catalyst
+    # + momentum (the right axes for a growth stock) actually score it.
+    sector = (screening.get("sector") or "").strip()
+    sector_lower = sector.lower()
+    div_yield = screening.get("dividend_yield") or 0
+    mcap = screening.get("market_cap") or 0
+
+    high_risk_sectors_lower = {"technology", "communication services", "consumer cyclical"}
+    energy_materials_lower = {"energy", "basic materials", "materials"}
+
+    if sector_lower in energy_materials_lower:
+        bucket = "HIGH_RISK"
+    elif div_yield and div_yield > 0:
+        bucket = "SAFE_INCOME"
+    elif 0 < mcap < 50_000_000_000:
+        bucket = "HIGH_RISK"
+    elif sector_lower in high_risk_sectors_lower:
         bucket = "HIGH_RISK"
     else:
         bucket = "SAFE_INCOME"

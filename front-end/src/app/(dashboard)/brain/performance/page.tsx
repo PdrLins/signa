@@ -499,6 +499,21 @@ function fmtTxnDate(iso: string): string {
 
 const TXN_PAGE_SIZE = 20
 
+// Sell-type rows always carry positive `amount` (proceeds in) but the
+// REALIZED P&L can be negative. Pulling P&L out of the description so
+// the row visually surfaces win/loss instead of hiding it in prose.
+const PNL_REGEX = /P&L \$([+-]?[\d.]+)/
+
+function extractPnl(description: string | null | undefined): number | null {
+  if (!description) return null
+  const m = description.match(PNL_REGEX)
+  if (!m) return null
+  const parsed = parseFloat(m[1])
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const SELL_TYPES = new Set<WalletTxnType>(['SELL', 'SHORT_COVER', 'LEGACY_SELL', 'LEGACY_COVER'])
+
 function WalletHistory() {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
@@ -550,14 +565,30 @@ function WalletHistory() {
             <div className="divide-y" style={{ borderColor: theme.colors.border }}>
               {txns.map((tx) => {
                 const colorKey = TXN_COLOR[tx.transaction_type]
-                const color = theme.colors[colorKey]
+                const typeColor = theme.colors[colorKey]
                 const sign = tx.amount > 0 ? '+' : tx.amount < 0 ? '-' : ''
+
+                // For sell-type rows the `amount` is gross proceeds (always
+                // positive when something flowed in) but the REALIZED P&L
+                // is what tells you win/loss. Surface it as its own badge
+                // colored independently.
+                const pnl = SELL_TYPES.has(tx.transaction_type) ? extractPnl(tx.description) : null
+                const pnlColor = pnl == null
+                  ? theme.colors.textHint
+                  : pnl > 0
+                    ? theme.colors.up
+                    : pnl < 0
+                      ? theme.colors.down
+                      : theme.colors.textHint
+                const isWin = pnl != null && pnl > 0
+                const isLoss = pnl != null && pnl < 0
+
                 return (
                   <div key={tx.id} className="flex items-start justify-between gap-3 py-2.5">
                     <div className="flex items-start gap-2 min-w-0 flex-1">
                       <span
                         className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 tabular-nums"
-                        style={{ backgroundColor: color + '18', color, letterSpacing: '0.04em' }}
+                        style={{ backgroundColor: typeColor + '18', color: typeColor, letterSpacing: '0.04em' }}
                       >
                         {tx.transaction_type.replace('_', ' ')}
                       </span>
@@ -578,6 +609,14 @@ function WalletHistory() {
                               @ ${tx.price.toFixed(2)}
                             </span>
                           )}
+                          {(isWin || isLoss) && (
+                            <span
+                              className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded tabular-nums"
+                              style={{ backgroundColor: pnlColor + '18', color: pnlColor, letterSpacing: '0.04em' }}
+                            >
+                              {isWin ? '✓ Win' : '✗ Loss'} {pnl! >= 0 ? '+' : '-'}${Math.abs(pnl!).toFixed(2)}
+                            </span>
+                          )}
                         </div>
                         {tx.description && (
                           <p className="text-[10px] mt-0.5 truncate" style={{ color: theme.colors.textSub }}>
@@ -590,7 +629,7 @@ function WalletHistory() {
                       </div>
                     </div>
                     <div className="text-right shrink-0 tabular-nums">
-                      <p className="text-[12px] font-bold" style={{ color: tx.amount === 0 ? theme.colors.textHint : color }}>
+                      <p className="text-[12px] font-bold" style={{ color: tx.amount === 0 ? theme.colors.textHint : typeColor }}>
                         {sign}${Math.abs(tx.amount).toFixed(2)}
                       </p>
                       <p className="text-[9px]" style={{ color: theme.colors.textHint }}>

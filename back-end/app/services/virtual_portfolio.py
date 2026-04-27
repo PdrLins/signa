@@ -2151,8 +2151,40 @@ def close_virtual_trade(
 
     Returns:
         dict with keys pnl_pct, pnl_amount_stored, is_win — so callers can
-        log / notify without recomputing.
+        log / notify without recomputing. Returns {"skipped": True, ...}
+        when the close was suppressed (race-guard or Day-0 grace period).
     """
+    # Day-0 grace period: thesis-driven exits (THESIS_INVALIDATED,
+    # QUALITY_PRUNE) on a position less than 24h old are suppressed.
+    # Two real cases drove this: IONQ entered Apr 23 score 79 validated,
+    # thesis flipped "weakening" within hours; BCE.TO entered Apr 27
+    # score 77, thesis flipped to "invalid" 90 minutes later. Both were
+    # closed at small losses despite Claude validating them at entry —
+    # the conservative bias re-reads fresh data through a more cautious
+    # lens before the position has had a chance to develop. Price-based
+    # exits (STOP, TARGET, TRAILING, TIME_EXPIRED) still fire; the
+    # catastrophic stop in `_exit_is_thesis_protected` already bypasses
+    # any thesis gating at -8% pnl, so a fresh entry that craters fast
+    # still gets cut.
+    THESIS_GATED = {"THESIS_INVALIDATED", "QUALITY_PRUNE"}
+    grace_hours = settings.new_position_grace_hours
+    if exit_reason in THESIS_GATED and grace_hours > 0:
+        entry_dt_str = trade.get("entry_date")
+        if entry_dt_str:
+            try:
+                entry_dt = parse_iso_utc(entry_dt_str)
+                if entry_dt is not None:
+                    age_hours = (datetime.now(timezone.utc) - entry_dt).total_seconds() / 3600
+                    if age_hours < grace_hours:
+                        logger.info(
+                            f"Day-0 grace: {exit_reason} suppressed for "
+                            f"{trade.get('symbol')} (age {age_hours:.1f}h < {grace_hours:.0f}h). "
+                            f"Letting the fresh thesis develop."
+                        )
+                        return {"pnl_pct": 0, "pnl_amount_stored": 0, "is_win": False, "skipped": True}
+            except Exception:
+                pass
+
     db = get_client()
     entry_price = float(trade["entry_price"])
     direction = trade.get("direction") or "LONG"
@@ -2247,6 +2279,7 @@ def close_virtual_trade(
                 wallet_svc.credit_for_legacy_sell(
                     user_id=user_id, exit_price=exit_price,
                     trade_id=trade["id"], symbol=sym, exit_reason=exit_reason,
+                    pnl_usd=per_share_pnl,
                 )
     except Exception as e:
         logger.error(
@@ -2577,8 +2610,15 @@ def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
         if not exit_reason and trade.get("source") == "brain" and horizon != "LONG":
             latest_action = current_actions.get(symbol)
 
+            # Magnitude gate: only prune when the loss is meaningful.
+            # Without this, the rule fires on −0.5% drawdowns that would
+            # likely recover, locking in trivial losses + churning slots.
+            # Threshold mirrors the trailing-stop activation (3% from
+            # entry) — symmetric: positions up 3% start ratcheting trails,
+            # positions down 3% start being pruned. See
+            # `brain_quality_prune_min_loss_pct` in config.
             if (
-                pnl_pct < 0
+                pnl_pct < -settings.brain_quality_prune_min_loss_pct
                 and 2 <= days_held <= 7
                 and thesis_status in ("weakening", "invalid", "")
                 and latest_action in ("HOLD", "AVOID", "SELL", None)

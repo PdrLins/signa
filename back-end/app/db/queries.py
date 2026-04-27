@@ -208,16 +208,38 @@ def get_active_tickers() -> list[dict]:
 
 
 def upsert_ticker(symbol: str, name: str = "", exchange: str = "", bucket: str | None = None) -> dict:
-    """Insert or update a ticker."""
+    """Insert or update a ticker.
+
+    The `bucket` field is "sticky" — only set on initial insert. Once a
+    ticker has a bucket, subsequent calls do NOT overwrite it. This
+    matters because the per-scan classifier (`_classify_bucket`) can be
+    overruled by the manual audit (`scripts/audit_ticker_buckets.py`),
+    and an upsert that re-stamps `bucket` every scan would silently
+    undo audit corrections. If the ticker is genuinely missing a bucket,
+    callers can pass `bucket=...` and it'll be set on the next call.
+    """
     client = get_client()
+    sym = symbol.upper()
+
+    existing = client.table("tickers").select("id, bucket").eq("symbol", sym).limit(1).execute().data
+    if existing:
+        # Update everything EXCEPT bucket (preserve any prior classification).
+        # Only stamp bucket if the existing row has none AND a bucket was passed.
+        patch: dict = {"name": name, "exchange": exchange, "is_active": True}
+        if bucket and not existing[0].get("bucket"):
+            patch["bucket"] = bucket
+        result = client.table("tickers").update(patch).eq("symbol", sym).execute()
+        return result.data[0] if result.data else existing[0]
+
+    # New row — stamp bucket so first-scan classification persists.
     data = {
-        "symbol": symbol.upper(),
+        "symbol": sym,
         "name": name,
         "exchange": exchange,
         "bucket": bucket,
         "is_active": True,
     }
-    result = client.table("tickers").upsert(data, on_conflict="symbol").execute()
+    result = client.table("tickers").insert(data).execute()
     return result.data[0] if result.data else {}
 
 
