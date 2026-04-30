@@ -2324,6 +2324,142 @@ Quiet success day. The structural fix from yesterday produced exactly the result
 
 ---
 
+## Day 19 — April 29, 2026 (Wednesday)
+
+**Metrics:** Apr 28 cohort post-grace results: 5 of 7 closed (2W / 3L), net realized **−$37.83**. ONDS — yesterday's highest-conviction entry at score 91 — was today's biggest loss at **−$27.40 / −9.46% via WATCHDOG_FORCE_SELL**. ARM and CAMT (both flagged weakening at Day 0) survived grace and closed positive: partial validation of conservative-bias hypothesis. Portfolio: $6,257.23 (−1.38% from baseline). Cumulative wallet realized P&L: **−$33.21** since deposit.
+
+### The Apr 28 cohort — full reckoning
+
+Yesterday I wrote: *"Tomorrow's data tells us whether the looser universe + Day-0 grace combination produces alpha or just more drawdowns."* Today's data tells the story:
+
+| Symbol | Score | Outcome | P&L | Days |
+|---|---|---|---|---|
+| **ONDS** | **91** | ❌ WATCHDOG_FORCE_SELL Day 1 (post-grace) | **−$27.40 / −9.46%** | 18.7h |
+| CCO.TO | 80 | ❌ WATCHDOG_FORCE_SELL Day 1 (post-grace) | −$14.90 / −3.49% | 22.1h |
+| FN | 79 | ❌ WATCHDOG_EXIT same-day (Apr 28) | −$10.41 / −2.21% | 8 min |
+| ARM | 81 | ✅ THESIS_INVALIDATED Day 1 (post-grace, **POSITIVE**) | +$7.78 / +2.02% | 1.1d |
+| CAMT | 81 | ✅ SIGNAL Day 1 (post-grace) | +$7.10 / +2.21% | 1.0d |
+| HIMS | 79 | 🔄 STILL OPEN, weakening | unrealized −$22.60 | 1.5d |
+| ALAB | 83 | 🔄 STILL OPEN, winner | unrealized **+$22.87** | 1.3d |
+
+**Closed cohort:** 5/7 closed → 2W / 3L → 40% win rate → **−$37.83 realized**.
+**Still-open cohort:** 2/7 → +$22.87 (ALAB) − $22.60 (HIMS) = +$0.27 net unrealized.
+**Combined cohort P&L so far:** ~ **−$37.56**.
+
+### Three big lessons from this cohort
+
+**1. High score ≠ high probability of success.** ONDS at 91 was the highest-conviction entry of the post-fix era and it was THE biggest loss. CCO.TO at 80, ARM at 81, CAMT at 81 — three positions at almost identical scores produced two wins and one loss. The score is a *starting point*, not a guarantee. **The hypothesis "raise BRAIN_MIN_SCORE" would NOT have helped here.** ONDS would still have qualified at 91. The actual problem is that score doesn't capture position-specific risk like volatility, sector momentum, or sentiment shifts that the watchdog catches in real time.
+
+**2. The conservative-bias hypothesis is partially confirmed.** Day 17 I argued: "if weakening positions recover after grace, the bias is real and grace saves us money." Today's evidence:
+- ARM (thesis=invalid at age 4.8h, grace-protected) → closed +2.02% after grace expired ✓ bias was real
+- CAMT (thesis=weakening) → closed +2.21% after grace expired ✓ bias was real
+- ONDS (thesis=weakening) → watchdog killed it at −9.46% after grace ✗ Claude was right, grace just delayed
+- CCO.TO → same as ONDS
+
+**Two of four weakening positions recovered.** That's enough to keep the grace period — without it, ARM and CAMT would have been Day-0 losses too, costing maybe $5-10 each. The grace turned them into +$15 of realized wins. Net win for the grace mechanism: ~$30 protected vs ~$0 cost (the losses still happened, just via watchdog instead of thesis path).
+
+**3. The watchdog is the actual hero.** All three of today's worst losses were caught by the watchdog (FN, CCO.TO, ONDS combined: −$52.71). Without it, these positions would have continued to ride down to their stop levels. ONDS at −9.46% was caught at the 8% catastrophic threshold. **The watchdog is doing exactly what it was built to do** — and the dollar magnitudes have made its value much more visible than in the per-share era.
+
+### The HIMS problem
+
+HIMS is currently sitting at −6.53% / −$22.60 unrealized, still open at 1.5 days. Why hasn't anything closed it?
+
+- ❌ STOP_HIT — current price hasn't crossed stop yet
+- ❌ TARGET_HIT — obviously not
+- ❌ TRAILING_STOP — trail not active until +3% from entry
+- ❌ TIME_EXPIRED — 1.5 days, far from 7-day horizon limit
+- ❌ THESIS_INVALIDATED — only fires when status="invalid", currently "weakening"
+- ❌ QUALITY_PRUNE — needs days_held in [2, 7] AND pnl < −3% AND thesis not valid AND Claude not BUY. Currently 1.5 days, just outside the 2-day floor.
+- ❌ WATCHDOG_FORCE_SELL — needs catastrophic stop (−8%) OR sentiment + price catastrophe combo. HIMS is at −6.53%, hasn't tripped.
+
+So HIMS is in a "no-rule-fires" zone. Will likely either:
+- Recover into the green (let it cook)
+- Drop another 1.5% to trigger watchdog at -8%
+- Cross into Day 2 → QUALITY_PRUNE eligible
+
+This is fine *if* it recovers. **But it surfaces a calibration question:** between QUALITY_PRUNE (2d floor) and WATCHDOG (-8% floor), there's a "valley of death" where positions can sit at −5 to −7% for a day with no rule firing. That's where ONDS spent some of its time. Worth thinking about.
+
+### Today's other activity
+
+**Opens (2):** CRWV @ $114.56 score 83 (HIGH_RISK SHORT-horizon), NBIS @ $141.93 score 81 (HIGH_RISK SHORT-horizon). Both Day-0 noise, both flat-to-slightly-down at EOD.
+
+**Closes (4):** All Apr 28 cohort:
+- 13:45 ONDS WATCHDOG_FORCE_SELL −$27.40 (the 91-score)
+- 14:10 CCO.TO WATCHDOG_FORCE_SELL −$14.90
+- 19:02 CAMT SIGNAL flip +$7.10
+- 19:02 ARM THESIS_INVALIDATED +$7.78
+
+**Score distribution:** 280 signals, 4 at 85+ (top 90s, but no 95+). HIGH_RISK 174 / SAFE_INCOME 106. Still no GEMs (5/5 days at zero post-fix).
+
+### What should we change?
+
+**Now:** Nothing. We have 2 days of post-fix data and only 5 wallet closes to evaluate. Drawing rules from this would be premature.
+
+**Watch list for the next 3-5 trading days:**
+
+1. **ALAB and HIMS resolution.** ALAB is the +6.4% open winner; HIMS is the −6.5% open loser. Both will close eventually. If ALAB rides to +10% target and HIMS bleeds to −8% watchdog, that's roughly net-zero on the 2 remaining cohort positions — keeping cohort win rate at 40%, net loss ~$37. That's bad but not catastrophic.
+
+2. **Watchdog activation rate.** Today fired 2 watchdog-driven exits (ONDS, CCO.TO). Yesterday: 1 (FN). If the rate climbs (3+ tomorrow), the entry quality is genuinely poor. If it drops to 0-1, today was just market-driven.
+
+3. **Score-vs-outcome correlation.** ONDS 91 → −9.46%. CAMT 81 → +2.21%. The ranks are inverted. Worth running a backwards check: across all wallet-era closes, is there ANY positive correlation between entry_score and exit_pnl_pct? If not, score is a quality FILTER (gates entries) but not a quality PREDICTOR (rank entries). That'd shift how we think about Tier 2/3.
+
+4. **GEM persistence at 0.** 5 trading days post-fix, still 0 GEMs. ONDS hit 91 but other gates blocked. **Worth auditing which GEM gate fails most often** — if it's always sentiment ≥ 80%, the threshold may be uncalibrated for current market.
+
+### Today's learnings (the actual ones)
+
+**1. Score is a filter, not a ranker.** A position scoring 91 produced a worse outcome than positions scoring 79-83. The brain's mental model "higher score = better trade" doesn't survive contact with this data. **Better mental model: score gets you past the gate, but post-gate variance dominates.**
+
+**2. The wallet doesn't change strategy quality, it changes loss visibility.** Pre-wallet, ONDS at −9.46% would have been "−$1 per share." Today it was **−$27.40 in real cash**. That's the same trade, the same outcome, just expressed in money instead of percent. **Pedro is feeling the wallet's brutal honesty for the first time.** This was exactly the design intent — but it's emotionally heavier than expected.
+
+**3. Watchdog earns its budget.** Day 16 the watchdog cost was ~$0.03/month and seemed luxurious. Today it saved us from probably another $30-60 of additional drawdown by catching ONDS and CCO.TO at their force-sell thresholds. **Order of magnitude more value than cost.** Keep it on, watch its events more closely.
+
+**4. The "no-rule-fires valley" between QUALITY_PRUNE and WATCHDOG_FORCE_SELL is real.** A position at −5 to −7% for 1-2 days exists in nobody's responsibility zone. Worth either lowering WATCHDOG_FORCE_SELL threshold from −8% to −6%, OR removing the 2-day floor from QUALITY_PRUNE. Don't act yet — but the gap is now named.
+
+**5. Two losing days in a row make the wallet feel worse than the data warrants.** −1.38% in 6 trading days extrapolates to −7%/month, but that's including the pre-fix realized losses. Post-fix-only: −$37.83 across 5 closes ÷ 2 days ≈ −0.6%/day, which extrapolates to −15%/month. **That's the number to actually watch.** If next 3 days hold this pace, we have a problem. If it reverts to flat or positive, today was a cohort-specific bad draw.
+
+### Predictions for Day 20
+
+- [ ] **HIMS resolution.** Cross 2-day mark today. If it's still at <−3% AND thesis weakening AND Claude not BUY, QUALITY_PRUNE fires at the 14:00 MORNING scan. Will validate the magnitude gate's calibration.
+- [ ] **ALAB target hunt.** At +6.4%, target probably $200ish. If it hits target tomorrow, first wallet TARGET_HIT in prod → first ✓ Win badge in transactions list.
+- [ ] **CRWV / NBIS Day-1 outcomes.** Two fresh entries. If both die same-day or Day-1 like FN/CCO.TO/ONDS, that's the third consecutive day of fresh-position mortality and the deployment cadence is genuinely too aggressive.
+- [ ] **First positive-day at portfolio level.** We've had 2 consecutive negative days. A flat or positive day tomorrow would suggest today was just a cohort working through its losers, not a trend.
+
+### Personal note
+
+Today hurt more than it should have because of ONDS — a score-91 entry losing $27 in 18 hours feels like the system actively chose the worst trade available. But the data says: 2 of 5 closes were wins, 2 of 4 weakening positions recovered post-grace, the watchdog caught what it should. **The system is functioning as designed. The design itself is now under test.** That's the right kind of pain — informative, not arbitrary. Three more days of data tells us whether to tighten the entry filter, change horizon mix, or stay the course.
+
+### EOD action: shipped per-day entry cap
+
+Driven by the Apr 28 cohort data (43% win rate matches historical, but 7-entry day produced visible variance), shipped:
+
+- **`wallet_max_entries_per_day = 3`** in `config.py`
+- Counter logic in `process_virtual_trades` reads today's BUY + SHORT_OPEN ledger rows + tracks scan-local opens
+- Signals pre-sorted by score DESC at function entry so the cap clips marginal entries first, not whatever happened to come first in iteration order
+- Applied to BOTH brain BUY and brain SHORT_SELL paths (both deploy capital)
+
+**On Apr 28's 7 entries, the cap would have taken:** ONDS (91), ALAB (83), CAMT (81). ONDS was the biggest loser, so the cap doesn't fix entry quality — but it would have reduced concurrent-fresh-position dollar risk by ~57%.
+
+### EOD action: GEM gate audit (information only)
+
+Saved as `scripts/audit_gem_gates.py`. Findings on 7 days of signals at score >= 80:
+
+| Gate | Failure rate |
+|---|---|
+| **sentiment >= 80** | **100%** — top observed sentiment is 60–70, threshold of 80 is unreachable |
+| R/R >= 3.0 | 98.8% — actual R/R distribution is 1.4–2.2 |
+| score >= 85 | 89.4% |
+
+**0 GEMs in 19 days is structural, not luck.** The sentiment threshold was calibrated against a different Grok output range than what's currently being produced. **Did NOT change the threshold** — lowering sentiment to 70 would mass-produce "GEMs" on names like ARM, ONDS, SOUN which today were exactly the volatile losers. Until GEM has functional consequence (e.g., bigger position size), recalibrating the badge is cosmetic.
+
+### Did NOT change today (and why)
+
+- **QUALITY_PRUNE day floor** (currently 2 days): HIMS sat at −6.5% / 1.5d hitting no rule (the "valley of death"). Lowering to 1 day would have closed it for ~$22 loss. But ARM, CAMT, ALAB also entered yesterday at thesis=weakening; lowering the floor would have killed them BEFORE they closed positive. Trading variance against speed is a coin flip without backtest data.
+- **WATCHDOG_FORCE_SELL threshold** (currently −8%): Same reasoning. Catches catastrophic only; lowering to −6% would have caught ONDS earlier but also would have closed positions that recovered to flat.
+- **BRAIN_MIN_SCORE**: ONDS at 91 was the biggest loser. Higher score floor wouldn't have helped — would just have produced fewer entries of the same quality mix.
+- **Sentiment threshold for GEM**: see above.
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

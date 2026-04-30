@@ -136,6 +136,18 @@ class Settings(BaseSettings):
     # the -8% catastrophic stop also still applies.
     new_position_grace_hours: float = 24.0
 
+    # --- Per-day entry cap (Day 19 learning) ---
+    # Apr 28 the brain opened 7 wallet positions in a single day,
+    # producing 4 visible losses within 24h (FN, CCO.TO, ONDS, etc).
+    # Win rate stayed at 43% (matches historical 42%) — the issue was
+    # variance from concurrent fresh-position risk, not entry quality.
+    # Capping daily entries reduces variance without changing win rate.
+    # Highest-score signals win the cap slots (pre-sorted by score
+    # before the BUY loop). Counts BOTH wallet LONG BUYs and SHORT_OPENs
+    # — both deploy capital, both should be rate-limited.
+    # Set to 0 to disable.
+    wallet_max_entries_per_day: int = 3
+
     # --- Brain Thesis Tracking (Stage 6) ---
     # When enabled, every scan re-evaluates the thesis on every open brain
     # position via Claude. Positions whose thesis is invalidated are closed

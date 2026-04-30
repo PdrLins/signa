@@ -1277,8 +1277,38 @@ def process_virtual_trades(
     _wlt_initial = wallet_svc.get_wallet(brain_user_id) if settings.wallet_enabled else None
     running_balance: float = float(_wlt_initial["balance"]) if _wlt_initial else 0.0
 
+    # Per-day entry cap (Day 19 learning). Count today's already-opened
+    # wallet entries from the audit ledger so the cap is enforced
+    # *across* scans, not just within one scan. Counts BUY + SHORT_OPEN
+    # (both deploy capital). Tracking variable below increments locally
+    # as we open new ones during this scan.
+    wallet_entries_today = 0
+    if settings.wallet_max_entries_per_day > 0:
+        try:
+            today_utc_start = datetime.now(timezone.utc).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ).isoformat()
+            day_count_result = (
+                db.table("wallet_transactions")
+                .select("id", count="exact")
+                .gte("created_at", today_utc_start)
+                .in_("transaction_type", ["BUY", "SHORT_OPEN"])
+                .execute()
+            )
+            wallet_entries_today = int(day_count_result.count or 0)
+        except Exception as e:
+            logger.warning(f"Couldn't count today's wallet entries: {e}")
+    wallet_entries_this_scan = 0
+
     now = datetime.now(timezone.utc).isoformat()
     market_open = _is_us_market_open()
+
+    # Pre-sort signals by score DESC so when we hit the daily cap the
+    # surviving slots go to the highest-conviction signals, not whatever
+    # happened to come first in the iteration order. SELL/AVOID logic
+    # is symbol-keyed (matches by `pos["symbol"] == sig["symbol"]`) so
+    # the order doesn't matter for closes. Only entries benefit.
+    signals = sorted(signals, key=lambda s: -(s.get("score") or 0))
 
     # ──────────────────────────────────────────────────────────
     # PHASE 2 — Per-signal decision loop
@@ -1659,6 +1689,20 @@ def process_virtual_trades(
                 else:
                     _horizon = "LONG"
 
+                # Per-day cap (Day 19): if we've already opened the
+                # configured max number of wallet entries today (across
+                # all scans), skip. Highest-score signals are processed
+                # first because we sorted at function entry, so the cap
+                # naturally clips marginal entries.
+                cap = settings.wallet_max_entries_per_day
+                if cap > 0 and (wallet_entries_today + wallet_entries_this_scan) >= cap:
+                    logger.info(
+                        f"Virtual BUY skipped for {symbol} (score {score}): daily entry cap "
+                        f"reached ({wallet_entries_today + wallet_entries_this_scan}/{cap}). "
+                        f"Conserving capital for higher-conviction signals tomorrow."
+                    )
+                    continue
+
                 sizing = _compute_wallet_fields(
                     running_balance, brain_tier, trust_multiplier, price, symbol, kind="BUY",
                 )
@@ -1726,6 +1770,7 @@ def process_virtual_trades(
                 buys += 1
                 brain_open_count += 1
                 brain_long_count += 1
+                wallet_entries_this_scan += 1
                 open_brain.add(symbol)
                 open_brain_long.add(symbol)
                 logger.info(
@@ -1785,6 +1830,16 @@ def process_virtual_trades(
         target = sig.get("target_price")
         stop = sig.get("stop_loss")
         if not target or not stop:
+            continue
+
+        # Per-day cap (Day 19) — applies to SHORTs too. Both wallet
+        # entries deploy capital; rate-limit them together.
+        cap = settings.wallet_max_entries_per_day
+        if cap > 0 and (wallet_entries_today + wallet_entries_this_scan) >= cap:
+            logger.info(
+                f"Virtual SHORT skipped for {symbol} (score {score}): daily entry cap "
+                f"reached ({wallet_entries_today + wallet_entries_this_scan}/{cap})."
+            )
             continue
 
         # Horizon for shorts: default SHORT (momentum), but stable
@@ -1848,6 +1903,7 @@ def process_virtual_trades(
         shorts_opened += 1
         brain_short_count += 1
         brain_open_count += 1
+        wallet_entries_this_scan += 1
         open_brain_short.add(symbol)
         open_brain.add(symbol)
         logger.info(
