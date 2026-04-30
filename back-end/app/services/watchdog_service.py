@@ -100,7 +100,7 @@ from datetime import datetime, timezone
 from loguru import logger
 
 from app.core.config import settings
-from app.core.dates import days_since
+from app.core.dates import days_since, parse_iso_utc
 from app.db import queries
 from app.db.supabase import get_client
 from app.notifications.messages import msg
@@ -408,7 +408,24 @@ async def run_watchdog() -> dict:
             "in_watchlist": is_in_watchlist,
         }
 
-        if sentiment_label == "bearish" and pnl_total_pct < 0:
+        # Day-20 grace for fresh positions on the WATCHDOG_EXIT (sentiment-
+        # driven) path. WATCHDOG_FORCE_SELL above (catastrophic ≤-8%, score
+        # collapse) ALWAYS fires regardless of age — that's the safety net.
+        # The bearish-sentiment + slight-loss combo below is sensitive enough
+        # to fire on routine first-hour intraday wobble of HIGH_RISK SHORT-
+        # horizon entries (Apr 28 FN @ 8min/-2.21%, Apr 30 NBIS @ 19h/-4.24%,
+        # Apr 30 BTDR @ 2.5h/-2.34% — all WATCHDOG_EXIT same-day deaths).
+        # Grace mirrors the thesis-tracker `new_position_grace_hours`: a
+        # fresh position can't be killed by a soft trigger before it has
+        # had time to either invalidate properly or recover.
+        entry_dt = parse_iso_utc(trade.get("entry_date"))
+        hours_held = (
+            (datetime.now(timezone.utc) - entry_dt).total_seconds() / 3600
+            if entry_dt is not None else 9999.0
+        )
+        in_grace = hours_held < settings.new_position_grace_hours
+
+        if sentiment_label == "bearish" and pnl_total_pct < 0 and not in_grace:
             did_close = await _close_virtual_trade(db, trade, current_price, "WATCHDOG_EXIT")
             if not did_close:
                 logger.info(f"Watchdog: {symbol} bearish-exit already handled by another path; no duplicate alert.")
@@ -431,6 +448,19 @@ async def run_watchdog() -> dict:
             logger.warning(f"Watchdog: CLOSED {symbol} -- bearish sentiment + price drop")
 
         elif pnl_total_pct < 0:
+            # When the close above was suppressed by grace, log a single
+            # auditable line so the cost of the grace decision is visible.
+            # The "would-have-killed" cohort is the most important thing to
+            # track — if grace-protected positions consistently recover, the
+            # grace is doing real work; if they consistently bleed further,
+            # the threshold needs revisiting.
+            if in_grace and sentiment_label == "bearish":
+                logger.warning(
+                    f"Watchdog: {symbol} GRACE PROTECTED from WATCHDOG_EXIT "
+                    f"(held {hours_held:.1f}h < {settings.new_position_grace_hours}h grace, "
+                    f"P&L {pnl_total_pct:+.1f}%, sentiment={sentiment_label}). "
+                    f"Routed to alert path. Catastrophic ≤-8% still fires."
+                )
             pending_events.append({**event_base, "event_type": EVENT_ALERT, "action_taken": "warned", "notes": reason})
 
             # Only send Telegram if the move is significant enough

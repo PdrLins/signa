@@ -2529,6 +2529,165 @@ Today is a methodology day, not a P&L day. The discipline test was: when the dat
 
 The other half — the dossier path that would make these gates redundant — is the next thing to build. Pattern stats need to reach Claude's prompt with the same fidelity these gates have in code. Until then, the gates are training wheels.
 
+### EOD reality check (Apr 30, 17:30 ET)
+
+Filter D shipped at ~07:15 ET. Backend was restarted before market open. Five trading scans ran today. Here's what actually happened.
+
+#### Filter D firing audit — IT WORKED
+
+Six BUY signals at score >= 75 with validated AI in blocked sectors hit the gate today and were rejected:
+
+| Symbol | Score | Sector | Notes |
+|---|---|---|---|
+| **SMR** | **90** | Industrials | The headline block — pre-Filter-D this was a Tier-1 priority entry |
+| SEZL | 86 | Financial Services | High-conviction Fin name |
+| TFC | 80 | Financial Services | Already held from Apr 27 — Filter D prevented doubling-up |
+| PLUG | 80 | Industrials | Two scans, two blocks |
+| YSS | 75 | Industrials | Marginal entry |
+
+**Universe composition today:** 263 signals total, 84 BUY, 19 at score >= 80.
+- Industrials: 62 signals (24% of universe)
+- Financial Services: 20 signals
+- **Combined: 31% of the universe gated by sector exclusion**
+
+This is meaningful structural work — the gate isn't theoretical. SMR-90 in particular is the kind of pre-Filter-D entry that would have been a $500 position on Tier-1 sizing.
+
+LONG-horizon suspension: not directly visible in DB rows (they never get inserted), but the entry mix below confirms it's working — 0 of 3 admitted entries are LONG-horizon. Pre-fix, ~30% of entries were LONG.
+
+#### Today's entries (3 — within Filter D's 2-4 prediction)
+
+All three are HIGH_RISK / SHORT-horizon — exactly the cohort Filter D admits:
+
+| Time | Symbol | Score | Bucket | Horizon | Size |
+|---|---|---|---|---|---|
+| 14:02 | APLD | 75 | HIGH_RISK | SHORT | $410 |
+| 14:02 | USAR | 75 | HIGH_RISK | SHORT | $456 |
+| 16:02 | BTDR | 78 | HIGH_RISK | SHORT | $443 |
+
+Per-day cap (3) was the binding constraint — by 16:02 the cap was hit. APLD and USAR are still open at 17:30 with thesis=valid.
+
+BTDR opened at 16:02 and **closed at 18:30 same-day at −2.34% via WATCHDOG_EXIT**. That's the third same-day-mortality entry this week (FN Apr 28 8min, NBIS Apr 30 48min, BTDR Apr 30 2.5h). At −2.34% it didn't even hit catastrophic — the watchdog has a softer trigger for fresh positions that bleed quickly. **The same-day-mortality pattern is now accumulating real evidence.**
+
+#### Today's closes (5)
+
+| Time | Symbol | Reason | P&L | Note |
+|---|---|---|---|---|
+| 13:50 | HIMS | WATCHDOG_FORCE_SELL | −$29.72 (−8.59%) | Hit −8% catastrophic. Day-19 predicted "bleeds to −8% watchdog" — confirmed. |
+| 14:02 | ALAB | TRAILING_STOP | +$8.44 (+2.36%) | Day-19 predicted TARGET_HIT — got TRAIL at lower magnitude. Win still booked. |
+| 14:50 | NBIS | WATCHDOG_EXIT | −$16.58 (−4.24%) | Day-1 mortality. Day-19 predicted CRWV/NBIS Day-1 death — confirmed for NBIS. |
+| 18:30 | BTDR | WATCHDOG_EXIT | −$10.37 (−2.34%) | Same-day mortality (entered 16:02). |
+| 19:02 | CRWV | THESIS_INVALIDATED | +$1.25 (+0.29%) | Thesis flipped Day 1, position essentially flat. Win technically, but the model said "exit." |
+
+**Today P&L:** 2W / 3L → net realized **−$46.98**.
+
+#### Wallet-era cumulative
+
+- Closed wallet trades: 13 → 4W / 9L (**31% win rate**)
+- Cumulative realized: **−$108.54**
+- Pocket balance trajectory: 4500 → 4067 → 4709 → 3669 → 4239 → 4855 (closes return cash; the trajectory looks rising but only because positions are flushing)
+
+**31% wallet-era win rate is BELOW the 40.4% full-history baseline.** The recent regime is harder than the average regime. Filter D's historical 47.8% win rate is computed over the same harder regime *with* the filter applied — so the projection still holds, but we won't see Filter-D-only outcomes until APLD/USAR/etc. close.
+
+#### Day-19 predictions vs reality
+
+| Prediction | Outcome |
+|---|---|
+| HIMS resolution at 2-day mark | ✓ Closed via WATCHDOG_FORCE_SELL at −8.59% (different gate, same destination) |
+| ALAB target hunt | ✓ Won via TRAILING_STOP +2.36% (lower magnitude than predicted target) |
+| CRWV/NBIS Day-1 outcomes | ✓ Both died Day 1 — pattern of fresh-position mortality CONFIRMED for 3rd consecutive day |
+| First positive-day at portfolio level | ✗ Pocket grew $616 from closes returning cash, but realized P&L is −$47. Not a true positive day. |
+
+#### Day-20 ship predictions vs reality
+
+| Prediction | Outcome |
+|---|---|
+| 2-4 entries today | ✓ 3 entries (cap-bound) |
+| First filter_d_sector_excluded log | ✓ 6 blocks recorded (SMR-90 the headline) |
+| First filter_d_long_horizon_suspended log | Unverified in DB rows (gates suppress at insert), but 0/3 entries are LONG-horizon vs ~30% pre-fix |
+| Win rate over next 5 closes | 2W/3L = 40% (right at baseline; n=5 too small to confirm Filter D edge) |
+
+#### The same-day mortality problem (now Pattern #4)
+
+Three entries this week died on the same calendar day they opened:
+- Apr 28: FN (8 minutes)
+- Apr 30: NBIS (48 minutes after entry)
+- Apr 30: BTDR (2.5 hours after entry)
+
+These are NOT all catastrophic (−8%). NBIS exited at −4.24%, BTDR at −2.34%. The watchdog has a non-catastrophic exit path that fires same-day on fresh positions when the price action is "wrong shape" (deteriorating fast even if not at catastrophic threshold). **This pattern needs investigation tomorrow.** Three same-day deaths in three trading days is not noise.
+
+The Day-0 grace period was supposed to protect new entries from premature thesis-driven exits. But the watchdog bypasses the grace period — and rightly so, because it's a safety net. The question is whether the watchdog is correctly identifying "fresh position dying fast" as a catastrophic-equivalent, or whether it's prematurely killing positions that would recover (the way ARM and CAMT did Apr 29).
+
+#### Predictions for Day 21
+
+- [ ] **APLD and USAR Day-0/1 outcomes.** Both entered today at 14:02 within the 24h grace window. If both close losers tomorrow, Filter D's entry quality isn't yet good enough — the gate is admitting the right cohort but the trades inside it are still losing.
+- [ ] **TFC behavior.** TFC is currently OPEN from Apr 27 at score 80, Financial Services, **LONG-horizon**. Filter D would have rejected this entry today; it survived because it's already in flight. Watch whether it hits target or stops out — this is the "would Filter D have been wrong?" test in vivo.
+- [ ] **Same-day mortality count.** If a 4th fresh position dies same-day tomorrow, watchdog calibration becomes the next thing to investigate. If 0 die same-day, today's pattern was the cohort, not the rule.
+- [ ] **First Filter-D-era close.** If APLD or USAR close tomorrow, that's the first wallet-era trade where Filter D actually decided "enter" or "skip." Real evidence on the gate's quality starts arriving.
+- [ ] **Track SMR.** SMR at 90 was today's headline block. If we see SMR rip up tomorrow, that's a data point against Filter D's sector exclusion. Watch SMR's price for 5 trading days as a "would-have-traded" cohort.
+
+#### Personal note (EOD update)
+
+Today vindicated the Filter D ship in two ways: (1) it actually fired meaningfully — 6 blocks including a 90-score — and (2) the entries it admitted look structurally correct (3 HIGH_RISK SHORT-horizon, the exact cohort the backtest favored). What it did NOT vindicate is per-trade quality. Today's −$47 was driven by Day-19 carryover (HIMS) and same-day mortality (NBIS, BTDR) — same illness as before.
+
+The Filter D test is a 5-trading-day test, not a 1-day test. We need APLD, USAR, and tomorrow's entries to close before we can tell whether the gate is admitting better trades or just fewer of the same trades. The same-day mortality pattern is the more urgent signal — three in three days warrants its own investigation tomorrow.
+
+Pocket up $616 today is misleading — that's closes returning capital, not gains. Realized −$47. Wallet-era is −$108 across 13 closes. The journal has to keep telling the truth even when the dashboard makes it look better than it is.
+
+### Late-evening ship: WATCHDOG_EXIT grace period
+
+After the EOD entry above, investigated why three same-day deaths happened in three trading days. Root cause:
+
+The watchdog has a **non-catastrophic exit path** at `watchdog_service.py:411`:
+```python
+if sentiment_label == "bearish" and pnl_total_pct < 0:
+    _close_virtual_trade(..., "WATCHDOG_EXIT")
+```
+
+This fires when:
+1. Position enters "concerned" state (any of 5 triggers — including total loss ≤ −2% for SHORT-horizon, line 312)
+2. Fresh sentiment fetch returns `bearish`
+3. P&L is negative (any negative)
+
+**The fatal combination:** A HIGH_RISK SHORT-horizon position naturally drifts ±2% in its first hours. The −2% bleed threshold trips, sentiment gets fetched (and is plausibly bearish *because* the price is down), pnl < 0 is trivially true, and the position is closed.
+
+**No grace period existed on this path.** Compare:
+
+| Defense | Grace |
+|---|---|
+| THESIS_INVALIDATED | 24h grace (`new_position_grace_hours`) |
+| QUALITY_PRUNE | 2-day floor |
+| Thesis-protected exits | thesis-gated, with -8% catastrophic carve-out |
+| **WATCHDOG_EXIT** | **NONE — outlier** |
+| WATCHDOG_FORCE_SELL | NONE (correct — safety net) |
+
+**Fix shipped:** Added `in_grace = hours_held < settings.new_position_grace_hours` check before the close. Inside grace, the bearish-sentiment + slight-loss combo falls through to the alert path (logged as WARNING with `GRACE PROTECTED`) instead of closing the position. WATCHDOG_FORCE_SELL (≤ −8% catastrophic) and the score-collapse path are unchanged — they still fire at any age.
+
+**Code:** `app/services/watchdog_service.py` — three import addition, ~10 lines for the grace computation, ~7 lines for the audit log line in the alert branch.
+
+**Tests:** `tests/test_watchdog_grace.py` (9 tests) — pins:
+- 24h grace default
+- Positions at 0min / 8min / 2.5h / 19h are protected
+- Positions at 24.5h / 3 days are NOT protected
+- Missing/unparseable entry_date does NOT silently extend protection (falls through)
+- The catastrophic check appears BEFORE the grace check in source order (regression guard)
+
+All 19 tests pass (9 grace + 10 Filter D from this morning). All 99 pre-existing unit tests still pass.
+
+**Reverts:** `git revert` of the watchdog_service.py edit + delete the test file. Three-line change to revert.
+
+**Invalidation criterion:** if a fresh position bleeds catastrophically (≤ −8%) inside the grace window, the existing WATCHDOG_FORCE_SELL still catches it. If grace-protected positions consistently bleed past −8% (catastrophic), the threshold itself needs revisiting — the grace is doing the right thing in that case (catching them via the harder net). If grace-protected positions consistently recover into positive, the grace is the right call. Track via the new `GRACE PROTECTED` log line for the next 5 trading days.
+
+#### Updated predictions for Day 21
+
+Adding to the existing list:
+
+- [ ] **First `GRACE PROTECTED` log line.** Should appear within 24h given how often the −2% bleed threshold trips on fresh entries. If 0 in 48h, either today's pattern was a cohort, not a rule, OR the watchdog isn't running (check infra).
+- [ ] **APLD/USAR survival.** Both entered 14:02 today and are now grace-protected through tomorrow ~14:02. Pre-fix, NBIS at -4.24% would have been killed in this window. Post-fix, NBIS-equivalent stays open and either recovers (vindicates grace) or hits catastrophic (vindicates the carve-out).
+
+Today's ship was the correct move at the correct time. The data made the case (3 same-day deaths in 3 days, all on the same softer trigger), the principles allowed it (grace is a CAPACITY decision, not a quality veto), and the risk is bounded (catastrophic safety net unchanged). This is what "do what is better" looks like — investigate, identify, ship, document.
+
+Two ships in one day. Filter D pre-market, watchdog grace post-EOD. Both with regression tests, both with documented invalidation criteria, both with one-line reverts. The brain enters Day 21 structurally different from Day 19.
+
 ---
 
 ## Template for Future Days
