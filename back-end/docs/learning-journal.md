@@ -2234,6 +2234,96 @@ The day felt bad because of the small-loss churn (4 in a row, all losses). But t
 
 ---
 
+## Day 18 — April 28, 2026 (Tuesday)
+
+**Metrics:** First trading day post-Day-17 fixes. The brain went from 1 entry/day to **7 entries** in 5 scans. First score 91 in weeks. 4 of 7 new positions immediately show weakening/invalid thesis — Day-0 grace period working as designed (none triggered THESIS_INVALIDATED). Net realized: −$10.41 (FN watchdog-exit, 8 minutes after open). Portfolio drift: −$29.31 / −0.46% from baseline. Cash deployment jumped 75% → 58% of portfolio in one day.
+
+### What changed today (the fixes worked)
+
+The Day-17 universe re-bucket flowed straight into Day-18 signal scoring:
+
+| Metric | Day 16 (pre-fix) | Day 18 (post-fix) |
+|---|---|---|
+| Signals total | ~324 / 6 scans | 271 / 5 scans |
+| HIGH_RISK signals | ~28% of pool | **70% of pool** (189 / 271) |
+| Scores ≥ 85 | 0 | **4** (top: ONDS @ 91) |
+| New entries opened | 1 (IONQ) | **7** |
+| GEMs detected | 0 | 0 |
+
+Compositionally: every entry today was HIGH_RISK except CCO.TO (re-bought after yesterday's TRAILING_STOP closed the legacy version). That's the bucketing fix doing exactly what it was supposed to do — letting growth/momentum names through the AI candidate cut and into the brain's tier evaluator.
+
+### Today's activity
+
+**7 new wallet positions:**
+
+| Symbol | Score | Horizon | Allocation | Bucket |
+|---|---|---|---|---|
+| FN | 79 | SHORT | $471 | HIGH_RISK |
+| CCO.TO | 80 | LONG | $427 | SAFE_INCOME |
+| HIMS | 79 | SHORT | $346 | HIGH_RISK |
+| ARM | 81 | SHORT | $384 | HIGH_RISK |
+| CAMT | 81 | SHORT | $322 | HIGH_RISK |
+| ALAB | 83 | SHORT | $357 | HIGH_RISK |
+| **ONDS** | **91** | SHORT | $290 | HIGH_RISK |
+
+ONDS at 91 is the highest score we've seen since the wallet shipped. Pre-fix that ticker was scoring ~60 in SAFE_INCOME with $0 dividend.
+
+**5 closes:**
+
+| Symbol | Type | Reason | P&L |
+|---|---|---|---|
+| HIMS legacy | 🗂 | TRAILING_STOP | +0.45% / +$0.13 |
+| BBD legacy | 🗂 | WATCHDOG_EXIT | −5.26% / −$0.21 |
+| FN wallet | 📦 | WATCHDOG_EXIT | **−2.21% / −$10.41** |
+| DIR-UN.TO legacy | 🗂 | ROTATION | +0.65% / +$0.09 |
+| **BLK legacy** | 🗂 | ROTATION | +2.77% / **+$28.34** |
+
+ROTATION fired twice — brain hit `brain_max_open_long = 8` and rotated the two weakest legacies (DIR-UN.TO, BLK) out for stronger HIGH_RISK picks. BLK was the heavyweight: a single close at $1,049.79 pumped Pocket by ~$1k.
+
+### What the data says about each fix
+
+**1. Re-bucketing flow-through ✓** — Universe shift directly produced the candidate-pool shift directly produced the entry shift. ONDS hit 91, ALAB 83, CAMT 81, ARM 81, FN 79 — all newly accessible. Structural fix doing exactly what diagnosis predicted.
+
+**2. Day-0 grace period: silently working** — 4 of today's 7 opens already show `thesis=weakening` or `invalid` by EOD. ARM is `invalid` at age 4.8h. **None triggered THESIS_INVALIDATED today.** The grace period DID its job (or the thesis tracker would have tried to close them). Tomorrow, when these positions cross the 24h mark, we'll see if they survive on price merit or get cut. **First real test of "is the conservative-bias real, or is Claude actually right that these were bad picks?"**
+
+**3. WATCHDOG_EXIT ≠ thesis exit** — FN closed in 8 minutes via WATCHDOG_EXIT, not THESIS_INVALIDATED. Watchdog fires on price drop + sentiment, not on thesis re-eval. Day-0 grace correctly did NOT block it — watchdog is the brake, and a position that drops fast enough for the watchdog to act needs to die regardless of age. The −$10.41 hurt but the system worked as intended.
+
+**4. QUALITY_PRUNE magnitude gate untested today** — No QUALITY_PRUNE fired (would have needed pnl < −3% AND days 2-7 AND thesis weakening AND Claude not BUY). All today's losers were either fresh (Day-0 protected) or hit watchdog first. Need a few days before we know if −3% is calibrated.
+
+### Today's learnings
+
+**1. Structural fixes have non-linear payoffs.** Yesterday: 1 entry. Today: 7 entries. Not 7×, that's the universe finally working as designed. **Lesson: when a system is producing low-volume outputs, audit the structural classifiers BEFORE tuning thresholds.** I almost suggested lowering BRAIN_MIN_SCORE on Day 16 because volume was too low; would have been the wrong fix. The real bottleneck was bucket-driven score suppression upstream of the threshold.
+
+**2. The grace period and the watchdog are doing different jobs.** Today proves they're complementary, not redundant. Grace protects thesis-driven exits on fresh positions (Claude's conservative bias). Watchdog protects against price/sentiment-driven catastrophes (real risk). Both fired correctly — grace by NOT firing on 4 weakening positions, watchdog by firing on FN at −2.21% within 8 minutes. The system has a slow brake (thesis re-eval) and a fast brake (watchdog), and they should not be conflated.
+
+**3. Heaviest legacy (BLK) drained into Pocket via ROTATION.** Cleanest mechanical proof that the legacy-drain design works at scale. BLK was a 1-share holding worth $1,049.79 at exit. ROTATION decided to swap it out, the close path emitted a `LEGACY_SELL` ledger row, Pocket jumped $1,049.79, Holdings dropped by BLK's mark-to-market — net portfolio unchanged, but capital now liquid for new wallet trades. **Day-15 wallet design end-to-end validated on a $1k trade.**
+
+**4. Today's 7 entries skew SHORT-horizon (6 of 7).** Pre-fix, the brain rarely opened SHORT-horizon trades because the universe lacked momentum names. Now that universe is HIGH_RISK-rich, the natural fit is SHORT-horizon momentum. **Expect higher trade frequency, shorter holds, more watchdog activity.** The wallet will see more activity per week than before — and the watchdog will get exercised more.
+
+**5. Two consecutive same-day open-and-close events (BCE.TO yesterday, FN today).** Different mechanisms (BCE.TO via THESIS_INVALIDATED, FN via WATCHDOG_EXIT), same observable: enter, lose ~$10, exit. **Whether this is normal volatility or a calibration issue takes more days to know.** Watch this through the week.
+
+### Open from yesterday's metrics-to-track
+
+- [x] Score distribution shifts up — ✓ confirmed (4 scores ≥ 85, was 0)
+- [x] AI candidate cut composition changes — ✓ HIGH_RISK now 70% of pool
+- [ ] First GEM in many weeks — ✗ still 0 (other GEM gates harder to clear than score)
+- [x] Day-0 grace fires — ✓ silently (4 weakening positions kept open)
+- [ ] No QUALITY_PRUNE on positions with pnl > −3% — UNTESTED (no quality prune fired today)
+
+### Predictions for Day 19
+
+- [ ] **First wallet TARGET_HIT** — ONDS at $10.60 with target — if any Tier-1 entry hits target tomorrow, that's the first realized wallet WIN with a green ✓ Win badge.
+- [ ] **24-hour grace window expires for today's 7 entries between 14:02–19:02 tomorrow.** If any exit via THESIS_INVALIDATED or QUALITY_PRUNE precisely after grace expires → Claude was right, grace just delayed. If they survive → conservative bias is real, grace is saving us money.
+- [ ] **Same-day open-and-close pattern repeats?** If a 3rd fresh position closes within hours tomorrow, we have a pattern requiring action.
+- [ ] **First 85+ GEM detection.** ONDS hit 91 today without becoming a GEM. Audit which gates fail most often (sentiment ≥ 80%, catalyst ≤ 30d, R/R ≥ 3.0).
+- [ ] **Will Pocket continue draining or stabilize?** Today: 75% → 58% in one day. With 1 LONG slot + 6 SHORT slots still free, Pocket could drop further if every slot fills.
+
+### Personal note
+
+Quiet success day. The structural fix from yesterday produced exactly the result the diagnosis predicted, but with one nuance worth flagging: the brain went from cautious (1 entry/day) to active (7 entries/day) overnight. We deployed $1.8k of new capital. **The system is now exposing real risk in a way it wasn't before.** Tomorrow's data starts to tell us whether the looser universe + Day-0 grace combination produces alpha or just more drawdowns. Either way, we have signal — that's better than the unblocked-but-quiet state we were in.
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]
