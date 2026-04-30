@@ -223,13 +223,23 @@ from app.services.price_cache import _fetch_prices_batch
 # (Oct 2024 - Apr 2025) — raising any of these reduces buy frequency but
 # increases per-trade win rate. Lowering them does the reverse.
 
-BRAIN_MIN_SCORE = 75
+BRAIN_MIN_SCORE = 80
 """Tier 1 floor — validated AI signals must clear this score to be bought.
-Raised from 72 to 75 on Day 13 (Apr 21) after observing that every losing
-rotation/churn event over Days 11-13 came from score 72-74 entries:
-JD (74, thesis died in 3h), REI-UN.TO/CAR-UN.TO/HR-UN.TO (all 72, rotated
-out at losses within 24h). Score 78+ entries were solid. Patience over
-slot-filling — the brain now sits when nothing great is available."""
+
+Day 13 (Apr 21): raised 72 → 75 after every losing rotation/churn over
+Days 11-13 came from score 72-74 entries (JD, REI-UN.TO, CAR-UN.TO,
+HR-UN.TO). Patience over slot-filling.
+
+Day 19 (Apr 29): raised 75 → 80 after the bucketing fix shifted the
+universe HIGH_RISK-heavy. Post-fix data showed:
+  - Score 75-79: 0 wins / 4 losses, total -$34.14 realized
+  - Score 80-84: 2 wins / 1 loss, ~ break-even
+The 75 threshold was calibrated for a SAFE_INCOME-dominated universe
+where 75 meant 'boring but stable.' In a HIGH_RISK-dominated universe,
+75 means 'momentum stock that barely cleared the AI gate' — not the
+same trade quality. The 75-79 band accounted for essentially all of
+our realized losses. Eliminating it isn't a hypothesis, it's removing
+the band with 100% loss rate."""
 
 BRAIN_TIER2_MIN_SCORE = 80
 """Tier 2 floor — low-confidence AI signals need a higher score bar (80+)
