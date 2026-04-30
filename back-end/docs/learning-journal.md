@@ -2460,6 +2460,77 @@ Saved as `scripts/audit_gem_gates.py`. Findings on 7 days of signals at score >=
 
 ---
 
+## Day 20 — April 30, 2026 (Thursday)
+
+**Metrics:** Pre-market shipment of Filter D, derived from overnight backtest of all 52 closed brain trades (`docs/Day-19-overnight-analysis.md`). No new closes yet today — this entry documents the SHIP, not outcomes. Yesterday's overnight analysis is the data. Today's job is to act on it.
+
+### What shipped (one coherent package)
+
+Three changes, one ship — the literal Filter D from the backtest, not a compromise version:
+
+1. **`BRAIN_MIN_SCORE = 80 → 75`** (rolled back the Day-19 raise).
+2. **Sector exclusion gate**: Financial Services + Industrials are blocked at both `_eval_brain_trust_tier` and `_eval_brain_short_tier`.
+3. **LONG-horizon suspension**: any BUY signal whose computed `trade_horizon == "LONG"` is rejected after horizon computation, before insert.
+
+All three live in `app/services/virtual_portfolio.py`. Each gate carries an explicit invalidation criterion in its docstring — these are NOT eternal vetoes, they're decay-able safety rails.
+
+### Why this shape (not the Day-19 shape)
+
+Day 19 raised `BRAIN_MIN_SCORE` 75 → 80 based on **4 wallet-era trades** that had all closed losses in 2 days. The full 52-trade backtest tells a more complete story:
+
+| Filter | n | Win rate | Total P&L | Δ vs baseline |
+|---|---|---|---|---|
+| Baseline (no filter) | 52 | 40.4% | −17.6% | — |
+| Score ≥ 75 alone | 36 | 41.7% | −8.0% | +9.6pp |
+| Score ≥ 80 alone (Day 19) | 17 | 41.2% | +1.7% | +19.3pp |
+| **Filter D: 75 + SHORT + drop Fin/Industrials** | **23** | **47.8%** | **+5.4%** | **+23.1pp** |
+
+**Score 75-79 across all history was 8W / 11L (42.1% win rate)**, not the 0% the wallet sample suggested. The Day-19 raise was small-sample noise correctly shipped at the time, now correctly reverted with more data.
+
+The discriminating axes are **horizon and sector**, not score. ONDS at 91 was Day 19's biggest loser; CAMT and ARM at 81 were both winners. Score gets a signal past the gate but doesn't rank the gate-survivors.
+
+### How this respects "AI is the Decider"
+
+Initial reaction (mine) was: *static gates violate the principle that AI should weigh patterns, not be vetoed by them.* True in steady state. False right now, because:
+
+- Claude's dossier doesn't yet carry "this sector has lost us 5/9 times."
+- The pattern-stats injection (Stage 4) that would carry it isn't wired through to scoring yet.
+- Every day we wait costs ~$10–30 of avoidable loss given Day-19's cadence.
+
+The compromise: ship the gates **with explicit invalidation criteria** so they decay automatically when the underlying cohort recovers. Each gate logs `tier_reason` strings (`filter_d_sector_excluded_*`, `filter_d_long_horizon_suspended`) so the cost of being wrong is visible in the database. When Claude's dossier matures, the gates are redundant and can be removed.
+
+This is the same shape as the per-day cap (Day 19) and the −8% catastrophic stop — capacity rails, not quality vetoes.
+
+### Predictions for Day 21
+
+- [ ] **Tomorrow's scan should produce fewer entries.** Pre-Filter-D, the brain admitted ~7 entries on Apr 28. With sector + horizon gates, expect 2-4. If we see 7 again, a gate isn't firing — investigate.
+- [ ] **First `tier_reason = "filter_d_sector_excluded_*"` row.** Search `virtual_trades` for the pattern; if no rows appear in 48h, the gate isn't being hit (universe might naturally avoid those sectors).
+- [ ] **First `filter_d_long_horizon_suspended` log line.** Same audit — should appear within 24h given how SAFE_INCOME-heavy the universe was.
+- [ ] **Win rate over the next 5 closes.** Backtest predicts 47.8% on Filter D vs 40.4% baseline. Real-world n=5 is too small to confirm but a rate ≤ 25% would be a red flag.
+
+### What to watch for
+
+If the brain produces ZERO entries for 2 consecutive days post-ship, Filter D is too restrictive in the current universe. Loosen by:
+- Removing one sector from `FILTER_D_BLOCKED_SECTORS` (Industrials first — slightly weaker individual-cohort evidence than Financial Services).
+- OR keeping `BRAIN_MIN_SCORE = 75` but allowing the LONG horizon back through gated by HIGH_RISK bucket only.
+
+Both are one-line reverts.
+
+### What did NOT change today
+
+- **GEM gate sentiment threshold** — still 80, still structurally unreachable. Until GEM has functional consequence (e.g., bigger position size), recalibrating is cosmetic. Reconfirmed by yesterday's audit.
+- **WATCHDOG_FORCE_SELL threshold** — still −8%. Day 19 evidence was that ARM/CAMT recovered from negative territory; tightening would have killed winners.
+- **QUALITY_PRUNE day floor** — still 2 days. Same reasoning — recovery cases mattered.
+- **Per-day cap** — still 3. Already shipped Day 19, holds.
+
+### Personal note
+
+Today is a methodology day, not a P&L day. The discipline test was: when the data and the principle conflict, do you act on the data with appropriate guardrails, or freeze on the principle? We chose action with invalidation criteria — which is what the principle ("Knowledge is Conditional") actually says to do. The gates exist to be removed; documenting *when* to remove them is half the work.
+
+The other half — the dossier path that would make these gates redundant — is the next thing to build. Pattern stats need to reach Claude's prompt with the same fidelity these gates have in code. Until then, the gates are training wheels.
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

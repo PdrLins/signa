@@ -106,6 +106,34 @@ own stricter criteria — the user-facing UI stays conservative, the brain
 is allowed to act with its tier-aware position sizing.
 
 ============================================================
+FILTER D ADMISSION GATES (Day 20, Apr 30)
+============================================================
+
+Independent of the tier model above, every brain entry (long or short)
+must clear two structural admission gates derived from the historical
+backtest (`scripts/backtest_filters.py`, see `docs/Day-19-overnight-analysis.md`):
+
+  1. Sector exclusion: signals where fundamental_data.sector ∈
+     {"Financial Services", "Industrials"} are rejected at the tier
+     evaluator. See `FILTER_D_BLOCKED_SECTORS` for the rationale and
+     invalidation criteria.
+
+  2. LONG-horizon suspension: BUY signals whose computed trade_horizon
+     would be "LONG" (i.e., not crypto, not HIGH_RISK bucket, no near-term
+     catalyst within 7 days) are rejected at the BUY entry path AFTER
+     horizon computation. Every LONG trade in 52-trade history was
+     SAFE_INCOME bucket and the cohort was -14.9% total. See the inline
+     comment in `process_virtual_trades` for invalidation criteria.
+
+Both gates are TEMPORARY safety rails, not eternal vetoes. They live in
+code (rather than in Claude's dossier) because the dossier path doesn't
+yet carry "trades like this have lost us 5/9 times" to Claude's prompt.
+When pattern-stats injection (Stage 4) makes Claude aware of these
+cohorts, the gates become redundant and should be removed. Until then,
+re-run the backtest weekly and remove a gate when its underlying cohort
+recovers — see each constant's docstring for the precise threshold.
+
+============================================================
 MARKET HOURS DISCIPLINE
 ============================================================
 
@@ -223,7 +251,7 @@ from app.services.price_cache import _fetch_prices_batch
 # (Oct 2024 - Apr 2025) — raising any of these reduces buy frequency but
 # increases per-trade win rate. Lowering them does the reverse.
 
-BRAIN_MIN_SCORE = 80
+BRAIN_MIN_SCORE = 75
 """Tier 1 floor — validated AI signals must clear this score to be bought.
 
 Day 13 (Apr 21): raised 72 → 75 after every losing rotation/churn over
@@ -231,15 +259,23 @@ Days 11-13 came from score 72-74 entries (JD, REI-UN.TO, CAR-UN.TO,
 HR-UN.TO). Patience over slot-filling.
 
 Day 19 (Apr 29): raised 75 → 80 after the bucketing fix shifted the
-universe HIGH_RISK-heavy. Post-fix data showed:
-  - Score 75-79: 0 wins / 4 losses, total -$34.14 realized
-  - Score 80-84: 2 wins / 1 loss, ~ break-even
-The 75 threshold was calibrated for a SAFE_INCOME-dominated universe
-where 75 meant 'boring but stable.' In a HIGH_RISK-dominated universe,
-75 means 'momentum stock that barely cleared the AI gate' — not the
-same trade quality. The 75-79 band accounted for essentially all of
-our realized losses. Eliminating it isn't a hypothesis, it's removing
-the band with 100% loss rate."""
+universe HIGH_RISK-heavy. The Day-19 reasoning was based on 4 wallet-era
+trades at score 75-79 all closing losses. That sample was too small.
+
+Day 20 (Apr 30): rolled back 80 → 75 as part of the Filter D ship.
+The full 52-trade backtest (`scripts/backtest_filters.py`) showed:
+  - Score 75-79 across all history: 8W / 11L, 42.1% win rate, -9.7% total
+  - Score 80+ across all history: 7W / 10L, 41.2% win rate, +1.7% total
+The 80-only rule cuts trade volume in half (36 → 17) for a marginal
++0.6pp/trade gain. Filter D (75 + SHORT-horizon + drop Fin/Industrials)
+delivers +5.4% historical with n=23 — the same number of trades survive
+as score 80 + sector add-on, with a stronger win rate (47.8% vs 46.2%).
+Score is a quality FILTER, not a quality RANKER (Day-19 lesson from
+ONDS at 91 being the biggest loser). The discriminating axes are
+horizon and sector, not score.
+
+Invalidation: revert to 80 if next monthly backtest shows the 75-79
+band has a win rate < 35% across n >= 15 wallet-era trades."""
 
 BRAIN_TIER2_MIN_SCORE = 80
 """Tier 2 floor — low-confidence AI signals need a higher score bar (80+)
@@ -252,6 +288,61 @@ BRAIN_TIER3_MIN_SCORE = 82
 score bar (82+) AND must pass technical confirmation checks AND must not
 be in a hostile macro regime. The 10-point premium over Tier 1 reflects
 the absence of any AI validation."""
+
+
+# ============================================================
+# CONSTANTS — Filter D admission gates (Day 20)
+# ============================================================
+#
+# Filter D is the historical winner from the 52-trade backtest
+# (`scripts/backtest_filters.py`). Two structurally independent recipes
+# (D and G) collapse to the same 23-trade subset and produce the same
+# +5.4% total historical P&L (47.8% win rate) vs the unfiltered baseline
+# of -17.6% / 40.4% — a +23.1pp improvement.
+#
+# The two gates below implement the structural pieces of Filter D:
+#   1. FILTER_D_BLOCKED_SECTORS — the sector exclusion
+#   2. The LONG-horizon suspension — implemented inline at the BUY path
+#      (horizon is computed there, not on the signal)
+#
+# These are NOT meant to be permanent vetoes. Per the "Knowledge is
+# Conditional" principle, every gate carries explicit invalidation
+# criteria. Re-run `scripts/backtest_filters.py` weekly and remove the
+# gate when its underlying cohort recovers.
+
+FILTER_D_BLOCKED_SECTORS: frozenset[str] = frozenset({
+    "Financial Services",
+    "Industrials",
+})
+"""Sectors blocked from brain entry as of Day 20 (Apr 30).
+
+Backtest evidence (52 closed brain trades):
+  - "Drop Financial Services + Industrials" alone: n=43 surviving,
+    46.5% win rate, +0.2% total (vs baseline 40.4% / -17.6%).
+  - +17.8pp improvement from a 9-trade exclusion → those 9 trades
+    averaged ~ -2% per trade. Structurally negative-EV in our sample.
+
+Why these two specifically: they are the two highest-frequency,
+lowest-EV sector cohorts in the data. Financial Services is dominated
+by Canadian REITs and bank stocks that have been bleeding through the
+sample period; Industrials is dominated by cyclical names that the
+brain has been catching at the wrong end of their cycles.
+
+Why this is OK as a gate (and not a violation of "AI is the Decider"):
+the AI does not currently see "trades like this have lost us 5/9 times"
+in its dossier. Until pattern-stats injection (Stage 4) carries this
+signal to Claude's prompt, this gate is a temporary capacity rail
+analogous to the per-day entry cap, not a quality veto.
+
+Invalidation criteria: remove a sector from this set if the next
+monthly backtest shows that sector's cohort has:
+  - win rate >= 45% AND
+  - n >= 10 trades in the rolling 30-day window AND
+  - sum_pct >= 0% (not a net loser)
+
+Audit cadence: weekly via `scripts/backtest_filters.py`. Log every
+block via the tier_reason `"filter_d_sector_excluded_<sector>"` so
+the cost of being wrong is visible in the database."""
 
 
 # ============================================================
@@ -364,6 +455,16 @@ def _eval_brain_trust_tier(sig: dict, portfolio_heat: int = 0) -> tuple[int, flo
     # Failed AI is never auto-bought — it's a transient failure that should retry
     if ai_status == "failed":
         return 0, 0.0, "ai_failed"
+
+    # ── Filter D: sector exclusion (Day 20) ──
+    # Backtest evidence: Financial Services + Industrials cohorts together
+    # account for the largest concentrated source of loss in the 52-trade
+    # history. Block at the gate. See FILTER_D_BLOCKED_SECTORS for the
+    # invalidation criteria — re-run scripts/backtest_filters.py weekly.
+    fund = sig.get("fundamental_data") or {}
+    sector = (fund.get("sector") or "").strip()
+    if sector in FILTER_D_BLOCKED_SECTORS:
+        return 0, 0.0, f"filter_d_sector_excluded_{sector.lower().replace(' ', '_')}"
 
     # ── Portfolio heat gating ──
     # heat=3 (locked): no new entries at all — protect existing gains
@@ -502,6 +603,15 @@ def _eval_brain_short_tier(sig: dict) -> tuple[int, float, str]:
         return 0, 0.0, "short_requires_avoid_action"
     if score > settings.brain_short_max_score:
         return 0, 0.0, f"short_score_too_high_{score}"
+
+    # Filter D: sector exclusion (Day 20) — same rationale as the long
+    # path. The backtest didn't cleanly separate long-vs-short for these
+    # sectors, but the structural drag was symmetric enough to warrant
+    # blocking at both gates. See FILTER_D_BLOCKED_SECTORS for invalidation.
+    fund = sig.get("fundamental_data") or {}
+    sector = (fund.get("sector") or "").strip()
+    if sector in FILTER_D_BLOCKED_SECTORS:
+        return 0, 0.0, f"short_filter_d_sector_excluded_{sector.lower().replace(' ', '_')}"
 
     # Must have target and stop defined
     price = float(sig.get("price_at_signal") or 0)
@@ -1698,6 +1808,28 @@ def process_virtual_trades(
                     _horizon = "SHORT"
                 else:
                     _horizon = "LONG"
+
+                # Filter D: LONG-horizon suspension (Day 20).
+                # Backtest evidence: every LONG-horizon trade in the 52-trade
+                # history was bucket=SAFE_INCOME (zero HIGH_RISK × LONG ever
+                # existed). The cohort: n=15, 33.3% win rate, -14.9% total —
+                # the single worst slice of the data. Block here, after the
+                # horizon has been computed, so the log is informative.
+                #
+                # Invalidation: re-enable when the next monthly backtest shows
+                # the LONG cohort has win rate >= 50% across n >= 10 trades
+                # in the rolling 30-day window OR a HIGH_RISK × LONG entry
+                # appears in the data with a positive outcome. Until then,
+                # SAFE_INCOME with no near-term catalyst is structurally
+                # negative-EV in our sample.
+                if _horizon == "LONG":
+                    logger.info(
+                        f"Virtual BUY skipped for {symbol} (score {score}): "
+                        f"filter_d_long_horizon_suspended (bucket={_bucket}, "
+                        f"catalyst_days={_catalyst_days}). Historical LONG "
+                        f"cohort: 33% win rate, -14.9% total over n=15."
+                    )
+                    continue
 
                 # Per-day cap (Day 19): if we've already opened the
                 # configured max number of wallet entries today (across
