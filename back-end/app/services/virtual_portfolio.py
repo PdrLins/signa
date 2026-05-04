@@ -3167,6 +3167,19 @@ def get_virtual_summary() -> dict:
         # across the mix is apples-and-oranges, so the two totals are
         # reported separately. The frontend picks whichever is non-zero
         # or renders both when migration populations coexist.
+        #
+        # ⚠ Day-21 deprecation: `total_return_pct` below sums per-trade
+        # pnl_pct values, which is mathematically meaningless because each
+        # trade has a different cost basis. Example: -10% on $1k + +5% on
+        # $500 = sum of -5% but actual dollar net is $-75 vs $25k portfolio
+        # = -0.3%. The field is kept for backwards compat but the frontend
+        # no longer surfaces it as "Total Return" — that role has moved to
+        # `wallet.roi_pct` (mark-to-market portfolio vs initial capital)
+        # and `avg_return_pct` (per-trade arithmetic mean) as fallback.
+        # DO NOT add new consumers of `total_return_pct`. Use one of:
+        #   - wallet.roi_pct          (true return on capital, includes unrealized)
+        #   - avg_return_pct          (mean of per-trade pnl_pct, defined here)
+        #   - total_pnl_amount_wallet (raw realized $ for wallet trades)
         total = len(trades)
         wins = sum(1 for t in trades if t.get("is_win"))
         win_rate = (wins / total * 100) if total > 0 else 0

@@ -834,28 +834,57 @@ export default function BrainPerformancePage() {
             />
             <StatBox
               label="Total Return"
-              value={hasClosedData ? `${brain.total_return_pct >= 0 ? '+' : ''}${formatPct(brain.total_return_pct)}%` : '\u2014'}
+              value={(() => {
+                // Day-21 fix: use wallet ROI as the headline when funded —
+                // it is the only metric that ties dollar P&L to the capital
+                // base. The previous sum-of-pnl_pct produced numbers like
+                // -21.79% that did not match the underlying dollars
+                // (-$77.93 wallet realized = -1.56% of $5k deposited).
+                // Fall back to avg_return_pct (per-trade arithmetic mean)
+                // for legacy-only or unfunded-wallet cases.
+                if (!hasClosedData) return '\u2014'
+                const wallet = data?.wallet
+                if (wallet && wallet.initial_deposit > 0) {
+                  return `${wallet.roi_pct >= 0 ? '+' : ''}${formatPct(wallet.roi_pct)}%`
+                }
+                return `${brain.avg_return_pct >= 0 ? '+' : ''}${formatPct(brain.avg_return_pct)}%`
+              })()}
               sub={(() => {
-                // Mixed population during migration: wallet trades carry
-                // TOTAL-dollar P&L, legacy trades carry per-share P&L.
-                // Surface both so neither number is misleading.
+                // Day-21 fix: dropped the wallet-+-legacy mixed sub line.
+                // Each unit is different (wallet $ = total dollars, legacy $
+                // = per-share dollars), so combining them with a "+" sign
+                // produces math that doesn't add up against the headline %.
+                // Now: when wallet is funded, show realized $ + capital
+                // base; when only legacy, show per-share P&L; otherwise
+                // show the closed count.
                 if (!hasClosedData) return 'Tracking...'
+                const wallet = data?.wallet
                 const wallet$ = brain.total_pnl_amount_wallet ?? 0
                 const legacy$ = brain.total_pnl_amount_legacy ?? 0
                 const walletCount = brain.wallet_closed_count ?? 0
                 const legacyCount = brain.legacy_closed_count ?? 0
+                if (wallet && wallet.initial_deposit > 0 && walletCount > 0) {
+                  const sign = wallet$ >= 0 ? '+' : '-'
+                  const abs = Math.abs(wallet$).toFixed(2)
+                  const tail = legacyCount > 0 ? ' wallet realized' : ' realized'
+                  return `${sign}$${abs}${tail} of ${formatMoney(wallet.initial_deposit)}`
+                }
                 if (walletCount > 0 && legacyCount === 0) {
                   return `${wallet$ >= 0 ? '+' : '-'}$${Math.abs(wallet$).toFixed(2)} realized`
                 }
                 if (walletCount === 0 && legacyCount > 0) {
-                  return `${legacy$ >= 0 ? '+' : '-'}$${Math.abs(legacy$).toFixed(2)} @ 1 share/trade`
-                }
-                if (walletCount > 0 && legacyCount > 0) {
-                  return `${wallet$ >= 0 ? '+' : '-'}$${Math.abs(wallet$).toFixed(2)} wallet + ${legacy$ >= 0 ? '+' : '-'}$${Math.abs(legacy$).toFixed(2)} legacy/share`
+                  return `${legacy$ >= 0 ? '+' : '-'}$${Math.abs(legacy$).toFixed(2)} per share, ${legacyCount} trades`
                 }
                 return `Avg ${brain.avg_return_pct >= 0 ? '+' : ''}${formatPct(brain.avg_return_pct)}% per trade`
               })()}
-              color={hasClosedData ? (brain.total_return_pct >= 0 ? theme.colors.up : theme.colors.down) : theme.colors.textSub}
+              color={(() => {
+                if (!hasClosedData) return theme.colors.textSub
+                const wallet = data?.wallet
+                const pct = (wallet && wallet.initial_deposit > 0)
+                  ? wallet.roi_pct
+                  : brain.avg_return_pct
+                return pct >= 0 ? theme.colors.up : theme.colors.down
+              })()}
               bgColor={theme.colors.surfaceAlt}
             />
           </div>

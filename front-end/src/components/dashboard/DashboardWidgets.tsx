@@ -319,15 +319,18 @@ export function BrainPerformanceWidget() {
           </span>
         </div>
         {/* When the wallet has been funded, prefer wallet ROI over the
-            per-share total_return_pct — it's the number that actually
-            describes capital performance. */}
+            per-trade aggregate — it's the number that actually describes
+            capital performance. Day-21 fix: when wallet is NOT funded,
+            fall back to avg_return_pct (per-trade arithmetic mean) instead
+            of total_return_pct (which sums per-trade percentages and is
+            mathematically meaningless across mixed cost bases). */}
         {data.wallet && data.wallet.initial_deposit > 0 ? (
           <span className="text-[11px] font-bold tabular-nums" style={{ color: data.wallet.roi_pct >= 0 ? theme.colors.up : theme.colors.down }}>
             {data.wallet.roi_pct >= 0 ? '+' : ''}{formatPct(data.wallet.roi_pct)}% ROI
           </span>
         ) : data.closed_count > 0 ? (
-          <span className="text-[11px] font-bold tabular-nums" style={{ color: data.total_return_pct >= 0 ? theme.colors.up : theme.colors.down }}>
-            {data.total_return_pct >= 0 ? '+' : ''}{data.total_return_pct.toFixed(1)}%
+          <span className="text-[11px] font-bold tabular-nums" style={{ color: data.avg_return_pct >= 0 ? theme.colors.up : theme.colors.down }}>
+            {data.avg_return_pct >= 0 ? '+' : ''}{data.avg_return_pct.toFixed(1)}% avg
           </span>
         ) : null}
       </div>
