@@ -148,6 +148,16 @@ class Settings(BaseSettings):
     # Set to 0 to disable.
     wallet_max_entries_per_day: int = 3
 
+    # Day 21: per-symbol per-day cap. SEZL hit Filter D 3 times in one
+    # day (May 1) — the brain repeatedly tried the same Fin name on
+    # consecutive scans. Without this gate, the per-day cap (3) above
+    # could be entirely consumed by a single symbol, concentrating
+    # ~$1.2k of capital on one name. The per-day cap clips by score
+    # ranking; this cap clips by symbol ranking. Both apply.
+    # Counts BOTH wallet LONG BUYs and SHORT_OPENs.
+    # Set to 0 to disable.
+    wallet_max_entries_per_symbol_per_day: int = 1
+
     # --- Brain Thesis Tracking (Stage 6) ---
     # When enabled, every scan re-evaluates the thesis on every open brain
     # position via Claude. Positions whose thesis is invalidated are closed

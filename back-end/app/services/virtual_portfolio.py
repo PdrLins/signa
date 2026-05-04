@@ -222,6 +222,7 @@ There is no in-memory state that survives process restarts. The brain
 fully recovers its state from `virtual_trades` on every scan.
 """
 
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -1403,19 +1404,30 @@ def process_virtual_trades(
     # (both deploy capital). Tracking variable below increments locally
     # as we open new ones during this scan.
     wallet_entries_today = 0
-    if settings.wallet_max_entries_per_day > 0:
+    # Day 21: per-SYMBOL per-day cap. SEZL hit Filter D 3 times in one
+    # day (May 1) — the same name re-appearing across consecutive scans.
+    # Without a per-symbol gate, the per-day cap (3) could be entirely
+    # consumed by one ticker and concentrate ~$1.2k there. Build a
+    # Counter of today's wallet-entry symbols so we can clip on the
+    # second attempt of the same name.
+    wallet_entries_by_symbol_today: Counter = Counter()
+    if settings.wallet_max_entries_per_day > 0 or settings.wallet_max_entries_per_symbol_per_day > 0:
         try:
             today_utc_start = datetime.now(timezone.utc).replace(
                 hour=0, minute=0, second=0, microsecond=0
             ).isoformat()
             day_count_result = (
                 db.table("wallet_transactions")
-                .select("id", count="exact")
+                .select("symbol", count="exact")
                 .gte("created_at", today_utc_start)
                 .in_("transaction_type", ["BUY", "SHORT_OPEN"])
                 .execute()
             )
             wallet_entries_today = int(day_count_result.count or 0)
+            for row in (day_count_result.data or []):
+                _sym = row.get("symbol")
+                if _sym:
+                    wallet_entries_by_symbol_today[_sym] += 1
         except Exception as e:
             logger.warning(f"Couldn't count today's wallet entries: {e}")
     wallet_entries_this_scan = 0
@@ -1831,6 +1843,22 @@ def process_virtual_trades(
                     )
                     continue
 
+                # Per-symbol per-day cap (Day 21): block re-entry of a
+                # name we already entered today. Without this gate, a
+                # repeatedly-flagged ticker (May 1: SEZL hit Filter D
+                # 3 times in one day) could consume the per-day cap
+                # entirely on a single name. Sector exclusion catches
+                # this for Fin/Industrials but a Tech name in the same
+                # situation would still concentrate.
+                sym_cap = settings.wallet_max_entries_per_symbol_per_day
+                if sym_cap > 0 and wallet_entries_by_symbol_today[symbol] >= sym_cap:
+                    logger.info(
+                        f"Virtual BUY skipped for {symbol} (score {score}): per-symbol "
+                        f"cap reached ({wallet_entries_by_symbol_today[symbol]}/{sym_cap}). "
+                        f"Brain already entered this name today; preventing concentration."
+                    )
+                    continue
+
                 # Per-day cap (Day 19): if we've already opened the
                 # configured max number of wallet entries today (across
                 # all scans), skip. Highest-score signals are processed
@@ -1913,6 +1941,7 @@ def process_virtual_trades(
                 brain_open_count += 1
                 brain_long_count += 1
                 wallet_entries_this_scan += 1
+                wallet_entries_by_symbol_today[symbol] += 1
                 open_brain.add(symbol)
                 open_brain_long.add(symbol)
                 logger.info(
@@ -1972,6 +2001,17 @@ def process_virtual_trades(
         target = sig.get("target_price")
         stop = sig.get("stop_loss")
         if not target or not stop:
+            continue
+
+        # Per-symbol per-day cap (Day 21) — same gate as the BUY path,
+        # applied to SHORT entries. Prevents the brain from re-shorting
+        # the same name across consecutive scans.
+        sym_cap = settings.wallet_max_entries_per_symbol_per_day
+        if sym_cap > 0 and wallet_entries_by_symbol_today[symbol] >= sym_cap:
+            logger.info(
+                f"Virtual SHORT skipped for {symbol} (score {score}): per-symbol "
+                f"cap reached ({wallet_entries_by_symbol_today[symbol]}/{sym_cap})."
+            )
             continue
 
         # Per-day cap (Day 19) — applies to SHORTs too. Both wallet
@@ -2046,6 +2086,7 @@ def process_virtual_trades(
         brain_short_count += 1
         brain_open_count += 1
         wallet_entries_this_scan += 1
+        wallet_entries_by_symbol_today[symbol] += 1
         open_brain_short.add(symbol)
         open_brain.add(symbol)
         logger.info(
