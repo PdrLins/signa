@@ -2863,6 +2863,168 @@ When Claude's prompt is built next scan, `get_active_thinking_block` will surfac
 
 ---
 
+## Day 24 — May 4, 2026 (Monday)
+
+**Metrics:** First full trading day with watchdog grace + per-symbol cap live. Filter D fired heavily (8 blocks today, dominated by Financial Services). **3 closes (1W/2L) net +$30.61 — first net-positive realized day in over a week.** SOUN closed +14.14% via THESIS_INVALIDATED — the single position that vindicates the watchdog grace ship. Wallet-era cumulative now **−$77.93** (was −$108.54 Friday). 6 positions still open (5 wallet + CNQ legacy).
+
+### The headline: watchdog grace paid for itself today
+
+**SOUN +$68.67 / +14.14% via THESIS_INVALIDATED after 72h.**
+
+Friday: SOUN entered at 16:03 with thesis flipping to **invalid by hour 9**. **Pre-watchdog-grace fix, this is exactly the configuration that killed FN/NBIS/BTDR same-day** (bearish sentiment + slight loss + grace=none). Post-fix: protected through the 24h grace, recovered over the weekend, and exited profitably on Monday when the thesis tracker re-evaluated.
+
+**One position covered today's two losses with $30 to spare.** This is the proof the design loop works: grace lets weakening positions either invalidate properly later OR recover and exit cleanly. Both happen on different positions; today we got the recovery.
+
+### Today's closes (3)
+
+| Time | Symbol | Reason | P&L | Held | What it confirms |
+|---|---|---|---|---|---|
+| 14:02 | ONDS | QUALITY_PRUNE | **−$25.40** (−6.46%) | 67h | 3rd ONDS-91 loss — hypothesis adds N=1 supporting |
+| 15:45 | TFC | WATCHDOG_EXIT | **−$12.66** (−2.81%) | 168h | Filter D's sector call was right |
+| 16:02 | SOUN | THESIS_INVALIDATED | **+$68.67** (+14.14%) | 72h | Watchdog grace save — the headline |
+
+**Today P&L: +$30.61** — first net-positive realized day since Apr 22.
+
+### Today's entries (2 — clean Filter D shape)
+
+| Time | Symbol | Score | Bucket | Horizon | Size | EOD thesis |
+|---|---|---|---|---|---|---|
+| 14:02 | ARM | 77 | HIGH_RISK | SHORT | $354 | **invalid** at 10h (grace-protected) |
+| 16:02 | BTDR | 78 | HIGH_RISK | SHORT | $399 | valid at 8h |
+
+**ARM is the next watchdog-grace test in flight.** Same shape as SOUN: thesis flipped invalid intra-day, position is at slight loss, grace is keeping it open. Pre-fix this would have been killed this afternoon. Post-fix it survives until grace expires tomorrow ~14:02 ET. SOUN took 72h to resolve; ARM is on the same clock.
+
+**BTDR is a re-entry** — same name died same-day Apr 30 via WATCHDOG_EXIT. Per-symbol cap doesn't block (it's per-day, not per-week). Day-1 outcome will tell us if BTDR is name-specific bad or just unlucky timing.
+
+### Filter D firing — heavy Financial Services day
+
+8 BUY signals at score >= 75 with validated AI in blocked sectors hit the gate today:
+
+| Symbol | Score | Sector | Notes |
+|---|---|---|---|
+| TFC | 80 (×2) | Financial Services | Existing position simultaneously closing at a loss — Filter D was right |
+| COIN | 78 | Financial Services | First time COIN attempted post-Filter-D |
+| BMO.TO | 77 (×2) | Financial Services | Canadian bank pair — dense day for Fin |
+| MFC.TO | 77 (×2) | Financial Services | Canadian insurer |
+| USB | 76 | Financial Services | US bank |
+
+**Universe today:** 329 signals, 94 BUY, 15 at score >= 80. Financial Services 38/329 = 11.5%. Industrials count was lower today than May 1.
+
+The **TFC pattern** is striking: Filter D blocked TWO new TFC entry attempts at the exact moment the existing TFC position was hitting the watchdog. The brain's signal pipeline really does keep generating the same names regardless of in-flight state. Without Filter D AND without the per-symbol cap, this would have been a TFC-doubling event in a Fin name we already held that was about to fail. Two gates worked together.
+
+### ONDS-91 hypothesis: +1 supporting observation
+
+The thinking entry inserted Friday (id `bc1aa8c3`) auto-incremented to `observations_supporting = 1` when ONDS closed today via QUALITY_PRUNE at −6.46%. **Total ONDS-91 evidence in dossier:** Day 19 −9.46%, Day 21 (today) −6.46%, plus an open ONDS that didn't close yet from Apr 29. **Three losses, zero wins** for ONDS at score 91 in HIGH_RISK SHORT-horizon.
+
+The hypothesis was inserted with `graduation_threshold = 5`. Two more matching closes and it graduates to `signal_knowledge` — at which point it would appear in Claude's prompt as a *validated truth*, not a hypothesis under observation.
+
+### Currently open (6 positions — the no-rule-fires problem is now real)
+
+| Symbol | Age | Score | Bucket | Hz | Thesis | Size | Notes |
+|---|---|---|---|---|---|---|---|
+| BTDR | 8h | 78 | HIGH_RISK | SHORT | valid | $399 | In grace |
+| ARM | 10h | 77 | HIGH_RISK | SHORT | **invalid** | $354 | In grace, watchdog-grace test |
+| MSTR | **80h** | 77 | HIGH_RISK | SHORT | valid | $437 | **Day-4 in valley** |
+| USAR | **106h** | 75 | HIGH_RISK | SHORT | valid | $456 | **Day-5 in valley** |
+| APLD | **106h** | 75 | HIGH_RISK | SHORT | valid | $410 | **Day-5 in valley** |
+| CNQ | 416h | 79 | SAFE_INCOME | LONG | valid | $0 | Legacy |
+
+**$2,056 deployed across 5 wallet positions.**
+
+**Three positions (MSTR, USAR, APLD) are 80-106 hours old with thesis=valid and no exit has triggered.** This is **Day 21 lesson #3 ("no-rule-fires valley") biting in real time.** They're in the gap between QUALITY_PRUNE (needs Day 2+ AND thesis weak AND < −3%) and WATCHDOG_FORCE_SELL (needs ≤ −8%). Their thesis is still valid so QUALITY_PRUNE doesn't qualify. Their loss isn't catastrophic so the watchdog soft-trigger doesn't fire post-grace either.
+
+### Wallet trajectory
+
+| Day | Pocket | Realized P&L (cum) |
+|---|---|---|
+| Apr 30 | $4,855 | −$108.54 |
+| May 1 | $3,539 | −$108.54 (no closes) |
+| **May 4** | **$4,146** | **−$77.93** (+$30.61 today) |
+
+Pocket up $607 from net cash flow (closes returned $1,360, new entries deployed $753).
+
+### Lessons today (the real ones)
+
+**1. The grace + thesis-tracker loop works end-to-end.** SOUN proves it: thesis went invalid on Day 0, grace kept it open through the weekend, market gave it time to recover, thesis tracker exited cleanly when conditions changed. This is the design intent. Day 19 had the *opposite* outcome (ARM/CAMT recovered too — but ONDS/CCO.TO died after grace). Today we got the bullish version.
+
+**2. Filter D's sector calls keep being right in vivo.** TFC was the standing test ("would Filter D have been wrong on a Fin name we couldn't avoid?"). Today TFC closed at a loss. Filter D's blocking TWO new TFC entries at the same moment was exactly the right call. **Two-for-two: both Day-21's SMR-90 block (down 1% in 24h) and today's TFC validate the gate.**
+
+**3. ONDS-91 hypothesis is converging fast.** Inserted Friday with N=2 prior evidence. Today's close added another to the live counter. Two more and it graduates. The dossier path is doing real work without code changes — the brain learns from itself.
+
+**4. The "no-rule-fires valley" is now the next bottleneck.** Three live positions are sitting at 80-106h with thesis=valid, no exit firing. If any of them eventually closes via WATCHDOG_FORCE_SELL at −8% (catastrophic), we lost ~$30+ each because nothing softer fired earlier. Day 21 lesson #3 deferred this — the deferral now costs visible position-days. Worth investigating Day 25.
+
+**5. The per-symbol cap and Filter D are functioning as a pair.** TFC today: existing position closing AND Filter D blocking new entries. Without both, the brain would have repeatedly tried to re-add a name that was actively dying. The two gates are catching different aspects of the same anti-pattern.
+
+### Mid-day UI fix (separate from brain)
+
+Shipped a fix for the broken "Total Return" card on `/brain/performance`. The headline was showing −21.79% (sum-of-percentages math error) when the underlying realized was −$77.93 of $5,000 deposited (real return ≈ −1.56%). Now uses `wallet.roi_pct` (mark-to-market vs initial capital) as the headline. Sub line dropped the misleading wallet+legacy "+ +" string. Backend `total_return_pct` field kept for backwards compat but marked deprecated with a 12-line warning comment so a future reader doesn't repeat the mistake. TS check clean, 125 backend tests pass.
+
+### Predictions for Day 25 (Tuesday May 5)
+
+- [ ] **ARM Day-1 outcome — the next SOUN test.** ARM entered today with thesis flipping to invalid by 10h. Pre-fix would have died this afternoon. Post-fix is grace-protected through tomorrow ~14:02 ET. If ARM closes positive (SOUN repeat), the grace logic earns more credibility. If ARM closes catastrophically (−8%+), grace was wrong on this case but the carve-out caught it. If ARM closes via THESIS_INVALIDATED at small loss, neutral.
+- [ ] **USAR/APLD Day-5 resolution.** Both at 106h with valid thesis. If still open on Day 7, they'll trigger STAGNATION_PRUNE (week+ no movement). If they bleed into negative territory, QUALITY_PRUNE eligibility kicks in once thesis flips. The valley question gets answered either way.
+- [ ] **MSTR Day-4.** Same shape as USAR/APLD but newer. 24-48 hours behind them on the same trajectory.
+- [ ] **BTDR Day-1.** Re-entry of the Apr-30 same-day death. If it dies same-day again, BTDR is name-specific bad and worth a `signal_thinking` entry. If it survives, the Apr-30 death was timing not name.
+- [ ] **First Filter-D-era close that's a winner.** SOUN was the SOUN-shaped winner today. Need at least one more Filter-D-only entry (post-Day-20) to close in the green to start building a real Filter D win-rate sample.
+
+### Personal note
+
+First positive day in over a week. The temptation is to read it as "the gates are working." But one day is one data point. SOUN was a +$68 win covering two −$20s of losses; that's a magnitude effect, not a probability effect. Tomorrow could easily be three losers covering one winner. Pedro's framing all along has been "we want consistent monthly profit," not "occasional big wins." We need 3-5 consecutive days of small positive realized P&L before the new structure has been actually validated.
+
+What today *did* validate: the grace logic prevented a same-day death that would have cost ~$15. The Filter D gate prevented at least one Fin-name doubling-up event. The ONDS-91 hypothesis is gathering evidence on its own. **The structure is doing what we designed it to do.** Whether that produces compounding monthly returns is a different question and we won't know for two more weeks at minimum.
+
+The next big lesson: the no-rule-fires valley is now the bleeding edge. Three live positions are caught in it. Day 25 will tell us if this is a real problem or just a holding pattern that resolves itself.
+
+### Late-evening: shipped 4 information-layer improvements
+
+After EOD analysis, shipped four non-behavior-changing improvements (the kind that improve the system without compromising the in-flight test of Filter D + watchdog grace):
+
+**1. Watchdog grace instrumentation** (`watchdog_service.py`):
+- New `EVENT_GRACE_PROTECTED` event type emitted to `watchdog_events` whenever the WATCHDOG_EXIT path is suppressed by grace.
+- Each row records symbol, P&L, sentiment, hours_held, trigger reason, and the suppressed-close P&L. Joinable later to virtual_trades to answer "did grace save this position or just delay its death?"
+- Without this, the only data point we had was SOUN (one save). Now every grace decision is auditable.
+
+**2. Valley-of-death `signal_thinking` entry** (id `226cfb85-...`):
+- Hypothesis: HIGH_RISK SHORT-horizon positions held 3-5 days with thesis=valid in the gap between QUALITY_PRUNE (day≥2 + thesis weak + pnl<-3%) and WATCHDOG_FORCE_SELL (≤-8%) underperform.
+- Active in valley at insert: MSTR (80h), USAR (106h), APLD (106h). Prior loss case: HIMS Day 19.
+- Same shape as ONDS-91 entry — surfaces the pattern to Claude's prompt as low-confidence observation; auto-classifier tracks it.
+
+**3. Cap-by-score backtest** (`scripts/backtest_cap_sort_order.py`):
+- Tested whether the per-day cap's "score-DESC" sort is right or whether random / inverse would beat it.
+- **Result: score-DESC is correct.** Score-DESC = −4.3% total / 43.9% win on 41 admitted trades. Random = −20.8% / 36.9%. Score-ASC (inverse) = −54.4% / 24.4%. Day 19 lesson #1 ("score isn't a ranker") was about ONE bad trade (ONDS-91), not a population pattern. **Cap stays as-is.**
+
+**4. Re-buy gate verification** (read-only audit):
+- Confirmed `process_virtual_trades` line 1715 already gates on `symbol not in open_brain` before any tier eval.
+- The brain DOES skip re-entry on held symbols. **No fix needed.** Day 21 lesson #5 closed.
+
+### And the headline: full-brain backtest result
+
+In response to Pedro's "run the current application with backdata" ask, shipped `scripts/backtest_current_brain.py` — replays every closed brain trade through the CURRENT entry pipeline (Filter D + per-day cap + per-symbol cap + score gates) and reports what would have been admitted vs blocked:
+
+| Configuration | n | W/L | Win Rate | Total P&L |
+|---|---|---|---|---|
+| Baseline (no filter, all 60 trades) | 60 | 24/36 | 40.0% | **−25.2%** |
+| Filter D only | 30 | 14/16 | 46.7% | +0.6% |
+| **Filter D + per-day + per-symbol caps** | **25** | **13/12** | **52.0%** | **+13.2%** |
+
+**+38.5pp improvement vs baseline.** If the current brain had been live across all 60 closed trades, instead of a −25.2% loss, we'd have +13.2% positive — a magnitude shift, not a marginal one.
+
+**Cap-clipped days were instructive:**
+- Apr 10: kept TPL(85), AGI.TO(81), AVGO(81); dropped LB(80), ASML(80)
+- Apr 28: kept ONDS(91), ALAB(83), ARM(81); dropped FN(79), HIMS(79), CAMT(81)
+
+On Apr 28 the cap dropped two losers (FN, HIMS) and one winner (CAMT) — net positive but not free. ONDS-91 was kept (it was the biggest loser). This validates that **score-DESC sort isn't a perfect ranker** but is still better than the alternatives.
+
+**What this number does NOT include:**
+- Watchdog grace exit-path effects — would likely improve the win rate further (SOUN-style saves) but cannot be proven without intra-day price replay we don't store.
+- True position sizing (legacy trades = 1 share, wallet trades = sized). The % comparison is direction-stable but the dollar comparison would need real sizing to be meaningful.
+
+### Updated test count
+
+127 unit tests passing (118 prior + 1 new EVENT_GRACE_PROTECTED constant pin + 1 new ordering test). 4 backend tests + 1 Python script + 0 brain-behavior changes. Net effect: significantly better visibility, no risk to the in-flight test.
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

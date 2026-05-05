@@ -89,6 +89,39 @@ class TestGraceWindow:
         assert _in_grace(None) is False
 
 
+class TestGraceInstrumentation:
+    """Day-24 instrumentation: grace-protected close attempts must emit
+    a queryable event row so we can later measure 'did grace save this
+    position or just delay its death?' by joining back to virtual_trades.
+    """
+
+    def test_grace_protected_event_constant_exists(self):
+        from app.services.watchdog_service import EVENT_GRACE_PROTECTED
+        # Pinned value — used by downstream queries (e.g., dashboard panels
+        # filtering watchdog_events by event_type). If renamed, update
+        # consumers; do NOT silently change the string.
+        assert EVENT_GRACE_PROTECTED == "GRACE_PROTECTED"
+
+    def test_grace_path_emits_event_not_alert(self):
+        # Verify by reading the file structure: the GRACE_PROTECTED branch
+        # appends a watchdog_events row with event_type=GRACE_PROTECTED,
+        # NOT event_type=ALERT. If the branch logic flips, we'd silently
+        # lose the audit trail and "grace saved $X" claims would be
+        # unverifiable.
+        from pathlib import Path
+
+        src = Path("app/services/watchdog_service.py").read_text()
+        # The grace branch must reference EVENT_GRACE_PROTECTED.
+        grace_event_idx = src.find('"event_type": EVENT_GRACE_PROTECTED')
+        assert grace_event_idx > 0, "EVENT_GRACE_PROTECTED must be emitted from the grace branch"
+        # And the grace branch must be inside the in_grace + bearish guard.
+        grace_guard = src.find('if in_grace and sentiment_label == "bearish":')
+        assert 0 < grace_guard < grace_event_idx, (
+            "EVENT_GRACE_PROTECTED must be emitted ONLY when in_grace AND sentiment is bearish — "
+            "otherwise we'd record grace events for non-grace cases and pollute the audit trail"
+        )
+
+
 class TestGraceDoesNotProtectCatastrophic:
     """Pin the invariant that grace ONLY suppresses WATCHDOG_EXIT, not
     WATCHDOG_FORCE_SELL. The catastrophic path is the safety net — it

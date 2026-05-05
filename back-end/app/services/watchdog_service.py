@@ -113,6 +113,13 @@ EVENT_ALERT = "ALERT"
 EVENT_CLOSE = "CLOSE"
 EVENT_HOLD = "HOLD_THROUGH_DIP"
 EVENT_RECOVERY = "RECOVERY"
+# Day-24 instrumentation: emitted when the WATCHDOG_EXIT path was about
+# to fire (bearish sentiment + slight loss) but was suppressed by the
+# new_position_grace_hours guard. Queryable via watchdog_events with
+# event_type = GRACE_PROTECTED — enables "did grace save this position
+# or just delay its death?" analysis by joining back to virtual_trades
+# at +24h/+48h/+5d and reading the eventual outcome.
+EVENT_GRACE_PROTECTED = "GRACE_PROTECTED"
 
 
 @dataclass
@@ -454,6 +461,14 @@ async def run_watchdog() -> dict:
             # track — if grace-protected positions consistently recover, the
             # grace is doing real work; if they consistently bleed further,
             # the threshold needs revisiting.
+            #
+            # Day 24 instrumentation: also emit a GRACE_PROTECTED event row
+            # so we have queryable history. Without this we can't quantify
+            # the grace's effectiveness beyond per-incident anecdotes
+            # (SOUN saved, FN/NBIS/BTDR pre-fix died). Join later: for any
+            # GRACE_PROTECTED event from N hours ago, find the same trade_id
+            # in virtual_trades and read its current state (still OPEN, or
+            # CLOSED with what reason and what P&L).
             if in_grace and sentiment_label == "bearish":
                 logger.warning(
                     f"Watchdog: {symbol} GRACE PROTECTED from WATCHDOG_EXIT "
@@ -461,7 +476,19 @@ async def run_watchdog() -> dict:
                     f"P&L {pnl_total_pct:+.1f}%, sentiment={sentiment_label}). "
                     f"Routed to alert path. Catastrophic ≤-8% still fires."
                 )
-            pending_events.append({**event_base, "event_type": EVENT_ALERT, "action_taken": "warned", "notes": reason})
+                pending_events.append({
+                    **event_base,
+                    "event_type": EVENT_GRACE_PROTECTED,
+                    "action_taken": "grace_protected",
+                    "notes": (
+                        f"WATCHDOG_EXIT suppressed: held {hours_held:.1f}h < "
+                        f"{settings.new_position_grace_hours}h grace. "
+                        f"Trigger reasons: {reason}. "
+                        f"Pre-fix would have closed at P&L {pnl_total_pct:+.1f}%."
+                    ),
+                })
+            else:
+                pending_events.append({**event_base, "event_type": EVENT_ALERT, "action_taken": "warned", "notes": reason})
 
             # Only send Telegram if the move is significant enough
             if abs(pnl_total_pct) >= settings.watchdog_min_notify_pct:
