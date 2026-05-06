@@ -3174,6 +3174,154 @@ Day 30 is the natural decision point: 7 more trading days from today, ~12-18 exp
 
 ---
 
+## Day 26 — May 6, 2026 (Wednesday)
+
+**Metrics:** First net-loss day since the May-1 stretch. **FN closed −$14.12** (−3.41% via WATCHDOG_EXIT after 24h) — second FN failure in 7 days. **Cumulative wallet-era: −$20.46** (was −$6.34 yesterday). 3 new entries (NEXT, SWKS, SMCI) — all clean Filter D shape, but **SMCI already thesis=weakening at 5h.** 7 positions open, 6 wallet + CNQ legacy. Win rate dipped: 36.8% (was 38.9%).
+
+### The headline: FN is now name-specific bad
+
+**FN closed −$14.12 / −3.41% via WATCHDOG_EXIT after 24 hours and 23 minutes** — almost exactly when grace expired.
+
+| Entry | Score | Held | Outcome |
+|---|---|---|---|
+| Apr 28 14:02 | 79 | 8 min | −2.21% WATCHDOG_EXIT (same-day) |
+| **May 5 16:02** | **87** | **24h** | **−3.41% WATCHDOG_EXIT** |
+
+**Two failures of FN in 7 trading days, both via the same exit path, at scores spanning 79-87.** This isn't score-related noise — FN itself is the problem. Worth a `signal_thinking` entry tomorrow: "FN-style high-volatility names with post-IPO dilution risk underperform regardless of entry score."
+
+The grace mechanism worked exactly as designed: it protected FN for the full 24 hours. But the position was still a losing trade. **Grace bought time; it didn't change the outcome.** Compare to SOUN/ARM/USAR (which won post-grace) — those had thesis flips that the system eventually recognized. FN never gave a clean exit signal until the watchdog soft-trigger finally fired post-grace.
+
+**Critical timing:** the watchdog fired at 24h+23min — right after grace expired. This isn't "grace caused the loss" (the loss was already happening) but it IS evidence that grace can mask deterioration that the watchdog would otherwise have caught at hour 4-12. The honest read: grace is a 50/50 bet. Sometimes (SOUN/ARM/USAR) it lets winners cook. Sometimes (FN) it just delays the inevitable.
+
+### Today's full activity
+
+**Closes (1):**
+- 16:25 FN WATCHDOG_EXIT −3.41% / −$14.12, held 24h
+
+**Entries (3 — clean Filter D shape):**
+- 14:02 NEXT score 78 HIGH_RISK SHORT $415 — fresh, in grace
+- 14:02 SWKS score 79 HIGH_RISK SHORT $461 — fresh, in grace
+- 16:02 SMCI score 80 HIGH_RISK SHORT $374 — **entered with thesis already weakening at 5h, the second time this week**
+
+SMCI is the next test case. Same shape as ARM (Day 24): thesis flipped fast, grace protecting it. ARM won. FN lost. SMCI is the third in this cohort.
+
+### Day-25 predictions vs reality
+
+| Prediction | Outcome |
+|---|---|
+| APLD resolution at 168h | Still open at 151h. **17h to STAGNATION_PRUNE.** Tomorrow tells us. |
+| MSTR Day-5 | Still open at 125h, thesis=valid. Same age USAR was when it closed +13.26%. |
+| FN at 87 — Day-1 | ✗ **Died at 24h via WATCHDOG_EXIT for −$14.12.** Grace expired and watchdog fired. |
+| BTDR Day-2 | Survived to 53h, thesis flipped to **weakening**. Past grace. In the same valley shape as MSTR. |
+| First grace event recorded | Still 0 in `watchdog_events`. **Two days post-instrumentation, zero events.** Either backend wasn't restarted with the new code, OR no fresh position triggered the soft-watchdog inside grace. |
+| Cumulative crosses positive | ✗ Lost ground (−$6.34 → −$20.46). Need bigger winner this week to flip positive. |
+
+3 of 6 favorable. The FN loss and the unflipped cumulative are the cost of today.
+
+### Currently open (7 positions)
+
+| Symbol | Age | Score | Bucket | Thesis | Notes |
+|---|---|---|---|---|---|
+| SMCI | 5h | 80 | HIGH_RISK | **weakening** | In grace. ARM/FN-shaped test #3 |
+| NEXT | 7h | 78 | HIGH_RISK | n/a | Fresh, in grace |
+| SWKS | 7h | 79 | HIGH_RISK | n/a | Fresh, in grace |
+| BTDR | 53h | 78 | HIGH_RISK | **weakening** | Past grace, no exit triggered yet |
+| MSTR | **125h** | 77 | HIGH_RISK | valid | USAR-equivalent age (Day 5) |
+| APLD | **151h** | 75 | HIGH_RISK | valid | **17h to STAGNATION_PRUNE** |
+| CNQ | 461h | 79 | SAFE_INCOME | valid | Legacy, $0 |
+
+**$2,496 deployed across 6 wallet positions.**
+
+### Hypothesis status
+
+- **`journal_day21_onds91_pattern`** (HIGH_RISK score≥88): 1 supporting / 0 contradicting. Unchanged today. **FN at 87 was just below threshold.** If we'd set the threshold at 85 we'd have 2 supporting now. Worth a Day-30 review.
+- **`journal_day24_no_rule_fires_valley`** (HIGH_RISK any): now 1S / 2C (FN added a supporting since it was a HIGH_RISK loss). Still inflated by broad pattern_match.
+
+### Lessons today (the real ones)
+
+**1. Grace is not a magic bullet — it's a coin flip.** Pre-fix outcomes for grace-protected configurations: 100% deaths (FN/NBIS/BTDR same-day). Post-fix: 3 wins (SOUN/ARM/USAR) + 1 loss (FN today). **Grace converts ~60-75% of would-be same-day deaths into longer-hold winners, but ~25-40% are still real losers — grace just delays them by 24h.** That's the honest framing. Two of four cases is still much better than zero of four.
+
+**2. The score-based ONDS-91 hypothesis missed FN at 87.** I set the threshold at >=88 because Day 19 ONDS was at 91. But FN at 87 just produced exactly the same kind of loss. **The actual pattern might be HIGH_RISK score >= 80, not >= 88.** If we widen the threshold, we capture FN. If we widen too far, we capture winners like ALAB at 83 (Apr 30 +2.4% win) and the hypothesis decays. The right move: collect 5-10 more HIGH_RISK 80+ closes, then re-fit the threshold based on the actual loss/win distribution by score band.
+
+**3. Name-specific patterns are real and we don't track them.** FN failed twice in 7 days at different scores. ONDS failed twice (Day 19 + Day 21) at score 91. **The brain has no per-symbol "this name has been losing recently, raise the threshold" memory.** Possible future fix: a `symbol_recent_outcomes` view that surfaces the last 30 days of trades on a given ticker into Claude's prompt. Defer until Day 30.
+
+**4. The instrumentation may not be live.** Two days post-`EVENT_GRACE_PROTECTED` ship, zero events recorded. Plausible reasons:
+   - Backend wasn't restarted (no way to verify from data alone)
+   - No qualifying watchdog event happened inside grace (also plausible — most positions have thesis=valid, which suppresses the soft-trigger)
+   - The instrumentation IS wired but the code path that emits hasn't been hit
+   
+   **Tomorrow:** verify by grepping the running backend's logs for the new logger.warning line "GRACE PROTECTED from WATCHDOG_EXIT". If the line is absent, the new code isn't loaded — restart needed.
+
+**5. The valley is hardening into "Day 5-7 = high-stakes resolution window."** USAR resolved at 125h (+13%). MSTR is at 125h now. APLD is at 151h. **Day 5-7 is when valley-cohort positions resolve.** The deeper pattern: HIGH_RISK SHORT-horizon entries that survive past grace AND past the watchdog soft-trigger spend 4-7 days waiting for either signal-flip or thesis-tracker-flip. The exit isn't from time-decay (we never hit STAGNATION_PRUNE), it's from the underlying signal evolving. **The brain's existing infrastructure is doing the work; the new gates just give it time to run.**
+
+**6. Today closed the door on two of yesterday's predictions and opened one.** APLD's STAGNATION_PRUNE test is now imminent (within 17h). MSTR's USAR-mirror test is live (same age, similar score). SMCI's grace-recovery test is fresh. **Three live experiments running into Day 27.**
+
+### Predictions for Day 27 (Thursday May 7)
+
+- [ ] **APLD STAGNATION_PRUNE.** Hits 168h (~7 days) at 14:02 ET tomorrow. If still open with no exit triggered by then, STAGNATION_PRUNE fires automatically. Outcome will be either small loss / flat (which validates the gate) or by some miracle a positive signal flip first.
+- [ ] **MSTR resolution.** At 125h with valid thesis. USAR resolved at this exact age yesterday. Same shape, different name.
+- [ ] **SMCI Day-1 outcome.** Third in the ARM/FN cohort (thesis weakening early, grace protecting). Coin flip whether it's a win or a loss.
+- [ ] **First GRACE_PROTECTED event.** If still 0 by EOD tomorrow, debug the wiring — the instrumentation should have caught at least one position by now (BTDR earlier today was thesis-weakening + grace-eligible).
+- [ ] **Cumulative wallet-era flips positive.** Currently −$20.46. Needs ~+$25 of net realized P&L tomorrow. MSTR and/or APLD resolving positive could do it.
+- [ ] **NEXT/SWKS Day-1 outcomes.** Both at score 78-79 in the band that's been winning post-Filter-D. The next data points for the score-band hypothesis.
+
+### Personal note
+
+After two positive days, today's −$14 stings disproportionately. The honest math: **5 trading days post-Filter-D, +$41.13 net realized** (USAR +$60 + ARM +$11 + SOUN +$68 = +$140 wins, ONDS −$25 + TFC −$13 + FN −$14 + BTDR −$10 = −$62 prior + −$14 today = −$76 losses, plus the SOUN/ALAB/CRWV mix from Apr 30). Still positive over the period. But the trajectory is fragile.
+
+What I want to remember: **FN's loss was the system working correctly, not a failure.** Grace protected it for 24h, then the watchdog correctly identified it as a bleeder and closed it before catastrophic. The −$14 is the cost of running the experiment. The alternative (no grace, kill at 8 min like Apr 28) was a smaller loss — but we'd never have known whether FN could recover.
+
+The discipline question for tomorrow: **don't react to one bad day.** Three brain-behavior changes shipped this week (Filter D, watchdog grace, per-symbol cap) plus four information-layer improvements (instrumentation, valley hypothesis, two backtest scripts) plus the closed-trade UI expansion. The data needs more time. Day 30 (Monday) is the agreed re-evaluation point.
+
+But tomorrow's APLD at 168h is a real test. If APLD closes catastrophic (−6%+) via STAGNATION_PRUNE, the valley question becomes urgent and we revisit the gate timing. If APLD closes flat or positive, the valley resolves itself and we trust the existing infrastructure.
+
+### Deeper lessons (the ones I missed in the first pass)
+
+After Pedro pushed back on the surface lessons above, five harder observations:
+
+**7. The brain is now single-strategy.** All 6 wallet positions are HIGH_RISK SHORT-horizon. Filter D's natural output IS this cohort — the gate effectively forced concentration. **When this cohort fails (e.g., a sector-wide tech selloff), the entire brain fails simultaneously.** Pre-Filter-D we had bucket diversity that hid this risk. We've never named or measured it. **Worth a Day-30 review: should we carve out 1-2 slots for HIGH_RISK LONG-horizon or a different bucket entirely, even if backtest says they underperform on average?** Concentration risk isn't visible in average-return numbers; it's visible in covariance.
+
+**8. The reentry problem was structural — and we just fixed half of it.** FN failed Apr 28 at 79, then again May 5 at 87. ONDS failed Day 19 at 91, then Day 21 at 91. The per-symbol cap (1/day) only blocks intra-day re-attempts; across days, the brain re-tried losers freely. **Backtest evidence: 2 of 2 closed re-entries within 7 days of a WATCHDOG_EXIT also lost (VZ Apr 14→16, FN Apr 28→May 5).** Both re-entries also exited via WATCHDOG_EXIT — same illness, same outcome.
+
+**9. The "weakening past grace" cohort is growing and we don't know its resolution distribution.** BTDR at 53h is in it now. SMCI at 5h is heading there. ARM was in it (won). FN was in it (lost). **2-of-2 splits don't tell you anything.** The next 5 weakening-past-grace closes are the data — until we have them, claims that "weakening positions resolve naturally" are just hope. Worth tracking explicitly.
+
+**10. Cumulative win rate is now BELOW baseline.** 36.8% < 40% all-time baseline. The post-Filter-D 50% looks good in isolation but **the cumulative number is what a real account holder cares about.** We're 5 closed wallet trades into the new structure; one more loss day and we're decisively below baseline. Worth tracking explicitly: *when does cumulative cross back above 40%?*
+
+**11. Single-day variance is huge — don't update from 1-day P&L.** Day 24: +$30. Day 25: +$71. Day 26: −$14. **Single-day swings of $40-$70 are normal noise on a $5k base.** I almost flipped the cap-sort on Day 25's data; today's data would have flipped it again the other way. **The discipline is to stop updating from single days and only re-evaluate on N-day averages.** Day 30 is still the right re-evaluation point.
+
+### Late-evening ship: WATCHDOG_EXIT cooldown (lesson #8)
+
+Acted on the only one of the five deeper lessons that had a clean backtest + mechanism. Per the "backtest before brain changes" memory rule, validated first.
+
+**Backtest:** 13 historical WATCHDOG_EXIT closes. 3 had subsequent re-entries within 7 days (VZ, FN, BTDR-still-open). Of the 2 that have closed: **both lost (VZ −2.31%, FN −3.41% — both via WATCHDOG_EXIT again).** 100% loss rate, n=2. Small but unambiguous, paired with the mechanism.
+
+**Mechanism:** WATCHDOG_EXIT signals the *name* is bleeding in the current regime. The score moved (FN: 79→87) but the underlying pattern didn't. Score-based gates can't catch this; we need name-level memory.
+
+**Ship:**
+- New config: `brain_watchdog_exit_cooldown_hours: int = 168` (7 days, matches the watchdog/STAGNATION_PRUNE timeframe)
+- New `watchdog_cooldown_symbols` set populated at the start of `process_virtual_trades` from any WATCHDOG_EXIT or WATCHDOG_FORCE_SELL closes within the cooldown window
+- Entry gate now checks `symbol not in watchdog_cooldown_symbols` alongside the existing `cooldown_brain_symbols` (THESIS_INVALIDATED). Two separate sets, two separate log lines.
+- 6 regression tests pinning the config, the wiring, and the orthogonality of the two cooldowns.
+
+**Total: 133 tests pass.** Same shape as previous gate ships — small surgical change, documented mechanism + backtest, one-line revert (set cooldown to 0).
+
+**Reverts:** `brain_watchdog_exit_cooldown_hours = 0` disables instantly. No code revert needed.
+
+**Invalidation criterion:** if 5+ post-cooldown re-entries (>7 days after a WATCHDOG_EXIT) win in the next 4 weeks, the cooldown is too long. Bring it down to 72h (3 trading days) and re-evaluate. If 5+ re-entries on the SAME name across MULTIPLE weeks all keep losing, extend to 14 days.
+
+### Updated test count: 133
+
+(127 prior + 6 new watchdog cooldown tests)
+
+### Updated predictions for Day 27
+
+Adding to the existing list:
+
+- [ ] **Watchdog cooldown firing visible in logs.** After backend restart, "Watchdog re-buy cooldown active on N symbols" should appear in scan logs. Current cooldown candidates (last 168h of WATCHDOG_EXIT closes): TFC, BTDR, FN, NBIS, FN — five symbols (FN appears twice, deduped to one). The brain should not enter any of these symbols tomorrow.
+- [ ] **First grace-protected log line.** Same as before — if 0 events in `watchdog_events` after restart with the new code, debug the wiring.
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

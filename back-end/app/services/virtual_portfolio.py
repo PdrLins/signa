@@ -1386,6 +1386,34 @@ def process_virtual_trades(
                 f"({cooldown_minutes}min): {sorted(cooldown_brain_symbols)}"
             )
 
+    # Day 26: WATCHDOG_EXIT cooldown. Separate from the thesis-rebuy
+    # cooldown above because the mechanism and timeframe are different:
+    # - thesis-rebuy = AI changed its mind quickly, wait 60min for
+    #   conviction to settle. Short window because it's about thrash.
+    # - watchdog-exit = the name is bleeding in the current regime,
+    #   re-buying within a week historically loses 100% (n=2). Long
+    #   window because the issue is name-specific behavior, not AI noise.
+    # Two sets are merged at the entry gate; either one excludes a symbol.
+    we_cooldown_hours = settings.brain_watchdog_exit_cooldown_hours
+    watchdog_cooldown_symbols: set[str] = set()
+    if we_cooldown_hours > 0:
+        we_cutoff = (datetime.now(timezone.utc) - timedelta(hours=we_cooldown_hours)).isoformat()
+        we_rows = (
+            db.table("virtual_trades")
+            .select("symbol, exit_date")
+            .eq("source", "brain")
+            .eq("status", "CLOSED")
+            .in_("exit_reason", ["WATCHDOG_EXIT", "WATCHDOG_FORCE_SELL"])
+            .gte("exit_date", we_cutoff)
+            .execute()
+        ).data or []
+        watchdog_cooldown_symbols = {r["symbol"] for r in we_rows if r.get("symbol")}
+        if watchdog_cooldown_symbols:
+            logger.info(
+                f"Watchdog re-buy cooldown active on {len(watchdog_cooldown_symbols)} symbols "
+                f"({we_cooldown_hours}h): {sorted(watchdog_cooldown_symbols)}"
+            )
+
     # Resolve once: brain runs single-tenant, every insert is stamped with
     # this user_id so the rows are correctly attributed and queryable.
     brain_user_id = queries.get_brain_user_id()
@@ -1715,6 +1743,7 @@ def process_virtual_trades(
             and symbol not in open_brain
             and symbol not in open_watchlist  # dedup with watchlist track
             and symbol not in cooldown_brain_symbols  # post-THESIS_INVALIDATED cooldown
+            and symbol not in watchdog_cooldown_symbols  # Day 26: post-WATCHDOG_EXIT cooldown
         ):
             # ── Rotation: brain at max capacity, only rotate if the new
             # ── signal is meaningfully better (+5 points) than the weakest

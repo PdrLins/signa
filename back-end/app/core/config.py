@@ -177,6 +177,18 @@ class Settings(BaseSettings):
     # explicitly named this fix. Set to 0 to disable.
     brain_thesis_rebuy_cooldown_minutes: int = 60
 
+    # Day 26: post-WATCHDOG_EXIT cooldown. When the watchdog closes a
+    # position via the bearish-sentiment + slight-loss path (WATCHDOG_EXIT),
+    # the brain is blocked from re-entering that symbol for N hours.
+    # Backtest evidence: 2 of 2 closed re-entries within 7 days of a
+    # prior WATCHDOG_EXIT also lost (VZ Apr 14→16, FN Apr 28→May 5).
+    # Both re-entries also exited via WATCHDOG_EXIT — same illness, same
+    # outcome. The mechanism: WATCHDOG_EXIT signals the *name* is bleeding
+    # in the current regime, not just that one entry was poorly timed.
+    # Default 168h = 7 days = one full trading week, matching the watchdog
+    # / STAGNATION_PRUNE timeframe. Set to 0 to disable.
+    brain_watchdog_exit_cooldown_hours: int = 168
+
     # --- Trade Horizon (SHORT vs LONG) ---
     # SHORT: momentum trades, 1-7d hold, tight trail, every-scan thesis re-eval.
     # LONG: trend trades, up to 60d, wide trail, daily thesis re-eval (AFTER_CLOSE only).
