@@ -101,6 +101,12 @@ interface ClosedTrade {
   exit_price?: number
   peak_price?: number
   exit_context?: string  // human-readable explanation of why it was sold
+  // Day 26: full reasoning text for the expandable detail panel.
+  // entry_thesis = Claude's synthesis at insert time (the why-bought).
+  // thesis_last_reason = the most recent thesis re-eval (the why-sold,
+  // OR the most-recent state for non-thesis exits).
+  entry_thesis?: string
+  thesis_last_reason?: string
   trade_horizon?: 'SHORT' | 'LONG'
   direction?: 'LONG' | 'SHORT'
   is_wallet_trade?: boolean
@@ -686,6 +692,11 @@ export default function BrainPerformancePage() {
   const [watchdogExpandedSymbol, setWatchdogExpandedSymbol] = useState<string | null>(null)
   const [watchdogShowClosed, setWatchdogShowClosed] = useState(false)
   const [closedVisibleCount, setClosedVisibleCount] = useState(5)
+  // Day 26: which closed-trade row is expanded to show full entry/exit
+  // reasoning. Single-key Set so only one expands at a time (avoids
+  // walls-of-text on the dashboard). Key is `${symbol}-${exit_date}` for
+  // uniqueness across multiple closes of the same ticker.
+  const [expandedClosedKey, setExpandedClosedKey] = useState<string | null>(null)
 
   const { data: signalsData } = useQuery<{ signals: { symbol: string; is_discovered?: boolean }[] }>({
     queryKey: ['signals', 'discovered-check'],
@@ -1328,9 +1339,21 @@ export default function BrainPerformancePage() {
                   const daysHeld = rc.entry_date && rc.exit_date
                     ? Math.max(1, Math.round((new Date(rc.exit_date).getTime() - new Date(rc.entry_date).getTime()) / 86400000))
                     : null
+                  // Day 26: per-row expansion key. exit_date is the
+                  // discriminator when the same ticker has closed multiple
+                  // times (e.g., BTDR on Apr 30 + May 4).
+                  const rowKey = `${rc.symbol}-${rc.exit_date ?? i}`
+                  const isExpanded = expandedClosedKey === rowKey
+                  const hasReasoning = !!(rc.entry_thesis || rc.thesis_last_reason)
                   return (
-                    <Link key={i} href={`/signals/${rc.symbol}`}>
-                      <div className="flex items-start justify-between py-4 px-3 transition-opacity hover:opacity-80">
+                    <div key={rowKey}>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedClosedKey(isExpanded ? null : rowKey)}
+                        aria-expanded={isExpanded}
+                        aria-label={isExpanded ? `Collapse ${rc.symbol} details` : `Expand ${rc.symbol} details`}
+                        className="w-full text-left flex items-start justify-between py-4 px-3 transition-opacity hover:opacity-80"
+                      >
                         <div className="flex flex-col gap-1 min-w-0">
                           <div className="flex items-center gap-2">
                             {rc.is_win
@@ -1366,6 +1389,11 @@ export default function BrainPerformancePage() {
                                 {rc.entry_score}{rc.exit_score != null ? ` → ${rc.exit_score}` : ''}
                               </span>
                             )}
+                            {hasReasoning && (
+                              <span aria-hidden className="text-[10px] ml-auto" style={{ color: theme.colors.textHint }}>
+                                {isExpanded ? '▾' : '▸'}
+                              </span>
+                            )}
                           </div>
                           <div className="text-[10px] tabular-nums pl-[22px]" style={{ color: theme.colors.textHint }}>
                             {rc.is_wallet_trade && rc.position_size_usd != null && (
@@ -1392,8 +1420,41 @@ export default function BrainPerformancePage() {
                             </span>
                           )}
                         </div>
-                      </div>
-                    </Link>
+                      </button>
+                      {isExpanded && hasReasoning && (
+                        <div className="px-3 pb-4 pl-[34px] -mt-2 space-y-3" style={{ color: theme.colors.textSub }}>
+                          {rc.entry_thesis && (
+                            <div>
+                              <div className="text-[9px] uppercase tracking-wide font-semibold mb-1" style={{ color: theme.colors.textHint }}>
+                                Why bought · entry score {rc.entry_score ?? '—'}
+                              </div>
+                              <div className="text-[11px] leading-relaxed" style={{ color: theme.colors.text }}>
+                                {rc.entry_thesis}
+                              </div>
+                            </div>
+                          )}
+                          {rc.thesis_last_reason && (
+                            <div>
+                              <div className="text-[9px] uppercase tracking-wide font-semibold mb-1" style={{ color: theme.colors.textHint }}>
+                                Why closed · {rc.exit_reason ?? '—'} · exit score {rc.exit_score ?? '—'}
+                              </div>
+                              <div className="text-[11px] leading-relaxed" style={{ color: theme.colors.text }}>
+                                {rc.thesis_last_reason}
+                              </div>
+                            </div>
+                          )}
+                          <div className="pt-1">
+                            <Link
+                              href={`/signals/${rc.symbol}`}
+                              className="text-[10px] font-medium hover:underline"
+                              style={{ color: theme.colors.primary }}
+                            >
+                              View {rc.symbol} signal page →
+                            </Link>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )
                 })}
               </div>

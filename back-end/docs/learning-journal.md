@@ -3025,6 +3025,155 @@ On Apr 28 the cap dropped two losers (FN, HIMS) and one winner (CAMT) — net po
 
 ---
 
+## Day 25 — May 5, 2026 (Tuesday)
+
+**Metrics: TWO big wins. Net +$71.59 realized today** (USAR +$60.43, ARM +$11.16, no losses). **Wallet-era cumulative now −$6.34** — was −$108.54 just 4 days ago Friday. The brain is **94% recovered to flat** in 4 trading days under the new structure. Second consecutive positive day. 38.9% wallet-era win rate.
+
+### The headline: USAR proves the valley resolves both ways
+
+**USAR closed +$60.43 / +13.26% via SIGNAL after 125 hours (5.2 days).**
+
+USAR was the canonical "no-rule-fires valley" position from Day 24:
+- Entered Apr 30 14:02 at score 75
+- Day 24: 106h old, thesis=valid, no exit triggered, in the gap between QUALITY_PRUNE and WATCHDOG_FORCE_SELL
+- Yesterday's prediction: "If still open on Day 7, will trigger STAGNATION_PRUNE. If they bleed into negative territory, QUALITY_PRUNE eligibility kicks in."
+- **Today's reality: the SIGNAL flipped and it closed at +13.26% as a winner.** Position #2 of the "valley three" resolved positively. The patience paid.
+
+**This is the contradicting case for the valley-of-death hypothesis we wrote yesterday.** The auto-classifier picked it up — `journal_day24_no_rule_fires_valley` now sits at **2 contradicting / 0 supporting** observations (USAR + ARM both HIGH_RISK winners increment contradicting).
+
+### The other win: ARM proves watchdog grace works on the second try
+
+**ARM closed +$11.16 / +3.15% via THESIS_INVALIDATED after 29 hours.**
+
+ARM entered May 4 14:02, thesis flipped to invalid by hour 10. Pre-watchdog-grace fix: would have been killed yesterday afternoon at any negative P&L. Post-fix: grace held it through the night, thesis tracker eventually re-evaluated and exited cleanly at a small win.
+
+This is the **second SOUN-shaped grace save in 4 trading days** (SOUN +14% / +$68 yesterday, ARM +3% / +$11 today). The pattern is now n=2 wins. Without grace, both would have been small same-day losses (~$10-20 each). With grace, both became wins.
+
+### Today's full activity
+
+| Time | Symbol | Action | Score | Outcome |
+|---|---|---|---|---|
+| 16:02 | FN | BUY | 87 | OPEN — re-entry of Apr-28 same-day death |
+| 19:02 | USAR | SELL | 75→? | **+$60.43 / +13.26% SIGNAL** |
+| 19:02 | ARM | SELL | 77 | **+$11.16 / +3.15% THESIS_INVALIDATED** |
+
+**Today P&L: +$71.59.** Two wins, zero losses.
+
+### Day-24 predictions vs reality
+
+| Prediction | Outcome |
+|---|---|
+| ARM Day-1 outcome — next SOUN test | ✓ **Closed +3.15%** — grace logic earns more credibility |
+| USAR/APLD Day-5 resolution | ✓ USAR closed **+13.26%** (winner). APLD still open at 127h |
+| MSTR Day-4 | Still open at 101h, thesis=valid |
+| BTDR Day-1 outcome | ✓ Survived 29h, no same-day death (Apr-30 was timing not name) |
+| First Filter-D-era close that's a winner (non-SOUN) | ✓ **TWO of them today** (USAR, ARM) |
+
+5 of 5 predictions hit or favorable.
+
+### The valley hypothesis is decaying — but for the right reason
+
+I inserted `journal_day24_no_rule_fires_valley` yesterday with N=1 prior loss (HIMS). Within 24 hours it accumulated 2 contradicting observations. The contradiction count is moving fast — at this rate the hypothesis would be rejected within a week.
+
+**But there's a subtle issue:** the `pattern_match` for that hypothesis is just `{bucket: HIGH_RISK}` because `_trade_matches_pattern` can only check entry-time fields. It can't verify "spent time in the −3% to −7% range" or "held 3-5 days" — those require intra-trade snapshots we don't take. So **every HIGH_RISK close — winner or loser — increments the counter**, not just trades that actually passed through the valley state.
+
+USAR closed at +13.26% — was it ever in the valley? Yesterday at 106h it was thesis=valid with no exit triggered, so by definition yes. ARM at 29h closed at +3% — was never really in the valley (too young). But the auto-classifier doesn't know that.
+
+**Lesson #6 for the next pass:** hypotheses with intra-trade state conditions need a different evaluation mechanism. Either we capture peak-loss/min-loss/days-at-pnl-bucket on virtual_trades, OR the hypothesis is implicitly broader than its prose says. The ONDS-91 hypothesis is OK because it depends only on entry-time fields (bucket + score). The valley hypothesis is implicitly testing "are HIGH_RISK trades winning?" not the specific valley question.
+
+The decay is the *right answer for the broader question* (HIGH_RISK trades are winning more under the new structure) but the *wrong answer for the specific valley question* (we still don't know if positions trapped at −5% on Day 2-3 systematically die).
+
+### Currently open (5 wallet positions)
+
+| Symbol | Age | Score | Bucket | Hz | Thesis | Size | Notes |
+|---|---|---|---|---|---|---|---|
+| FN | 5h | **87** | HIGH_RISK | SHORT | n/a | $415 | In grace. Re-entry of Apr-28 same-day death |
+| BTDR | 29h | 78 | HIGH_RISK | SHORT | valid | $399 | Past grace, no exit triggered — survived Apr-30-style death |
+| MSTR | 101h | 77 | HIGH_RISK | SHORT | valid | $437 | Day-4 in valley, but USAR shows valley can resolve up |
+| APLD | **127h** | 75 | HIGH_RISK | SHORT | valid | $410 | **Day-5+ — longest-held wallet position** |
+| CNQ | 437h | 79 | SAFE_INCOME | LONG | valid | $0 | Legacy |
+
+**$1,661 deployed across 4 active wallet positions.** Down from $2,056 yesterday because two positions closed (returned cash) and one entered.
+
+**APLD is the next valley test.** If APLD also closes positive (Day 6 STAGNATION_PRUNE or earlier signal flip), the valley question is essentially answered: HIGH_RISK SHORT-horizon positions in this regime self-resolve given enough time. If APLD instead bleeds catastrophic, the valley needs a tighter exit gate.
+
+### Wallet trajectory
+
+| Day | Pocket | Cumulative realized |
+|---|---|---|
+| Apr 30 | $4,855 | −$108.54 |
+| May 1 | $3,539 | −$108.54 (no closes) |
+| May 4 | $4,146 | −$77.93 (+$30.61) |
+| **May 5** | **$4,613** | **−$6.34 (+$71.59)** |
+
+**4-day swing: +$102.20 of realized P&L recovery.** Almost back to flat from the position we were in at Day 19 lows.
+
+### Filter D firing — quiet day
+
+Only 1 block today: TFC at score 80 (Financial Services). Universe was smaller: 216 signals vs 329 Monday. The brain admitted exactly 1 entry (FN at 87) — well within the per-day cap of 3.
+
+**FN re-entry at score 87** is interesting. Apr 28 FN entered at score 79 and died same-day at −2.21%. Today FN entered at score 87 — same name but rated higher by the AI today. **Pattern-match-wise, FN at 87 falls just below the ONDS-91 hypothesis threshold (>=88).** But it's close enough to watch. If FN dies in the next 24-72h, it's another data point for "HIGH_RISK SHORT-horizon at 85+" being structurally weaker.
+
+### The structural narrative for the week so far
+
+5 trading days post-Filter-D ship (Apr 30 → May 5):
+- Day 20 (Apr 30): 5 closes, 2W/3L, net −$47 (carry-over from pre-fix entries)
+- Day 21 (May 1): 0 closes
+- Day 24 (May 4): 3 closes, 1W/2L, net **+$30.61** (SOUN +$68 covered ONDS −$25 + TFC −$13)
+- Day 25 (May 5): 2 closes, **2W/0L, net +$71.59** (USAR +$60, ARM +$11)
+- Cumulative: 7 closes since Filter D went live → **4W / 3L = 57% win rate**, total realized **+$55.47**
+
+**This is the post-Filter-D-era data we needed.** 7 closes is small but the direction is clear: 57% win rate beats the 40% baseline. The +$55 of realized P&L over 5 trading days, if sustained, projects to ~$220/month — meaningful relative to the $5k deposit.
+
+### ONDS-91 hypothesis status
+
+`journal_day21_onds91_pattern`: 1 supporting / 0 contradicting (unchanged today, no ONDS or 88+ HIGH_RISK closes). Patient.
+
+### Lessons today (the real ones)
+
+**1. The valley resolves both ways — patience pays in this regime.** USAR sat at "no-rule-fires" for 5+ days and closed +13%. Day 24's worry was that it would die catastrophic. The opposite happened. **Don't reflexively tighten exit gates just because a position is sitting. The thesis tracker and signal flip are doing the work the gates would have done — just on the system's timing, not ours.**
+
+**2. Watchdog grace is now n=2 wins.** SOUN +14% Monday, ARM +3% today. Pattern: thesis flips invalid in hour 0-12, grace holds the position, thesis tracker eventually exits when conditions actually warrant it. **Two for two on grace saves.** Sample is small but the mechanism is consistent.
+
+**3. Hypothesis pattern_match limitations matter.** The valley hypothesis is decaying because its pattern_match is too broad (any HIGH_RISK close increments). For hypotheses about intra-trade state (peak-loss, days-at-loss, etc.), we'd need to snapshot those fields on virtual_trades — currently they're computed on-the-fly only. **Future hypotheses with intra-trade conditions need either a new column or an explicit "pattern_match_loose" caveat in the notes.** The ONDS-91 hypothesis is OK because it's entry-time only.
+
+**4. The recovery is real but not yet validated.** 7 closes / 5 trading days / +$55 realized. The post-Filter-D era is clearly outperforming the pre-Filter-D era (40% → 57% win rate, −$108 → −$6 cumulative). But 7 closes is still early. The honest read: structural fixes are doing what we expected, but the next 10 closes will tell us if it's a real edge or a small-sample win streak.
+
+**5. Re-entries on names that previously died are the next test.** FN died Apr 28 same-day at score 79. Today FN re-entered at score 87. BTDR died Apr 30 same-day at score 78, today BTDR is at 29h with thesis=valid (Day-1 survival ✓). These are the symbol-specific resilience tests. If FN dies again at 87, FN is a name-quality issue. If FN wins, the Apr-28 outcome was timing-specific.
+
+### Predictions for Day 26 (Wednesday May 6)
+
+- [ ] **APLD resolution.** 127h old. If it crosses 168h (7 days) without closing, STAGNATION_PRUNE fires. Otherwise watching for the same SIGNAL/THESIS_INVALIDATED resolution USAR got.
+- [ ] **MSTR Day-5.** Following USAR's trajectory by 24h. Same pattern: if it resolves positive via SIGNAL or THESIS_INVALIDATED, valley question is settled.
+- [ ] **FN at 87 — Day-1.** First "high-conviction HIGH_RISK SHORT" entry post-Filter-D. Below the ONDS-91 hypothesis threshold (88) so neutral evidence.
+- [ ] **BTDR Day-2.** Past grace, thesis valid. Continues to test whether Apr-30's same-day death was timing or name.
+- [ ] **First grace-protected event recorded in `watchdog_events` table.** Today's instrumentation didn't produce any rows — either no fresh position triggered the watchdog soft-trigger, or the watchdog never escalated. If no rows in 48h, investigate whether the instrumentation is wired correctly.
+- [ ] **Cumulative realized turns positive.** Currently −$6.34. One small winner tomorrow flips it.
+
+### Personal note
+
+After two weeks of bleeding and three weeks of doubt, the brain just delivered a $71 net day with two wins and zero losses. Not because anything magic happened — the structural fixes (Filter D, watchdog grace, per-symbol cap) created the conditions for trades to survive and resolve naturally, and the existing infrastructure (signal tracker, thesis re-eval) did the rest.
+
+What I want to be careful about: **2 days isn't a trend.** A loss day would make today look like a coincidence. The honest framing is "the structure is producing the kinds of outcomes we designed it to produce." The cumulative −$6.34 is a *recovery from disaster*, not a *positive return*. We need cumulative realized to cross +$0 first, then sustain it across 10+ closes, before we can say the brain is profitable.
+
+But the data has shifted. Last week the question was "is anything we're shipping helping?" This week it's "how much of this is regime vs structure?" That's a much better question to be asking. The next 5 trading days will tell us.
+
+### Queued for Day 30 review (~Mon May 11)
+
+Items deferred today because the post-Filter-D sample is too small to act on. Re-evaluate when we have 12-15 closed wallet trades from the post-Filter-D era (currently 5):
+
+- **Re-run cap-sort backtest on post-Filter-D era only.** Today's check: 75-79 band is 3W/1L (the 1L died before watchdog grace shipped, so arguably 3W/0L). 90+ band is 0W/1L (ONDS). Directionally supports inverting the cap sort but n is too small. **The cap also never fires in the new regime** (no day has had >3 candidates yet). Both reasons to wait.
+- **Re-evaluate the valley-of-death hypothesis** (`226cfb85-...`). Currently 0 supporting / 2 contradicting after one day — but the contradicting count is inflated because the `pattern_match` is too broad (every HIGH_RISK close increments). Either rewrite with a narrower pattern OR add intra-trade snapshot columns to virtual_trades so the matcher can check held-time and peak-loss.
+- **Check `watchdog_events` for accumulated GRACE_PROTECTED rows.** Today's count was 0 — either no fresh position triggered the watchdog soft-trigger, or the instrumentation isn't wired correctly. After 5 trading days we should have at least a handful. If still 0, debug the wiring.
+- **Score band sample at n>=15 per band.** Re-check whether 75-79 still outperforms 80+ in the post-Filter-D era. If yes, this becomes a real signal and we consider the cap-sort flip OR a per-band sizing rule. If no, today's pattern was small-sample noise.
+- **Deferred Day-24 brain changes** still on hold pending data:
+  - Valley-of-death exit gate tightening (only if APLD/MSTR/BTDR die catastrophic)
+  - Stage 4 pattern_stats dossier injection (the architectural improvement that would make the gates redundant)
+
+Day 30 is the natural decision point: 7 more trading days from today, ~12-18 expected closes, enough sample to evaluate each item with confidence.
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

@@ -3090,7 +3090,7 @@ def get_virtual_summary() -> dict:
         db.table("virtual_trades")
         .select("symbol, entry_price, exit_price, pnl_pct, pnl_amount, is_win, "
                 "entry_date, exit_date, entry_score, exit_score, bucket, source, exit_reason, "
-                "peak_price, thesis_last_reason, tier_reason, trade_horizon, direction, "
+                "peak_price, entry_thesis, thesis_last_reason, tier_reason, trade_horizon, direction, "
                 "shares, position_size_usd, is_wallet_trade")
         .eq("status", "CLOSED")
         .order("exit_date", desc=True)
@@ -3321,6 +3321,15 @@ def get_virtual_summary() -> dict:
                 "exit_price": t.get("exit_price"),
                 "peak_price": t.get("peak_price"),
                 "exit_context": _build_exit_context(t),
+                # Day 26: full entry/exit reasoning for the inline detail
+                # panel on the closed-trade row. entry_thesis was the
+                # synthesis Claude wrote at insert time; thesis_last_reason
+                # is the most recent thesis re-eval explanation. Together
+                # they answer "why bought" and "why sold". Truncate at
+                # 800 chars each to keep payload bounded — full text is
+                # available in DB if needed.
+                "entry_thesis": (t.get("entry_thesis") or "")[:800],
+                "thesis_last_reason": (t.get("thesis_last_reason") or "")[:800],
                 "trade_horizon": t.get("trade_horizon") or "SHORT",
                 "direction": t.get("direction") or "LONG",
                 # Wallet metadata so the UI can render "$1,000 invested,
