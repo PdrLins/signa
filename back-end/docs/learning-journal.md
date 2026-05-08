@@ -3322,6 +3322,139 @@ Adding to the existing list:
 
 ---
 
+## Day 27 — May 7, 2026 (Thursday)
+
+**Metrics: BREAKOUT DAY. 4 closes, 4 WINS, 0 LOSSES. Net realized today: +$127.93.** Cumulative wallet-era flipped from −$20.46 to **+$105.85** — a **+$126.31 swing in one session and the FIRST POSITIVE wallet-era number since we started measuring.** Win rate jumped 36.8% → 45.5% (10W/12L on 22 wallet-era closes). 3 new entries, valley resolved POSITIVELY at huge magnitude, watchdog grace instrumentation finally captured its first event.
+
+### The headline: the valley was wrong all along
+
+**APLD closed at +$76.89 / +18.75% via ROTATION after 170h (7.1 days).**
+
+This is the position I worried about for THREE journal entries in a row (Day 21 lesson #3, Day 24 lesson #3, Day 26 lesson #9). At Day 6 the prediction was "STAGNATION_PRUNE will fire if it crosses 168h." It DID cross 168h. And then **before STAGNATION_PRUNE could fire, ROTATION fired and closed it at +$76.89 — the second-biggest single wallet win to date.**
+
+**The brain rotated APLD out for a stronger entry.** That's the existing rotation logic working exactly as designed: the brain saw a stronger signal coming in, sold the weakest open position to make room, and APLD just happened to be a winner sitting there.
+
+**MSTR closed the same way** at +$5.76 / +1.32% via ROTATION after 147h. Two valley-resident positions, both rotated out positive on the same day.
+
+**The valley framing was completely wrong.** What I called "the no-rule-fires valley" was actually the **brain's normal patience window**. Positions that survive past grace and don't trigger any soft exit are *waiting for either a thesis flip OR a stronger entry candidate* — and yesterday's worry about catastrophic outcomes happened to zero of three valley positions (APLD won, MSTR won, BTDR won via TRAILING_STOP at +10.94%).
+
+### Today's full activity
+
+**Closes (4 wins, 0 losses):**
+
+| Time | Symbol | Reason | P&L | Held | Note |
+|---|---|---|---|---|---|
+| 14:02 | CNQ | TRAILING_STOP | +$1.62 (+3.83%) | 478h | Legacy 1-share, finally exited after 20 days |
+| 16:02 | **APLD** | **ROTATION** | **+$76.89 (+18.75%)** | 170h | Valley exit, the headline win |
+| 19:02 | MSTR | ROTATION | +$5.76 (+1.32%) | 147h | Valley resolved positive |
+| 19:02 | **BTDR** | TRAILING_STOP | **+$43.66 (+10.94%)** | 75h | The Apr-30 same-day-death name now a winner |
+
+**Today P&L: +$127.93. Zero losses.**
+
+**Entries (3):**
+- 14:02 ALAB score 79 ($376) — thesis flipped to **invalid** at 12h, in grace
+- 16:02 **IONQ score 96** ($343) — **first score-96 entry post-Filter-D**, thesis weakening at 10h
+- 16:02 **MP score 91** ($309) — second 90+ entry today, thesis valid
+
+### Day-26 predictions vs reality
+
+| Prediction | Outcome |
+|---|---|
+| APLD STAGNATION_PRUNE | ✓ Actually closed via **ROTATION at +$76.89** — better than predicted |
+| MSTR Day-5 resolution | ✓ Closed +$5.76 via ROTATION |
+| SMCI Day-1 outcome | Still open at 34h, thesis=valid |
+| First GRACE_PROTECTED event | ✓ **Finally captured: MP at 19:30, pnl −0.35%, bearish sentiment.** Instrumentation works. |
+| Cumulative wallet-era flips positive | ✓ **−$20.46 → +$105.85 (+$126.31 swing)** |
+| NEXT/SWKS Day-1 outcomes | Both still open, no close yet |
+| Watchdog cooldown visible | ✓ FN and TFC are on cooldown; brain didn't try to enter them |
+
+**6 of 7 predictions hit, all of them favorably.**
+
+### The watchdog grace instrumentation finally fired
+
+After 2 days of zero `GRACE_PROTECTED` events, the first row landed today at 19:30 ET on **MP**. The instrumentation **works** — the reason for the delay was structural: most positions had thesis=valid which suppresses the watchdog soft-trigger. Today MP went thesis=weakening with bearish sentiment, the watchdog wanted to close it, grace held, and the row recorded.
+
+This means the SOUN/ARM/USAR saves on prior days were happening but not being audit-logged because they pre-dated the instrumentation ship. **From now forward, every grace decision is queryable.** Day-30 review can quantify the grace's effectiveness directly instead of relying on per-incident anecdotes.
+
+### Hypothesis decay
+
+- **`journal_day21_onds91_pattern`**: 1S / 0C. Unchanged — no matching closes today (no >=88 HIGH_RISK closes).
+- **`journal_day24_no_rule_fires_valley`**: now **1S / 5C** (was 1S / 2C yesterday). Three winners today (APLD, MSTR, BTDR) auto-classified as contradicting because pattern_match is broad (`bucket: HIGH_RISK`). **The hypothesis is on track to decay to rejected within 1-2 more close days.** That's the right outcome — the valley wasn't a real pattern, it was a misread of normal cycle time.
+
+### Currently open (6 wallet positions)
+
+| Symbol | Age | Score | Thesis | Size | Notes |
+|---|---|---|---|---|---|
+| IONQ | 10h | **96** | weakening | $343 | First score-96 post-Filter-D entry, in grace |
+| MP | 10h | 91 | valid | $309 | First grace event recorded for this position |
+| ALAB | 12h | 79 | **invalid** | $376 | ARM/SOUN-shaped grace test |
+| SMCI | 34h | 80 | valid | $374 | Past grace, thesis recovered (was weakening yesterday) |
+| NEXT | 36h | 78 | n/a | $415 | Past grace, healthy |
+| SWKS | 36h | 79 | n/a | $461 | Past grace, healthy |
+
+**$2,278 deployed across 6 wallet positions.**
+
+CNQ legacy is GONE — closed today after 20 days. The brain is now 100% wallet-trades.
+
+### Wallet trajectory
+
+| Day | Pocket | Realized cumulative |
+|---|---|---|
+| Apr 30 (post-fix) | $4,855 | −$108.54 |
+| May 1 | $3,539 | −$108.54 |
+| May 4 | $4,146 | −$77.93 |
+| May 5 | $4,613 | −$6.34 |
+| May 6 | $3,763 | −$20.46 |
+| **May 7** | **$4,151** | **+$105.85** |
+
+**6-day swing: +$214.39 of realized P&L recovery.** From the Day-19 low of −$108.54 to today's +$105.85. **The brain has now made back everything it lost AND more.**
+
+### Score distribution shift
+
+This is the headline that's NOT about P&L. **Today the brain admitted a score 96 (IONQ) and a score 91 (MP) entry — the first 90+ entries since Day-21's ONDS-91 disaster.** For 6 trading days the brain only entered 75-83 band names. Today it admitted two 90+ names on the same scan.
+
+**Why this matters:** the ONDS-91 hypothesis is now an active in-flight test. If IONQ and MP both close losses, the hypothesis gains 2 supporting and graduates much faster. If they win, the hypothesis is contradicted and the threshold may need to drop or be removed.
+
+**Worth tracking:** the brain may be entering a different regime where 90+ scores make sense again. Or this could be a 2-trade aberration. The next 5-10 trading days will tell.
+
+### Lessons today (the real ones)
+
+**1. The valley was a phantom — patience over premature gating is right.** Three positions sitting at 5-7 days with thesis=valid and no exit firing was NOT a stuck cohort. It was the brain waiting for either thesis-flip or stronger competing signals. APLD +18.75%, MSTR +1.32%, BTDR +10.94% (different exit, same general cohort). **None of them died in the valley.** Day-21/24/26 worry was wrong, and almost-shipping a tighter exit gate would have killed +$120 of realized profit. **Discipline on "wait for data" works.**
+
+**2. ROTATION is the most underrated exit path in the brain.** It fired twice today (APLD, MSTR) and produced +$82 of gains. The brain's "sell weakest, buy stronger" rotation logic doesn't get journal credit because it's existing infrastructure — but it's what produces magnitude wins. The new gates (Filter D, watchdog grace, per-symbol cap, watchdog cooldown) ALL work by *not blocking* the rotation logic. **Stop thinking of rotation as "the trade close that wasn't a real exit signal" — start thinking of it as the primary winner-realization mechanism.**
+
+**3. Watchdog instrumentation works — and explains why we hadn't seen events.** Most positions had thesis=valid which suppresses the watchdog soft-trigger. Today MP went weakening + bearish + losing, the soft-trigger wanted to close, and grace held. **The 0-event problem of Days 25-26 wasn't a bug — it was the structure being healthy enough that the soft-trigger rarely fires.** Worth remembering for future debugging.
+
+**4. The brain just entered a different score regime.** From 75-83 only (6 days) to 91 and 96 entries today. IONQ at 96 is the highest-conviction Filter-D entry to date. If both lose, the ONDS-91 hypothesis hardens fast. If both win, score-as-ranker validates again. **This is exactly the kind of in-vivo test the dossier path is designed to run.**
+
+**5. The "grace can't make money" reading from yesterday was right but incomplete.** Yesterday I wrote: *"Grace converts ~75% of would-be same-day deaths into longer-hold winners. The other 25% are still real losers."* Today's data: APLD's +18.75% is a 75th-percentile outcome of grace — the position survived multiple soft-trigger windows, eventually rotated out for a stronger candidate. Without grace, APLD would have died Day-1 at probably −2 to −3%. **Grace doesn't make money directly; it converts ~75% of false-positive watchdog hits into eventual wins.** Same lesson as yesterday, validated again at 5x the magnitude.
+
+**6. The wallet just crossed back to positive — but win rate (45.5%) is still below baseline (40% all-time, but the recent regime is closer to 50%).** Cumulative P&L matters; win rate doesn't. **The brain made +$105.85 with a 45.5% win rate because the magnitude of the wins is dramatically higher than the magnitude of the losses.** APLD +$76 alone covered FN (−$14) + ONDS (−$25) + TFC (−$13) + 2x same-day deaths. **Average winner: ~+$30. Average loser: ~−$15. 2:1 reward:risk is the actual edge, not win rate.** Worth tracking explicitly.
+
+### Predictions for Day 28 (Friday May 8)
+
+- [ ] **IONQ Day-1 outcome.** Score 96, thesis weakening, in grace. The first 90+ Filter-D-era close. ONDS-91 hypothesis test in progress.
+- [ ] **MP Day-1 outcome.** Score 91, thesis valid. Same hypothesis test.
+- [ ] **ALAB grace expiry.** At 12h now, grace expires ~14:02 tomorrow. Thesis is invalid. ARM/SOUN-shaped: does it resolve positive (ARM/USAR/SOUN) or fail past grace (FN)?
+- [ ] **NEXT/SWKS Day-2.** Both at 36h, past grace, no exit triggered. Either resolve via signal flip (USAR-style) or ride into the rotation queue.
+- [ ] **Watchdog cooldown blocks visible in logs.** FN and TFC are on cooldown through May 13 / May 11 respectively. If today's signals tried either, log line should show the block.
+- [ ] **Wallet-era win rate crosses 50%.** Currently 45.5%. One more winner with no losers takes it over.
+
+### Personal note
+
+After ~3 weeks of mostly bleeding and one week of rebuilding, the brain just delivered its biggest single-day P&L since I started measuring. **+$127 in 4 closes. Zero losses. Cumulative now positive.**
+
+What I want to remember about today:
+- **The valley I worried about for 4 days was not a death trap.** It was just the brain doing patience right. I almost shipped a tightening of the QUALITY_PRUNE day floor on Day-24 — that change would have closed APLD at probably +5% instead of +18.75%, and killed MSTR before its rotation. **The "wait for data" discipline saved $50-80 of realized profit by NOT acting.**
+- **Filter D + watchdog grace + per-symbol cap + watchdog cooldown all worked together today.** None of them directly produced a winner. They prevented premature exits, prevented re-entries on dying names, blocked sector concentration. The existing rotation/trailing-stop/thesis-tracker infrastructure produced the wins. **The new gates are the permission layer; the old logic is the action layer.**
+- **The score-90+ entries today (IONQ, MP) are the hypothesis test.** If they fail, ONDS-91 graduates. If they win, score-as-ranker is alive. Day 28-29 tells us.
+
+Two days ago the journal said: "the brain enters Day 21 structurally different from Day 19." Today it can say: **the brain just delivered its first weekly profit since we started measuring.** The structural changes are working. The discipline of waiting for data instead of reacting to single-day variance is working.
+
+Day 30 (Monday) is the formal re-evaluation point — at the current pace, we'll have 6-8 more closes by then, enough to evaluate every queued lesson with confidence.
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

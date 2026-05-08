@@ -186,14 +186,20 @@ interface VirtualSummary extends TrackStats {
   wallet?: WalletSummary | null
 }
 
-// Format an ISO timestamp as a short ET date, e.g. "Apr 6". Used so users
-// can verify closed-trade entry/exit against external sources like yfinance.
+// Format an ISO timestamp as a short ET date+time, e.g. "Apr 6, 10:02 AM".
+// Used on closed-trade rows so users can see exactly when entry and exit
+// fired (the brain scans at fixed minutes past the hour, so the time
+// reveals which scan triggered each event). Day 27: added time component
+// to answer Pedro's question "when did USAR get sold?" inline instead of
+// requiring a DB query.
 function fmtShortDate(iso?: string): string {
   if (!iso) return '--'
   try {
-    return new Date(iso).toLocaleDateString('en-US', {
+    return new Date(iso).toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
       timeZone: DEFAULT_TIMEZONE,
     })
   } catch {
