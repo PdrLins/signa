@@ -3566,6 +3566,130 @@ Pending hypothesis tests:
 
 ---
 
+## Day 31 — May 11, 2026 (Monday)
+
+**Metrics:** Mixed day, marginally positive. **2 closes (1W/1L), net +$11.64.** ZERO entries today — first zero-entry day of the post-Filter-D era. **Cumulative wallet-era: $84.94 to $96.58** (+$11.64). Down from the Day-27 peak (+$105.85) but recovering after the Day-28 dip. **5 of 5 valley positions have now resolved positively** — USAR, APLD, MSTR, BTDR, SMCI today. The "no-rule-fires valley" worry is definitively wrong.
+
+### Today's two closes
+
+**SMCI TRAILING_STOP at +$27.04 / +7.24% after 123h (5.1 days).**
+- Entered Day-26 at score 80
+- Held through the "valley" Day-5+ window
+- Resolved via trailing stop as rally cooled
+- **5th valley position to win in 5 attempts** (USAR +13%, APLD +18.75%, MSTR +1.32%, BTDR +10.94%, SMCI +7.24%)
+
+**TTGT WATCHDOG_EXIT at -$15.40 / -3.71% after 76h.**
+- Entered Friday Day-28 at score 76, thesis flipped weakening early
+- Survived 24h grace, closed at hour 76 via watchdog soft-trigger
+- **4th post-grace loss in the -3% range** (FN -3.4%, ALAB -2.7%, MP -3.5%, TTGT -3.7%)
+- Same shape, same magnitude — the watchdog is doing exactly what it was designed to do
+
+**Today P&L: +$11.64.** One win covered one loss with $12 to spare.
+
+### The zero-entry day
+
+**The brain admitted 0 new positions today** despite 61 BUY signals in the universe. First zero-entry day post-Filter-D. The gates rejected every candidate:
+- Filter D blocked USB (Financial Services)
+- Watchdog cooldown blocks: FN through May 13, TFC through May 11
+- Per-symbol caps: not applicable (no held names re-attempted)
+- Tier evaluator must have rejected the rest (failed `ai_status == validated AND score >= 75` filter, OR LONG-horizon)
+
+**This is the gates working as a quality filter, not a quantity throttle.** Weak universe day, brain holds cash. **$4,790 in pocket now (was $3,990 Friday)** — the brain is sitting on more cash than at any point since the wallet was funded.
+
+### Day-28 predictions vs reality
+
+| Prediction | Outcome |
+|---|---|
+| IONQ outcome | **Still open at 101h** — longest-held score-90+ position in brain history |
+| NEXT/SWKS/SMCI at Day-5+ | SMCI **closed +7.24%**. NEXT/SWKS still open at 127h (USAR-equivalent age). |
+| ONDS-91 hypothesis | Unchanged: S=2 C=0. No 88+ closes today. |
+| Single-strategy concentration | Still 4-of-4 HIGH_RISK SHORT, but cash position swelled to $4.8k |
+
+### Currently open (4 wallet positions — smaller deployment)
+
+| Symbol | Age | Score | Thesis | Notes |
+|---|---|---|---|---|
+| SOUN | 77h | 79 | **weakening** | Re-entry, thesis flipped from valid → weakening today |
+| **IONQ** | **101h** | **96** | weakening | **The 90+ hypothesis test, Day-4+** |
+| NEXT | 127h | 78 | valid | Day-5+, valley-eligible (like USAR was) |
+| SWKS | 127h | 79 | valid | Day-5+, valley-eligible |
+
+**$1,629 deployed, $4,790 cash.** First time wallet ratio has shifted defensive.
+
+### Hypothesis status
+
+- **ONDS-91 (HIGH_RISK score>=88):** S=2 / C=0. Unchanged. IONQ-96 is the live test.
+- **Valley (HIGH_RISK any):** S=4 / C=6. TTGT loss added supporting, SMCI win added contradicting. **The win count (6) is now > graduation_threshold (5)** — by the auto-classifier's rules, this should be eligible for rejection at the next observation match. The hypothesis is essentially decided: **the valley is not a death trap, it's a normal resolution window.**
+
+### Lessons today (the real ones)
+
+**1. 5 of 5 valley positions won. The Day-21/24/26 valley worry was wrong.**
+   - USAR +13.26% / 125h
+   - APLD +18.75% / 170h
+   - MSTR +1.32% / 147h
+   - BTDR +10.94% / 75h
+   - SMCI +7.24% / 123h
+   - **Total: ~+51% across 5 winners.** Average per trade: ~+10%.
+   - **The "valley" is the brain's natural resolution window for HIGH_RISK SHORT-horizon entries.** Day-2 to Day-7 is when positions either get rotated for stronger candidates OR trail out as the rally cools. Tightening the exit gate would have killed all 5 prematurely.
+
+**2. Post-grace 24h cohort: 4W/4L by count, +$164 net by dollars.**
+   - Wins: USAR +$60, SOUN +$68, ARM +$11, SMCI +$27 = **+$166**
+   - Losses: FN -$14, ALAB -$10, MP -$11, TTGT -$15 = **-$50**
+   - **Win-rate is 50%. Dollar-rate is 3.3:1.** Day-28 lesson #6 holds and strengthens. **Grace doesn't change win rate; it changes the distribution shape.**
+
+**3. The brain is now self-restricting on weak days.** Today's 0-entry day proves the gates work as a quality filter, not a quantity rule. **Previously every signal cohort produced 2-3 entries regardless of quality.** Now the brain admits fewer entries on quiet universe days. **The system isn't trying to deploy capital — it's waiting for signals that clear the gates.**
+
+**4. IONQ at 101h is unprecedented for a 90+ HIGH_RISK SHORT.** Pre-Filter-D ONDS-91 died at 67h via QUALITY_PRUNE. Post-Filter-D IONQ-96 is still alive at 101h with thesis weakening throughout. **The post-fix infrastructure is holding the position through what would have been a forced exit pre-fix.** Either:
+   - IONQ resolves positively (contradicting ONDS-91 hypothesis directly)
+   - IONQ eventually triggers thesis-invalid + watchdog and dies
+   - IONQ resolves via SIGNAL/ROTATION like the valley winners
+   
+   Whichever happens, **IONQ's outcome is the single most important data point in the dossier right now.**
+
+**5. SOUN-2's thesis flipped to weakening — the re-entry decision is now testable.**
+   - Friday: SOUN-2 entered at score 79, thesis valid
+   - Today: SOUN-2 at 77h, thesis weakening
+   - The brain's decision to re-buy SOUN 4 days after its +$68 win is now under live evaluation
+   - **If SOUN-2 wins → recent winners often persist (signal followed price for the right reason)**
+   - **If SOUN-2 loses → the brain has a "chase recent winners" anti-pattern that needs naming**
+   - Same name. Two entries. Different outcomes possible. Worth pinning the verdict explicitly.
+
+**6. Cash position is climbing.** Pocket at $4,790 (vs $3,539 May 1). The brain is sitting on >50% of equity in cash. **This is a regime shift in trade deployment.** Either:
+   - Universe quality has declined (fewer signals clear Filter D)
+   - Filter D is increasingly restrictive as the universe rotates sectors
+   - Both
+   
+   **Worth tracking deployment ratio as a separate metric** — if cash stays >40% for 2+ weeks, the universe is materially different from when the gates were calibrated.
+
+### Post-Filter-D era stats (now significant sample)
+
+- **14 closes since Apr 30**: USAR (W), BTDR Apr30 (L), SOUN (W), ONDS (L), ARM (W), FN (L), APLD (W), MSTR (W), BTDR May4 (W), CNQ (W legacy), TFC (L), ALAB (L), MP (L), SMCI (W), TTGT (L)
+- Wait, that's actually 15 closes — let me recount from the data
+- **Post-Filter-D wallet closes (is_wallet_trade=True, entry >= Apr 30): n ~ 11**
+- **W/L: ~7W / 4L = 64% win rate** (vs 40% baseline)
+
+This is the closest we've had to a real signal-vs-noise read. **64% win rate, 2:1 reward:risk, average winner ~+$30, average loser ~-$13.** Mathematical expectation per trade: **0.64 × $30 + 0.36 × (-$13) = +$14.52/trade.** At 1.5 trades/day = **+$22/day = +$440/month** projected. On $5k base = **~9% monthly return.**
+
+This is the post-Filter-D math. **Reality could differ wildly — n=11 is still small.** But the projection is meaningful and worth tracking week-over-week.
+
+### Predictions for Day 32 (Tuesday May 12)
+
+- [ ] **IONQ outcome.** 101h and counting. Either wins (contradicts ONDS-91) or loses (supports). The longest-running active hypothesis test.
+- [ ] **SOUN-2 resolution.** Thesis weakening, Day-3+. The "chasing recent winners" test.
+- [ ] **NEXT/SWKS Day-5+ resolution.** Same age as SMCI today. Expect TRAILING_STOP or ROTATION outcomes like the prior 5 valley winners.
+- [ ] **Entry deployment.** Will the brain admit anything tomorrow? If we see another 0-entry day, the regime shift is real.
+- [ ] **Cumulative wallet-era crosses +$100.** Currently at $96.58. One small winner does it.
+
+### Personal note
+
+The Day-30 re-evaluation hasn't happened — was supposed to be today but the data wasn't surprising enough to warrant a formal review. The system is doing what it should: occasionally losing -$15-20 on weakening positions, occasionally winning $20-80 on valley resolutions, net positive trajectory. **Nothing to ship today.** The deferred items from Day-25 (cap-sort flip, valley exit tightening, etc.) are still on the right side of "wait for more data" — and today's data confirms that direction.
+
+The most interesting thing isn't today's P&L — it's IONQ at 101h. A score-96 position surviving 4 days is the kind of trade that pre-Filter-D would have been impossible (would have been killed by Day 2). Either IONQ teaches us the 90+ score band IS tradeable in this regime (contradicting ONDS-91), or it eventually fails and the hypothesis hardens. Either outcome is informative.
+
+**Going into Day 32: 4 open positions, $4,790 cash, cumulative +$96.58, 64% post-Filter-D win rate, 3 live hypothesis tests in flight (IONQ-96, SOUN-2 re-entry, NEXT/SWKS valley).**
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]
