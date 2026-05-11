@@ -3455,6 +3455,117 @@ Day 30 (Monday) is the formal re-evaluation point — at the current pace, we'll
 
 ---
 
+## Day 28 — May 8, 2026 (Friday) [retroactive — written Monday morning]
+
+**Metrics:** Mixed-to-negative day. 2 closes (0W/2L), net **-$20.91**. 2 entries (TTGT, SOUN-2nd-attempt). **Cumulative wallet-era dropped from +$105.85 to +$84.94** — still positive but gave back ~20% of Day-27's swing. Win rate slipped 45.5% to 41.7% (10W/14L). **Two grace-cohort losses** (ALAB, MP) settled the "is grace 75% effective?" claim toward "more like 50/50."
+
+### The two closes
+
+**ALAB closed -$10.05 / -2.67% via THESIS_INVALIDATED after exactly 24 hours.**
+- Entered Day-27 14:02 at score 79, thesis flipped to invalid at 12h, was grace-protected
+- Closed Day-28 14:02 — **the moment grace expired**, thesis fired immediately
+- Same pattern as FN Day-26 (grace expired then watchdog killed it)
+- ARM/SOUN/USAR shape didn't repeat for ALAB. Not all "thesis invalid in grace" positions recover.
+
+**MP closed -$10.86 / -3.52% via TRAILING_STOP after 24h.**
+- Entered Day-27 16:02 at **score 91** — one of the two 90+ test entries
+- Position must have rallied to peak then sold off (trailing stop activates above +3%)
+- Net negative means the rally fizzled and the trail caught the drop past entry
+- **Supporting evidence for the ONDS-91 hypothesis** (now S=2 / C=0)
+
+**Today P&L: -$20.91.** Two losses, zero wins.
+
+### Today's entries (2)
+
+| Time | Symbol | Score | Notes |
+|---|---|---|---|
+| 14:02 | TTGT | 76 | Standard Filter D shape (HIGH_RISK SHORT-horizon), thesis went weakening early |
+| 16:02 | **SOUN** | **79** | **Second SOUN entry of the week** — same name that won +14% on Day-24 |
+
+The SOUN re-entry is interesting. SOUN closed via THESIS_INVALIDATED on Day-24 (not WATCHDOG_EXIT) so the watchdog cooldown doesn't apply. The per-symbol cap is per-day (already cleared). Filter D doesn't block (HIGH_RISK Tech). **So the brain happily re-bought SOUN four days after the prior win.** Question for the journal: is that good or bad? If SOUN wins again, the brain identified persistent strength. If it loses, we may need a "won recently means still in flight from prior cohort" check.
+
+### Day-27 predictions vs reality
+
+| Prediction | Outcome |
+|---|---|
+| IONQ Day-1 outcome | **Still alive at 94h** — survived through Friday EOD and the weekend. Thesis weakening throughout but no exit triggered. Strong evidence grace is working as designed on this one. |
+| MP Day-1 outcome | ✗ **Closed at -3.52% via TRAILING_STOP.** First 90+ Filter-D-era close, supports ONDS-91 hypothesis. |
+| ALAB grace expiry | ✗ **Closed at -2.67% via THESIS_INVALIDATED** exactly at grace boundary. Same pattern as FN. |
+| NEXT/SWKS Day-2 | Both still open; thesis flipped from n/a to **valid** as Claude actually re-evaluated them. Healthy. |
+| Watchdog cooldown blocks visible | Filter D blocked SEZL + LYG (both Financial Services). Overlaps with sector exclusion — no clean cooldown-only fire today. |
+| Win rate crosses 50% | ✗ Went the wrong way: 45.5% to 41.7%. Two losses pulled it down. |
+
+3 of 6 favorable, 3 unfavorable.
+
+### Hypothesis status
+
+- **`journal_day21_onds91_pattern`** (HIGH_RISK score >= 88): now **S=2 / C=0** (was S=1). MP-91 closing at a loss bumped the supporting counter. **Three more matching closes (and not 3 wins to offset) would graduate this to validated knowledge.** IONQ-96 is the next test in flight.
+- **`journal_day24_no_rule_fires_valley`** (HIGH_RISK any): now **S=3 / C=5**. Today's 2 losses added 2 supporting. Decay has slowed; hypothesis is mixed-signal because the pattern_match is too broad (covers every HIGH_RISK close).
+
+### Currently open going into Monday (6 positions)
+
+| Symbol | Age (Mon AM) | Score | Thesis | Notes |
+|---|---|---|---|---|
+| SWKS | 120h | 79 | valid | Day-5+, valley-eligible |
+| NEXT | 120h | 78 | valid | Day-5+, valley-eligible |
+| SMCI | 118h | 80 | valid | Day-5, healthy |
+| **IONQ** | **94h** | **96** | weakening | **The 90+ hypothesis test, still in flight Day-4** |
+| TTGT | 72h | 76 | weakening | Day-3, weakening past grace |
+| **SOUN** | **70h** | 79 | valid | **Re-entry of Day-24 winner, Day-3** |
+
+**$2,419 deployed across 6 wallet positions.** All HIGH_RISK SHORT-horizon. Same single-strategy concentration noted Day-26 lesson #7.
+
+### What I learned from Day 28 (the real lessons)
+
+**1. The "grace converts ~75% of false-positive watchdog hits" claim is now 50/50.** Pre-Day-28 grace cohort: ARM (won), SOUN (won), USAR (won), FN (lost). Post-Day-28: ALAB (lost), MP (lost). **Now 3W / 3L on positions that entered with early-thesis-weakening + grace-protection.** The win-rate of grace-protected positions converges toward 50%, not 75%. **Day-27's "grace converts ~75%" was small-sample optimism.** Honest framing: grace is roughly neutral on win rate — it lets the system make better-informed exits later instead of premature ones, but the exit outcomes are still ~50/50 because the underlying name quality matters more than the grace window.
+
+**2. MP-91 supports the ONDS-91 hypothesis.** S=2 C=0. With 2 supporting closes on the pattern (ONDS Day-19, MP Day-28), the hypothesis is gathering real evidence. IONQ-96 is the next test — if IONQ ALSO closes negative, S=3 and we're nearly at graduation threshold (5).
+
+**3. SOUN re-entry exposes a gap.** The brain has no "this name was just open" check across days — only the open_brain (currently held) and watchdog cooldown (only WATCHDOG_EXIT closes). A THESIS_INVALIDATED winner from 4 days ago can be re-bought freely. **This may be correct (the name showed strength, re-buy on signal flip is reasonable) or it may be a gap (the brain is chasing recent winners with no cooldown).** Track SOUN-2's outcome explicitly.
+
+**4. The trailing stop activating at +3% but allowing the trade to close negative is mechanically OK but feels wrong.** MP rallied, trailing stop armed, then dropped past entry to -3.52%. The trailing stop did its job (prevented a larger loss after the peak) — but the user impression is "the trail caught a loss instead of a win." Worth checking if the trailing-stop logic should also be gated by a "no negative exit if peak gain was >5%" carve-out. Defer to Day-30 review.
+
+**5. Cumulative win rate is back DOWN (41.7%, below 45.5% yesterday).** Wallet-era cumulative still POSITIVE (+$84.94). **Win rate is variance; cumulative dollars is signal.** Day-26 lesson #10 holds: don't track win rate as the main number. Track cumulative + post-Filter-D win rate (still 7W/5L = 58% over 12 closes since Apr 30 — strong).
+
+### Deeper lessons (the ones that change my mental model)
+
+**6. Grace doesn't change win rate — it changes the SHAPE of the distribution.** Look at the grace-cohort dollars, not the count:
+- Wins (3): SOUN +14%, ARM +3%, USAR +13% → total ~+30%
+- Losses (3): FN -3.4%, ALAB -2.7%, MP -3.5% → total ~-9.6%
+
+**Net: +20% across the 6-trade grace cohort, even at 50% win rate.** Grace lets winners run to +10-14% while watchdog/thesis-tracker cap losses near -3%. **The 2:1 reward:risk edge holds because grace produces it on this specific cohort.** "Grace is 50/50 on win rate" is true but misses the point — grace's job is to enable big winners while losses stay capped.
+
+**7. The first scan post-grace is the highest-risk close moment.**
+- ALAB Day-28: entered 14:02 Thu, exit 14:02 Fri (24h exact)
+- MP Day-28: entered 16:02 Thu, exit 16:03 Fri (24h exact)
+- FN Day-26: entered 16:02 Tue, exit 16:25 Wed (24h+23min)
+
+**All three losses fired at the FIRST scan after grace expired.** USAR/APLD/MSTR/SOUN-1 all held past hour 24 and won big. **24h is a fork in the road: either dies on the immediate post-grace tick or survives to win in 5-7 days.** Bimodal outcome distribution, not gradual.
+
+**8. TRAILING_STOP exiting MP at -3.52% is mechanically correct but emotionally confusing.** MP went up >+3% (armed the trail), then dropped past entry to -3.5%. The trail prevented a bigger loss after the peak. **But "trailing stop" implies "profitable exit" to most users.** Worth Day-30 review: should the trail be gated by a "no negative exit if peak gain was >5%" carve-out? If its visible behavior keeps surprising us, the design is leaky.
+
+**9. The 24h post-grace exit cluster is DETERMINISTIC by design.** It's the natural consequence of `new_position_grace_hours = 24` + scan schedule (positions only exit at scan ticks). **Every day, expect 0-2 exits to fire at scan times exactly 24h after big entry days.** Not a bug — but our daily P&L clusters bad-cohort losses on specific calendar slots. If we ever change grace to 18h or 36h, we shift the cluster, not the rate.
+
+**10. The "thesis weakening at hour 0-12" cohort is now well-documented and predictable.** ALAB, MP, TTGT, SMCI, FN, ARM, SOUN, USAR — all had thesis flip weakening/invalid within hours of entry. **~50% close as winners after 5-7 days. ~50% close as losers at hour 24+.** This is the dominant Filter-D-era trade shape.
+
+**The honest reframe:** the brain isn't "saving" weakening positions. It's letting them resolve naturally so the half that recover can win big while the half that fail die with capped -3% losses. **That's a much better business model than "kill at first sign of weakness," even though intuitively it doesn't feel like a save.**
+
+### Weekend recap (May 9-10)
+
+Markets closed. No brain activity. 6 positions held over the weekend with these resolutions pending Monday: IONQ (the hypothesis test), the Day-5 valley triple (NEXT/SWKS/SMCI), and the fresh SOUN-2 + TTGT.
+
+### Looking into Monday (Day 31 — May 11)
+
+This was originally framed as the formal re-evaluation point per Day-25's queued items. Will write that re-evaluation as the Day 31 entry once today's actual trading data arrives.
+
+Pending hypothesis tests:
+- IONQ outcome (94h+ now, in flight all weekend)
+- NEXT/SWKS/SMCI at Day-5+ (USAR-like resolution age)
+- ONDS-91 hypothesis trending — needs 3 more supporting OR 5 contradicting to resolve
+- The Day-26 single-strategy concentration risk is still live (6 of 6 HIGH_RISK SHORT)
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]
