@@ -1,4 +1,5 @@
 export type ThemeId =
+  | 'slate'
   | 'applestocks'
   | 'robinhood'
   | 'wealthsimple'
@@ -43,6 +44,38 @@ export interface Theme {
 }
 
 export const themes: Record<ThemeId, Theme> = {
+  // Day 32 revamp: Linear / Mercury Bank inspired professional dark.
+  // Near-black slate, cool muted off-white, single-accent slate-blue.
+  // Up/down separated by HUE not red/green — wins are cool blue (calm),
+  // losses are drained slate gray. Reads as institutional/private-banking
+  // rather than retail-trader. References:
+  // - https://linear.app
+  // - https://mercury.com/insights
+  slate: {
+    id: 'slate',
+    name: 'Slate',
+    description: 'Near-black slate + muted blue. Professional, no green/red.',
+    isDark: true,
+    colors: {
+      bg: '#0E1116',          // Linear-style near-black with slight blue undertone
+      surface: '#161B22',     // cards (GitHub-dark surface tone)
+      surfaceAlt: '#1C2128',  // nested / hover
+      nav: '#0B0E13',         // nav darker than bg for separation
+      navActive: '#1C2128',
+      text: '#E6EAF0',        // cool off-white
+      textSub: '#7B8590',     // cool gray
+      textHint: '#4A535E',
+      primary: '#6B8FBC',     // muted slate-blue — institutional
+      accent: '#85A3CC',      // brighter slate-blue for hover/active
+      // Semantic — the headline of this theme:
+      up: '#7FB3D5',          // cool desaturated blue (calm win, not loud green)
+      down: '#6E7681',        // drained slate gray (muted loss, not aggressive red)
+      warning: '#C9A961',     // subdued amber kept for warnings only
+      border: 'rgba(140, 160, 200, 0.10)',  // subtle blue-tinted divider
+      stripeRisk: 'linear-gradient(90deg, #6B8FBC, #85A3CC)',
+      stripeSafe: 'linear-gradient(90deg, #4A6F94, #6B8FBC)',
+    },
+  },
   applestocks: {
     id: 'applestocks',
     name: 'Apple Stocks',
@@ -189,4 +222,4 @@ export const themes: Record<ThemeId, Theme> = {
   },
 }
 
-export const DEFAULT_THEME: ThemeId = 'applestocks'
+export const DEFAULT_THEME: ThemeId = 'slate'

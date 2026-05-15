@@ -14,11 +14,12 @@ export function TopNav() {
   const pathname = usePathname()
   const t = useI18nStore((s) => s.t)
 
+  // Day 32 revamp: /brain/performance is the home; /overview and
+  // /portfolio dropped from main nav (still routable for old bookmarks).
   const NAV_ITEMS = [
-    { label: t.nav.overview, href: '/overview' },
+    { label: t.nav.brainPerformance, href: '/brain/performance' },
     { label: t.nav.signals, href: '/signals' },
     { label: t.nav.watchlist, href: '/watchlist' },
-    { label: t.nav.portfolio, href: '/portfolio' },
     { label: t.nav.howItWorks, href: '/how-it-works' },
   ]
   const [time, setTime] = useState<Date | null>(null)

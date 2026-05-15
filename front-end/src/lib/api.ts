@@ -63,37 +63,10 @@ client.interceptors.request.use((config) => {
   return config
 })
 
-let isRefreshing = false
-let refreshPromise: Promise<string | null> | null = null
+// Module-level guard so that once forceLogout is in flight, every
+// subsequent request and response is killed instead of generating more
+// 401s while the browser navigates. See response interceptor below.
 let isRedirecting = false
-
-// Nuclear failsafe: if we see 3+ 401s within 5 seconds, force logout.
-// This catches the edge case where the refresh "succeeds" but the new
-// token is immediately rejected — creating an infinite 401 loop that
-// the normal interceptor logic can't break.
-let _401count = 0
-let _401windowStart = 0
-const _401_MAX = 3
-const _401_WINDOW_MS = 5000
-
-async function silentRefresh(): Promise<string | null> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null
-  if (!token) return null
-  try {
-    const res = await axios.post<AuthResponse>(
-      `${API_URL}/auth/refresh`,
-      {},
-      { headers: { Authorization: `Bearer ${token}` } },
-    )
-    const newToken = res.data.access_token
-    if (!newToken) return null
-    localStorage.setItem(TOKEN_KEY, newToken)
-    document.cookie = `${TOKEN_KEY}=${newToken}; path=/; max-age=86400; SameSite=Strict`
-    return newToken
-  } catch {
-    return null
-  }
-}
 
 /**
  * Atomically clear all auth state and hard-redirect to /login.
@@ -156,53 +129,27 @@ client.interceptors.response.use(
     }
 
     if (error.response?.status === 401 && error.config) {
-      // Nuclear failsafe: too many 401s too fast = something is broken, just logout
-      const now401 = Date.now()
-      if (now401 - _401windowStart > _401_WINDOW_MS) {
-        _401count = 0
-        _401windowStart = now401
-      }
-      _401count++
-      if (_401count >= _401_MAX) {
-        forceLogout('expired')
-        return new Promise(() => {})
-      }
-
-      // Skip refresh on auth routes (login/verify) -- those 401s are user-facing
+      // Skip on auth routes (login/verify-otp) — those 401s are user-facing
+      // messages like "wrong password" that the form needs to render.
       const isAuthRoute = PUBLIC_ROUTES.some((r) => error.config.url?.startsWith(r))
       if (isAuthRoute) {
         const rawDetail = error.response.data?.detail || error.message
         throw new Error(rawDetail)
       }
 
-      // If we already retried this request once and got 401 again, the new
-      // token is also bad. Force logout immediately — do NOT fall through to
-      // the generic error handler (the previous bug: this case threw a regular
-      // error which React Query swallowed, leaving the user stuck on the page).
-      if (error.config._retried) {
-        forceLogout('expired')
-        return new Promise(() => {})
-      }
-
-      // First 401 for this request — try silent refresh before logging out.
-      // Coalesce concurrent refreshes so parallel 401s share one refresh call.
-      if (!isRefreshing) {
-        isRefreshing = true
-        refreshPromise = silentRefresh()
-      }
-      const newToken = await refreshPromise
-      isRefreshing = false
-      refreshPromise = null
-
-      if (newToken) {
-        error.config._retried = true
-        error.config.headers.Authorization = `Bearer ${newToken}`
-        return client.request(error.config)
-      }
-
-      // Refresh failed -- force logout immediately
+      // Day-32 (May 12): simplified — any 401 on a protected route boots
+      // to /login immediately. The prior silent-refresh path had edge
+      // cases (refresh "succeeds" with a token the backend re-rejects;
+      // concurrent React Query refetches racing each other) that left
+      // the user stuck on a broken page with 401s flooding the backend
+      // for minutes. Logging out is recoverable in 5 seconds; a frozen
+      // page wasting API quota is not.
+      // The nuclear-failsafe / _retried / silentRefresh complexity is
+      // gone — if you see this comment and the backend's /auth/refresh
+      // is reliable, you can reintroduce it, but pair it with a real
+      // integration test that proves the redirect always fires.
       forceLogout('expired')
-      return new Promise(() => {}) // Kill this request chain
+      return new Promise(() => {}) // Kill this request chain — caller never resolves
     }
 
     if (error.response?.status === 403) {

@@ -6,7 +6,6 @@ import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import {
-  LayoutDashboard,
   TrendingUp,
   Star,
   Settings,
@@ -38,13 +37,13 @@ export function BottomNav() {
   // /brain in More menu uses exact match so /brain/performance doesn't highlight it
 
 
+  // Day 32 revamp: /brain/performance is the home tab (leftmost).
+  // /overview removed from bottom nav — it had become a low-information
+  // landing the user wasn't using.
   const TABS = useMemo(() => [
-    { label: t.nav.overview, href: '/overview', icon: LayoutDashboard },
+    { label: t.nav.brainPerformance, href: '/brain/performance', icon: Activity },
     { label: t.nav.signals, href: '/signals', icon: TrendingUp },
     { label: t.nav.watchlist, href: '/watchlist', icon: Star },
-    // TODO: Uncomment when portfolio manual tracking is implemented
-    // { label: t.nav.portfolio, href: '/portfolio', icon: Briefcase },
-    { label: t.nav.brainPerformance, href: '/brain/performance', icon: Activity },
     { label: 'More', href: '#more', icon: Menu },
   ], [t])
 

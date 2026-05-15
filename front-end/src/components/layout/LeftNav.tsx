@@ -10,7 +10,6 @@ import { useAllSignals } from '@/hooks/useSignals'
 import { useStats } from '@/hooks/useStats'
 import { isMarketOpen, DEFAULT_TIMEZONE } from '@/lib/utils'
 import {
-  LayoutDashboard,
   TrendingUp,
   Star,
   HelpCircle,
@@ -59,14 +58,15 @@ export function LeftNav() {
 
   const dotColor = open ? theme.colors.up : theme.colors.textHint
 
+  // Day 32 revamp: /brain/performance is the home, surfaced first.
+  // /overview and /portfolio removed from nav (still routable for old
+  // bookmarks but de-emphasized). /brain root kept for now — it was the
+  // pre-performance entry point. Order reflects daily usage frequency.
   const NAV_ITEMS = [
-    { label: t.nav.overview, href: '/overview', icon: LayoutDashboard },
+    { label: t.nav.brainPerformance, href: '/brain/performance', icon: Activity },
     { label: t.nav.signals, href: '/signals', icon: TrendingUp },
     { label: t.nav.watchlist, href: '/watchlist', icon: Star },
-    // TODO: Uncomment when portfolio manual tracking is implemented
-    // { label: t.nav.portfolio, href: '/portfolio', icon: Briefcase },
     { label: t.nav.brain, href: '/brain', icon: Brain },
-    { label: t.nav.brainPerformance, href: '/brain/performance', icon: Activity },
     { label: t.nav.logs, href: '/logs', icon: ScrollText },
     { label: t.nav.integrations, href: '/integrations', icon: Plug },
     { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle },

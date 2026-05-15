@@ -111,7 +111,7 @@ export default function LoginPage() {
       if (res.last_login) {
         localStorage.setItem('signa-last-login', res.last_login)
       }
-      router.push('/overview')
+      router.push('/brain/performance')
     } catch (err) {
       const msg = err instanceof Error ? err.message : ''
       const newAttempts = attempts + 1
@@ -313,7 +313,15 @@ export default function LoginPage() {
                     type="submit"
                     disabled={!username.trim() || !password.trim() || loading}
                     className="w-full rounded-xl px-5 py-3.5 text-sm font-semibold transition-all hover:opacity-90 active:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ backgroundColor: theme.colors.primary, color: theme.colors.surface }}
+                    // Day 32 fix: button text was using theme.colors.surface
+                    // which is near-black on dark themes (Slate), giving
+                    // unreadable dark-text-on-slate-blue. Use theme.isDark
+                    // to pick the right contrast: white on dark themes, the
+                    // existing surface (white) on light themes.
+                    style={{
+                      backgroundColor: theme.colors.primary,
+                      color: theme.isDark ? theme.colors.text : theme.colors.surface,
+                    }}
                   >
                     {loading ? t.login.signingIn : t.login.continue}
                   </button>

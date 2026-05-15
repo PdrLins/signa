@@ -49,7 +49,7 @@ export function BudgetWidget() {
       <Card className="h-full">
         <div className="flex items-center justify-between mb-2.5">
           <div className="flex items-center gap-1.5">
-            <DollarSign size={14} style={{ color: '#10B981' }} />
+            <DollarSign size={14} style={{ color: theme.colors.up }} />
             <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
               {t.integrations.budget}
             </span>

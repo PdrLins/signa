@@ -9,9 +9,10 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Sidebar } from '@/components/layout/Sidebar'
-import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Brain, Target, ShieldAlert, Clock, Eye, RefreshCw } from 'lucide-react'
+import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Target, ShieldAlert, Clock, Eye, RefreshCw } from 'lucide-react'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useI18nStore } from '@/store/i18nStore'
+import { ResponsiveContainer, AreaChart, Area, Tooltip as RechartsTooltip, ReferenceLine } from 'recharts'
 
 // ── Track record types ──
 
@@ -208,17 +209,9 @@ function fmtShortDate(iso?: string): string {
 }
 
 // ── Small components ──
-
-function StatBox({ label, value, sub, color, bgColor }: { label: string; value: string; sub?: string; color: string; bgColor: string }) {
-  const theme = useTheme()
-  return (
-    <div className="rounded-xl px-4 py-3" style={{ backgroundColor: bgColor }}>
-      <p className="text-[10px] uppercase tracking-wide mb-1" style={{ color: theme.colors.textHint }}>{label}</p>
-      <p className="text-2xl font-bold tabular-nums" style={{ color }}>{value}</p>
-      {sub && <p className="text-[10px] mt-0.5" style={{ color: theme.colors.textHint }}>{sub}</p>}
-    </div>
-  )
-}
+// StatBox removed Day 32: editorial KPI strip replaced it inline at the
+// page level. The component is unused now; if you need a card-style KPI
+// elsewhere, copy the pattern fresh rather than re-introducing this.
 
 function ExitReasonBadge({ reason, theme }: { reason?: string; theme: ReturnType<typeof useTheme> }) {
   if (!reason) return null
@@ -544,23 +537,54 @@ function WalletHistory() {
   const hasMore = txns.length === limit
 
   return (
-    <Card>
+    <section className="space-y-0">
+      {/* Day-32 editorial header with a real "click me" affordance.
+          Bigger chevron in an accent-tinted circle, explicit SHOW/HIDE
+          label, hover background tint, count visible at all times. */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between"
-        aria-label={t.wallet?.transactions ?? 'Transactions'}
+        className="group w-full flex items-baseline justify-between py-3 px-2 -mx-2 transition-colors cursor-pointer rounded"
+        style={{ borderBottom: `1px solid ${theme.colors.border}` }}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = theme.colors.surfaceAlt }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? 'Hide' : 'Show'} transactions`}
       >
-        <div className="flex items-center gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
+        <div className="flex items-baseline gap-3">
+          <h2
+            className="font-serif text-xl"
+            style={{ color: theme.colors.text, fontWeight: 500 }}
+          >
             {t.wallet?.transactions ?? 'Transactions'}
-          </p>
-          {txns.length > 0 && (
-            <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textHint }}>
-              {txns.length}{hasMore ? '+' : ''}
-            </span>
-          )}
+          </h2>
+          <span
+            className="text-xs tabular-nums"
+            style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}
+          >
+            {String(txns.length).padStart(2, '0')}{hasMore ? '+' : ''}
+          </span>
         </div>
-        {expanded ? <ChevronUp size={14} style={{ color: theme.colors.textHint }} /> : <ChevronDown size={14} style={{ color: theme.colors.textHint }} />}
+        <div className="flex items-center gap-2">
+          <span
+            className="text-[10px] uppercase tracking-[0.14em] transition-colors"
+            style={{
+              color: expanded ? theme.colors.primary : theme.colors.textSub,
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            {expanded ? 'HIDE' : 'SHOW'}
+          </span>
+          <span
+            className="inline-flex items-center justify-center w-7 h-7 rounded-full transition-all group-hover:scale-105"
+            style={{
+              backgroundColor: expanded ? theme.colors.primary + '20' : 'transparent',
+              border: `1px solid ${expanded ? theme.colors.primary + '40' : theme.colors.border}`,
+              color: expanded ? theme.colors.primary : theme.colors.textSub,
+            }}
+          >
+            {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </span>
+        </div>
       </button>
 
       {expanded && (
@@ -596,56 +620,86 @@ function WalletHistory() {
                 const isLoss = pnl != null && pnl < 0
 
                 return (
-                  <div key={tx.id} className="flex items-start justify-between gap-3 py-2.5">
-                    <div className="flex items-start gap-2 min-w-0 flex-1">
+                  <div key={tx.id} className="flex items-start justify-between gap-4 py-3">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      {/* Day-32: type label as mono uppercase text instead of pill */}
                       <span
-                        className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 tabular-nums"
-                        style={{ backgroundColor: typeColor + '18', color: typeColor, letterSpacing: '0.04em' }}
+                        className="text-[9px] uppercase tracking-[0.14em] tabular-nums shrink-0 pt-0.5"
+                        style={{
+                          color: typeColor,
+                          fontFamily: 'var(--font-mono)',
+                          minWidth: '5.5rem',
+                        }}
                       >
                         {tx.transaction_type.replace('_', ' ')}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-baseline gap-2 flex-wrap">
                           {tx.symbol && (
-                            <span className="text-[11px] font-semibold" style={{ color: theme.colors.text }}>
+                            <span
+                              className="font-serif text-base"
+                              style={{ color: theme.colors.text, fontWeight: 500, letterSpacing: '0.01em' }}
+                            >
                               {tx.symbol}
                             </span>
                           )}
                           {tx.shares != null && tx.shares > 0 && (
-                            <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textHint }}>
+                            <span
+                              className="text-xs tabular-nums"
+                              style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}
+                            >
                               {tx.shares.toFixed(4)} sh
                             </span>
                           )}
                           {tx.price != null && (
-                            <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textHint }}>
+                            <span
+                              className="text-xs tabular-nums"
+                              style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}
+                            >
                               @ ${tx.price.toFixed(2)}
                             </span>
                           )}
                           {(isWin || isLoss) && (
                             <span
-                              className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded tabular-nums"
-                              style={{ backgroundColor: pnlColor + '18', color: pnlColor, letterSpacing: '0.04em' }}
+                              className="text-[10px] tabular-nums font-serif italic"
+                              style={{ color: pnlColor }}
                             >
-                              {isWin ? '✓ Win' : '✗ Loss'} {pnl! >= 0 ? '+' : '-'}${Math.abs(pnl!).toFixed(2)}
+                              {isWin ? 'win' : 'loss'}{' '}
+                              <span style={{ fontFamily: 'var(--font-mono)', fontStyle: 'normal' }}>
+                                {pnl! >= 0 ? '+' : '-'}${Math.abs(pnl!).toFixed(2)}
+                              </span>
                             </span>
                           )}
                         </div>
                         {tx.description && (
-                          <p className="text-[10px] mt-0.5 truncate" style={{ color: theme.colors.textSub }}>
+                          <p className="text-xs mt-1 truncate" style={{ color: theme.colors.textSub }}>
                             {tx.description}
                           </p>
                         )}
-                        <p className="text-[9px] mt-0.5" style={{ color: theme.colors.textHint }}>
+                        <p
+                          className="text-[10px] mt-1 tabular-nums"
+                          style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}
+                        >
                           {fmtTxnDate(tx.created_at)}
                         </p>
                       </div>
                     </div>
-                    <div className="text-right shrink-0 tabular-nums">
-                      <p className="text-[12px] font-bold" style={{ color: tx.amount === 0 ? theme.colors.textHint : typeColor }}>
+                    <div className="text-right shrink-0">
+                      <p
+                        className="text-base tabular-nums leading-none"
+                        style={{
+                          color: tx.amount === 0 ? theme.colors.textHint : typeColor,
+                          fontFamily: 'var(--font-mono)',
+                          fontWeight: 500,
+                        }}
+                      >
                         {sign}${Math.abs(tx.amount).toFixed(2)}
                       </p>
-                      <p className="text-[9px]" style={{ color: theme.colors.textHint }}>
-                        {t.wallet?.balanceAfter ?? 'bal'} ${tx.balance_after.toFixed(2)}
+                      <p
+                        className="text-[10px] mt-1.5 tabular-nums"
+                        style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}
+                      >
+                        bal ${tx.balance_after.toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -657,15 +711,22 @@ function WalletHistory() {
             <button
               onClick={() => setLimit(limit + TXN_PAGE_SIZE)}
               disabled={isFetching}
-              className="w-full mt-3 text-[11px] font-semibold py-2 rounded-lg transition-opacity hover:opacity-80 disabled:opacity-50"
-              style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.primary, border: `1px solid ${theme.colors.border}` }}
+              className="w-full mt-4 text-[11px] py-2 transition-opacity hover:opacity-80 disabled:opacity-50"
+              style={{
+                backgroundColor: 'transparent',
+                color: theme.colors.primary,
+                borderTop: `1px solid ${theme.colors.border}`,
+                fontFamily: 'var(--font-mono)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.12em',
+              }}
             >
-              {isFetching ? '…' : (t.brainPerf.loadMore ?? 'Load more')}
+              {isFetching ? '…' : `${t.brainPerf.loadMore ?? 'LOAD MORE'} ↓`}
             </button>
           )}
         </div>
       )}
-    </Card>
+    </section>
   )
 }
 
@@ -773,43 +834,213 @@ export default function BrainPerformancePage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Brain size={22} style={{ color: theme.colors.warning }} />
-            <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>Brain Performance</h1>
+      {/* Day-32 editorial hero. Big serif portfolio number as the headline,
+          mono delta + accent meta, lose the icon-and-pill convention. The
+          aesthetic borrows from FT / Stripe Press / Granola: typography
+          carries the layout, no boxes. */}
+      {(() => {
+        const wallet = data?.wallet
+        const portfolioValue = wallet?.total_value
+        const roiPct = wallet?.roi_pct ?? 0
+        const realized = brain.total_pnl_amount_wallet ?? 0
+        return (
+          <div className="flex items-start justify-between gap-6 pt-2 pb-6 border-b" style={{ borderColor: theme.colors.border }}>
+            <div className="min-w-0 flex-1">
+              <p
+                className="text-[10px] uppercase tracking-[0.18em] mb-3"
+                style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}
+              >
+                BRAIN · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+              </p>
+              <h1
+                className="font-serif font-medium leading-[0.95] tracking-tight mb-3"
+                style={{
+                  color: theme.colors.text,
+                  fontSize: 'clamp(2rem, 4.5vw, 3.25rem)',
+                }}
+              >
+                {portfolioValue != null ? (
+                  <>
+                    <span style={{ color: theme.colors.textSub, fontSize: '0.5em', verticalAlign: 'top', marginRight: '0.1em' }}>$</span>
+                    <span className="tabular-nums" style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>
+                      {portfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </>
+                ) : (
+                  <span style={{ color: theme.colors.textHint }}>—</span>
+                )}
+              </h1>
+              <p className="text-base leading-relaxed font-serif italic" style={{ color: theme.colors.textSub }}>
+                {portfolioValue != null && wallet?.initial_deposit ? (
+                  <>
+                    <span style={{ color: roiPct >= 0 ? theme.colors.up : theme.colors.down, fontFamily: 'var(--font-mono)', fontStyle: 'normal', fontWeight: 500 }}>
+                      {roiPct >= 0 ? '+' : ''}{formatPct(roiPct)}%
+                    </span>
+                    {' '}on capital since funding ·{' '}
+                    <span style={{ fontFamily: 'var(--font-mono)', fontStyle: 'normal', fontWeight: 500, color: realized >= 0 ? theme.colors.up : theme.colors.down }}>
+                      {realized >= 0 ? '+' : '-'}${Math.abs(realized).toFixed(2)}
+                    </span>
+                    {' '}realized across{' '}
+                    <span style={{ fontFamily: 'var(--font-mono)', fontStyle: 'normal' }}>{brain.closed_count}</span>
+                    {' '}closed trades
+                  </>
+                ) : (
+                  'Tracking begins after first deposit.'
+                )}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setAutoRefresh(!autoRefresh)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold transition-all"
+                style={{
+                  backgroundColor: autoRefresh ? theme.colors.primary + '15' : 'transparent',
+                  color: autoRefresh ? theme.colors.primary : theme.colors.textHint,
+                  border: `1px solid ${autoRefresh ? theme.colors.primary + '30' : theme.colors.border}`,
+                  fontFamily: 'var(--font-mono)',
+                }}
+                aria-label="Toggle auto-refresh"
+              >
+                {autoRefresh ? `${countdown}s` : 'AUTO'}
+              </button>
+              <button
+                onClick={handleRefresh}
+                disabled={isFetching}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-opacity hover:opacity-80 disabled:opacity-50"
+                style={{
+                  backgroundColor: 'transparent',
+                  color: theme.colors.textSub,
+                  border: `1px solid ${theme.colors.border}`,
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
+                {isFetching ? 'REFRESHING' : 'REFRESH'}
+              </button>
+            </div>
           </div>
-          <p className="text-sm mt-1" style={{ color: theme.colors.textSub }}>
-            Autonomous picks proving the brain&apos;s accuracy with real market data.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Auto-refresh toggle */}
-          <button
-            onClick={() => setAutoRefresh(!autoRefresh)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold transition-all"
-            style={{
-              backgroundColor: autoRefresh ? theme.colors.primary + '15' : theme.colors.surfaceAlt,
-              color: autoRefresh ? theme.colors.primary : theme.colors.textHint,
-              border: `1px solid ${autoRefresh ? theme.colors.primary + '30' : theme.colors.border}`,
-            }}
-            aria-label="Toggle auto-refresh"
-          >
-            {autoRefresh ? `${countdown}s` : 'Auto'}
-          </button>
-          {/* Manual refresh */}
-          <button
-            onClick={handleRefresh}
-            disabled={isFetching}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-opacity hover:opacity-80 disabled:opacity-50"
-            style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.textSub }}
-          >
-            <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
-            {isFetching ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
-      </div>
+        )
+      })()}
+
+      {/* Day-32 chart: cumulative realized P&L since first wallet trade.
+          Editorial chart — no axes, no grid, just the shape of the curve.
+          Tells the recovery story visually: the V from -$108 trough to today.
+          Computes inline since data is already on the page. */}
+      {(() => {
+        const wallet = data?.wallet
+        if (!wallet || wallet.initial_deposit <= 0) return null
+        // brainClosed comes DESC from API — reverse to chronological.
+        // Filter to wallet trades only (legacy = per-share, not summable).
+        const walletClosed = [...brainClosed]
+          .filter(t => t.is_wallet_trade && t.exit_date && t.pnl_amount != null)
+          .sort((a, b) => (a.exit_date! < b.exit_date! ? -1 : 1))
+        if (walletClosed.length < 2) return null
+
+        let running = 0
+        const series = walletClosed.map(t => {
+          running += (t.pnl_amount ?? 0)
+          return {
+            date: t.exit_date!,
+            label: new Date(t.exit_date!).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: DEFAULT_TIMEZONE }),
+            cumulative: parseFloat(running.toFixed(2)),
+            symbol: t.symbol,
+            tradePnl: t.pnl_amount ?? 0,
+          }
+        })
+        const current = series[series.length - 1].cumulative
+        const peak = Math.max(...series.map(p => p.cumulative))
+        const trough = Math.min(...series.map(p => p.cumulative))
+        const isUp = current >= 0
+        const lineColor = isUp ? theme.colors.up : theme.colors.down
+
+        return (
+          <div className="pb-6" style={{ borderBottom: `1px solid ${theme.colors.border}` }}>
+            <div className="flex items-baseline justify-between mb-4">
+              <div className="flex items-baseline gap-3">
+                <h2 className="font-serif text-xl" style={{ color: theme.colors.text, fontWeight: 500 }}>
+                  Cumulative P&amp;L
+                </h2>
+                <span className="text-xs" style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}>
+                  {walletClosed.length} CLOSES
+                </span>
+              </div>
+              <div className="flex items-baseline gap-6 text-xs" style={{ fontFamily: 'var(--font-mono)' }}>
+                <div>
+                  <span style={{ color: theme.colors.textHint }}>TROUGH </span>
+                  <span style={{ color: theme.colors.down }}>${trough.toFixed(2)}</span>
+                </div>
+                <div>
+                  <span style={{ color: theme.colors.textHint }}>PEAK </span>
+                  <span style={{ color: theme.colors.up }}>${peak.toFixed(2)}</span>
+                </div>
+                <div>
+                  <span style={{ color: theme.colors.textHint }}>NOW </span>
+                  <span style={{ color: lineColor }}>{current >= 0 ? '+' : ''}${current.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={180}>
+              <AreaChart data={series} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+                <defs>
+                  <linearGradient id="pnlFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={lineColor} stopOpacity={0.35} />
+                    <stop offset="100%" stopColor={lineColor} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <ReferenceLine
+                  y={0}
+                  stroke={theme.colors.border}
+                  strokeWidth={1}
+                  strokeDasharray="3 3"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="cumulative"
+                  stroke={lineColor}
+                  strokeWidth={1.5}
+                  fill="url(#pnlFill)"
+                  isAnimationActive={false}
+                  dot={false}
+                  activeDot={{ r: 3, stroke: lineColor, strokeWidth: 1, fill: theme.colors.bg }}
+                />
+                <RechartsTooltip
+                  cursor={{ stroke: theme.colors.border, strokeWidth: 1 }}
+                  content={({ active, payload }) => {
+                    if (!active || !payload || !payload[0]) return null
+                    const p = payload[0].payload as { label: string; cumulative: number; symbol: string; tradePnl: number }
+                    return (
+                      <div
+                        className="px-3 py-2 text-xs"
+                        style={{
+                          backgroundColor: theme.colors.surface,
+                          border: `1px solid ${theme.colors.border}`,
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                      >
+                        <div style={{ color: theme.colors.textHint, fontSize: 10, letterSpacing: '0.12em' }}>
+                          {p.label.toUpperCase()}
+                        </div>
+                        <div style={{ color: theme.colors.text, marginTop: 4 }}>
+                          {p.symbol}{' '}
+                          <span style={{ color: p.tradePnl >= 0 ? theme.colors.up : theme.colors.down }}>
+                            {p.tradePnl >= 0 ? '+' : ''}${p.tradePnl.toFixed(2)}
+                          </span>
+                        </div>
+                        <div style={{ color: theme.colors.textSub, marginTop: 2 }}>
+                          cum{' '}
+                          <span style={{ color: p.cumulative >= 0 ? theme.colors.up : theme.colors.down }}>
+                            {p.cumulative >= 0 ? '+' : ''}${p.cumulative.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )
+      })()}
 
       {/* Content + Sidebar */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
@@ -824,113 +1055,213 @@ export default function BrainPerformancePage() {
               every deposit, buy, sell, legacy liquidation, etc. */}
           <WalletHistory />
 
-          {/* Hero stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatBox
-              label="Open Positions"
-              value={String(brain.open_count)}
-              sub={brainTrades.length > 0 && avgUnrealizedPnl !== 0
-                ? `Avg P&L ${avgUnrealizedPnl >= 0 ? '+' : ''}${formatPct(avgUnrealizedPnl)}%`
-                : undefined}
-              color={theme.colors.text}
-              bgColor={theme.colors.surfaceAlt}
-            />
-            <StatBox
-              label="Win Rate"
-              value={hasClosedData ? `${brain.win_rate.toFixed(0)}%` : '\u2014'}
-              sub={hasClosedData ? `${brain.wins}W / ${brain.losses}L` : 'No closed trades yet'}
-              color={hasClosedData ? (brain.win_rate >= 60 ? theme.colors.up : brain.win_rate >= 50 ? theme.colors.warning : theme.colors.down) : theme.colors.textSub}
-              bgColor={theme.colors.surfaceAlt}
-            />
-            <StatBox
-              label="Total Trades"
-              value={String(brain.closed_count + brain.open_count)}
-              sub={hasClosedData ? `${brain.closed_count} closed` : `${brain.open_count} open`}
-              color={theme.colors.text}
-              bgColor={theme.colors.surfaceAlt}
-            />
-            <StatBox
-              label="Total Return"
-              value={(() => {
-                // Day-21 fix: use wallet ROI as the headline when funded —
-                // it is the only metric that ties dollar P&L to the capital
-                // base. The previous sum-of-pnl_pct produced numbers like
-                // -21.79% that did not match the underlying dollars
-                // (-$77.93 wallet realized = -1.56% of $5k deposited).
-                // Fall back to avg_return_pct (per-trade arithmetic mean)
-                // for legacy-only or unfunded-wallet cases.
-                if (!hasClosedData) return '\u2014'
-                const wallet = data?.wallet
-                if (wallet && wallet.initial_deposit > 0) {
-                  return `${wallet.roi_pct >= 0 ? '+' : ''}${formatPct(wallet.roi_pct)}%`
-                }
-                return `${brain.avg_return_pct >= 0 ? '+' : ''}${formatPct(brain.avg_return_pct)}%`
-              })()}
-              sub={(() => {
-                // Day-21 fix: dropped the wallet-+-legacy mixed sub line.
-                // Each unit is different (wallet $ = total dollars, legacy $
-                // = per-share dollars), so combining them with a "+" sign
-                // produces math that doesn't add up against the headline %.
-                // Now: when wallet is funded, show realized $ + capital
-                // base; when only legacy, show per-share P&L; otherwise
-                // show the closed count.
-                if (!hasClosedData) return 'Tracking...'
-                const wallet = data?.wallet
-                const wallet$ = brain.total_pnl_amount_wallet ?? 0
-                const legacy$ = brain.total_pnl_amount_legacy ?? 0
-                const walletCount = brain.wallet_closed_count ?? 0
-                const legacyCount = brain.legacy_closed_count ?? 0
-                if (wallet && wallet.initial_deposit > 0 && walletCount > 0) {
-                  const sign = wallet$ >= 0 ? '+' : '-'
-                  const abs = Math.abs(wallet$).toFixed(2)
-                  const tail = legacyCount > 0 ? ' wallet realized' : ' realized'
-                  return `${sign}$${abs}${tail} of ${formatMoney(wallet.initial_deposit)}`
-                }
-                if (walletCount > 0 && legacyCount === 0) {
-                  return `${wallet$ >= 0 ? '+' : '-'}$${Math.abs(wallet$).toFixed(2)} realized`
-                }
-                if (walletCount === 0 && legacyCount > 0) {
-                  return `${legacy$ >= 0 ? '+' : '-'}$${Math.abs(legacy$).toFixed(2)} per share, ${legacyCount} trades`
-                }
-                return `Avg ${brain.avg_return_pct >= 0 ? '+' : ''}${formatPct(brain.avg_return_pct)}% per trade`
-              })()}
-              color={(() => {
-                if (!hasClosedData) return theme.colors.textSub
-                const wallet = data?.wallet
-                const pct = (wallet && wallet.initial_deposit > 0)
-                  ? wallet.roi_pct
-                  : brain.avg_return_pct
-                return pct >= 0 ? theme.colors.up : theme.colors.down
-              })()}
-              bgColor={theme.colors.surfaceAlt}
-            />
-          </div>
+          {/* Day-32 editorial KPI strip — bigger numbers, 4 columns now,
+              TODAY added so the daily realized P&L is always visible. */}
+          {(() => {
+            const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: DEFAULT_TIMEZONE })
+            const isToday = (iso?: string) => !!iso && (new Date(iso).toLocaleDateString('en-CA', { timeZone: DEFAULT_TIMEZONE }) === todayKey)
+            const todayClosed = brainClosed.filter(t => t.is_wallet_trade && isToday(t.exit_date))
+            const todayPnl = todayClosed.reduce((sum, t) => sum + (t.pnl_amount ?? 0), 0)
+            const todayCount = todayClosed.length
+            const kpiBig = { fontSize: 'clamp(1.5rem, 3vw, 2.5rem)', lineHeight: '0.95' }
 
-          {/* Win/loss bar */}
+            return (
+              <div
+                className="grid grid-cols-2 md:grid-cols-4"
+                style={{
+                  borderTop: `1px solid ${theme.colors.border}`,
+                  borderBottom: `1px solid ${theme.colors.border}`,
+                }}
+              >
+                <div className="py-6 px-1" style={{ borderRight: `1px solid ${theme.colors.border}` }}>
+                  <p className="text-[10px] uppercase tracking-[0.18em] mb-3" style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}>
+                    TODAY
+                  </p>
+                  <p
+                    className="tabular-nums"
+                    style={{
+                      ...kpiBig,
+                      color: todayCount === 0 ? theme.colors.textHint : (todayPnl >= 0 ? theme.colors.up : theme.colors.down),
+                      fontFamily: 'var(--font-mono)',
+                      fontWeight: 500,
+                    }}
+                  >
+                    {todayCount === 0 ? '\u2014' : (
+                      <>
+                        <span style={{ fontSize: '0.55em', verticalAlign: 'top', marginRight: '0.05em' }}>
+                          {todayPnl >= 0 ? '+$' : '-$'}
+                        </span>
+                        {Math.abs(todayPnl).toFixed(2)}
+                      </>
+                    )}
+                  </p>
+                  <p className="text-xs mt-2 font-serif italic" style={{ color: theme.colors.textSub }}>
+                    {todayCount === 0 ? 'no closes yet' : (
+                      <>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontStyle: 'normal' }}>{todayCount}</span>
+                        {' closed today'}
+                      </>
+                    )}
+                  </p>
+                </div>
+                <div className="py-6 px-4 md:px-6" style={{ borderRight: `1px solid ${theme.colors.border}` }}>
+                  <p className="text-[10px] uppercase tracking-[0.18em] mb-3" style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}>
+                    OPEN
+                  </p>
+                  <p
+                    className="tabular-nums"
+                    style={{ ...kpiBig, color: theme.colors.text, fontFamily: 'var(--font-mono)', fontWeight: 500 }}
+                  >
+                    {brain.open_count}
+                  </p>
+                  {brainTrades.length > 0 && avgUnrealizedPnl !== 0 && (
+                    <p className="text-xs mt-2 font-serif italic" style={{ color: avgUnrealizedPnl >= 0 ? theme.colors.up : theme.colors.down }}>
+                      {'avg '}
+                      <span style={{ fontFamily: 'var(--font-mono)', fontStyle: 'normal' }}>
+                        {avgUnrealizedPnl >= 0 ? '+' : ''}{formatPct(avgUnrealizedPnl)}%
+                      </span>
+                    </p>
+                  )}
+                </div>
+                <div className="py-6 px-4 md:px-6" style={{ borderRight: `1px solid ${theme.colors.border}` }}>
+                  <p className="text-[10px] uppercase tracking-[0.18em] mb-3" style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}>
+                    WIN RATE
+                  </p>
+                  <p
+                    className="tabular-nums"
+                    style={{
+                      ...kpiBig,
+                      color: hasClosedData ? (brain.win_rate >= 60 ? theme.colors.up : brain.win_rate >= 50 ? theme.colors.warning : theme.colors.down) : theme.colors.textHint,
+                      fontFamily: 'var(--font-mono)',
+                      fontWeight: 500,
+                    }}
+                  >
+                    {hasClosedData ? `${brain.win_rate.toFixed(0)}%` : '\u2014'}
+                  </p>
+                  {hasClosedData && (
+                    <p className="text-xs mt-2 font-serif italic" style={{ color: theme.colors.textSub }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontStyle: 'normal' }}>{brain.wins}W</span>
+                      {' / '}
+                      <span style={{ fontFamily: 'var(--font-mono)', fontStyle: 'normal' }}>{brain.losses}L</span>
+                    </p>
+                  )}
+                </div>
+                <div className="py-6 px-4 md:px-6">
+                  <p className="text-[10px] uppercase tracking-[0.18em] mb-3" style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}>
+                    TRADES
+                  </p>
+                  <p
+                    className="tabular-nums"
+                    style={{ ...kpiBig, color: theme.colors.text, fontFamily: 'var(--font-mono)', fontWeight: 500 }}
+                  >
+                    {brain.closed_count + brain.open_count}
+                  </p>
+                  <p className="text-xs mt-2 font-serif italic" style={{ color: theme.colors.textSub }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontStyle: 'normal' }}>{brain.closed_count}</span>
+                    {' closed'}
+                  </p>
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Win/loss baseline — Day-32: hairline instead of pill */}
           {hasClosedData && (
-            <div className="flex items-center gap-1">
-              <div className="h-3 rounded-l-full transition-all" style={{ width: `${Math.max(5, brain.win_rate)}%`, backgroundColor: theme.colors.up }} />
-              <div className="h-3 rounded-r-full transition-all" style={{ width: `${Math.max(5, 100 - brain.win_rate)}%`, backgroundColor: theme.colors.down }} />
+            <div className="flex items-center h-0.5 -mt-2">
+              <div className="h-full" style={{ width: `${Math.max(5, brain.win_rate)}%`, backgroundColor: theme.colors.up }} />
+              <div className="h-full" style={{ width: `${Math.max(5, 100 - brain.win_rate)}%`, backgroundColor: theme.colors.down }} />
             </div>
           )}
 
-          {/* Best / Worst trades */}
+          {/* Day-32 editorial: Best/Worst as dual big-number callouts.
+              Same visual weight as the hero — serif ticker, giant mono %.
+              Replaces the tiny inline pill with a real moment. */}
           {hasClosedData && (brain.best_trade || brain.worst_trade) && (
-            <div className="flex gap-6">
+            <div className="grid grid-cols-2" style={{ borderTop: `1px solid ${theme.colors.border}`, borderBottom: `1px solid ${theme.colors.border}` }}>
               {brain.best_trade && (
-                <div className="flex items-center gap-2">
-                  <TrendingUp size={14} style={{ color: theme.colors.up }} />
-                  <span className="text-[11px]" style={{ color: theme.colors.textHint }}>Best</span>
-                  <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{brain.best_trade.symbol}</span>
-                  <span className="text-[12px] font-bold tabular-nums" style={{ color: theme.colors.up }}>+{formatPct(brain.best_trade.pnl_pct)}%</span>
+                <div className="py-6 pr-6" style={{ borderRight: `1px solid ${theme.colors.border}` }}>
+                  <p
+                    className="text-[10px] uppercase tracking-[0.18em] mb-3"
+                    style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}
+                  >
+                    BEST TRADE
+                  </p>
+                  <div className="flex items-baseline gap-4">
+                    <span
+                      className="font-serif italic"
+                      style={{
+                        color: theme.colors.text,
+                        fontSize: 'clamp(1.125rem, 2.5vw, 1.75rem)',
+                        fontWeight: 500,
+                        letterSpacing: '0.01em',
+                      }}
+                    >
+                      {brain.best_trade.symbol}
+                    </span>
+                    <span
+                      className="tabular-nums"
+                      style={{
+                        color: theme.colors.up,
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 'clamp(1.5rem, 3.5vw, 2.5rem)',
+                        fontWeight: 500,
+                        lineHeight: 1,
+                      }}
+                    >
+                      +{formatPct(brain.best_trade.pnl_pct)}%
+                    </span>
+                  </div>
+                  {brain.best_trade.pnl_amount != null && (
+                    <p className="text-sm mt-2 font-serif italic" style={{ color: theme.colors.textSub }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontStyle: 'normal', color: theme.colors.up }}>
+                        +${brain.best_trade.pnl_amount.toFixed(2)}
+                      </span>{' '}
+                      realized
+                    </p>
+                  )}
                 </div>
               )}
               {brain.worst_trade && (
-                <div className="flex items-center gap-2">
-                  <TrendingDown size={14} style={{ color: theme.colors.down }} />
-                  <span className="text-[11px]" style={{ color: theme.colors.textHint }}>Worst</span>
-                  <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{brain.worst_trade.symbol}</span>
-                  <span className="text-[12px] font-bold tabular-nums" style={{ color: theme.colors.down }}>{formatPct(brain.worst_trade.pnl_pct)}%</span>
+                <div className="py-6 pl-6">
+                  <p
+                    className="text-[10px] uppercase tracking-[0.18em] mb-3"
+                    style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}
+                  >
+                    WORST TRADE
+                  </p>
+                  <div className="flex items-baseline gap-4">
+                    <span
+                      className="font-serif italic"
+                      style={{
+                        color: theme.colors.text,
+                        fontSize: 'clamp(1.125rem, 2.5vw, 1.75rem)',
+                        fontWeight: 500,
+                        letterSpacing: '0.01em',
+                      }}
+                    >
+                      {brain.worst_trade.symbol}
+                    </span>
+                    <span
+                      className="tabular-nums"
+                      style={{
+                        color: theme.colors.down,
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 'clamp(1.5rem, 3.5vw, 2.5rem)',
+                        fontWeight: 500,
+                        lineHeight: 1,
+                      }}
+                    >
+                      {formatPct(brain.worst_trade.pnl_pct)}%
+                    </span>
+                  </div>
+                  {brain.worst_trade.pnl_amount != null && (
+                    <p className="text-sm mt-2 font-serif italic" style={{ color: theme.colors.textSub }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontStyle: 'normal', color: theme.colors.down }}>
+                        {brain.worst_trade.pnl_amount >= 0 ? '+' : '-'}${Math.abs(brain.worst_trade.pnl_amount).toFixed(2)}
+                      </span>{' '}
+                      realized
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -1083,32 +1414,50 @@ export default function BrainPerformancePage() {
             )
           })()}
 
-          {/* Open positions — brain picks */}
-          <Card>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
-                Open Positions ({brainTrades.length})
-              </p>
+          {/* Day-32 editorial: Open positions as a section, not a card.
+              Editorial header with serif label + mono count, hairline rule below. */}
+          <section className="space-y-0">
+            <div className="flex items-baseline justify-between pb-3" style={{ borderBottom: `1px solid ${theme.colors.border}` }}>
+              <div className="flex items-baseline gap-3">
+                <h2
+                  className="font-serif text-xl"
+                  style={{ color: theme.colors.text, fontWeight: 500 }}
+                >
+                  Open positions
+                </h2>
+                <span
+                  className="text-xs tabular-nums"
+                  style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}
+                >
+                  {String(brainTrades.length).padStart(2, '0')}
+                </span>
+              </div>
               {brainTrades.length > 0 && avgUnrealizedPnl !== 0 && (
-                <span className="text-[11px] font-bold tabular-nums" style={{ color: avgUnrealizedPnl >= 0 ? theme.colors.up : theme.colors.down }}>
-                  {avgUnrealizedPnl >= 0 ? '+' : ''}{formatPct(avgUnrealizedPnl)}% avg
+                <span
+                  className="text-xs tabular-nums font-serif italic"
+                  style={{ color: avgUnrealizedPnl >= 0 ? theme.colors.up : theme.colors.down }}
+                >
+                  avg{' '}
+                  <span style={{ fontFamily: 'var(--font-mono)', fontStyle: 'normal' }}>
+                    {avgUnrealizedPnl >= 0 ? '+' : ''}{formatPct(avgUnrealizedPnl)}%
+                  </span>
                 </span>
               )}
             </div>
 
             {brainTrades.length === 0 ? (
-              <p className="text-[11px]" style={{ color: theme.colors.textHint }}>
-                No open positions. The brain will pick tickers scoring 72+ with AI analysis on the next scan.
+              <p className="text-sm font-serif italic py-6" style={{ color: theme.colors.textHint }}>
+                No open positions. The brain will pick tickers scoring 75+ with AI validation on the next scan.
               </p>
             ) : (
-              <div className="space-y-1.5">
+              <div>
                 {brainTrades.map((vt) => {
                   const isExpanded = expandedSymbol === vt.symbol
                   const hasPnl = vt.unrealized_pnl_pct != null
                   const pnlColor = hasPnl ? (vt.unrealized_pnl_pct! >= 0 ? theme.colors.up : theme.colors.down) : theme.colors.textSub
 
                   return (
-                    <div key={vt.symbol} className="rounded-lg overflow-hidden" style={{ backgroundColor: theme.colors.surfaceAlt }}>
+                    <div key={vt.symbol} style={{ borderBottom: `1px solid ${theme.colors.border}` }}>
                       {/* Main row */}
                       <div
                         className="flex items-center justify-between py-2 px-3 cursor-pointer transition-opacity hover:opacity-80"
@@ -1125,7 +1474,12 @@ export default function BrainPerformancePage() {
                                 : theme.colors.border,
                             }}
                           />
-                          <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{vt.symbol}</span>
+                          <span
+                            className="text-base font-serif"
+                            style={{ color: theme.colors.text, fontWeight: 500, letterSpacing: '0.01em' }}
+                          >
+                            {vt.symbol}
+                          </span>
                           <Badge variant={vt.bucket === 'SAFE_INCOME' ? 'safe' : 'risk'}>
                             {vt.bucket === 'SAFE_INCOME' ? 'Safe' : 'Risk'}
                           </Badge>
@@ -1327,13 +1681,24 @@ export default function BrainPerformancePage() {
                 })}
               </div>
             )}
-          </Card>
+          </section>
 
-          {/* Closed trades */}
-          <Card>
-            <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: theme.colors.textSub }}>
-              Closed Trades ({brain.closed_count})
-            </p>
+          {/* Closed trades — Day-32 editorial section */}
+          <section className="space-y-0">
+            <div className="flex items-baseline gap-3 pb-3" style={{ borderBottom: `1px solid ${theme.colors.border}` }}>
+              <h2
+                className="font-serif text-xl"
+                style={{ color: theme.colors.text, fontWeight: 500 }}
+              >
+                Closed trades
+              </h2>
+              <span
+                className="text-xs tabular-nums"
+                style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}
+              >
+                {String(brain.closed_count).padStart(2, '0')}
+              </span>
+            </div>
 
             {brainClosed.length === 0 ? (
               <p className="text-[11px]" style={{ color: theme.colors.textHint }}>
@@ -1366,7 +1731,12 @@ export default function BrainPerformancePage() {
                               ? <TrendingUp size={14} style={{ color: theme.colors.up }} />
                               : <TrendingDown size={14} style={{ color: theme.colors.down }} />
                             }
-                            <span className="text-[12px] font-semibold" style={{ color: theme.colors.text }}>{rc.symbol}</span>
+                            <span
+                              className="text-base font-serif"
+                              style={{ color: theme.colors.text, fontWeight: 500, letterSpacing: '0.01em' }}
+                            >
+                              {rc.symbol}
+                            </span>
                             {rc.direction === 'SHORT' && (
                               <span
                                 className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded"
@@ -1468,13 +1838,20 @@ export default function BrainPerformancePage() {
             {brainClosed.length > closedVisibleCount && (
               <button
                 onClick={() => setClosedVisibleCount(c => c + 5)}
-                className="w-full mt-3 text-[11px] font-semibold py-2 rounded-lg transition-opacity hover:opacity-80"
-                style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.primary, border: `1px solid ${theme.colors.border}` }}
+                className="w-full mt-4 text-[11px] py-2 transition-opacity hover:opacity-80"
+                style={{
+                  backgroundColor: 'transparent',
+                  color: theme.colors.primary,
+                  borderTop: `1px solid ${theme.colors.border}`,
+                  fontFamily: 'var(--font-mono)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.12em',
+                }}
               >
-                {t.brainPerf.loadMore ?? 'Load more'}
+                {t.brainPerf.loadMore ?? 'LOAD MORE'} ↓
               </button>
             )}
-          </Card>
+          </section>
 
           {/* Track Record by Score Range */}
           {trackRecord && trackRecord.total_trades > 0 && (
