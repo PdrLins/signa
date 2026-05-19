@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import localFont from 'next/font/local'
-import { Newsreader, JetBrains_Mono } from 'next/font/google'
+import { JetBrains_Mono } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
 
@@ -10,19 +10,10 @@ const geistSans = localFont({
   weight: '100 900',
 })
 
-// Day 32 revamp: editorial typography pairing. Newsreader (serif) for
-// display headers + ticker symbols — gives the "FT/Stripe Press" feel.
-// JetBrains Mono for all numeric data — gives Bloomberg-Terminal density
-// without the cold-blue cliché. Both loaded via next/font/google for
-// automatic preload + zero-CLS.
-const newsreader = Newsreader({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  style: ['normal', 'italic'],
-  variable: '--font-serif',
-  display: 'swap',
-})
-
+// Day 32 revamp: dropped serif (Newsreader/Instrument). Pedro found it
+// clashed with the rest of the design — going pure sans for everything,
+// mono only for numeric data. Hierarchy comes from weight + size, not
+// from a font-family switch.
 const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
   weight: ['400', '500', '600'],
@@ -42,7 +33,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${newsreader.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
+      <body className={`${geistSans.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         <Providers>{children}</Providers>
       </body>
     </html>

@@ -369,8 +369,14 @@ def calc_position_size_usd(
     wallet_balance: float,
     tier: int,
     trust_multiplier: float | None,
+    tier1_pct_override: float | None = None,
+    max_pct_override: float | None = None,
 ) -> float:
     """Compute dollar allocation for a new brain entry, respecting tiers and caps.
+
+    Day-37: added `tier1_pct_override` and `max_pct_override` so the caller
+    (process_virtual_trades) can pass the drawdown-circuit-breaker-clamped
+    values without mutating settings. When None, falls back to settings.
 
     Rules (see module docstring for the full table):
       • Tier 1 + trust_multiplier 1.0 → wallet_position_pct_tier1 (10%)
@@ -388,7 +394,7 @@ def calc_position_size_usd(
     trust = float(trust_multiplier) if trust_multiplier is not None else 1.0
 
     if tier == 1:
-        base_pct = settings.wallet_position_pct_tier1
+        base_pct = tier1_pct_override if tier1_pct_override is not None else settings.wallet_position_pct_tier1
     else:
         base_pct = settings.wallet_position_pct_tier2_3
 
@@ -399,7 +405,8 @@ def calc_position_size_usd(
         base_pct = base_pct * trust
 
     # Hard cap
-    pct = min(base_pct, settings.wallet_max_position_pct)
+    cap = max_pct_override if max_pct_override is not None else settings.wallet_max_position_pct
+    pct = min(base_pct, cap)
     allocation = wallet_balance * (pct / 100.0)
 
     # One more sanity floor: if the computed allocation is smaller than the

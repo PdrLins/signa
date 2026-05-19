@@ -119,10 +119,27 @@ class Settings(BaseSettings):
     # math and don't touch the wallet when they close.
     wallet_enabled: bool = True
     wallet_starting_balance: float = 10000.0     # default first-deposit amount
-    wallet_position_pct_tier1: float = 10.0      # Tier 1 (full trust) = 10% of balance
+    # Day 37 (May 19): goal revised upward to 20% monthly (~0.91%/day).
+    # At previous 10% Tier 1 sizing, current $5.24/day = 0.10%/day.
+    # Need ~9x improvement. First-phase amplification: bump sizing 1.5x
+    # AND raise per-day cap 1.33x = ~2x daily output target ($10-12/day).
+    # Subsequent phases (options trading, leverage, multi-strategy) close
+    # the remaining gap. Safety: drawdown circuit breaker reverts to 10%
+    # if cumulative falls below +$50 (see wallet_auto_revert_pnl_floor).
+    wallet_position_pct_tier1: float = 15.0      # Tier 1 (full trust) — was 10.0, Day 37 bump
     wallet_position_pct_tier2_3: float = 5.0     # Tier 2/3 (half trust) = 5% of balance
-    wallet_max_position_pct: float = 15.0        # hard cap (matches kelly.MAX_POSITION_PCT)
+    wallet_max_position_pct: float = 20.0        # hard cap — was 15.0, room for Tier 1 + buffer
     wallet_min_balance_for_trade: float = 100.0  # below this, skip new entries
+
+    # Day 37: drawdown circuit breaker. When cumulative wallet-era
+    # realized P&L drops below this floor, all sizing reverts to the
+    # conservative pre-Day-37 defaults (10% / 5% / cap 3). This bounds
+    # the experiment's downside while letting us test 2x amplification
+    # on the proven edge. Set to a very negative number to disable.
+    # Mechanism: process_virtual_trades reads cumulative pnl from
+    # virtual_trades at the start of each scan; if below floor, the
+    # effective sizing constants are clamped before entries are sized.
+    wallet_auto_revert_pnl_floor: float = 50.0
 
     # --- Day-0 grace period ---
     # New brain positions are immune to thesis-driven exits
@@ -146,7 +163,11 @@ class Settings(BaseSettings):
     # before the BUY loop). Counts BOTH wallet LONG BUYs and SHORT_OPENs
     # — both deploy capital, both should be rate-limited.
     # Set to 0 to disable.
-    wallet_max_entries_per_day: int = 3
+    # Day 37: bumped 3 → 4 to support 20%/month goal. Combined with the
+    # 1.5x sizing increase, daily peak deployment goes from 30% → 60% of
+    # pocket. Circuit breaker (wallet_auto_revert_pnl_floor) clamps back
+    # to 3 if cumulative P&L falls below the floor.
+    wallet_max_entries_per_day: int = 4
 
     # Day 21: per-symbol per-day cap. SEZL hit Filter D 3 times in one
     # day (May 1) — the brain repeatedly tried the same Fin name on
@@ -188,6 +209,20 @@ class Settings(BaseSettings):
     # Default 168h = 7 days = one full trading week, matching the watchdog
     # / STAGNATION_PRUNE timeframe. Set to 0 to disable.
     brain_watchdog_exit_cooldown_hours: int = 168
+
+    # Day 37: post-WINNER cooldown. After a wallet trade closes positive
+    # via THESIS_INVALIDATED / TARGET_HIT / TRAILING_STOP / SIGNAL /
+    # ROTATION, the brain is blocked from re-entering that symbol for N
+    # hours.
+    # Backtest evidence: 3 of 3 chase-winner re-entries lost -$67 total:
+    #   - SOUN won +$68 Day 24 → SOUN-2 entered 4d later → lost -$22 Day 32
+    #   - IONQ won +$64 Day 32 → IONQ-2 entered 1d later → lost -$41 Day 36
+    #   - ARM  won +$11 Day 25 → ARM-2  entered 10d later → lost -$4 Day 36
+    # Same name, recent winner, fresh entry weakens early, dies within
+    # 3-5 days. Gap-from-winner ranged 1-10 days, so the cooldown needs
+    # to be at least 14 days to catch all observed cases.
+    # Default 336h = 14 days. Set to 0 to disable.
+    brain_post_winner_cooldown_hours: int = 336
 
     # --- Trade Horizon (SHORT vs LONG) ---
     # SHORT: momentum trades, 1-7d hold, tight trail, every-scan thesis re-eval.

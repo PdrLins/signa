@@ -8,11 +8,10 @@ const config: Config = {
   ],
   theme: {
     extend: {
-      // Day 32 revamp: editorial typography. font-serif = Newsreader for
-      // display headers + ticker symbols. font-mono = JetBrains Mono for
-      // all numeric data. Use sparingly — body still uses default sans.
+      // Day 32 revamp: dropped serif. font-mono = JetBrains Mono for
+      // numeric data only. Body + headers use the default Geist sans;
+      // hierarchy comes from weight + size, not from a family switch.
       fontFamily: {
-        serif: ['var(--font-serif)', 'Georgia', 'serif'],
         mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
       },
     },

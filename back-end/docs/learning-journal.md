@@ -3841,6 +3841,488 @@ Day 33 has live tests on CRDO (bimodal #5), NEXT/SWKS (post-valley uncharted), a
 
 ---
 
+## Day 33 — May 13, 2026 (Wednesday)
+
+**Metrics:** Quiet day. 2 entries, 0 closes, net **$0** realized. **Cumulative wallet-era unchanged at +$138.30** (still all-time high). Pocket dropped $5,027 to $4,072 (entries deployed $955 with no offsetting closes). 5 wallet positions open; 2 of them at 177h (NEXT, SWKS) past the STAGNATION_PRUNE threshold but neither has fired.
+
+### Today's activity
+
+**Entries (2):**
+
+| Time | Symbol | Score | Notes |
+|---|---|---|---|
+| 14:02 | **IONQ** | 80 | **Re-entry of yesterday's +$64 winner** (was IONQ-96, today IONQ-80) — second documented "chase recent winner" case after SOUN-2. Thesis weakening at hour 9. |
+| 16:02 | TEAM | 75 | Standard Filter D shape — HIGH_RISK SHORT-horizon, fresh, in grace. |
+
+**Closes:** none.
+
+### Day-32 predictions vs reality
+
+| Prediction | Outcome |
+|---|---|
+| CRDO Day-1 outcome | Still open at 28h, thesis weakening. Bimodal test ongoing. |
+| NEXT/SWKS cross 168h — first STAGNATION_PRUNE potential | ✓ Both crossed (now 177h). **STAGNATION_PRUNE did NOT fire.** Both still alive. |
+| Manual rejection of valley hypothesis | ✓ Shipped (id 226cfb85, status=rejected) |
+| FN cooldown expires today | FN didn't appear in any qualifying signals today, so the post-cooldown FN test didn't activate. Wait for next FN signal. |
+| Universe size | **202 today** (was 203 yesterday, 269 last Friday). **~25% shrink in a week** — worth tracking. |
+
+3 of 5 favorable, 2 inconclusive. The STAGNATION_PRUNE no-fire is the most actionable.
+
+### Currently open (5 wallet positions)
+
+| Symbol | Age | Score | Thesis | Notes |
+|---|---|---|---|---|
+| TEAM | 7h | 75 | n/a | Fresh, in grace |
+| IONQ | 9h | **80** | weakening | **Re-entry of Day-32 winner** — chase test #2 |
+| CRDO | 28h | 80 | weakening | Day-2 in bimodal cohort |
+| NEXT | **177h** | 78 | valid | **Past STAGNATION_PRUNE threshold, no exit** |
+| SWKS | **177h** | 79 | valid | **Past STAGNATION_PRUNE threshold, no exit** |
+
+**$2,390 deployed across 5 positions.** Cash position $4,072 (~63% deployment).
+
+### Hypothesis status
+
+- **`journal_day21_onds91_pattern`** (HIGH_RISK score>=88): S=2 / C=1. Unchanged — no closes today.
+- **`journal_day24_no_rule_fires_valley`**: REJECTED (manual, Day-32). Status now reflects in DB.
+
+### Lessons today (the real ones)
+
+**1. STAGNATION_PRUNE doesn't fire just because position is past Day 7 — it needs the position to have NEVER moved up.** NEXT/SWKS are at 177h (past 168h threshold) and didn't trigger. Looking at the gate definition, STAGNATION_PRUNE requires `peak_price - entry_price <= 0` (no meaningful upside ever). NEXT and SWKS likely had SOME rally (peak above entry) then drifted back, so they don't qualify. **The "stagnation" gate is for trades that never went anywhere, not trades that went up and came back.** This is a Day-22 prediction that turned out to be wrong about how the gate works. Worth reading the gate code to confirm and document.
+
+**2. IONQ-2 is the second documented "chase recent winner" case.** Day-32 SOUN re-entered 4 days after a +$68 winner and lost −$22. Today IONQ re-entered 1 day after a +$64 winner. **n=2 now on this pattern.** If IONQ-2 also closes negative, n=3 and the post-winner cooldown ship becomes justified by the "backtest before brain changes" rule (we'd have 2-of-2 or 3-of-3 evidence). Keep watching. **Don't ship the cooldown yet — wait for IONQ-2's outcome.**
+
+**3. The universe is shrinking — 269 → 202 over a week (~25% down).** Possible explanations:
+   - Market consolidating (lower volatility = fewer signals clearing the day_change > 1% pre-filter)
+   - Scan parameter drift (if pre-filter thresholds tightened recently)
+   - Seasonal — mid-May historically lower-vol
+   
+   Not actionable today, but worth tracking. If universe stays sub-200 for 5+ days, the brain has fewer total candidates which may explain lower entry counts and the defensive cash buildup.
+
+**4. Cash deployment swung from defensive ($5,027 yesterday) back to active ($4,072 today).** Two days ago Day-31 admitted 0 entries. Today admits 2. The brain isn't artificially throttling — it's responding to whatever Filter D + tier criteria produce on a given day. **The "self-restricting on weak days" claim from Day-31 is supported again** — it's emergent, not coded.
+
+**5. The bimodal "weakening at hour 0-12 → resolves at 24h+" cohort grew today (CRDO at 28h, weakening at 2h).** With CRDO + IONQ-2 + TEAM (3 fresh positions in this shape), tomorrow's resolution data will add 1-3 more data points to the cohort. Currently 4W/4L (50% by count, asymmetric by dollar).
+
+### Deeper lessons (the ones that shift my mental model)
+
+**6. STAGNATION_PRUNE has stricter conditions than I assumed.** Day-22 prediction was that NEXT/SWKS would trigger STAGNATION_PRUNE at 168h — they didn't, even at 177h. The gate requires `peak_price - entry_price <= 0` (position NEVER moved up). NEXT/SWKS likely rallied a bit then drifted back, disqualifying them. **Implication: a position that goes up 1-2% then back to flat/negative can sit open for 60 days until TIME_EXPIRED.** That's a position-time risk we haven't priced in.
+
+**7. NEXT/SWKS are now in "long-hold survivor" territory — a state we haven't named.** Past grace + past valley window + past stagnation threshold + no exit triggered. Could sit until day 60 (TIME_EXPIRED). With 2 of 5 active positions in this state, **the no-rule-fires "valley" lesson I rejected Day-32 was actually correct about the LONG-tail version**: what we lose isn't the day-3 catastrophic case (those resolve fine) — what we lose is the day-7-to-60 slow-bleed case (those silently consume capital). Worth instrumenting: what % of post-Filter-D positions reach 168h+ without firing any exit, and what's their close-P&L distribution?
+
+**8. The 60-minute thesis-rebuy cooldown is too short for the chase-winner anti-pattern.** SOUN-2 entered 4 days after SOUN-1's +$68 win → lost. IONQ-2 entered 22 hours after IONQ-1's +$64 win → TBD. Both within normal trading-week cadence, both well past the 60-min cooldown. **The cooldown was designed to prevent same-scan rebuy loops, not multi-day winner-chasing.** A 5-7 day post-WIN cooldown would catch both cases.
+
+**9. The IONQ score drop from 96 to 80 in 24h was a leading indicator we ignored.** Yesterday's score said "high conviction." Today's said "marginal." When a name's score drops 16 points in a day, the AI's conviction is materially changing — but the entry gate doesn't see "this name's score just halved." **A simpler version of the post-winner cooldown:** *don't re-enter a name within 7 days if its score on the new signal is more than X points lower than its score on the prior closed entry.* Catches the chase-winner case via mechanism rather than calendar time.
+
+**10. Single-strategy concentration is PERMANENT, not transitional.** 5 of 5 open positions are HIGH_RISK SHORT-horizon. Day-26 lesson #7 named this as a transitional state from Filter D's narrow admission. Today's data confirms it as steady state. **Sector-wide tech weakness = 100% portfolio drawdown.** Filter D doesn't know "we're already 80% in this sector." Worth flagging as a separate ship candidate: *cap concurrent positions per sector at 3 of 6.*
+
+**11. Sample velocity is slowing.** Last week: 5+ closes/week. This week so far: 2-3. Combination of smaller universe + longer-held survivors. **The brain is generating fewer data points per week as it stabilizes — which means hypothesis tests take longer to graduate or reject.** ONDS-91 has been at S=2/C=1 for 2+ days because no matching closes happened. The dossier learning loop slows down with the brain's cadence.
+
+### Actionability ranking
+
+| Lesson | Ship now? | Cost |
+|---|---|---|
+| #6 STAGNATION_PRUNE understanding | Document only | 5 min |
+| #7 Long-hold instrumentation | Defer until n>=5 long-hold closes | — |
+| **#8/#9 Post-winner cooldown** | **Wait for IONQ-2 outcome (1 data point)** | If n=2/2 → ship |
+| #10 Per-sector concentration cap | Defer — interesting but no concrete loss yet | — |
+| #11 Slowing velocity | Track only | — |
+
+**Decision: don't ship tonight.** Wait for IONQ-2's outcome. If it matches SOUN-2's pattern (loses), n=2/2 on chase-winner failures and the post-winner cooldown gets backtest justification per the "backtest before brain changes" rule. If it wins, the pattern's not real and we need more data.
+
+### Predictions for Day 34 (Thursday May 14)
+
+- [ ] **CRDO Day-2 resolution.** 28h now, thesis weakening. Bimodal cohort — wins big or loses small. The "USAR-style hold" or "FN-style die" question.
+- [ ] **IONQ-2 outcome.** Chase-recent-winner test #2. If positive: pattern's not real, "recent winners can persist." If negative: n=2 on the anti-pattern, ship the post-winner cooldown.
+- [ ] **NEXT/SWKS — what closes them?** STAGNATION_PRUNE didn't fire at 168h. Either ROTATION (when the brain gets stronger candidates), SIGNAL flip, TRAILING_STOP (if they rally), THESIS_INVALIDATED, or eventual WATCHDOG_FORCE_SELL. They've had ~7-8 days to resolve and haven't — interesting in itself.
+- [ ] **TEAM Day-1 outcome.** First TEAM entry. Standard fresh position test.
+- [ ] **Cumulative crosses +$200.** Currently at +$138.30. Needs ~+$62 of net realized P&L tomorrow. One IONQ-style winner does it.
+- [ ] **Universe size — does the shrink continue?** If it's <200 again, that's 3 consecutive days of contracted universe. Worth a deeper look at scan_service pre-filter behavior.
+
+### Personal note
+
+A genuinely uneventful day. Two entries, zero closes, no journal-worthy events. **The most interesting thing was IONQ-2** — the brain admitted the same name that won big yesterday. We don't have any cooldown for this case (only for THESIS_INVALIDATED and WATCHDOG_EXIT exits). The post-winner gap was named Day-28 lesson #3 and Day-32 lesson #3 — and now the brain just keeps walking into it.
+
+If IONQ-2 also closes loss, that's 2-of-2 (SOUN-2, IONQ-2) and the cooldown gets a backtest justification. If IONQ-2 wins, the cooldown might cost us future SOUN-2-style winners we don't yet know exist.
+
+Day 34 is the data point that decides it.
+
+---
+
+## Day 34 — May 14, 2026 (Thursday) [retroactive]
+
+**Metrics:** Quiet day. **0 entries, 1 close. Net realized -$3.81** from CRDO closing at the small-loss end of the bimodal cohort. Cumulative wallet-era: $138.30 → **$134.49**. Universe collapsed to 103 signals (vs 269 a week prior) — brain admitted zero on the contracted universe.
+
+### The single close
+
+**CRDO closed -$3.81 / -0.68% via THESIS_INVALIDATED after 39h.**
+
+CRDO was the bimodal-cohort test from Day-32 (entered with thesis already invalid at 2h). Day-33 prediction: *"Coin flip whether it wins big like SOUN/USAR or loses small like ALAB/MP."* Outcome: **lost small (-$4) via the THESIS_INVALIDATED path** — the thesis tracker correctly caught the weakness, no catastrophic. Adds CRDO to the FN/ALAB/MP/TTGT side of the cohort.
+
+**Updated bimodal cohort tally (post-grace + thesis-weakening early):**
+- Wins: USAR +$60, SOUN +$68, ARM +$11, SMCI +$27, IONQ +$64 → **5 wins, +$230**
+- Losses: FN -$14, ALAB -$10, MP -$11, TTGT -$15, CRDO -$4 → **5 losses, -$54**
+- **5W / 5L = 50% win rate. +$176 net by dollars (4.3:1 reward:risk).** Day-28 lesson #6 holds and strengthens.
+
+### The universe collapse
+
+**103 signals.** That's the smallest universe of the post-Filter-D era. Possible drivers:
+- Pre-holiday low-vol day
+- Market consolidation phase
+- Pre-filter (volume >= 200K, abs(day_change) >= 1%) tightening on a quiet session
+
+The brain's response: **admit zero entries.** This is the "self-restricting on weak days" emergent property from Day-31 lesson #3 — confirmed for the second time.
+
+### Day-33 predictions vs Day-34 reality
+
+| Prediction | Outcome |
+|---|---|
+| CRDO Day-2 bimodal resolution | ✓ Lost -0.68% via THESIS_INVALIDATED — small-loss side of cohort |
+| IONQ-2 outcome (chase-winner test) | **Still open** — thesis valid, unexpectedly resilient at 32h |
+| NEXT/SWKS — what closes them? | Still nothing. At 200h now. |
+| TEAM Day-1 outcome | Still open, thesis n/a |
+| Cumulative crosses +$200 | ✗ Down to +$134.49 |
+| Universe shrink continues | ✓ Confirmed — 103 signals |
+
+### Lessons from Day 34
+
+**1. The bimodal cohort math is now n=10 — strong signal.** 5W/5L by count, +$176 by dollars (4.3:1). **Grace doesn't change win rate; it changes magnitude asymmetry.** Day-28 lesson #6 is now backed by a proper sample.
+
+**2. Universe contraction → brain auto-throttles.** Two zero-entry days now (Day-31 + Day-34) on contracted universes. The gates are doing structural work even when the brain isn't trading — they're FILTERING for quality, not just rate-limiting.
+
+**3. CRDO's -0.68% close is the smallest loss in the cohort.** The thesis tracker fired EARLY (39h) and caught the failure before it could deepen. **Faster thesis exits = smaller losses on bimodal cohort failures.** ALAB took 24h, FN took 24h, MP took 24h, TTGT took 76h, CRDO took 39h. The faster exits all closed under -$15.
+
+---
+
+## Day 35 — May 15, 2026 (Friday)
+
+**Metrics:** **3 entries, 0 closes. Net realized $0.** Cumulative wallet-era unchanged at **+$134.49**. Pocket dropped to $3,373 (deployed $1,254 in three new entries). **7 positions open** — most ever in the post-Filter-D era. Universe rebounded to 260 from yesterday's 103.
+
+### Today's entries (3)
+
+| Time | Symbol | Score | Notes |
+|---|---|---|---|
+| 14:02 | **ARM** | **97** | **Highest-conviction entry of the post-Filter-D era.** ARM previously won +$11 on Day-25 (May 5) — 10 days ago. Thesis weakening at 8h. |
+| 14:02 | BTDR | 81 | **4th BTDR entry of the era** (Apr 28 lost same-day, May 4 won +$44, May 5 entered, today). Per-symbol cooldown wasn't triggered because the prior closes were TRAILING_STOP/wins, not WATCHDOG_EXIT. |
+| 16:05 | MSTR | 78 | Fresh entry — same name that won +$5.76 via ROTATION on Day 27 (May 7). 8 days ago. |
+
+**Today P&L: $0.** No closes.
+
+### Day-34 predictions vs Day-35 reality
+
+| Prediction | Outcome |
+|---|---|
+| IONQ-2 outcome (chase-winner test) | **Still open at 56h, thesis VALID** — unexpectedly healthy. Pre-fix would have died. The "chase-winner" hypothesis is now under doubt (n=1 SOUN-2 confirmed loss, n=1 IONQ-2 surviving past death window). |
+| NEXT/SWKS — what closes them? | Still nothing. **224h now (Day 9.3).** Officially long-hold survivors. |
+| TEAM Day-1 outcome | Survived to 54h, thesis n/a (no re-eval yet). |
+| Cumulative crosses +$200 | ✗ Stuck at +$134.49 |
+| Universe shrink continues | ✗ Rebounded to 260 — alternating week, not consistent shrink |
+
+### Currently open (7 wallet positions — most ever)
+
+| Symbol | Age | Score | Thesis | Notes |
+|---|---|---|---|---|
+| MSTR | 6h | 78 | valid | Fresh, in grace. **Re-entry of Day-27 winner (8d ago)** |
+| ARM | 8h | **97** | weakening | **Highest-score entry of era. Re-entry of Day-25 winner (10d ago)** |
+| BTDR | 8h | 81 | n/a | **4th BTDR entry** of post-Filter-D era |
+| TEAM | 54h | 75 | n/a | Past grace, thesis still untracked |
+| IONQ | 56h | 80 | **valid** | **Chase-winner test SURVIVING** — past typical death window |
+| NEXT | 224h | 78 | valid | Day-9.3, long-hold survivor |
+| SWKS | 224h | 79 | valid | Day-9.3, long-hold survivor |
+
+**$3,085 deployed across 7 positions.** Pocket $3,373 = ~52% deployment ratio.
+
+### Lessons from Day 35 (the real ones)
+
+**1. The "chase-recent-winner" anti-pattern is now under doubt — n=1 confirmed loss (SOUN-2), n=1 surviving past death window (IONQ-2).** Day-32/33 lesson #8 was based on SOUN-2's loss alone. IONQ-2 was supposed to be the deciding data point. It hasn't decided yet — but the fact that it's at 56h with thesis VALID (not dying like SOUN-2 did) suggests **the pattern might just be "fresh-entry weakness", not "winner-chase weakness."** **Defer the post-winner cooldown ship.** Need IONQ-2 to actually close before drawing conclusions. If it wins or just exits flat, the cooldown isn't justified.
+
+**2. ARM-2 at score 97 is interesting — not chase-winner, but score-band test.** ARM at 97 is the highest-score entry of the era. ONDS-91 hypothesis says HIGH_RISK score>=88 underperforms (S=2/C=1). ARM-2 at 97 is the next direct test. **If ARM-2 wins → contradicts to S=2/C=2 (decay continues).** If ARM-2 loses → supports to S=3/C=1 (graduation closer at 5).
+
+**3. 7 positions open — concentration is real now.** All 7 are HIGH_RISK SHORT-horizon (Day-26 lesson #7 / Day-33 lesson #10). With $3,085 deployed in a single bucket+horizon, a sector-wide tech selloff = full portfolio drawdown. **No defense for this in current code.** Day-33 lesson #10 ship candidate (per-sector concentration cap) becomes more interesting — but no concrete loss event yet, defer.
+
+**4. The "long-hold survivor" cohort is growing.** NEXT/SWKS at 224h. They've now been open for >2x the typical resolution window. **Eventual close P&L will tell us if these are silent winners (the slow grind we should welcome) or silent losers (the slow bleed Day-33 lesson #7 worried about).** When they finally close, that's the data point.
+
+**5. BTDR-4 entry exposes a per-symbol counting gap.** BTDR has been entered 4 times in 17 days (Apr 28, Apr 30, May 4, May 15). 1 loss (same-day Apr 28), 1 win (Day 24 May 4 +$44), 1 still-open (May 5? — wait, need to verify), and now today. **The brain has zero memory of "we've tried this name 3 times already this month."** Per-symbol cap is per-DAY only. **Worth a per-symbol-per-month tracking metric** — not a hard cap, but visibility into how often the brain churns the same names.
+
+**6. CRDO's small loss yesterday confirms the thesis tracker is doing its job.** -0.68% / -$4 in 39h is a remarkably contained failure. Pre-Filter-D, CRDO would have either been killed at ~-2% same-day (no grace) or held until -8% catastrophic (no thesis tracker). Today's infrastructure: 39h hold, thesis-tracker exit, -$4. **The system is preserving capital on bad trades while still letting good trades cook.**
+
+### Deeper lessons (the ones that change the model)
+
+**7. The "chase-winner" framing was WRONG — it's just the broader bimodal pattern.** I built up the post-winner-cooldown ship on SOUN-2 (4d gap, lost) and IONQ-2 (1d gap, surviving) evidence. Today ARM-2 entered (10d gap from a prior win) with thesis weakening at 8h — same shape. **Temporal distance from a prior win isn't the discriminator. Every fresh HIGH_RISK SHORT entry weakens within ~12h regardless of any prior closes.** The "chase-winner" pattern was a red herring — a subset of the broader bimodal cohort with extra storytelling. **Drop the post-winner cooldown idea entirely. No ship. Stop "waiting for IONQ-2 to decide" — IONQ-2 was about to teach the wrong lesson because the framing was wrong.**
+
+**8. The thesis tracker may be over-flagging weakness.** ARM at 97 → weakening at 8h. TEAM at 75 → weakening early. CRDO at 80 → weakening at 2h. IONQ at 80 → weakening immediately. **Score doesn't predict whether thesis stays valid. Even maximum-conviction (97) gets downgraded within hours.** Two interpretations:
+- Claude's thesis re-eval is conservative — flips to "weakening" as a default after entry euphoria
+- The market mean-reverts on fresh HIGH_RISK entries (entry catches the top of an intraday move)
+
+Either way, **the bimodal cohort might not be a real market pattern — it might be the thesis tracker's calibration**. Worth reading `THESIS_REEVAL_PROMPT` to check for an implicit "weakening" bias.
+
+**9. The edge is concentrated in 3 outlier wins.** Strip IONQ +$64 + SOUN-1 +$68 + APLD +$77 ($209 total) from the cumulative +$134 → **the rest of the post-Filter-D era is -$75.** **The brain's edge is ENTIRELY in 3 fat-tailed trades over 17 days.** If those don't repeat at the same cadence, we're a net loser. The "+$15/day average" framing hides this fragility. **Reframe expectations:** not "+$300/month is the new normal" — it's "we caught 3 great moves and need to keep catching them at similar magnitudes."
+
+**10. Sample velocity collapsed further.** 1 close in 2 days. 7 positions open. **Capital is committed without resolution faster than data is generated.** ONDS-91 hypothesis still S=2/C=1 (unchanged for 3 days because no matching closes). At this rate, formal hypothesis graduation/rejection takes weeks instead of days. Day-33 lesson #11 has worsened. **Accept the slower cadence as the steady state.**
+
+**11. The brain has a "barbell" age distribution — fresh OR long-hold, nothing in between.** Today's 7 positions: 3 at <12h, 2 at 50-60h, 2 at 224h. **Almost zero positions in the 3-6 day "running winner" middle band.** Trades either resolve quickly (bimodal cohort) or sit indefinitely (long-hold survivors). **The "letting winners run" middle phase is missing.** USAR/APLD/MSTR-1/SMCI (the valley-resolution wins) all exited via SIGNAL/ROTATION at 5-7 days — those were rare. Most trades are at the bimodal end. **Implies the brain doesn't have a sustained "good trade in flight" state — only "fresh and hopeful" or "stuck and old."**
+
+### What changes from these lessons
+
+| Lesson | Implication | Action |
+|---|---|---|
+| **#7 chase-winner was wrong premise** | **Drop post-winner cooldown ship entirely** | **No ship. Stop waiting for IONQ-2 to "decide."** |
+| #8 thesis tracker bias | Investigate THESIS_REEVAL_PROMPT for weakening default | Read code, document |
+| #9 edge is fat-tailed in 3 trades | Reframe expectations: "$60-80 wins among small noise," not "$15/day" | Mental model only |
+| #10 sample velocity collapsed | Hypothesis tests take weeks not days | Accept new cadence |
+| #11 barbell age distribution | Mid-age "running winner" phase is missing | Need to understand WHY winners exit so fast |
+
+### Meta-lesson
+
+**The biggest update: a previous decision was wrong.** I built up the post-winner-cooldown ship across Day-28 lesson #3, Day-32 lesson #5, Day-33 lesson #8, and Day-33 deeper-lessons #8/#9 — all on SOUN-2's lone data point. ARM-2 today (10d gap, same weakening shape) collapsed the framing. **Lessons themselves can be wrong, and "waiting for one more data point to decide" is appropriate — but only if the framing is right to begin with.** Today the framing was wrong, and waiting for IONQ-2 to "decide" would have produced a wrong ship if IONQ-2 happened to lose.
+
+**Going forward: when a pattern feels like it's about to justify a ship, ask "what's the THIRD case look like?" If the third case has the same shape but a different gap-size, the temporal framing was wrong — back off and re-categorize.
+
+### Day-35 follow-up: thesis-prompt bias investigation (run May 19)
+
+Read `THESIS_REEVAL_PROMPT` carefully + queried all 13 wallet-era winners. **Smoking gun:** 10 of 13 winners (77%) ended with thesis = `weakening` or `invalid`. Including the crown jewels — SOUN +14% (invalid), USAR +13% (weakening), IONQ +18% (invalid), BTDR +11% (weakening), SMCI +7% (weakening), ARM +3% (invalid). Only 3 winners ended `valid`: APLD, MSTR-1, IONQ-2 (briefly valid before dying — see Day 36).
+
+**Prompt biases identified:**
+1. **Asymmetric "be alert to" lists** — 4 bullets pointing to DECAY signals, 0 bullets pointing to CONFIRMATION signals.
+2. **P&L primed at the top** — Claude sees `(P&L: -X.XX%)` before reading the rules.
+3. **"Is the original thesis still valid TODAY"** — equivocation-loaded framing tends to land on "weakening" as the middle answer.
+
+**Net effect:** the thesis tracker is biased toward flagging weakness, BUT only `status == invalid` triggers THESIS_INVALIDATED exits, so the bias is mostly cosmetic (pessimistic UI labels). The exit logic still works — and arguably the conservative-exit behavior is a FEATURE not a bug (oil-barrel principle).
+
+**Decision:** no prompt change shipped tonight. Documented as a known calibration quirk. Revisit if/when we see clear evidence of early-exit hurting (e.g., several `invalid` exits followed by the same name rallying 10%+ in the next 5 days).
+**
+
+### Predictions for Day 36 (Monday May 18)
+
+- [ ] **IONQ-2 outcome.** 56h+, thesis valid. If positive: chase-winner pattern is dead. If negative: cooldown ship gets justification.
+- [ ] **ARM-2 outcome.** Score 97, weakening at 8h. Direct ONDS-91 hypothesis test. The highest-conviction entry to date.
+- [ ] **NEXT/SWKS — anything?** They've been open for 224h now (Day 9.3). One of them has to close eventually. The mechanism that fires will teach us about the long-hold cohort.
+- [ ] **First Filter-D era close that's NEITHER bimodal nor long-hold.** All recent closes have been one or the other. We need a clean "entered, ran up, profit-took at target" trade to know that exit path still works.
+- [ ] **Cumulative crosses +$200** — still need ~+$66 of net realized.
+- [ ] **Track the BTDR-4 outcome separately.** With 4 entries in 17 days, BTDR is the most-tried name in the era. Worth a name-specific dossier note.
+
+### Personal note (combined Day-34 + Day-35)
+
+Two days, one close, three entries, one decided lesson (bimodal cohort math at n=10 is solid) and one DEFERRED ship decision (post-winner cooldown — IONQ-2 hasn't decided yet).
+
+**The biggest takeaway:** the brain is operating in a stable groove — entries flow when the universe permits, exits fire when the thesis breaks, the structural P&L (+$134) is holding above zero with a fat-tailed distribution that matches Day-28 lesson #6's claims. **Boring is correct.** The system is doing what we designed it to do.
+
+What's NOT clear yet: long-hold survivors (NEXT/SWKS) and the chase-winner question (IONQ-2). Both resolve eventually and will teach us the next thing. **Tomorrow Friday EOD or Monday will likely close at least one of these open questions.**
+
+---
+
+## Day 36 — May 18, 2026 (Monday — Victoria Day, TSX closed)
+
+**Metrics:** Painful day. **1 entry (LUN.TO on a Canadian holiday), 2 closes, net -$45.32.** Cumulative wallet-era: $134.49 to **$89.16**. The chase-winner pattern that I declared "wrong premise" on Day 35 **just produced its third confirming loss.**
+
+### The big reversal: chase-winner pattern is real (n=3/3 losses)
+
+Day 35 deep-lesson #7 said: "Drop the post-winner cooldown idea entirely. The chase-winner framing was wrong." That conclusion was based on incomplete data — IONQ-2 was still alive at 56h with thesis valid, and ARM-2 had a 10d gap (which felt too far for the "chase" pattern).
+
+**Today, both completed their dives:**
+
+| Entry | Gap from prior win | Outcome | Held | When closed |
+|---|---|---|---|---|
+| SOUN-2 | 4d | -$22 (QUALITY_PRUNE) | 4d | Day 32 |
+| **IONQ-2** | **1d** | **-$41 (WATCHDOG_FORCE_SELL)** | **5d (catastrophic)** | **Day 36 (today)** |
+| **ARM-2** | **10d** | **-$4 (THESIS_INVALIDATED)** | **3d** | **Day 36 (today)** |
+
+**3 of 3 chase-winner re-entries lost. Total realized: -$67 across all three.** The post-winner cooldown ship is now decisively backtest-justified per the "backtest before brain changes" rule.
+
+**The meta-lesson from Day 35 was correct in shape but wrong in application:** I asked "what's the third case look like?" and concluded ARM-2 (10d gap, weakening early) was the same shape as IONQ-2 (1d gap, weakening early) — and used that to say the temporal gap doesn't matter. **But the OUTCOME (eventual loss) was what unified the three cases — not the trade shape, the trade RESULT.** I needed to wait for them to CLOSE before deciding, not look at their mid-flight thesis status. **Going forward: don't draw conclusions from open positions; wait for the close.**
+
+### Today's closes (2)
+
+| Time | Symbol | Reason | P&L | Held |
+|---|---|---|---|---|
+| 10:02 | ARM | THESIS_INVALIDATED | -$4.03 (-0.87%) | 68h |
+| 13:45 | **IONQ** | **WATCHDOG_FORCE_SELL** | **-$41.29 (-8.21%)** | 120h |
+
+IONQ-2's catastrophic exit at -8.21% is the biggest single LOSS of the post-Filter-D era. Pre-Filter-D era's biggest loss was ONDS Day-19 at -9.46%. **Same magnitude — and same name pattern** (high-conviction HIGH_RISK entry, dies catastrophic over 5 days). The bimodal cohort doesn't just have small losses; this one was big.
+
+### Today's entry (1) — and the holiday problem
+
+| Time | Symbol | Score | Notes |
+|---|---|---|---|
+| 14:02 | **LUN.TO** | 78 | **TSX ticker entered on a Canadian holiday (TSX closed for Victoria Day).** Price data was stale Friday close. |
+
+**The brain has no holiday awareness.** It admitted a Canadian stock on a day when Canadian markets weren't trading. The position will resolve tomorrow (May 19) when TSX reopens — and indeed it died at -$20 the next day. See Day 37.
+
+### Hypothesis status
+
+- **`journal_day21_onds91_pattern`** (HIGH_RISK score>=88): **S=2 / C=1**. ARM-2 was at 97, lost -$4 — but barely (-0.87%) and within bimodal-cohort variance. Counting it as supporting would push to S=3/C=1. The auto-classifier handles this; need to verify counts after the API sync.
+
+### Predictions for Day 37 (already happened, written retroactively)
+
+- ✓ LUN.TO resolves (will die when TSX reopens)
+- ? More post-holiday volatility
+- ? TEAM and BTDR — when do they close?
+
+---
+
+## Day 37 — May 19, 2026 (Tuesday)
+
+**Metrics:** Recovery day, marginally. **3 entries, 3 closes, net +$0.16** (essentially flat). Cumulative wallet-era unchanged at **$89.01**. First big winner in 2 weeks (TEAM +$35) finally arrived. LUN.TO holiday-entry died exactly as predicted.
+
+### Today's closes (3)
+
+| Time | Symbol | Reason | P&L | Held | Notes |
+|---|---|---|---|---|---|
+| 14:05 | **LUN.TO** | WATCHDOG_FORCE_SELL | **-$19.66 (-4.58%)** | 24h | **Holiday entry died first day TSX reopened** — exactly the cost of the missing holiday filter |
+| 16:03 | **TEAM** | TRAILING_STOP | **+$35.30 (+7.80%)** | 144h | **First magnitude winner in 2 weeks.** Entered May 13 at score 75, ran into the 6-day window, trailed out at +7.8%. |
+| 16:03 | BTDR | QUALITY_PRUNE | -$15.80 (-3.79%) | 98h | **4th BTDR entry of the era.** 4 attempts in 21 days: 1W/3L. The brain keeps walking back to this name. |
+
+**Today P&L: -$19.66 + $35.30 - $15.80 = -$0.16.** Net flat.
+
+### Today's entries (3 — solar sector concentration)
+
+| Time | Symbol | Score | Sector | Notes |
+|---|---|---|---|---|
+| 16:02 | ENPH | 80 | **Technology** (solar inverters) | Thesis invalid at 5h |
+| 16:02 | SEDG | 76 | **Technology** (solar inverters) | Thesis invalid at 5h |
+| 19:03 | FSLR | 77 | **Technology** (solar panels) | Thesis valid at 2h |
+
+**All three are SOLAR sector names entered within 3 hours of each other.** Day-33 lesson #10 (per-sector concentration cap) is now live with 3 active solar positions. If solar gets bad news tomorrow, all 3 die together — that's a $1,247 simultaneous drawdown vulnerability. **No defense for this in the current code.**
+
+### Currently open (6 wallet positions)
+
+| Symbol | Age | Score | Bucket | Thesis | Notes |
+|---|---|---|---|---|---|
+| FSLR | 2h | 77 | HIGH_RISK | valid | Solar #3 |
+| ENPH | 5h | 80 | HIGH_RISK | invalid | Solar #1 — thesis already gone |
+| SEDG | 5h | 76 | HIGH_RISK | invalid | Solar #2 — thesis already gone |
+| MSTR | 101h | 78 | HIGH_RISK | valid | Re-entry of Day-27 winner, Day 4+, no exit |
+| NEXT | **319h** | 78 | HIGH_RISK | valid | **Day-13.3 long-hold survivor** |
+| SWKS | **319h** | 79 | HIGH_RISK | valid | **Day-13.3 long-hold survivor** |
+
+**$2,495 deployed across 6 positions.** NEXT/SWKS now at TWO WEEKS held. They've blown past every conventional exit window. **The "long-hold survivor" cohort is becoming permanent capital.**
+
+### Lessons across Day 36 + Day 37
+
+**1. Chase-winner cooldown is now SHIPPABLE.** n=3/3 losses (-$67 total). The mechanism is clear (same name, recent winner, fresh entry weakens early, fails within 3-5 days). The "backtest before brain changes" rule is satisfied. **Tomorrow's ship candidate: a 14-day post-WINNER cooldown that blocks re-entry of any symbol whose previous wallet-trade close was a positive THESIS_INVALIDATED or TRAILING_STOP within the last 14 days.** Estimated savings: $67 over the last 17 days = ~$3.94/day prevented = ~$120/month.
+
+**2. The holiday gap cost us -$20 in one trade.** LUN.TO entered on Victoria Day, died the next session. **Holiday filter is the second ship candidate.** Cost prevented per occurrence: ~$20. Frequency: ~10 Canadian holidays/year = ~$200/year. Plus protection against US holidays (NYSE/NASDAQ closures) which the brain could also stumble into.
+
+**3. Solar sector concentration vulnerability is now LIVE.** 3 of 6 active positions are solar names. If solar sells off tomorrow, full -$1.2k drawdown is possible. **Per-sector concentration cap** is the third ship candidate. Cost prevented: unknown, but the variance reduction matters even if average return doesn't move.
+
+**4. NEXT/SWKS at 319h is uncharted territory.** Past grace, past valley, past stagnation threshold, past USAR/APLD resolution window, past everything. The "long-hold survivor" cohort is real and accumulating. **At what point does sitting on a position for 14 days count as "loss of opportunity cost"?** No exit rule fires until day 60 (TIME_EXPIRED) unless they bleed catastrophic. Worth instrumenting their eventual close P&L to know if "long hold = good outcome" or "long hold = silent loss."
+
+**5. TEAM's +$35 win matters more than it looks.** TEAM was admitted at score 75 (the bottom of Filter D), held 144h (the valley window), trailed out at +7.8%. **The bimodal cohort produces winners at the low-score end too** — not just the high-score names. ARM-2 at 97 lost; TEAM at 75 won. Day-33 deep-lesson #11 (score doesn't predict direction) holds.
+
+**6. BTDR-4 closing the case on per-symbol churn.** 4 entries in 21 days: 1 win (+$44), 3 losses (-$10 + -$10 + -$16 = -$36). Net **+$8 across 4 BTDR attempts.** Marginal win, but the variance and opportunity cost matters. The brain has zero visibility into "we've tried this name 3 times this month." **Per-symbol monthly tracking** is the fourth ship candidate.
+
+### Three ship candidates ranked
+
+| # | Ship | Backtest-justified? | Cost prevented | Risk |
+|---|---|---|---|---|
+| 1 | **Post-winner cooldown (14d)** | ✓ n=3/3 losses, -$67 | ~$120/month | LOW — 1-line gate |
+| 2 | **Holiday filter** | n=1 (LUN.TO) but mechanism is clear | ~$200/year | LOW — pure filter |
+| 3 | Per-sector concentration cap | No backtest yet | Variance reduction, unknown $ | MEDIUM — may block winners |
+| 4 | Per-symbol monthly tracker | Info-only (BTDR-4 net +$8 so not urgent) | None directly | LOW — pure visibility |
+
+**Recommendation: ship #1 and #2 tomorrow.** Both have clean mechanisms, both prevent the kind of losses we just suffered, both reversible in one line.
+
+### Predictions for Day 38 (Wednesday May 20)
+
+- [ ] **Three solar positions resolve.** ENPH/SEDG/FSLR all entered today with two of three already showing thesis=invalid. Three close events in the next 1-3 days will tell us if the brain's "all-eggs-in-one-sector" gamble paid or busted.
+- [ ] **NEXT/SWKS — day 14 reflection.** They're at the longest hold in the era. Worth manually checking their P&L state in DB — silent winners or silent losers?
+- [ ] **MSTR-2 (Day-4 re-entry of a prior winner) outcome.** Adds to the cohort tally (currently 3/3 losses).
+- [ ] **Cumulative crosses +$100 again** — needs ~+$11 net.
+
+### Personal note (combined Day 36 + Day 37)
+
+Bad two days. -$45 over 48 hours. The bulk of it (IONQ-2 -$41) was the chase-winner pattern I prematurely declared "not real" on Day 35. Lesson is hard but useful: **never conclude from open positions, only from closes.**
+
+The good news: the brain's structural P&L is still positive (+$89), the daily cadence is unchanged, no system failure. The two losses were known patterns we hadn't shipped fixes for yet. **Both fixes are tomorrow's work** — and that's the natural shape of a real learning loop. Identify pattern → wait for evidence → ship fix → measure.
+
+What I should NOT do tonight: bigger architectural changes, prompt rewrites, panic refactors. Just journal the lessons, ship the two backtest-justified gates tomorrow, watch the data.
+
+### Late-evening ship: both backtest-justified gates shipped tonight
+
+Pedro greenlit "do whatever is best." Shipped the two ships described in the Day-37 ranking table — together because both are small, backtest-justified, and reversible. Same shape as Filter D and the WATCHDOG_EXIT cooldown.
+
+**Ship A — post-WINNER cooldown** (`brain_post_winner_cooldown_hours = 336`, 14 days):
+- New config setting in `app/core/config.py`
+- New `post_winner_cooldown_symbols` set built in `process_virtual_trades` from any positive wallet close via THESIS_INVALIDATED / TARGET_HIT / TRAILING_STOP / SIGNAL / ROTATION within the cooldown window
+- Entry gate now checks `symbol not in post_winner_cooldown_symbols` alongside the existing thesis and watchdog cooldowns. Applied to both LONG (BUY) and SHORT entry paths.
+- Backtest: 3 of 3 chase-winner re-entries lost -$67 in the prior 17 days. All would have been blocked by this cooldown.
+- 7 regression tests (`test_post_winner_cooldown.py`) pinning the config default, the wiring, orthogonality vs the other two cooldowns, and the positive-pnl filter.
+- One-line revert: set `brain_post_winner_cooldown_hours = 0`.
+
+**Ship B — market_calendar holiday filter** (`app/core/market_calendar.py`):
+- Hardcoded TSX and US holiday lists for 2026 (10-11 holidays each)
+- `is_market_open(exchange, date)` function with safe defaults (unknown exchange → open, uncovered year → open) so a missing year-roll doesn't silently disable trading
+- Applied in `process_virtual_trades` BEFORE tier evaluation on both BUY and SHORT paths — entries on a closed-exchange day are skipped with a `Holiday filter` log line
+- Backtest: 1 case (LUN.TO on Victoria Day, -$19.66). Mechanism is clear: stale Friday-close prices on holidays produce fictional entries.
+- 20 regression tests (`test_market_calendar.py`) covering Victoria Day, every 2026 TSX/US holiday, CRYPTO always-open, weekend behavior, safe defaults for unknown exchanges, AND a "current year coverage" test that fails in CI if December year-roll is forgotten.
+- Reverts: delete the file, remove the 6 lines from `process_virtual_trades`. Two small reverts, no shared state.
+
+**Test totals: 160 unit tests pass** (133 prior + 7 post-winner + 20 market-calendar). All 99 pre-existing tests still pass.
+
+**Invalidation criteria:**
+- Post-winner cooldown: if 5+ trades in a row get BLOCKED by this cooldown but the un-blocked equivalent would have been a winner (we can simulate by checking which signals were rejected and what the same name's outcome was over the next 14 days), the cooldown is too aggressive. Re-tune.
+- Holiday filter: zero — it's a pure pre-filter on a deterministic external state (the calendar). Only risk is forgetting to add next year; the unit test catches that.
+
+**Status going into Day 38:** brain now has three cooldowns (thesis-rebuy 60min, watchdog-exit 7d, post-winner 14d), plus a holiday filter. 5 brain-behavior changes in the post-Filter-D era, all backtest-justified, all with documented invalidation criteria.
+
+**To deploy:** restart the backend. After Wednesday's first scan, grep logs for `Post-winner re-buy cooldown active` and `Holiday filter` — both should appear when applicable. The post-winner cooldown should show 5-7 names today (TEAM, ARM, IONQ, SOUN, USAR, APLD, BTDR — recent winners within 14 days).
+
+### Late-late-evening: amplification ship — chasing the 20%/month goal
+
+After Pedro's reminder that the goal is "**at least 1%/day = 20%/month minimum**" (not the 1-2%/month I'd been operating against), did a full data-driven analysis. Current $5.24/day = 0.10%/day. Goal: $45/day. **9x gap.**
+
+Found the real edge in the data:
+
+| Score band | n | Win rate | Avg winner | Avg loser | EV/trade | Total |
+|---|---|---|---|---|---|---|
+| **75-79** | 17 | 41% | **+$43** | -$14 | **+$9.42** | **+$160** |
+| 80-84 | 11 | 45% | +$10 | -$17 | -$4.86 | -$53 |
+| 90+ | 5 | 20% | +$64 (1 outlier) | -$17 | -$0.73 | -$4 |
+
+**The 75-79 band made +$160. Everything else combined lost.** Proposed a "block 80+ entries" ship → walked it back as overfitting on n=17. Instead, shipped a measured amplification of the proven edge.
+
+**Ship (Day 37 late):**
+- `wallet_position_pct_tier1 = 15.0` (was 10.0) — 1.5x sizing on Tier 1
+- `wallet_max_position_pct = 20.0` (was 15.0) — room for Tier 1 + trust_multiplier
+- `wallet_max_entries_per_day = 4` (was 3) — 1.33x frequency
+- New `wallet_auto_revert_pnl_floor = 50.0` — drawdown circuit breaker
+- Combined: ~2x daily output target ($10/day instead of $5/day)
+
+**Drawdown circuit breaker mechanism:** at the start of each scan, the brain reads cumulative wallet-era realized P&L. If below the +$50 floor, the EFFECTIVE sizing constants clamp back to pre-Day-37 defaults (10% / 5% / cap 3) for that scan. No settings mutation — pure local override passed through `calc_position_size_usd(tier1_pct_override, max_pct_override)`. Bounded experiment.
+
+**Code touched:**
+- `app/core/config.py` — 4 new/changed settings
+- `app/services/wallet.py` — added override params to `calc_position_size_usd`
+- `app/services/virtual_portfolio.py` — breaker logic + effective constants + call-site override threading
+- `tests/test_day37_amplification.py` — 12 regression tests
+
+**Test totals: 172 unit tests pass** (160 prior + 12 new).
+
+**Honest projection:**
+- If EV holds and 2x amplification works: **$10/day = 4-5% monthly = ~$220/month on $5k**
+- Still short of 20%/month target. The remaining gap requires:
+  - Options trading (5-10x leverage on the same signal) — weeks of work
+  - Margin/leverage on the existing trades — wallet rework
+  - Win-rate improvement (currently 38%) — months of signal engineering
+
+**What WON'T happen yet:**
+- No options trading shipped tonight (multi-week project)
+- No leverage (wallet doesn't support margin yet)
+- No score-band-based blocking (would overfit on n=17)
+- No goal lowered (still chasing 20%/month)
+
+**Reverts:** all four config values flip back in one git diff. Override params default to None so legacy callers unaffected.
+
+**Invalidation criteria:** if cumulative wallet-era falls below +$50, the breaker auto-clamps. If 5+ consecutive losses occur AT THE NEW SIZING and cumulative tanks below ZERO, manual intervention required (revert config + investigate). The +$50 floor is the safety net; +$0 is the panic line.
+
+### Going into Day 38
+
+Brain enters Day 38 with: Filter D, 3 cooldowns (thesis/watchdog/post-winner), per-day cap (4), per-symbol cap (1), holiday filter, watchdog grace, and now 1.5x sizing + drawdown breaker. Most defensive AND most aggressive configuration to date. The bet: the proven edge (75-79 band, +$9.42 EV/trade) survives the 1.5x scaling.
+
+If $10/day materializes over the next 2-4 weeks, we move to phase 2 (options/leverage). If not, we re-debug what changed.
+
+
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

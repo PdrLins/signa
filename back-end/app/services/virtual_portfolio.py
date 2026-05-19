@@ -1414,6 +1414,36 @@ def process_virtual_trades(
                 f"({we_cooldown_hours}h): {sorted(watchdog_cooldown_symbols)}"
             )
 
+    # Day 37: post-WINNER cooldown. Mirrors the watchdog cooldown above,
+    # but for the OPPOSITE failure mode — re-buying a name shortly after
+    # it CLOSED PROFITABLY. Backtest: 3 of 3 chase-winner re-entries lost
+    # (-$67 total: SOUN-2 -$22, IONQ-2 -$41, ARM-2 -$4). Mechanism: a name
+    # that just produced a winning thesis-exit (or trailing-stop) has
+    # likely played out its catalyst; the brain re-buying is "chasing"
+    # without a fresh reason. Wallet trades only — legacy 1-share trades
+    # are pre-wallet and shouldn't gate post-wallet re-entries.
+    pw_cooldown_hours = settings.brain_post_winner_cooldown_hours
+    post_winner_cooldown_symbols: set[str] = set()
+    if pw_cooldown_hours > 0:
+        pw_cutoff = (datetime.now(timezone.utc) - timedelta(hours=pw_cooldown_hours)).isoformat()
+        pw_rows = (
+            db.table("virtual_trades")
+            .select("symbol, exit_date, pnl_amount, exit_reason")
+            .eq("source", "brain")
+            .eq("status", "CLOSED")
+            .eq("is_wallet_trade", True)
+            .in_("exit_reason", ["THESIS_INVALIDATED", "TARGET_HIT", "TRAILING_STOP", "SIGNAL", "ROTATION"])
+            .gt("pnl_amount", 0)
+            .gte("exit_date", pw_cutoff)
+            .execute()
+        ).data or []
+        post_winner_cooldown_symbols = {r["symbol"] for r in pw_rows if r.get("symbol")}
+        if post_winner_cooldown_symbols:
+            logger.info(
+                f"Post-winner re-buy cooldown active on {len(post_winner_cooldown_symbols)} symbols "
+                f"({pw_cooldown_hours}h): {sorted(post_winner_cooldown_symbols)}"
+            )
+
     # Resolve once: brain runs single-tenant, every insert is stamped with
     # this user_id so the rows are correctly attributed and queryable.
     brain_user_id = queries.get_brain_user_id()
@@ -1425,6 +1455,39 @@ def process_virtual_trades(
     from app.services import wallet as wallet_svc
     _wlt_initial = wallet_svc.get_wallet(brain_user_id) if settings.wallet_enabled else None
     running_balance: float = float(_wlt_initial["balance"]) if _wlt_initial else 0.0
+
+    # Day 37: drawdown circuit breaker. Read cumulative wallet-era
+    # realized P&L; if below the floor, clamp sizing back to the pre-
+    # Day-37 conservative defaults. This bounds the experiment's downside
+    # while letting us test 2x amplification on the proven edge.
+    # When tripped, the brain effectively runs in "safe mode" until
+    # cumulative climbs back above the floor and the next scan rolls.
+    _drawdown_breaker_tripped = False
+    if settings.wallet_auto_revert_pnl_floor is not None:
+        try:
+            cum_rows = (
+                db.table("virtual_trades")
+                .select("pnl_amount")
+                .eq("source", "brain")
+                .eq("status", "CLOSED")
+                .eq("is_wallet_trade", True)
+                .execute()
+            ).data or []
+            cum_pnl = sum((r.get("pnl_amount") or 0) for r in cum_rows)
+            if cum_pnl < settings.wallet_auto_revert_pnl_floor:
+                _drawdown_breaker_tripped = True
+                logger.warning(
+                    f"Drawdown circuit breaker TRIPPED: cumulative wallet-era P&L "
+                    f"${cum_pnl:+.2f} < floor ${settings.wallet_auto_revert_pnl_floor:.2f}. "
+                    f"Reverting Tier 1 sizing to 10% and per-day cap to 3 for this scan."
+                )
+        except Exception as e:
+            logger.warning(f"Couldn't read cumulative P&L for circuit breaker: {e}")
+
+    # Effective sizing constants for this scan — clamped if the breaker tripped.
+    _eff_tier1_pct = 10.0 if _drawdown_breaker_tripped else settings.wallet_position_pct_tier1
+    _eff_max_pct = 15.0 if _drawdown_breaker_tripped else settings.wallet_max_position_pct
+    _eff_max_per_day = 3 if _drawdown_breaker_tripped else settings.wallet_max_entries_per_day
 
     # Per-day entry cap (Day 19 learning). Count today's already-opened
     # wallet entries from the audit ledger so the cap is enforced
@@ -1737,6 +1800,24 @@ def process_virtual_trades(
         # compensate for the AI uncertainty.
         #
         # See `_eval_brain_trust_tier` and the file header for the rules.
+
+        # Day 37: holiday filter. If the ticker's exchange is CLOSED
+        # today, skip — Yahoo returns stale Friday-close prices on those
+        # days, so any "entry" is a fiction. LUN.TO on Victoria Day
+        # (2026-05-18) is the case that proved this matters: -$19.66
+        # WATCHDOG_FORCE_SELL the day after entry on a holiday.
+        from app.core.market_calendar import is_market_open
+        from app.scanners.universe import get_exchange as _get_exchange
+        from zoneinfo import ZoneInfo
+        _today_et = datetime.now(ZoneInfo("America/New_York")).date()
+        _exchange = _get_exchange(symbol)
+        if not is_market_open(_exchange, _today_et):
+            logger.info(
+                f"Virtual BUY skipped for {symbol} (score {score}): "
+                f"{_exchange} closed today ({_today_et}). Holiday filter."
+            )
+            continue
+
         brain_tier, trust_multiplier, tier_reason = _eval_brain_trust_tier(sig, portfolio_heat)
         if (
             brain_tier > 0
@@ -1744,6 +1825,7 @@ def process_virtual_trades(
             and symbol not in open_watchlist  # dedup with watchlist track
             and symbol not in cooldown_brain_symbols  # post-THESIS_INVALIDATED cooldown
             and symbol not in watchdog_cooldown_symbols  # Day 26: post-WATCHDOG_EXIT cooldown
+            and symbol not in post_winner_cooldown_symbols  # Day 37: post-WINNER cooldown
         ):
             # ── Rotation: brain at max capacity, only rotate if the new
             # ── signal is meaningfully better (+5 points) than the weakest
@@ -1893,7 +1975,8 @@ def process_virtual_trades(
                 # all scans), skip. Highest-score signals are processed
                 # first because we sorted at function entry, so the cap
                 # naturally clips marginal entries.
-                cap = settings.wallet_max_entries_per_day
+                # Day 37: use effective cap (clamped by drawdown breaker)
+                cap = _eff_max_per_day
                 if cap > 0 and (wallet_entries_today + wallet_entries_this_scan) >= cap:
                     logger.info(
                         f"Virtual BUY skipped for {symbol} (score {score}): daily entry cap "
@@ -1904,6 +1987,8 @@ def process_virtual_trades(
 
                 sizing = _compute_wallet_fields(
                     running_balance, brain_tier, trust_multiplier, price, symbol, kind="BUY",
+                    tier1_pct_override=_eff_tier1_pct,
+                    max_pct_override=_eff_max_pct,
                 )
                 if sizing is None:
                     continue
@@ -2023,6 +2108,25 @@ def process_virtual_trades(
         if brain_short_count >= settings.brain_max_open_short:
             continue
 
+        # Day 37: holiday filter on SHORT path too.
+        from app.core.market_calendar import is_market_open as _is_open
+        from app.scanners.universe import get_exchange as _get_ex
+        from zoneinfo import ZoneInfo as _ZI
+        _td_et = datetime.now(_ZI("America/New_York")).date()
+        _exch = _get_ex(symbol)
+        if not _is_open(_exch, _td_et):
+            logger.info(
+                f"Virtual SHORT skipped for {symbol} (score {score}): "
+                f"{_exch} closed today ({_td_et}). Holiday filter."
+            )
+            continue
+
+        # Day 37: post-WINNER cooldown also blocks SHORT entries — a name
+        # that just produced a winning thesis-exit shouldn't be re-targeted
+        # in either direction within the cooldown window.
+        if symbol in post_winner_cooldown_symbols:
+            continue
+
         short_tier, short_mult, short_reason = _eval_brain_short_tier(sig)
         if short_tier == 0:
             continue
@@ -2045,7 +2149,8 @@ def process_virtual_trades(
 
         # Per-day cap (Day 19) — applies to SHORTs too. Both wallet
         # entries deploy capital; rate-limit them together.
-        cap = settings.wallet_max_entries_per_day
+        # Day 37: use effective cap (clamped by drawdown breaker)
+        cap = _eff_max_per_day
         if cap > 0 and (wallet_entries_today + wallet_entries_this_scan) >= cap:
             logger.info(
                 f"Virtual SHORT skipped for {symbol} (score {score}): daily entry cap "
@@ -2057,11 +2162,13 @@ def process_virtual_trades(
         # bearish thesis could be LONG (held up to 14 days either way).
         _horizon = "SHORT"
 
-        # Shorts use Tier-1 sizing (10% of balance) scaled by short_mult;
-        # 100% of the allocation gets reserved as collateral when
-        # reserve_for_short_open runs below.
+        # Shorts use Tier-1 sizing (15% of balance Day 37+, was 10%) scaled
+        # by short_mult; 100% of the allocation gets reserved as collateral
+        # when reserve_for_short_open runs below.
         sizing = _compute_wallet_fields(
             running_balance, 1, short_mult, float(price), symbol, kind="SHORT",
+            tier1_pct_override=_eff_tier1_pct,
+            max_pct_override=_eff_max_pct,
         )
         if sizing is None:
             continue
@@ -2214,6 +2321,8 @@ def _compute_wallet_fields(
     symbol: str,
     *,
     kind: str,
+    tier1_pct_override: float | None = None,
+    max_pct_override: float | None = None,
 ) -> tuple[float, float, dict] | None:
     """Size a new brain entry and produce the extra virtual_trades fields.
 
@@ -2231,7 +2340,11 @@ def _compute_wallet_fields(
     if not settings.wallet_enabled:
         return 0.0, 0.0, {"is_wallet_trade": False}
 
-    allocation_usd = wallet_svc.calc_position_size_usd(running_balance, tier, trust_multiplier)
+    allocation_usd = wallet_svc.calc_position_size_usd(
+        running_balance, tier, trust_multiplier,
+        tier1_pct_override=tier1_pct_override,
+        max_pct_override=max_pct_override,
+    )
     if allocation_usd <= 0:
         floor_reason = (
             "balance below minimum"
