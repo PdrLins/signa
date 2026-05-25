@@ -4323,6 +4323,212 @@ If $10/day materializes over the next 2-4 weeks, we move to phase 2 (options/lev
 
 ---
 
+## Day 38 — May 20, 2026 (Wednesday) — BREAKOUT
+
+**Metrics: +$145.17 net realized today.** 4 closes (3W/1L). **Cumulative wallet-era: $89.01 → $234.18 — first time above +$200, first time the wallet is NET POSITIVE in absolute dollars since deposit.** Pocket above $5,000 ($5,708) for the first time since funding. 0 new entries today (cooldowns + Filter D throttled).
+
+### Today's closes (3 wins, 1 loss)
+
+| Time | Symbol | Reason | P&L | Held | Notes |
+|---|---|---|---|---|---|
+| 14:05 | MSTR | STOP_HIT | **-$20.28 (-5.41%)** | 118h | **MSTR-2 — chase-winner pattern, n=4/4 confirmed** |
+| 16:04 | **SWKS** | **TARGET_HIT** | **+$76.47 (+16.58%)** | **338h (14+ days!)** | **Long-hold survivor FINALLY paid off** |
+| 19:04 | ENPH | SIGNAL | **+$53.82 (+12.59%)** | 27h | Solar entry from Day 37 hit signal flip |
+| 19:04 | SEDG | SIGNAL | **+$35.16 (+9.14%)** | 27h | Second solar winner |
+
+**Today P&L: +$145.17.** Biggest single-day realized since Day 27 (+$128).
+
+### The chase-winner pattern is now n=4/4 — cooldown ship vindicated
+
+MSTR-2 entered May 15 (5d after MSTR-1's Day-27 win) → lost -$20 today.
+
+Updated cohort tally:
+- SOUN-2: 4d gap → -$22
+- IONQ-2: 1d gap → -$41
+- ARM-2: 10d gap → -$4
+- **MSTR-2: 5d gap → -$20**
+
+**n=4/4 losses, -$87 total.** The post-winner cooldown shipped LAST NIGHT (14d window) would have blocked all four. **The cooldown is justified by 4 cases now, not 3.**
+
+**Today the cooldown blocked 9 names from re-entry** (APLD, BTDR, ENPH, IONQ, MSTR, SEDG, SMCI, SWKS, TEAM — all recent winners within 14 days). The brain admitted **zero** new entries today as a result. **That's exactly the trade-off we accepted: fewer entries, more selective, let winners cook.**
+
+### Two mental model corrections
+
+**1. Long-hold survivors are NOT silent bleeds.** Day-33 lesson #7 worried that NEXT/SWKS at 200+ hours would silently lose money. **SWKS held 338h (14+ days) and hit TARGET for +16.58%.** That's the longest-held wallet position to ever close — and it closed at one of the biggest wins of the era. **Mental model update: positions past the typical resolution window can be SLOW WINNERS, not just slow losers.** NEXT is still open at 346h — let's see if it also resolves positive.
+
+**2. Solar concentration was a WIN cluster, not a risk cluster.** Day-37 lesson #10 worried about 3 active solar names (ENPH, SEDG, FSLR) creating simultaneous drawdown risk. **Both ENPH and SEDG won at SIGNAL flip today (+$53 and +$35).** Sector concentration can produce simultaneous WINS too, not just simultaneous losses. The per-sector concentration cap I proposed deserves re-examination — capping the cohort would have killed $89 of today's win.
+
+### Day-37 (yesterday's amplification ship) status
+
+Yesterday's bumps (sizing 15%, cap 4, drawdown breaker) had ZERO test today because **0 new entries fired.** All four closes today were positions opened BEFORE the ship at old 10% sizing. So today's $145 was pure existing-strategy output.
+
+**The amplification still hasn't been tested.** Tomorrow when new entries fire (if they fire — cooldowns may continue to block), we'll see Tier 1 entries at ~$850 (15% of $5,708) instead of $570 (10%). That's the test.
+
+### Goal progress
+
+18 trading days post-Filter-D: +$234.18 cumulative / 18 = **$13/day average**.
+
+- 0.26%/day (vs 0.10%/day yesterday — 2.6x improvement in ONE DAY)
+- Monthly extrapolation: **~$280/month = 5.6%/month** on $5k
+- Still short of the 20%/month floor, BUT today alone was +2.9% in one day
+- **If today's pace held, we'd be ABOVE the 20%/month target**
+
+We're not there yet, but the trajectory just steepened materially. One big day doesn't make a trend — but it does prove the EV per trade is real (today's wins averaged +$55, well above the historical $32 avg).
+
+### Currently open (2 wallet positions)
+
+| Symbol | Age | Score | Thesis | Notes |
+|---|---|---|---|---|
+| FSLR | 29h | 77 | weakening | Last solar position, in flight |
+| NEXT | **346h** | 78 | valid | **Long-hold survivor — companion to today's SWKS winner. Could resolve any day now.** |
+
+**Only $850 deployed** (smallest deployment ratio in weeks). Brain is mostly in cash ($5,708) post-cooldowns.
+
+### Hypothesis status
+
+- **ONDS-91** (HIGH_RISK score>=88): S=2 / C=1. No matching closes today (all today's closes were 76-79). Unchanged.
+
+### Active cooldowns
+
+- **Watchdog cooldown (168h):** IONQ, LUN.TO
+- **Post-winner cooldown (336h):** APLD, BTDR, ENPH, IONQ, MSTR, SEDG, SMCI, SWKS, TEAM (9 names)
+
+**Half the recent winners are now untouchable for 2 weeks.** This concentrates the brain on UNTRIED names — fresh signals only. Less churn, more discovery.
+
+### Lessons (the real ones)
+
+**1. The chase-winner cooldown shipped yesterday is now n=4/4 backed.** MSTR-2 confirmed today. The pattern is real, the gate is justified, the ship was correct. Total losses prevented going forward: ~$22/case × frequency in the data.
+
+**2. Sector concentration ≠ risk concentration.** ENPH + SEDG winning together today shows the same sector can produce coordinated WINS. The per-sector cap I proposed Day 37 was the wrong lesson — kill that ship candidate.
+
+**3. Long-hold survivors can be slow winners.** SWKS proves it (+$76 at 338h). NEXT is the next test. **The "stagnation valley" worry I had Day 33 was overblown.** Positions that survive grace + valley + stagnation thresholds can resolve positive after weeks of patience.
+
+**4. The brain is now self-throttling via cooldowns.** 0 entries today wasn't a missed opportunity — it was the system refusing to chase. **Discipline over volume.** Pocket built to $5,708 with active positions winning. The system is patient.
+
+**5. Day-37 amplification ship status: unfired.** The 1.5x sizing + cap=4 hasn't had a single test trade yet. Tomorrow or Friday will be the first real test of the new sizing.
+
+### Pedro's catch: post-exit upside leakage
+
+Pedro pointed out: "we sold something that we could stay." Investigated by pulling current prices ~2 hours post-exit:
+
+| Symbol | Exit price | Price 2h later | Missed |
+|---|---|---|---|
+| **SWKS** | $72.72 | **$74.35** | **+2.24% upside (~$10)** |
+| **ENPH** | $52.57 | **$53.15** | **+1.10% upside (~$5)** |
+| SEDG | $56.12 | $56.22 | flat — AI was correct |
+| MSTR | $165.53 | $165.81 | flat — STOP_HIT was right |
+
+**Today's leakage: ~$15.** Small vs +$145 today but SYSTEMIC — if every winner leaks $10-15 post-exit, that's $300-500/month at our trade pace.
+
+**Why this happened:** the exit-time AI reasoning quoted bias toward "stretched / mean reversion risk" framing on names trending up. Direct excerpts:
+
+- **ENPH exit (score 54, AVOID):** *"pinned at 99% of upper Bollinger Band, RSI at 70, 43% above SMA200 — statistically stretched setup where mean reversion risk is elevated"*
+- **SEDG exit (score 87, AVOID):** *"sharp divergence: bearish X sentiment (28) citing solar demand slowdown ... vs thin call-heavy options flow"* — this one was actually correct (price stayed flat after exit)
+- **SWKS exit:** TARGET_HIT at $72.72, target was $68.50 — **the target was 8% too low**, the position overshot it
+
+**Same pattern as Day-35 thesis-tracker bias investigation.** The AI is conservative on stretched technicals; in trending markets, "stretched" stays stretched longer than the AI expects.
+
+### Deeper lessons (the ones that change the model)
+
+**6. The SWKS target was 8% too low — TARGETs may be systematically conservative.** Entry $62.38, target $68.50 (+9.8%), peak $72.72 (+16.6%). **The TARGET capped the win** — without it, TRAILING_STOP would have caught the move closer to the actual peak. Worth investigating: across all historical TARGET_HIT exits, what % of post-exit price action continued the move? If >50%, targets are systematically wrong.
+
+**7. The AI's "mean reversion risk" framing fires premature exits in trending markets.** ENPH closed at $52.57 via SIGNAL flip. Now $53.15. **The AI was wrong about the mean reversion.** Same pattern as Day-35: the AI is conservative on stretched technicals. Real cost: $5+ per occurrence; systemic over hundreds of exits.
+
+**8. Single big winners dominate the day's P&L.** SWKS alone was $76 of today's $145 (53%). ENPH +$53 was 37%. **Just two trades produced 89% of the day.** Re-confirms Day-35 lesson #9 ("edge concentrated in 3 fat-tail outliers") — but now within a single day. If those two specific exits had fired at the wrong moment, the day disappears.
+
+**9. Zero entries today is the cooldown stacking side-effect.** 9 names on post-winner cooldown + Filter D + standard tier filters = brain admitted **zero** new entries. Pre-cooldown the brain was 2-4/day. **The cooldown is now pinning the brain to existing positions only.** Long-term consequence: less data flow, slower learning, longer waits between trades. **Worth tracking: how many days/week the brain produces zero entries due to cooldown stacking.** If it becomes >50% of days, the cooldown window may be too long.
+
+**10. Magnitude variance is huge.** Today's 4 closes: $76, $54, $35, −$20. Range of $96 across 4 trades. **Predicting daily P&L is essentially impossible** — variance dominates the signal. The "$13/day average" framing hides this. The trend is what matters; daily noise is just noise. Implication: any single-day reading (good OR bad) shouldn't drive immediate changes — wait for 5+ days of evidence.
+
+**11. The Day-37 amplification ship still hasn't fired.** Zero entries today means zero tests of the 15% sizing. **All 4 of today's wins were on OLD 10% sizing.** Had they been at NEW sizing, SWKS alone would have been ~$680 instead of $461 → win of $113 instead of $76. **The amplification ship has been GATE'd by the cooldown ship** — this is a coupling we didn't anticipate. Tomorrow or Friday (when cooldowns start lifting) is the first real test.
+
+### Ship candidate identified (NOT shipped tonight)
+
+**Trailing-target adjustment:** when a position hits its TARGET with strong momentum still firing (MACD positive + price making new highs), defer TARGET_HIT and convert to TRAILING_STOP at -5% from peak. Captures the run-up beyond conservative targets.
+
+**Estimated cost prevented:** if 50% of TARGET_HIT exits continue running ~3% post-exit, savings = ~$15/trade × 1-2/week = ~$60-120/month.
+
+**Risk:** trailing stops can give back the gain. SWKS at $72 → could trail to $74 peak → give back to $70 = lose ~$25 of the gain.
+
+**Decision:** **don't ship tonight.** Per the "backtest before brain changes" memory, need to verify across all historical TARGET_HIT exits that >50% continue running. Will run that backtest before shipping. Today's n=1 (SWKS) is insufficient.
+
+### Backtest: trailing-exit rules across 4 cohorts (decision: ship nothing)
+
+Pedro's principle from this session: *"if it is making money and touches the exit point but the thesis says to stay, we should keep it and change the exit point."* Sound principle. Per "backtest before brain changes" memory rule, ran replay before shipping.
+
+**Script:** `back-end/scripts/backtest_trailing_exit.py` — replays every closed trade in last 30 days with exit_reason in (TARGET_HIT, STOP_HIT, SIGNAL, THESIS_INVALIDATED) using yfinance 15-min bars over 48h post-exit window.
+
+**Rules tested:**
+1. TARGET_HIT 3-state ladder (raise target +5% → trailing stop -5% from peak)
+2. STOP_HIT single extension (lower stop -3%, strict gates)
+3. SIGNAL trailing-convert (arm -5% trail when AI flips to AVOID on a winner)
+4. THESIS_INVALIDATED trailing-convert (same as SIGNAL but for thesis-tracker exits)
+
+**Results (n=17 total, 30-day window):**
+
+| Cohort | n | Mean Δ | Verdict |
+|---|---|---|---|
+| TARGET ladder | 1 (SWKS) | +$12.05 | Insufficient sample |
+| STOP extension | 1 (MSTR) | $0.00 | Gate correctly rejected; no signal |
+| SIGNAL trailing | 5 | −$0.53 | Net wash; 2 helped, 2 hurt, 1 flat |
+| THESIS_INVALIDATED trailing | 10 | −$1.17 | **Negative; thesis-tracker is right more often than wrong** |
+
+**The THESIS_INVALIDATED finding overturns a Day-35 working hypothesis.** Of the 4 trades where the trail actually engaged:
+
+| Symbol | Actual | Replay | Δ |
+|---|---|---|---|
+| ARM | +$11 | +$31 | **+$20** |
+| SOUN | +$69 | +$48 | **−$21** |
+| IONQ | +$64 | +$59 | **−$5** |
+| (6 others gate-filtered as small wins/losers) | | | $0 |
+
+**1 helped (+$20), 3 hurt (−$26 net).** The thesis-tracker correctly caught the peaks on SOUN and IONQ — they were genuinely turning when it fired. ARM was the exception.
+
+### Meta-lesson: the Day-35 bias was real, but acting on it costs money
+
+Day-35 finding: thesis-tracker labels 10/13 winners as "weakening." That observation stands. But this backtest proves the **pessimism is mostly correct** — when the tracker flags weakening on a winner, the winner usually IS about to turn. Overriding the tracker would have cost $12 over 10 trades.
+
+**Updates needed to mental model:**
+- The thesis-tracker is **closer to optimal than the Day-35 framing suggested.**
+- Pedro's intuition about SWKS today was correct for SWKS specifically (+$12 captured in replay), but **doesn't generalize** to a brain-wide rule.
+- The "we sold something we could stay" phenomenon is **real but small** — ~$5-12 per occurrence, ~1-2 occurrences per month → ~$10-25/month lever. Not a 20%/month lever.
+
+### What this rules out
+
+- **Trailing-target ladder on TARGET_HIT** — directionally positive but n=1 evidence; can revisit when 3-5 more samples accumulate
+- **Stop extension on STOP_HIT** — no signal; strict gate is doing its job
+- **SIGNAL trailing-convert** — net neutral; AI flips are right about as often as they're wrong
+- **THESIS_INVALIDATED trailing-convert** — net negative; do not ship under any framing
+
+### What this surfaces as the next lever to investigate
+
+If the 20%/month goal is real, exit tuning isn't the answer (max ~$25/month upside found here). The bigger questions sit upstream:
+
+1. **Entry frequency**: zero entries today, only 4 max/day even on good days — can we expand candidate flow without losing quality?
+2. **QUALITY_PRUNE cohort**: 5 closes, all losers, −$86 in 30 days. What triggered these entries? Can the pre-filter catch them?
+3. **WATCHDOG_FORCE_SELL**: 5 closes, all losers, −$133 — our worst cohort. The watchdog is firing AFTER the loss is baked in. Can we detect these setups at entry?
+4. **Position sizing on conviction**: SWKS at 10% sizing made $76. Same trade at 15% sizing (today's bump) would have made $113. Have we underweighted conviction historically?
+
+The script stays on disk for re-runs as cohorts grow. Per the memory rule, no brain changes shipped tonight.
+
+### Predictions for Day 39 (Thursday May 21)
+
+- [ ] **First Day-37-amplification entry.** If the brain admits any new Tier 1 entry, it'll be sized at 15% (~$850 on $5,708 pocket). Watch the first one carefully.
+- [ ] **NEXT resolution.** At 346h, it's the longest-held position remaining. SWKS-style win or eventual stop-out — either way, it teaches us about the long-hold cohort.
+- [ ] **FSLR Day-2 outcome.** Last solar position, thesis weakening. If it closes positive, the solar cluster goes 3W/0L. If negative, 2W/1L.
+- [ ] **Cumulative crosses +$300** — needs ~+$66 net tomorrow. Possible with any single Tier-1 winner at new sizing.
+- [ ] **Cooldowns lift.** Several post-winner cooldowns expire in 1-3 days (TEAM closed May 19, cooldown lifts June 2; ENPH/SEDG closed today, lift June 3). As they lift, the brain has more candidates.
+
+### Personal note
+
+After two weeks of grinding through the +$80-100 range, today the wallet broke through +$200 and the cumulative hit a new all-time high. **The breakthrough wasn't from anything we shipped recently** — it was from positions opened DAYS AGO finally resolving. The patience baked into the system (grace, no premature exits, long-hold tolerance) is what produced this. Filter D, watchdog grace, cooldowns — these are the structural enablers; the resolution paths (SIGNAL, TARGET_HIT) are what monetize them.
+
+**What I want to remember:** I was about to ship a "block 80+ entries" change Day 37 based on n=17 (the 80+ band had been losing). Pedro pushed back and I rolled back. **The data tonight shows ENPH at 80 won big (+12.59%).** If I'd shipped that gate, we'd have skipped ENPH and lost the +$53. **The Day-37 reversal was correct.** Overfitting to small samples kills future winners.
+
+Tomorrow's interesting question: when the new amplification finally fires (first 15% Tier 1 entry), does it produce proportionally larger wins/losses, or does the larger size shift the EV in unexpected ways? Tonight is the first time the post-Day-37 brain has any actual data to evaluate.
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]
