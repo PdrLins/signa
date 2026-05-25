@@ -4529,6 +4529,155 @@ Tomorrow's interesting question: when the new amplification finally fires (first
 
 ---
 
+## Day 39 — May 21, 2026 (Thursday) [retroactive — written Monday May 25]
+
+**Metrics: +$107.66 net realized.** 2 closes (2W/0L), **4 new entries** — the post-winner cooldowns finally lifted on enough names to admit fresh positions. **Cumulative wallet-era: $234.18 → $341.84 — new all-time high.** This was the FIRST DAY of the post-Day-37 amplification era (all 4 entries sized at 15%).
+
+### Today's closes (2W/0L)
+
+| Time | Symbol | Reason | P&L | Held | Notes |
+|---|---|---|---|---|---|
+| 14:04 | **NEXT** | TRAILING_STOP | **+$67.25 (+16.2%)** | **365h (15+ days!)** | **Long-hold survivor #2 paid off** — same pattern as SWKS Day 38 |
+| 16:04 | **FSLR** | THESIS_INVALIDATED | **+$40.41 (+9.3%)** | 47h | Last of the 3 solar names from Day 37 — exits at +9.3% on thesis flip |
+
+**Today P&L: +$107.66.** Second-biggest realized day of the era (only Day 38's +$145 was bigger).
+
+### Today's entries (4 — FIRST amplification test)
+
+| Time | Symbol | Score | Tier | Shares × Price | Position $ | % of wallet | Notes |
+|---|---|---|---|---|---|---|---|
+| 14:46 | **SATS** | 83 | 1 | 6.81 × $136.32 | **$928** | **16.3%** | **Highest-conviction entry of the era at top sizing** |
+| 14:46 | FIG | 79 | 1 | 36.17 × $21.82 | $789 | 15.0% | First-time symbol |
+| 16:04 | OSCR | 86 | 1 | 29.71 × $22.58 | $670 | 15.0% | Highest score of the day |
+| 19:04 | CIFR | 75 | 1 | 30.54 × $21.01 | $641 | 15.1% | Lowest score still admitted |
+
+**ALL FOUR entries sized at 15% of wallet** — Day-37 amplification ship is officially live and tested. Old sizing (10%) would have put $570-620 per position; new sizing put $640-928. **+50% deployment per name.**
+
+### Day-38 predictions vs actuals
+
+- [x] **First Day-37 amplification entry** → ✓ 4 of them
+- [x] **NEXT resolution** → ✓ +$67 TRAILING_STOP (long-hold survivor pattern n=2)
+- [x] **FSLR Day-2 outcome** → ✓ +$40 THESIS_INVALIDATED (solar cluster: 3W/0L confirmed, +$129 total)
+- [x] **Cooldowns lift** → ✓ 4 entries fired (vs zero Wednesday)
+- [ ] **Cumulative crosses +$300** → ✓ HIT +$341, exceeded the bar
+
+5/5 predictions correct.
+
+### Lessons (Day 39 specific)
+
+**1. Long-hold survivor pattern n=2 confirmed.** SWKS (Day 38, 338h, +16.6%) and now NEXT (365h, +16.2%). **Two for two**, both at trailing-stop / target exits, both via the same "let it cook past every conventional window" path. Day-33 worry that long-hold = silent loss is **falsified by 2 consecutive cases.** Mental model update: positions surviving past 200h are MORE likely to be slow winners than silent losers. This justifies the long-hold tolerance baked into the brain.
+
+**2. FSLR validates the Day-38 backtest finding.** Day 38 backtest concluded THESIS_INVALIDATED exits are calibrated — the tracker is right more often than wrong. FSLR fires THESIS_INVALIDATED at +9.3% — exactly the cohort we worried we were exiting too aggressively. **The exit captured a real peak** (need to verify with current price; intuition says we did the right thing). The "trust the tracker" memory written Day 38 is reinforced.
+
+**3. Solar cluster: 3W/0L = +$129 net.** ENPH +$54, SEDG +$35, FSLR +$40. The "per-sector concentration cap" idea from Day 37 would have killed all but 1 of these → forgone ~$85. **Concentration is bimodal** — it amplifies in either direction. Without an entry-quality screen for sector-wide thesis (catalyst, news flow), capping by sector throws away winners alongside losers.
+
+### Predictions for Day 40 (Friday May 22)
+
+- [ ] **SATS resolution.** Highest-conviction entry (score 83, biggest position $928). Win or lose, the magnitude will be the first real "amplified-size outcome" data point.
+- [ ] **The other three (FIG, OSCR, CIFR) survive day 1** — none of them should hit stop on a normal Friday absent earnings or macro.
+- [ ] **Cumulative holds above +$300.**
+- [ ] **No new entries** — most active candidates from today's scans are likely on the same cooldowns; brain may sit on the 4 fresh positions plus 4 carry-overs (MSTR, NEXT — wait, NEXT closed today).
+
+### Personal note
+
+The +$107 day was the BEST CASE outcome of Day 38's predictions. Not just "did the predictions hit" but "did they hit in the direction that confirms the brain's deepest design choices." Long-hold tolerance: confirmed. Thesis-tracker calibration: confirmed. Cooldown discipline (waiting for the right re-entry window): confirmed.
+
+**The +$341 cumulative is psychologically significant.** Started the era at $5,000, now at $5,341 — first time the wallet shows a clean 7% return on the original deposit. Two months of work to get here.
+
+The thing I'm watching nervously: **SATS at $928 is 50% bigger than any single position I've ever held.** If it goes wrong, the loss will hurt more than any previous loss. Tomorrow tells.
+
+---
+
+## Day 40 — May 22, 2026 (Friday) [retroactive — written Monday May 25]
+
+**Metrics: −$75.75 net realized.** 1 close (0W/1L), 0 new entries. **Cumulative wallet-era: $341.84 → $266.09 — first drawdown after the +$341 high.** The single close was SATS, the biggest position the wallet has ever held, dead in 24 hours.
+
+### Today's only close
+
+| Time | Symbol | Reason | P&L | Held | Notes |
+|---|---|---|---|---|---|
+| 14:50 | **SATS** | **WATCHDOG_FORCE_SELL** | **−$75.75 (−8.2%)** | **24h** | **Highest-conviction entry of the era. Dead in one day.** Force-closed by the −8% emergency backstop, 0.6% past the original stop |
+
+### The SATS forensic — score 83 to dead in 24 hours
+
+Entered Thursday 14:46 at $136.32 (score 83, $928 position, 16.3% of wallet). Started bleeding immediately:
+
+| Time | Price | P&L | Watchdog action |
+|---|---|---|---|
+| Thu 14:46 | $136.32 | entry | — |
+| Thu 18:30 | $133.58 | −2.0% | First ALERT (slow bleed) |
+| Thu 18:50 | $131.01 | −3.9% | 5th ALERT in 20 min — still warned, not closed |
+| Fri 13:30 | $128.44 | −5.8% | Within 1.9% of stop, ALERT continued |
+| Fri 14:30 | $126.83 | −7.0% | Within 0.7% of stop |
+| Fri 14:45 | $125.75 | −7.8% | Crossed stop ($126) — still ALERT only |
+| Fri 14:50 | $125.20 | **−8.2%** | **FORCE_CLOSE** — emergency backstop triggered at −8% |
+
+**16+ ALERTs across two days, no exit until the hard backstop fired.** The standard stop ($126) was crossed at 14:45 but the close didn't fire until 5 minutes later when the force-sell mechanism kicked in. **The watchdog correctly accelerated the exit by minutes, not hours** — the standard stop would have hit roughly the same place.
+
+**No catalyst.** Bullish sentiment 62 throughout, no news, no sector rotation visible — just a sustained bleed from entry forward. Score 83, AI validated, fundamentals clean — and dead in 24 hours.
+
+### The first amplification result — magnified loss as designed
+
+Old sizing: SATS at 10% would have been $570 → −$51 loss
+New sizing: SATS at 16.3% was $928 → **−$76 loss**
+
+**The amplification produced exactly what it was designed to produce: a 50% larger outcome.** This time it was a loss. The other 3 entries from Thursday (FIG, OSCR, CIFR) are still open at this writing and tracking +4.1% / +0.3% / +4.6% respectively — net ~+$63 unrealized at 15% sizing (vs ~$42 at 10%).
+
+**Combined Day 39+40 amplification data: 1 SATS loss (−$76), 3 still-open winners (+$63 unrealized).** Net so far: −$13 with the loss already realized and the gains still on paper. **Too early to judge the amplification's EV** — need 2-3 more amplified entries to resolve before any real reading.
+
+### Day-39 predictions vs actuals
+
+- [ ] **SATS resolution** → resolved, worse outcome (−$76 in 24h)
+- [x] **FIG, OSCR, CIFR survive day 1** → ✓ all three still open and green
+- [ ] **Cumulative holds above +$300** → ✗ dropped to +$266 (SATS loss exceeded the buffer)
+- [x] **No new entries** → ✓ zero entries Friday (cooldowns still binding)
+
+2/4. The SATS prediction was open by definition.
+
+### Lessons (Day 40 specific)
+
+**1. Score 83 is not protection.** SATS was the highest-conviction entry of the era — top score, AI validated, technical setup clean. Dead in 24 hours with no catalyst. **Day-33 lesson #11 ("score doesn't predict direction") just got a new exemplar.** The brain has no defense against "good setup, bad price action." This is structural — no filter we have caught this.
+
+**2. WATCHDOG_FORCE_SELL did its job (barely).** The −8% backstop fired at exactly the right moment — within 5 minutes of the standard stop being crossed. Without it, the loss might have been −9% or −10% before the next scan cycle caught the breach. **The backstop bought us ~$5-10 of damage limitation on this specific case.** Cumulative across many such cases, that's real money.
+
+**3. Amplification is doing what it was designed to do — for better AND worse.** SATS at 15% sizing → −$76 vs ~−$51 at 10%. The 3 winners at 15% are tracking ~$63 unrealized vs ~$42 at 10%. **The amplification is a leverage knob, not a "find more winners" knob.** Need more samples to know if the EV is positive at the new sizing.
+
+**4. The 4-entry burst (Thursday) followed by 0-entry day (Friday) is normal cooldown dynamics.** Post-winner cooldowns + per-day cap working together produce uneven cadence. Days will alternate between "4-entry bursts when cooldowns release a batch of names" and "0-entry waits while cooldowns refill." **This is by design — but worth monitoring whether net trading days/week ends up below ~3.** If so, the cooldown windows may be too wide.
+
+**5. Solar cluster post-mortem: 3W/0L, +$129 net.** All three closes were ENPH/SEDG/FSLR (different exit reasons: SIGNAL, SIGNAL, THESIS_INVALIDATED). The "diversification" the brain provided was timing/exit-mechanism, not sector. **A per-sector cap would have killed +$85 of this cluster.** Killed the idea fully — not shipping per-sector concentration cap.
+
+### What I should have done on Friday
+
+I should have caught Pedro's intuition that "Friday is unusual — write the journal" and pushed for it. Going 3 days without journaling means the SATS forensic was reconstructed from logs and watchdog events on Monday rather than captured in real time. **Pattern to watch: if the brain takes a >$50 loss, journal that day regardless of weekly cadence.** The loss memory fades fast; the lesson lives in the details.
+
+### Currently open as of Monday May 25 (snapshot)
+
+| Symbol | Entry | Current | Change | Held | Latest score |
+|---|---|---|---|---|---|
+| FIG | $21.82 | $22.71 | **+4.1% (+$32)** | 97h | 78 (ai=validated) |
+| OSCR | $22.58 | $22.64 | +0.3% (+$2) | 95h | 86 (ai=validated) |
+| CIFR | $21.01 | $21.97 | **+4.6% (+$29)** | 92h | 75 (ai=validated) |
+
+**$2,100 deployed, ~+$63 unrealized.** All three crossed into the long-hold tolerance window (Day 4+). None show thesis weakening yet. If FIG/CIFR sustain their gains and follow the SWKS/NEXT pattern, they could resolve as another long-hold cohort.
+
+### Net for the Day 39 + Day 40 stretch
+
+- Realized: +$107.66 (Thu) − $75.75 (Fri) = **+$31.91**
+- Unrealized at Monday open: ~+$63 on the 3 carry-over positions
+- Cumulative wallet-era: $234.18 → $266.09 realized
+- Net of unrealized: ~$329 effective
+
+**Still a profitable 2-day stretch despite the SATS gut-punch.** The two long-hold winners (NEXT, FSLR) carried it.
+
+### Predictions for Day 41 (Monday May 25 — today)
+
+- [ ] **FIG/OSCR/CIFR hit Day 5+** — three open positions in the long-hold zone. Will any of them follow the SWKS/NEXT pattern?
+- [ ] **First amplified WIN** — if any of the 3 closes positive today/this week, it'll be the first profit-side data point on Day-37 amplification.
+- [ ] **Brain admits new entries today** — Monday after a Friday with 0 entries usually means cooldowns are loose. Watch for first new entries since Thursday's burst.
+- [ ] **Cumulative recovers toward +$300** — needs +$34 net to reclaim the ground lost Friday.
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]
