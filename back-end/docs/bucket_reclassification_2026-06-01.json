@@ -1,0 +1,576 @@
+{
+  "reclassified_at": "2026-06-01T22:40:04.602955+00:00",
+  "reason": "Day-45 finding: 46+ tech/growth tickers cached as SAFE_INCOME due to missing sector data at first-classification. Code fix shipped to scan_service.py:_classify_bucket. Bulk update restores correct bucket per rules.",
+  "count": 71,
+  "moves": [
+    {
+      "symbol": "AAPL",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 4369635344384
+    },
+    {
+      "symbol": "ADI",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0.0105,
+      "mcap": 200109965312
+    },
+    {
+      "symbol": "AGI.TO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Basic Materials",
+      "div_yield": 0,
+      "mcap": 22993106944
+    },
+    {
+      "symbol": "AMAT",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 363768414208
+    },
+    {
+      "symbol": "APH",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 185273319424
+    },
+    {
+      "symbol": "ASML",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 633931235328
+    },
+    {
+      "symbol": "ASX",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0.0102,
+      "mcap": 76371255296
+    },
+    {
+      "symbol": "AVGO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 2000255320064
+    },
+    {
+      "symbol": "BABA",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Consumer Cyclical",
+      "div_yield": 0,
+      "mcap": 298020438016
+    },
+    {
+      "symbol": "BIRK",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Consumer Cyclical",
+      "div_yield": 0,
+      "mcap": 7146589184
+    },
+    {
+      "symbol": "CCL",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Consumer Cyclical",
+      "div_yield": 0.011200000000000002,
+      "mcap": 38312960000
+    },
+    {
+      "symbol": "CCO.TO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Energy",
+      "div_yield": 0.15,
+      "mcap": 67468419072
+    },
+    {
+      "symbol": "CF",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Basic Materials",
+      "div_yield": 0.0172,
+      "mcap": 17260249088
+    },
+    {
+      "symbol": "CNC",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Healthcare",
+      "div_yield": 0,
+      "mcap": 29203152896
+    },
+    {
+      "symbol": "CRM",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 171662409728
+    },
+    {
+      "symbol": "CVX",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Energy",
+      "div_yield": 0.0363,
+      "mcap": 390592135168
+    },
+    {
+      "symbol": "DCBO.TO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 692946368
+    },
+    {
+      "symbol": "DELL",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 275153879040
+    },
+    {
+      "symbol": "DIS",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Communication Services",
+      "div_yield": 0.0147,
+      "mcap": 176828973056
+    },
+    {
+      "symbol": "DOL.TO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Consumer Defensive",
+      "div_yield": 0,
+      "mcap": 47710257152
+    },
+    {
+      "symbol": "EL",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Consumer Defensive",
+      "div_yield": 0.0159,
+      "mcap": 31953727488
+    },
+    {
+      "symbol": "ENB.TO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Energy",
+      "div_yield": 0.051,
+      "mcap": 170175463424
+    },
+    {
+      "symbol": "ENS",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Industrials",
+      "div_yield": 0,
+      "mcap": 8686237696
+    },
+    {
+      "symbol": "FTAI",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Industrials",
+      "div_yield": 0,
+      "mcap": 25864245248
+    },
+    {
+      "symbol": "GKOS",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Healthcare",
+      "div_yield": 0,
+      "mcap": 8180605952
+    },
+    {
+      "symbol": "GLW",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 151833722880
+    },
+    {
+      "symbol": "GME",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Consumer Cyclical",
+      "div_yield": 0,
+      "mcap": 9796997120
+    },
+    {
+      "symbol": "GNRC",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Industrials",
+      "div_yield": 0,
+      "mcap": 15846278144
+    },
+    {
+      "symbol": "HAL",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Energy",
+      "div_yield": 0.0175,
+      "mcap": 32872900608
+    },
+    {
+      "symbol": "HPE",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0.0152,
+      "mcap": 49863180288
+    },
+    {
+      "symbol": "JOBY",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Industrials",
+      "div_yield": 0,
+      "mcap": 10741380096
+    },
+    {
+      "symbol": "KEYS",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 59171131392
+    },
+    {
+      "symbol": "KLAC",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 256489095168
+    },
+    {
+      "symbol": "KLAR",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 6265339904
+    },
+    {
+      "symbol": "LB",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Energy",
+      "div_yield": 0,
+      "mcap": 5702339584
+    },
+    {
+      "symbol": "LUNR",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Industrials",
+      "div_yield": 0,
+      "mcap": 6138905088
+    },
+    {
+      "symbol": "LYB",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Basic Materials",
+      "div_yield": 0.0603,
+      "mcap": 21513605120
+    },
+    {
+      "symbol": "MDLN",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Healthcare",
+      "div_yield": 0,
+      "mcap": 32285245440
+    },
+    {
+      "symbol": "META",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Communication Services",
+      "div_yield": 0,
+      "mcap": 1605260804096
+    },
+    {
+      "symbol": "MOD",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Consumer Cyclical",
+      "div_yield": 0,
+      "mcap": 16133109760
+    },
+    {
+      "symbol": "NTAP",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0.0168,
+      "mcap": 27427397632
+    },
+    {
+      "symbol": "NVTS",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 6836110336
+    },
+    {
+      "symbol": "P",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 28963706880
+    },
+    {
+      "symbol": "PBR-A",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Energy",
+      "div_yield": 0.1043,
+      "mcap": 113891762176
+    },
+    {
+      "symbol": "PS",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Financial Services",
+      "div_yield": 0,
+      "mcap": 14317999104
+    },
+    {
+      "symbol": "PSKY",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Communication Services",
+      "div_yield": 0.0189,
+      "mcap": 12461992960
+    },
+    {
+      "symbol": "PSX",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Energy",
+      "div_yield": 0.0286,
+      "mcap": 69714583552
+    },
+    {
+      "symbol": "QCOM",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0.0147,
+      "mcap": 241355472896
+    },
+    {
+      "symbol": "RBA.TO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Industrials",
+      "div_yield": 0.011699999999999999,
+      "mcap": 27186757632
+    },
+    {
+      "symbol": "RBLX",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Communication Services",
+      "div_yield": 0,
+      "mcap": 34481537024
+    },
+    {
+      "symbol": "RDDT",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Communication Services",
+      "div_yield": 0,
+      "mcap": 27272755200
+    },
+    {
+      "symbol": "RL",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Consumer Cyclical",
+      "div_yield": 0.0111,
+      "mcap": 21927055360
+    },
+    {
+      "symbol": "ROST",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Consumer Cyclical",
+      "div_yield": 0,
+      "mcap": 74539499520
+    },
+    {
+      "symbol": "RYAAY",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Industrials",
+      "div_yield": 0.0172,
+      "mcap": 31014117376
+    },
+    {
+      "symbol": "SEI",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Energy",
+      "div_yield": 0,
+      "mcap": 6858887680
+    },
+    {
+      "symbol": "SFM",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Consumer Defensive",
+      "div_yield": 0,
+      "mcap": 8086869504
+    },
+    {
+      "symbol": "STLD",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Basic Materials",
+      "div_yield": 0,
+      "mcap": 34742300672
+    },
+    {
+      "symbol": "SYNA",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 5540257280
+    },
+    {
+      "symbol": "TIH.TO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Industrials",
+      "div_yield": 0,
+      "mcap": 17978951680
+    },
+    {
+      "symbol": "TPL",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Energy",
+      "div_yield": 0,
+      "mcap": 27206621184
+    },
+    {
+      "symbol": "TRP.TO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Energy",
+      "div_yield": 0.0373,
+      "mcap": 99363725312
+    },
+    {
+      "symbol": "TSM",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 2167271849984
+    },
+    {
+      "symbol": "TWLO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 28515272704
+    },
+    {
+      "symbol": "TXN",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0.018600000000000002,
+      "mcap": 266839212032
+    },
+    {
+      "symbol": "VG",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Energy",
+      "div_yield": 0,
+      "mcap": 30458230784
+    },
+    {
+      "symbol": "VLO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Energy",
+      "div_yield": 0.0194,
+      "mcap": 71694417920
+    },
+    {
+      "symbol": "VSAT",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 10323186688
+    },
+    {
+      "symbol": "VSH",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 6431000064
+    },
+    {
+      "symbol": "WFG.TO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Basic Materials",
+      "div_yield": 0.018600000000000002,
+      "mcap": 7318275072
+    },
+    {
+      "symbol": "WSP.TO",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Industrials",
+      "div_yield": 0,
+      "mcap": 25547753472
+    },
+    {
+      "symbol": "ZM",
+      "from": "SAFE_INCOME",
+      "to": "HIGH_RISK",
+      "sector": "Technology",
+      "div_yield": 0,
+      "mcap": 31392921600
+    }
+  ],
+  "reversal_sql_template": "UPDATE tickers SET bucket='SAFE_INCOME' WHERE symbol IN (...)"
+}

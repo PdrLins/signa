@@ -195,13 +195,21 @@ def insert_audit_log(
 # ============================================================
 
 def get_active_tickers() -> list[dict]:
-    """Get all active tickers."""
+    """Get all active tickers.
+
+    The limit is set well above the plausible universe size. A previous
+    500-row cap was silently truncating the bucket cache when the universe
+    grew past 500: dropped tickers fell through to fresh classification
+    with empty screening data and defaulted to SAFE_INCOME, polluting the
+    HIGH_RISK growth-tech bucket. If you need to bound this, paginate —
+    don't cap.
+    """
     client = get_client()
     result = (
         client.table("tickers")
         .select("symbol, name, exchange, bucket, is_active")
         .eq("is_active", True)
-        .limit(500)
+        .limit(10000)
         .execute()
     )
     return result.data or []

@@ -1248,13 +1248,22 @@ def _classify_bucket(ticker: str, screening: dict) -> str:
     if ticker in high_risk_tickers:
         return "HIGH_RISK"
 
-    # 3. Heuristic fallback. Mirrors `scripts/audit_ticker_buckets.py`
-    # so first-scan classification matches the audit's verdict — no
-    # dividend OR small-cap-in-growth-sector → HIGH_RISK. The brain's
-    # SAFE_INCOME bucket weights `dividend_reliability` 35%, so a
-    # non-dividend stock dumped into SAFE_INCOME is mathematically
-    # capped near 60. Sending it to HIGH_RISK lets sentiment + catalyst
-    # + momentum (the right axes for a growth stock) actually score it.
+    # 3. Heuristic fallback. The brain's SAFE_INCOME bucket weights
+    # `dividend_reliability` 35% and skips Grok entirely (10% hardcoded
+    # neutral sentiment), so a growth stock dumped into SAFE_INCOME is
+    # mathematically capped near 60 and gets no sentiment signal. The
+    # rules below are ordered so growth-sector names beat token-dividend
+    # classifications:
+    #   1. Energy/Materials → HIGH_RISK
+    #   2. Tech/Comm/Consumer Cyclical → HIGH_RISK unless the dividend
+    #      is "meaningful" (>= 2% yield). Names like NVDA/AVGO/QCOM that
+    #      pay token <2% dividends still belong with growth peers, not
+    #      with telecom/utility income vehicles. Names like T (4.4%) and
+    #      BCE.TO (5.3%) DO belong with income.
+    #   3. div_yield >= 2% (any other sector) → SAFE_INCOME — meaningful
+    #      payout signals income vehicle (banks, REITs, dividend names).
+    #   4. mcap < $50B → HIGH_RISK
+    #   5. else → SAFE_INCOME
     sector = (screening.get("sector") or "").strip()
     sector_lower = sector.lower()
     div_yield = screening.get("dividend_yield") or 0
@@ -1263,9 +1272,17 @@ def _classify_bucket(ticker: str, screening: dict) -> str:
     high_risk_sectors_lower = {"technology", "communication services", "consumer cyclical"}
     energy_materials_lower = {"energy", "basic materials", "materials"}
 
+    # 2% threshold — empirically the line where the dividend becomes
+    # the actual reason to own. Below 2%, the company's value is in
+    # growth/momentum and the SAFE_INCOME bucket's dividend weight will
+    # cap the score. Above 2%, the cash return is material.
+    MEANINGFUL_DIV_THRESHOLD = 0.02
+
     if sector_lower in energy_materials_lower:
         bucket = "HIGH_RISK"
-    elif div_yield and div_yield > 0:
+    elif sector_lower in high_risk_sectors_lower and div_yield < MEANINGFUL_DIV_THRESHOLD:
+        bucket = "HIGH_RISK"
+    elif div_yield and div_yield >= MEANINGFUL_DIV_THRESHOLD:
         bucket = "SAFE_INCOME"
     elif 0 < mcap < 50_000_000_000:
         bucket = "HIGH_RISK"
