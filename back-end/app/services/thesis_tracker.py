@@ -120,7 +120,7 @@ async def reevaluate_open_theses(
     from app.services.virtual_portfolio import VIRTUAL_TRADES_CLOSE_FIELDS
     open_positions = (
         db.table("virtual_trades")
-        .select(VIRTUAL_TRADES_CLOSE_FIELDS + ", entry_thesis, entry_thesis_keywords")
+        .select(VIRTUAL_TRADES_CLOSE_FIELDS + ", entry_thesis, entry_thesis_keywords, thesis_last_reason")
         .eq("status", "OPEN")
         .eq("source", "brain")
         .execute()
@@ -225,6 +225,8 @@ async def reevaluate_open_theses(
                     entry_thesis=item["pos"].get("entry_thesis") or "",
                     entry_conditions=item["entry_conditions"],
                     current_conditions=item["current_conditions"],
+                    prior_status=item["pos"].get("thesis_last_status"),
+                    prior_reason=item["pos"].get("thesis_last_reason"),
                 )
                 return item, result
             except Exception as e:

@@ -281,6 +281,8 @@ async def re_evaluate_thesis(
     entry_thesis: str,
     entry_conditions: dict,
     current_conditions: dict,
+    prior_status: str | None = None,
+    prior_reason: str | None = None,
 ) -> dict | None:
     """Ask Claude whether the original thesis for an open position still holds.
 
@@ -314,6 +316,15 @@ async def re_evaluate_thesis(
             lines.append(f"- {k}: {v}")
         return "\n".join(lines) if lines else "(no data)"
 
+    if prior_status or prior_reason:
+        safe_prior_reason = (prior_reason or "").replace("\n", " ").replace("\r", " ")[:500]
+        prior_block = (
+            f"Status: {prior_status or 'unknown'}\n"
+            f"Reasoning: {safe_prior_reason or '(no reason recorded)'}"
+        )
+    else:
+        prior_block = "(first re-evaluation — no prior state)"
+
     prompt = THESIS_REEVAL_PROMPT.format(
         symbol=symbol,
         entry_date=entry_date[:10] if entry_date else "?",
@@ -323,6 +334,7 @@ async def re_evaluate_thesis(
         pnl_pct=pnl_pct,
         entry_thesis=entry_thesis or "(no thesis recorded)",
         entry_conditions=_format_conditions(entry_conditions),
+        prior_reeval_block=prior_block,
         current_conditions=_format_conditions(current_conditions),
     )
 

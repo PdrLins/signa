@@ -4678,6 +4678,204 @@ I should have caught Pedro's intuition that "Friday is unusual — write the jou
 
 ---
 
+## Day 41 — May 26, 2026 (Tuesday) — RECOVERY DAY
+
+**Metrics: +$56.48 net realized.** 2 closes (2W/0L), 1 new entry. **Cumulative wallet-era: $266.09 → $322.57 — fully recovered above pre-SATS line in a single session.** First trading day after Memorial Day (US closed Monday). All 4 Day-40 predictions hit.
+
+### Today's closes
+
+| Time | Symbol | Reason | P&L | Held | Notes |
+|---|---|---|---|---|---|
+| 15:02 | **CIFR** | TRAILING_STOP | **+$50.69 (+7.90%)** | 5d | **First clean amplified WIN.** Entered Day 39 at 15% sizing. Trail engaged after Memorial Day gap up |
+| 15:02 | FIG | TRAILING_STOP | +$5.79 (+0.73%) | 5d | Same trail mechanism, very different outcome. Trail caught only a small bump above entry |
+
+### Today's entry
+
+| Time | Symbol | Score | Bucket / Horizon | Sizing | Notes |
+|---|---|---|---|---|---|
+| 12:02 | **IONQ** | 78 | HIGH_RISK / SHORT | tier 1 (validated), $673 | First entry since Thursday's 4-burst. Same symbol that was a Day-38 backtest data point (THESIS_INVALIDATED cohort, −$5 if trail had engaged) |
+
+### The first amplified WIN — finally a profit-side data point
+
+Day-37 amplification (10%→15% sizing) until today had only produced one resolved outcome: SATS −$76. The "won" side of the EV ledger was three open positions tracking unrealized.
+
+**Today resolved 2/3 of those carry-overs cleanly:**
+
+| Symbol | Sizing | Actual P&L | Estimated at 10% | Amplification delta |
+|---|---|---|---|---|
+| SATS | 16.3% | −$75.75 | ~−$46.50 | **−$29.25 worse** |
+| CIFR | 15% | +$50.69 | ~$33.79 | **+$16.90 better** |
+| FIG | 15% | +$5.79 | ~$3.86 | **+$1.93 better** |
+| OSCR | 15% | open | open | TBD |
+
+**Resolved net amplification delta so far: −$10.42** (n=3 of 4). Worse than 10% sizing would have produced, but the loss came first and the second winner (OSCR) is still in play. **Still too few samples** — need at least 5-7 resolved before the EV reading is meaningful. The shape so far: bigger losses, bigger wins, exactly as designed.
+
+### Both closes were TRAILING_STOP — but the spreads tell different stories
+
+- **CIFR +$50.69 (+7.90%):** Trail tracked a genuine 8% run. Real money, real winner.
+- **FIG +$5.79 (+0.73%):** Trail caught a small bump — basically near-breakeven. The position never really worked.
+
+**Same mechanism, very different outcomes.** Both held 5 days, both went through Memorial Day flat, both exited 15:02 on the same trail-trigger. The peak-to-trail logic is symmetric but FIG's peak was tiny (~$22.78 vs entry $21.82, so ~4.4% peak gain) while CIFR's was substantial (peak ~$23+ vs entry $21.01, ~10%+ peak gain). **The trail captures gains proportional to whatever peak the position reached** — it doesn't make winners out of duds, it just locks in what was already there.
+
+### Day-40 predictions vs actuals — clean sweep
+
+- [x] **FIG/OSCR/CIFR hit Day 5+** → ✓ FIG and CIFR resolved at Day 5 via TRAILING_STOP; OSCR still open
+- [x] **First amplified WIN** → ✓ CIFR +$50.69 — first profit-side amplification sample
+- [x] **Brain admits new entries today** → ✓ IONQ entered after 3 calendar days of zero entries
+- [x] **Cumulative recovers toward +$300** → ✓ recovered to $322.57, **above** the +$300 mark
+
+4/4. **First clean-sweep prediction day since the start of structured predictions.** Confidence calibration on next-day predictions improving as the brain's behavior gets more rhythmic.
+
+### IONQ — same name, fresh cooldown window, fresh entry
+
+This is the second IONQ entry the brain has taken. The first was the SOUN/IONQ THESIS_INVALIDATED case from the Day-38 backtest (the −$5 cohort entry). The 60-min thesis-rebuy cooldown plus the 168h watchdog-exit cooldown have both lapsed for IONQ since the prior close, so the brain is free to re-enter.
+
+**Note the thesis already shows `weakening` on entry day.** Per `feedback_weakening_thesis_is_not_sell`: weakening on a winning position means Claude flags overextension but the core thesis holds — tighten risk, don't exit. IONQ is up +1.4% at writing with peak $62.83 (high tide today). The watchdog will manage from here.
+
+### Brain admitted IONQ but ignored 3 other BUYs — why?
+
+Top BUY signals today that did NOT enter the wallet:
+
+- AMZN score 79 BUY HIGH_RISK MOMENTUM
+- AFRM score 78 BUY HIGH_RISK (multiple times across the day)
+- MDB score 73 BUY HIGH_RISK
+
+None of these entered. Most likely cause: **Filter D sector-exclusion + tier-1 score floor + per-day cap (4) + position-count cap (max 20 open)**. The wallet already had OSCR (carry-over Day 5) at entry — adding IONQ made it 2 open. The other BUYs likely failed one of: post-winner cooldown (AMZN had recent winners), tier discipline, or sector caps.
+
+**Not investigating further today — but watching whether this pattern continues.** If AMZN keeps scoring 79+ BUY and never enters, that's a structural gate worth surfacing.
+
+### Lessons (Day 41 specific)
+
+**1. The 3-day market closure was a feature, not a bug.** Friday → Monday Memorial Day → Tuesday gave the brain 3 calendar days of "marinate" time on the 3 carry-over positions. CIFR's +7.9% emerged from the post-holiday gap up. **The forced waiting period helped.** General principle: when the market is closed, the brain can't hurt itself. The post-Memorial-Day gap captured the upside; a normal-flow day might have shaken out earlier on intraday noise.
+
+**2. Amplification still pre-verdict — but the asymmetry is real.** −$10.42 net at n=3 means we lost more on the loss than we gained on the wins combined. But the wins are still resolving (OSCR open). Need to resist the urge to roll back amplification on one bad sample. Day-37 commitment: ride this through at least n=7 resolved before deciding.
+
+**3. TRAILING_STOP is doing exactly what it's designed to do — and that's a separate fact from "is the entry good."** FIG +0.73% via trail is not a "bad trail" outcome. The trail just locked in whatever peak existed. The relevant question is "should we have entered FIG in the first place?" — that's an entry-side question, not an exit-side question.
+
+**4. 4/4 predictions hit, but resist over-reading.** This is the first clean-sweep day of predictions. Could be calibration improving, could be lucky alignment. **Need 3-4 more high-prediction-accuracy days before treating this as a signal that prediction quality is improving.** One day is anecdote.
+
+**5. Re-entering a previously THESIS_INVALIDATED name (IONQ) is the cooldown system working as designed.** The 60-min rebuy + 168h watchdog window expired; the brain re-evaluated fresh; new entry. **This is the alternative to permanent symbol blacklisting** — time-bounded cooldowns let the brain return to good names without getting trapped in invalid → rebuy loops. Watch IONQ's resolution: if it closes positive, that validates the cooldown unblock. If it closes via THESIS_INVALIDATED again, the cooldown might need to be longer for repeat-offender names.
+
+### Predictions for Day 42 (Wednesday May 27)
+
+- [ ] **OSCR Day 6+ resolution** — last carry-over from Thursday's burst. Currently +0.3% with thesis=valid and ai-validated score 86. If it follows CIFR's pattern, could resolve via TRAILING_STOP positive within 1-2 days.
+- [ ] **IONQ holds above $60** — entered at $61.98 with stop $54. Down to $60 = ~−3% drawdown without thesis invalidation = position survives. Below $54 = stop fires.
+- [ ] **2+ new entries** — Tuesday recovery sets up Wednesday for normal cadence. Cooldowns from Day 39 burst are now ~5 days old, post-winner cooldowns starting to release. Expect the brain to admit more than today's 1.
+- [ ] **Cumulative breaks +$340** — needs +$18 net. With CIFR's amplification win as a template, plausible if 1-2 of the unrealized positions resolve positive.
+
+---
+
+## Day 45 — June 1, 2026 (Monday) — QUIET DAY + Days 42-44 recap
+
+**Metrics: $0 net realized today.** 0 closes, 0 new entries. **Cumulative wallet-era: $373.99 (unchanged from Friday close).** First-quarter checkpoint: net +$374 across 46 closed wallet trades. 3 positions carry into Tuesday.
+
+### What happened during the 3-day gap since Day 41
+
+Three trading days went without journal entries (May 27-29). The activity was significant — folded in here as a recap, not retroactive full entries:
+
+| Date | Symbol | Event | P&L | Notes |
+|---|---|---|---|---|
+| Wed May 27 | — | 0 entries, 0 closes | $0 | Quiet day |
+| Thu May 28 12:05 | OSCR | TIME_EXPIRED close | **−$5.79** | The original Thursday-burst OSCR aged out at exit score 71 (entry 86) |
+| Thu May 28 15:04 | OSCR | re-entered $22.43 score 76, tier 1 | — | Same symbol, fresh cooldown, fresh entry |
+| Thu May 28 15:04 | **FN** | NEW entry $760 score 90, tier 1 | — | Highest score entry of the week — tier 1 validated |
+| Thu May 28 15:04 | **SOUN** | NEW entry $895 score 91, tier 1 | — | Highest score entry, contrarian style, $895 (Day-37 amplified sizing) |
+| Fri May 29 10:05 | **IONQ** | SIGNAL exit $69.34 | **+$79.95 (+11.87%)** | **Massive amplified WIN.** Entered Tuesday at $61.98 — held 3 days |
+| Fri May 29 10:05 | **FN** | WATCHDOG_FORCE_SELL $737 | **−$22.74 (−2.99%)** | Dead in 16 hours. Score 90→60 collapse, force-sell fired |
+| Fri May 29 12:04 | ZS | NEW entry $258 score 80, tier 2 | — | Smaller sizing (tier 2) |
+
+**Gap-period net: +$51.42** ($79.95 IONQ − $5.79 OSCR-original − $22.74 FN). Cumulative trajectory: $322.57 (Day 41) → $316.78 → $396.73 → $373.99 (Day 44 close, where we still sit Monday).
+
+### Why SIGNAL sold IONQ on Friday (answering directly)
+
+A fresh scan signal can close a brain position even when the thesis tracker says "weakening, not invalid." That's exactly what happened to IONQ:
+
+- **Stage 6 thesis check** said `weakening` — Claude's full text actually said the core thesis was **"firmly in place and arguably stronger"** (MACD rose from 4.21 to 4.77, +13% in two days, sentiment flipped neutral→bullish). On its own, this would NOT have exited the position.
+- **Stage 1-7 SIGNAL exit path** fires when a fresh scan generates `action=AVOID` (or downgraded HOLD) on an open brain symbol. May 29 10:03 scan ran IONQ → score 58 HOLD. May 29 12:05 scan ran IONQ → **score 54 AVOID**. The brain closed it.
+- **Claude's AVOID reasoning:** "entry is poor: 96% upper Bollinger Band, RSI overbought 72.6, ~45% above SMA200, volume drying up (z-score −1.55)." Classic overextension call on a runner.
+
+**Exit price $69.34, peak $71.03 — left ~$3 (2.4%) on the table.** But +11.87% / +$79.95 was captured.
+
+**Was this a "sold something we could stay" case (Day 38)?** Same shape, but the cohort verdict from the Day-38 backtest (`thesis-invalidated-is-calibrated`) said overriding these exits costs money on average. Even with IONQ's specific +$3 leakage, the rule is right at the cohort level — don't override.
+
+### Today's snapshot
+
+| Symbol | Entry | Peak | Peak gain | Target / Stop | Thesis | Tier |
+|---|---|---|---|---|---|---|
+| OSCR | $22.43 (May 28) | $23.19 | +3.4% | $25.50 / $20.40 | weakening | 1 ($647) |
+| SOUN | $8.56 (May 28) | $9.35 | +9.3% | $9.68 / $7.90 | valid | 1 ($895) |
+| ZS | $136.75 (May 29) | $154.85 | **+13.2%** | $150 / $122 | none | 2 ($258) |
+
+**$1,800 deployed across 3 positions. ZS already overshot its target at peak — same overextension shape that triggered IONQ's exit.** Watch the next scan: if ZS shows up as AVOID, SIGNAL fires.
+
+### Day-41 predictions vs actuals — 2/4 hit (resolved at Friday close)
+
+- [x] **OSCR Day 6+ resolution** → ✓ resolved Thursday via TIME_EXPIRED (−$5.79, then immediately re-entered fresh)
+- [x] **IONQ holds above $60** → ✓ **way above** — exited at $69.34 (+11.87%)
+- [?] **2+ new entries Wednesday** → ✗ Wed was actually 0-entry. But Thursday was 3-entry (OSCR+FN+SOUN). Off by one day.
+- [x] **Cumulative breaks +$340** → ✓ peaked at $396.73 Friday, settled $373.99
+
+3/4 with one timing miss. Cumulative-recovery + IONQ-holds were both correct, with IONQ exceeding the bar dramatically.
+
+### Why today (Monday June 1) was 0-activity
+
+11 BUY signals fired today (SOUN 91 CONTRARIAN, FLY 81, OSCR 76, MO 72, COMP 71, PM 70, etc.) — but **zero brain entries**. Reasons:
+
+1. **SOUN already held** (entered Thursday) — dedupe blocks re-entry
+2. **OSCR already held** (entered Thursday) — same
+3. **FLY 81 BUY MOMENTUM** → likely failed per-day cap or post-IONQ cooldown (similar momentum cohort)
+4. **MO/PM/COMP 70-72** → below the 75 floor for HIGH_RISK after sector filter
+5. **Cumulative wallet at $1,800 deployed of ~$5,000** — no capacity pressure, brain is just being picky
+
+**The brain held its 3 carry-overs and added nothing.** Not a bug — a feature. Monday-after-Friday-burst is normal cooldown weather.
+
+---
+
+### Cross-day learning: Day 41 + Days 42-45
+
+Looking at the Day 41 → Day 45 stretch as a single 5-trading-day window, four patterns emerge that no single day reveals:
+
+**1. The amplification thesis is resolving positive — but the variance is brutal.**
+
+Day-37 amplification (10%→15% sizing) at n=6 resolved wallet trades:
+
+| Symbol | Sizing | Actual | At 10% est. | Amp delta |
+|---|---|---|---|---|
+| SATS | 16.3% | −$75.75 | −$46.50 | −$29 |
+| CIFR | 15% | +$50.69 | +$33.79 | +$17 |
+| FIG | 15% | +$5.79 | +$3.86 | +$2 |
+| OSCR (Thu) | 15% | −$5.79 | −$3.86 | −$2 |
+| IONQ | 15% | +$79.95 | +$53.30 | **+$27** |
+| FN | 15% | −$22.74 | −$15.16 | −$8 |
+
+**Resolved amplification delta: +$7 net** across 6 trades. Was −$10 at Day 41 (n=3). The IONQ +$27 amplification gain flipped the sign. **Still not enough samples for a verdict, but the data is no longer net-negative.**
+
+**2. WATCHDOG_FORCE_SELL fired twice in 7 trading days. That's a new pattern.**
+
+SATS (Day 40) and FN (Day 44). Before Day 40, the −8% emergency backstop had fired ~3 times across 30+ trading days. Now it's firing every 3-4 days. Either:
+- (a) market regime has shifted to higher-volatility "good setup dies fast" mode, OR
+- (b) we're entering more momentum names at peak (FN was 90, SATS was 83) and the watchdog is correctly catching their reversals
+
+**Forward question:** if a 3rd FORCE_SELL fires within the next 5 trading days, the amplification + high-score-entry combo may be miscalibrated. Lower the tier-1 score floor from 83 (or whatever it actually is) for amplified entries, or cap amplified sizing on momentum-style names.
+
+**3. SIGNAL exits are the new dominant winner-exit reason.**
+
+7-day exit-reason distribution: TRAILING_STOP (3), SIGNAL (1 = IONQ), WATCHDOG_FORCE_SELL (2), TIME_EXPIRED (1). Pre-amplification, TRAILING_STOP was dominant. Now SIGNAL is the biggest single P&L contributor ($80 IONQ vs $50 CIFR trail vs $6 FIG trail). **The fresh-scan AVOID signal is doing more work than the price-based trail for amplified positions.** Worth tracking: if SIGNAL keeps producing the biggest wins, it argues against the (intuitive but rejected) Day-38 proposal to override SIGNAL with trailing-stop conversions.
+
+**4. The "re-entry after TIME_EXPIRED" pattern just worked.**
+
+OSCR Thursday cycle: original aged out −$5.79 → re-entered same day at fresh score 76 → currently +3.4% at peak with thesis still tracking. **Time-bounded cooldowns + fresh re-entry beats permanent symbol blacklisting** — same finding as IONQ post-THESIS_INVALIDATED on Day 41. Two independent confirmations in 5 days.
+
+### Predictions for Day 46 (Tuesday June 2)
+
+- [ ] **ZS hits SIGNAL or TARGET exit** — peak $154.85 above target $150, classic overextension shape. If next scan generates AVOID, SIGNAL fires. If price stays above $150, TARGET could fire instead.
+- [ ] **SOUN holds above $8.50** — entered $8.56 with stop $7.90. Thesis still valid. Score 91. Likely a holder.
+- [ ] **OSCR thesis flips to valid or invalid** — currently weakening. 3.4% peak gain isn't decisive enough for either. Probably resolves direction this week.
+- [ ] **2+ new entries Tuesday** — post-Monday-quiet, cooldowns should release. If amplification keeps firing, watch for sector concentration warning signs (3rd FORCE_SELL trigger).
+- [ ] **WATCHDOG_FORCE_SELL frequency check** — if ZERO force-sells fire over the next 5 trading days, the cluster was just noise. If a 3rd fires, the high-score-amplification combo is miscalibrated.
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

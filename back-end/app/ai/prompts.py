@@ -329,6 +329,9 @@ Current price: ${current_price} (P&L: {pnl_pct:+.2f}%).
 ## Conditions at Entry
 {entry_conditions}
 
+## Previous Re-evaluation
+{prior_reeval_block}
+
 ## Current Conditions
 {current_conditions}
 
@@ -355,6 +358,7 @@ Determine whether the original thesis is still valid TODAY. Return JSON:
   • Sentiment flips (bullish → bearish without our position recovering)
   • The thesis itself becoming the consensus (everyone's already long, no incremental buyers)
 - P&L direction does NOT determine the answer. The thesis does.
+- The "Previous Re-evaluation" section shows what you concluded last time. Use it for continuity — if you already flagged "weakening" and conditions have NOT deteriorated further, keep the same status. Only escalate to "invalid" on genuinely new evidence. Conversely, if you previously said "valid" but new evidence breaks it, do not anchor — call invalid.
 
 Return JSON only, no markdown."""
 
