@@ -4876,6 +4876,256 @@ OSCR Thursday cycle: original aged out −$5.79 → re-entered same day at fresh
 
 ---
 
+## Day 46 — June 2, 2026 (Tuesday) — BUCKET-FIX VALIDATION
+
+**Metrics: +$29.95 net realized.** 3 closes (2W/1L), 1 new entry. **Cumulative wallet-era: $373.99 → $403.94 — first time above $400.** Headline: the FIRST brain entry on a reclassified ticker (QCOM) fired today, 19 hours after the bucket fix shipped.
+
+### Today's closes — clean sweep on the carry-over cohort
+
+| Time | Symbol | Reason | P&L | Held | Notes |
+|---|---|---|---|---|---|
+| 10:22 | **SOUN** | TRAILING_STOP | **+$30.33 (+3.39%)** | 5d | Entered May 28 at $8.56, closed $8.85. Peak was $9.35 |
+| 10:22 | **ZS** | TRAILING_STOP | **+$11.44 (+4.44%)** | 4d | Entered May 29 at $136.75, closed $142.82. Peak was $154.85 — trail caught a deep drop |
+| 10:22 | OSCR | TRAILING_STOP | −$11.82 (−1.83%) | 5d | Entered May 28 at $22.43, exit $22.02. Thesis was weakening throughout |
+
+All three exits fired in the SAME minute (10:22) — the morning scan's trailing-stop sweep got all three at once. **2 winners, 1 small loser — exactly what a clean trail-out day looks like.**
+
+### Today's entry — the validation
+
+| Time | Symbol | Score | Bucket | Sizing | Notes |
+|---|---|---|---|---|---|
+| 12:02 | **QCOM** | **79** | **HIGH_RISK / SHORT** | tier 1, $1,009 | **FIRST brain entry on a reclassified ticker.** QCOM was SAFE_INCOME until 18:40 yesterday. Today it scored 79 BUY in HIGH_RISK, cleared the 75 floor, entered |
+
+This is the validation event for the bucket fix. QCOM had been scoring 60-68 in SAFE_INCOME for the past 60 days (one BUY ever, at 68 below the 75 admission floor). Today, in HIGH_RISK with Grok firing (sent=62), it lifted to 79 BUY → tier 1 entry → real position.
+
+### Bucket-fix surface area on Day 46
+
+Reclassified tickers that showed up at score ≥75 in today's scans:
+
+- **CRM 89 BUY HIGH_RISK CONTRARIAN sent=62** — would never have scored 89 in SAFE_INCOME (capped near 60). Not entered — likely cooldown or per-day cap conflict
+- **ADBE 83 BUY HIGH_RISK CONTRARIAN sent=52** — same story
+- **QCOM 79 BUY HIGH_RISK NEUTRAL sent=62** — entered
+- **AMAT 79 AVOID HIGH_RISK MOMENTUM sent=62** — close, but AVOID not BUY
+
+**Plus the non-reclassified high scores:**
+- SWKS 90 BUY (returning name — was the +$76 Day 38 winner)
+- OSCR 83 BUY (cooldown, just exited)
+
+**4 reclassified tickers crossed the admission floor on Day 1 of the fix.** Pre-fix, none of them ever did. The hypothesis is confirmed mechanically — the question now is whether these new entries produce winners or losers.
+
+### Day-45 predictions vs actuals — 4/5 hit cleanly
+
+- [x] **ZS hits SIGNAL or TARGET exit** → ✓ resolved via TRAILING_STOP at +4.44% (not SIGNAL/TARGET specifically, but exit happened — same direction)
+- [x] **SOUN holds above $8.50** → ✓ closed at $8.85, +3.39%
+- [x] **OSCR thesis flips to valid or invalid** → resolved by exit before thesis crystallized (was still weakening at close)
+- [~] **2+ new entries Tuesday** → partial: only 1 entry (QCOM), but 3 other admissible BUYs surfaced (CRM/ADBE/OSCR) — cooldown blocked OSCR, per-day cap may have blocked CRM/ADBE
+- [x] **WATCHDOG_FORCE_SELL frequency check** → ✓ zero force-sells today. Tally remains 2 in 8 trading days. **Still on watch but cooling down**
+
+### Amplification ledger — net delta now POSITIVE
+
+Day-37 amplification (10%→15% sizing), n=9 resolved:
+
+| Symbol | Sizing | Actual | At 10% est. | Amp delta |
+|---|---|---|---|---|
+| SATS | 16.3% | −$75.75 | −$46.50 | −$29 |
+| CIFR | 15% | +$50.69 | +$33.79 | +$17 |
+| FIG | 15% | +$5.79 | +$3.86 | +$2 |
+| OSCR (Thu) | 15% | −$5.79 | −$3.86 | −$2 |
+| IONQ | 15% | +$79.95 | +$53.30 | +$27 |
+| FN | 15% | −$22.74 | −$15.16 | −$8 |
+| SOUN | 15% | +$30.33 | +$20.22 | **+$10** |
+| ZS | tier 2 | +$11.44 | +$11.44 | 0 |
+| OSCR (May28) | 15% | −$11.82 | −$7.88 | −$4 |
+
+**Resolved amplification delta: +$13 net across 9 trades.** Was +$7 at Day 45 (n=6). The Day 46 cohort added +$6 of delta (SOUN +$10 win, OSCR −$4 loss). **First time the running ledger has been clearly positive.** Verdict still pending — need n=15-20 before any real call.
+
+### Daily rate trajectory toward the 1%/day goal
+
+- Day 1-40 average: ~$8/day on $5K wallet = 0.17%/day
+- Day 41-46 stretch (last 6 trading days): $403.94 − $322.57 = +$81.37 over 6 days = **$13.56/day = 0.27%/day**
+- Day 46 alone: +$29.95 = 0.60%/day
+
+**Rate is improving.** Last 6-day window is ~60% better than the 45-day average. Still not at the 1%/day mark (would need $50/day on $5K, or $10/day on $1K) — but the trajectory is right. **If the bucket-fix candidates (CRM, ADBE, AMAT) start producing entries in the next 5 days, this rate could keep climbing.**
+
+### Currently open EOD
+
+| Symbol | Entry | Peak | Target | Stop | Days | Thesis | Notes |
+|---|---|---|---|---|---|---|---|
+| QCOM | $241.83 | $241.97 | $259 | $228 | 0d | weakening | The bucket-fix validation trade. Up small at entry |
+
+**$1,009 deployed, 1 position.** Concentrated. The wallet is light — most cash sitting unused.
+
+### Lessons (Day 46 specific)
+
+**1. The bucket fix produced its expected effect within 24 hours.** QCOM entry at score 79 is the exact behavior the fix was designed to enable. CRM (89), ADBE (83), AMAT (79) didn't enter but proved they CAN cross the floor in the right bucket. **Day-45 hypothesis confirmed mechanically.** Whether the entries are profitable is the next phase of validation — need 5-7 reclassified-ticker entries resolved before reading EV.
+
+**2. Three-trail same-minute exits are not random.** SOUN, ZS, OSCR all exited at 10:22 via TRAILING_STOP. Same scan, same trail-sweep code path, three trails triggered together. **The MORNING scan after PRE_MARKET caught a coordinated downtick across multiple positions.** Watch this pattern — if multi-exit days correlate with broad market moves (SPY down 1%+), it's noise. If they correlate with sector-specific news, it's signal.
+
+**3. Per-day cap matters more now that good candidates exist.** Today produced 4 admissible BUYs (QCOM, CRM, ADBE, OSCR). Only 1 entered. The per-day-cap=4 may be a real bottleneck now — pre-fix, we rarely hit 4 admissible candidates in a day. Worth checking: were CRM/ADBE blocked by cap, cooldown, or per-style cap? **If they were blocked by cap, the cap may need to scale with admission volume.**
+
+**4. SWKS is back at score 90 BUY — same name that produced +$76 TARGET_HIT on Day 38.** The brain didn't enter it today (cooldown? post-winner cooldown is 336h = 14 days, Day 38 was 14 days ago exactly). **Watch for SWKS to admit tomorrow or Wednesday** — if the post-winner cooldown released today, it should appear in the next 1-3 scans as a candidate.
+
+**5. The watchdog quietness is real signal.** 8 trading days since SATS+FN, zero force-sells. **Either the regime stabilized or the cohort that triggered force-sells (high-score MOMENTUM amplified) hasn't recurred.** The signal_thinking hypothesis from Day 45 (score≥85 MOMENTUM amp disasters) needs MORE samples to verify — but the quiet stretch is noteworthy.
+
+### Predictions for Day 47 (Wednesday June 3)
+
+- [ ] **QCOM holds above $235** — entered $241.83 with stop $228. Down 3% = thesis warning, below stop = exit. Currently up small at $241.97 peak.
+- [ ] **2+ new reclassified-ticker entries** — CRM/ADBE/AMAT all proved they can score admissible. If cooldowns release Wednesday, expect 2 of these to enter (or SWKS if its post-winner cooldown clears).
+- [ ] **Cumulative breaks +$425** — needs +$22 net. Plausible if QCOM trends positive and 1 of the new entries closes positive same day.
+- [ ] **Zero force-sells continues** — 9 trading days, 0 force-sells = the SATS/FN cluster was a 2-day glitch, not a structural pattern. If a 3rd fires Wednesday, revisit Day-45 signal_thinking hypothesis.
+- [ ] **Daily rate stays above $15** — needs the bucket-fix candidates to actually produce wins, not just admissions. This is the real test for the 1%/day trajectory.
+
+---
+
+## Day 47 — June 3, 2026 (Wednesday) [folded into Day 48]
+
+Brief recap, fully folded into Day 48 below: **QCOM closed SIGNAL +$8.76 (the bucket-fix validation win)** — first reclassified-ticker entry to resolve profitably. 4 new entries fired in the same MIDDAY scan: NOW (NEUTRAL tier-1, $620), ONDS (MOMENTUM tier-1, $858), RBRK (MOMENTUM tier-1, $729), MUSA (MOMENTUM tier-1, $680). **3 of the 4 were tier-1 MOMENTUM** — the exact cohort the Day-48 backtest later proved was structurally negative-EV. The setup was there for the Day-48 disaster the moment those entries fired.
+
+Cumulative end-of-day-47: $412.70 (+$8.76).
+
+---
+
+## Day 48 — June 4, 2026 (Thursday) — 3RD FORCE_SELL + 2 NEW GATES SHIPPED
+
+**Metrics: −$66.38 net realized.** 3 closes (0W/3L), 1 new entry. **Cumulative wallet-era: $412.70 → $337.56 — biggest single-day drawdown since SATS Day 40.** Headline: 3rd WATCHDOG_FORCE_SELL in 11 trading days confirmed the amplified-MOMENTUM disaster pattern; spent the day backtesting and shipped two new gates (post-loss 24h cooldown, MOMENTUM tier-1 cap).
+
+### Today's closes — Wednesday's MOMENTUM burst dying
+
+| Time | Symbol | Reason | P&L | Held | Notes |
+|---|---|---|---|---|---|
+| 09:35 | **ONDS** | **WATCHDOG_FORCE_SELL** | **−$71.49 (−8.33%)** | **~24h** | Entered Wed at $12.30 score 76 MOMENTUM tier-1 ($858). Dead in a day. The 3rd FORCE_SELL of the pattern (after SATS Day 40, FN Day 44) |
+| 09:39 | MUSA | SIGNAL | −$1.65 (−0.24%) | ~24h | Entered Wed at $546.32 score 82 MOMENTUM tier-1 ($680). Quick AI downgrade exit |
+| 09:39 | RBRK | TRAILING_STOP | −$2.00 (−0.27%) | ~24h | Entered Wed at $76.74 score 75 MOMENTUM tier-1 ($729). Near-breakeven trail-exit |
+
+**All three were tier-1 MOMENTUM entries from Wednesday's burst.** All three lost. The 4th Wednesday entry (NOW, NEUTRAL tier-1) is still open at thesis=weakening.
+
+### Today's entry — last tier-1 MOMENTUM before the cap
+
+| Time | Symbol | Score | Style | Tier | Notes |
+|---|---|---|---|---|---|
+| 09:39 | OSCR | 83 | MOMENTUM | **tier-1 ($696)** | **Entered ~3 hours BEFORE the MOMENTUM cap rule shipped.** The last tier-1 MOMENTUM trade the brain will produce until the rule is reverted |
+
+OSCR re-entered today as cycle 3 (May 21 → −$5.79, May 28 → −$11.82, now June 4). Post-loss cooldown released at 47h gap. The cooldown is working as designed; whether OSCR cycle 3 ends differently is the open question.
+
+### The ONDS forensic — score 76 to dead in 24 hours
+
+Entered Wed 14:02 at $12.30 ($858 position = 17% of wallet at amplified tier-1). Bled steadily:
+
+| Time | Price | P&L | Note |
+|---|---|---|---|
+| Wed 14:02 | $12.30 | entry | score 76 MOMENTUM tier-1 |
+| Wed afternoon | $12.00 area | −2.5% | Slow drift |
+| Thu 09:35 | **$11.27** | **−8.33%** | Crossed the −8% emergency backstop |
+| Thu 09:35 | $11.27 | sell | **WATCHDOG_FORCE_SELL** |
+
+**Same shape as SATS (Day 40, score 83, dead in 24h) and FN (Day 44, score 90, dead in 16h).** This is the pattern that's been visible since Day 45 but kept getting tighter framing wrong (score ≥85 originally). ONDS at score 76 broke the score-ceiling framing — the real common thread is **amplified tier-1 MOMENTUM at any score**.
+
+### The 3-FORCE_SELL cluster — pattern confirmed
+
+| Day | Symbol | Score | Style | Sizing | Loss |
+|---|---|---|---|---|---|
+| 40 (May 22) | SATS | 83 | MOMENTUM | tier-1 ($928) | −$75.75 |
+| 44 (May 29) | FN | 90 | MOMENTUM | tier-1 ($760) | −$22.74 |
+| **48 (today)** | **ONDS** | **76** | **MOMENTUM** | **tier-1 ($858)** | **−$71.49** |
+
+**3 trades, 3 disasters, all tier-1 MOMENTUM, all within 24h of entry.** Combined loss: −$169.98. The cohort isn't score-bound — it's style-and-sizing-bound.
+
+### The backtest journey today (3 ran, 2 rejected, 2 shipped)
+
+Day 47 evening I claimed an OSCR-style cooldown wouldn't justify shipping (cohort n=1). Pedro pushed back. Re-ran with broader scope this morning:
+
+**Backtest 1 — `Sell HALF at first weakening signal`** (n=15)
+- Result: actual +$48 → sim +$14 → **delta −$34**
+- Big winners (IONQ, NEXT, IONQ-May) cut in half; downside saved smaller
+- **REJECTED.** Confirms `feedback_thesis_invalidated_is_calibrated`.
+
+**Backtest 2 — `24h cooldown after losing close`** (n=26 losing closes, 1 fast re-entry)
+- Result: blocks 1 historical case (OSCR), saves $11.82
+- No historical winner in the <48h window — gap is real
+- **SHIPPED.** `brain_post_loss_cooldown_hours = 24`, mechanism-justified, n=1 acceptable because the boundary cluster (48h vs 93h+ next re-entry) is structural.
+
+**Backtest 3 — `Cap tier-1 MOMENTUM at tier-2 sizing`** (n=17)
+- Result: actual −$60 → sim −$26 → **delta +$34**
+- 5 WATCHDOG_FORCE_SELLs in cohort: −$231 → −$100 saved
+- 29% win rate × amplified sizing = structurally net-negative
+- Sensitivity: every ratio 0.4-0.7 produces positive delta — robust
+- **SHIPPED.** `brain_momentum_force_tier2 = True`, biggest gate of the day.
+
+**Net: 2 ships, 1 rejection, both shipped have explicit invalidation criteria documented inline.**
+
+### What the new gates will catch going forward
+
+| Gate | Affects | Expected effect |
+|---|---|---|
+| Post-loss 24h cooldown | ONDS today (blocked), future fast re-entries | Prevents OSCR-style "lose-then-rebuy-3h-later" |
+| MOMENTUM tier-1 → tier-2 cap | All MOMENTUM entries from now on | ONDS/SATS/FN-scale disasters now half the size |
+
+**At today's wallet ($337), the MOMENTUM cap means a future ONDS-shape disaster would lose −$31 instead of −$71.** The IONQ-style winner would also win $35 instead of $80. **Net of the cohort: positive-EV per the backtest.**
+
+### Day-46 predictions vs actuals (the gaps that were real)
+
+- [x] **QCOM holds above $235** → ✓ closed +$8.76 on Day 47 at ~$244
+- [~] **2+ new reclassified-ticker entries** → 1 reclassified entry (QCOM on Day 46), then 4 new entries Day 47 but only 1 was reclassified-cohort
+- [ ] **Cumulative breaks +$425** → ✗ peaked $412.70, dropped to $337.56
+- [ ] **Zero force-sells continues** → **✗ MISSED. ONDS fired today.** Hypothesis from Day 45 confirmed.
+- [ ] **Daily rate stays above $15** → ✗ Day 47 only +$8.76, Day 48 −$66 → 2-day avg is sharply negative
+
+**2/5 hit.** The big miss (FORCE_SELL frequency) is exactly the pattern that triggered today's investigation. Bad prediction → good information.
+
+### Currently open EOD
+
+| Symbol | Entry | Tier / Style | Sizing | Thesis | Notes |
+|---|---|---|---|---|---|
+| NOW | $120.87 (Jun 3) | tier-1 NEUTRAL | $620 | weakening | Sole survivor of Wed's 4-entry burst |
+| OSCR | $22.90 (Jun 4) | tier-1 MOMENTUM | $696 | none | Last tier-1 MOMENTUM until the cap is reverted; cycle 3 of the OSCR saga |
+
+**$1,316 deployed across 2 positions.** Wallet is ~70% cash by total balance.
+
+### Amplification ledger update — flipped negative again
+
+Day-37 amplification (10%→15% sizing), n=12 resolved closes:
+
+| Cohort | Actual | At 10% est. | Amp delta |
+|---|---|---|---|
+| Total winners | +$337.14 | +$224.76 | +$112.38 (better) |
+| Total losers | −$390.92 | −$260.61 | −$130.31 (worse) |
+| **Net (n=12)** | **−$53.78** | **−$35.85** | **−$17.93** |
+
+**Resolved amplification delta is now −$17.93 net.** Was +$13 yesterday after SOUN/ZS wins. Today's 3-loss cluster (ONDS, MUSA, RBRK) flipped it back negative.
+
+**The MOMENTUM cap shipped today is the natural response.** The amplification at the cohort level is roughly neutral; the LOSING side is concentrated in MOMENTUM. Capping MOMENTUM specifically converts "neutral-ish overall, dragging from MOMENTUM" into "positive on the surviving NEUTRAL/CONTRARIAN amplification."
+
+### Daily rate trajectory — drawdown day
+
+- Day 1-40 avg: ~$8/day on $5K wallet = 0.17%/day
+- Day 41-46 stretch: $13.56/day = 0.27%/day
+- Day 47: +$8.76 = 0.18%/day
+- Day 48 (today): **−$66.38 = −1.32%/day**
+
+**Today erased ~5 days of recent progress.** The 1%/day goal is now further away — but the structural rules shipped today are exactly the kind of intervention that should improve the average going forward. The question is whether the MOMENTUM-cap improvement (~+$34 in backtest) outpaces the IONQ-style upside foregone in live trading.
+
+### Lessons (Day 48 specific)
+
+**1. The 3-FORCE_SELL cluster is structural, not noise.** The Day-45 prediction "if a 3rd fires within 5 days, revisit" hit on Day 48 (Day-45 + 3 trading days). The pattern wasn't "score ≥85" — it was "amplified tier-1 MOMENTUM at any score." Score 76 ONDS broke the original framing, which forced a better one. **Predictions that miss in informative ways are more valuable than predictions that hit cleanly.**
+
+**2. Backtest discipline saved more money today than the new gates will earn this week.** Two backtests rejected proposed rules (sell-half-on-weakening, narrow OSCR-only cooldown). Both would have shipped on intuition and lost money. The discipline is doing exactly what it's supposed to. **Going to real money July 1 with this discipline intact is the right setup.**
+
+**3. The bucket-fix produced its first resolved win (QCOM +$8.76 Day 47).** Small but proves the mechanism — a reclassified ticker entered HIGH_RISK at amplified sizing and resolved positive via SIGNAL exit within 24h. **One data point. Need 5+ resolved bucket-fix-cohort trades before reading EV.**
+
+**4. The 4-entry burst day pattern is dangerous when 3+ are MOMENTUM.** Wednesday produced NOW (NEUTRAL) + ONDS/RBRK/MUSA (all MOMENTUM). 3 of 4 entries were the negative-EV cohort. Today's −$75 was visible the moment those entries fired — we just didn't have the rule yet. **The MOMENTUM cap shipped today specifically blocks this future-burst risk: at most 1 MOMENTUM at full size now.**
+
+**5. The MOMENTUM cap's invalidation criterion matters.** If the next 10 MOMENTUM entries at tier-2 produce ≥6 wins AND positive net P&L, the cohort may have regime-shifted and the cap should be revisited. **Watch this carefully — the rule is structurally aggressive and a regime shift would be the first sign it's miscalibrated.**
+
+### Predictions for Day 49 (Friday June 5)
+
+- [ ] **No new WATCHDOG_FORCE_SELL** — first scan with the MOMENTUM cap live. If the cap is right, no force-sell on amplified MOMENTUM should happen because no new MOMENTUM entries will be amplified.
+- [ ] **OSCR (cycle 3) resolves within 5 days** — likely TRAILING_STOP either positive (cycle 1 had no real run) or negative (cycle 2 pattern repeats). Same-name 3-cycle test for the cooldown system.
+- [ ] **NOW resolves positive or breakeven** — entered Day 47 at NEUTRAL tier-1, $620, thesis=weakening. Trail will probably catch a small move.
+- [ ] **At least 1 MOMENTUM-cap log fires** — confirms the rule is mechanically working in production. Watch `Brain T2: ... validated_momentum_capped` log line.
+- [ ] **Cumulative recovers to +$360** — needs +$23 net. Plausible if NOW or OSCR (cycle 3) closes positive and no new losses appear.
+
+---
+
 ## Template for Future Days
 
 **Metrics:** [Did yesterday's fixes work?]

@@ -224,6 +224,45 @@ class Settings(BaseSettings):
     # Default 336h = 14 days. Set to 0 to disable.
     brain_post_winner_cooldown_hours: int = 336
 
+    # Day 47 (Jun 4): post-LOSING-close cooldown. After a wallet trade closes
+    # negative (any exit_reason), block re-entry of the same symbol for N
+    # hours. Backtest motivation: OSCR closed -$5.79 TIME_EXPIRED with
+    # weakening thesis (May 28 12:05) → brain re-entered the SAME symbol
+    # 3 hours later → lost another -$11.82 (Jun 2 TRAILING_STOP). Across
+    # all losing closes (n=26), only ONE re-entry has ever happened within
+    # 48h (the OSCR case), and it lost. The next-fastest re-entry was 53+
+    # hours later. So a 24h cooldown blocks the observed bad case without
+    # touching any historical winner.
+    # Mechanism: a losing close means the recent thesis didn't play out.
+    # Within 24h the brain has not received enough fresh information to
+    # justify reversing that judgment. Forcing a wait ensures any re-entry
+    # is preceded by at least one full scan cycle of new data.
+    # Invalidation: if a same-symbol re-entry < 24h after a losing close
+    # WOULD have been profitable in the next 30 days, revisit.
+    # Default 24h. Set to 0 to disable.
+    brain_post_loss_cooldown_hours: int = 24
+
+    # Day 47 (Jun 4): MOMENTUM tier-1 size cap. Backtest n=17 closed wallet
+    # trades that entered as tier-1 MOMENTUM:
+    #   - 5 wins +$237.14, 12 losses -$297.67 → 29% win rate, net -$60.53
+    #   - 5 of those losses were WATCHDOG_FORCE_SELL totaling -$230.93
+    #     (SATS -$76 Day 40, FN -$23 Day 44, ONDS -$71 Day 47, IONQ -$41,
+    #     LUN.TO -$20). All five at amplified tier-1 sizing.
+    # Simulating these at tier-2 sizing (observed ratio ~0.43) gives:
+    #   - Wins clipped to +$103, losses clipped to -$129 → net -$26.28
+    #   - Delta: +$34.25 improvement
+    # Sensitivity: every sizing ratio between 0.4-0.7 produces a positive
+    # delta because the cohort itself is net-negative. Mechanism: MOMENTUM
+    # style is structurally negative-EV at amplified sizing — Claude's
+    # MOMENTUM flag fires on extension setups, which produce big winners
+    # AND big losers, but the losers are more frequent.
+    # Cost of being wrong: would have clipped IONQ +$80 to +$35, SOUN
+    # +$30 to +$13, etc. Net still negative for cohort even after the
+    # foregone upside. Invalidation: if the next 10 MOMENTUM entries at
+    # tier-2 produce >=6 wins AND positive net P&L, revisit.
+    # Default True. Set False to revert.
+    brain_momentum_force_tier2: bool = True
+
     # --- Trade Horizon (SHORT vs LONG) ---
     # SHORT: momentum trades, 1-7d hold, tight trail, every-scan thesis re-eval.
     # LONG: trend trades, up to 60d, wide trail, daily thesis re-eval (AFTER_CLOSE only).

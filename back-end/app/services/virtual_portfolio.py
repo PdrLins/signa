@@ -522,6 +522,12 @@ def _eval_brain_trust_tier(sig: dict, portfolio_heat: int = 0) -> tuple[int, flo
             return 2, 0.5, "validated_overextended_bb"
         if heat_halve:
             return 2, 0.5, "validated_heat_defensive"
+        # Day 47: MOMENTUM-cohort tier cap. See config.brain_momentum_force_tier2
+        # for the full backtest rationale. Short version: tier-1 MOMENTUM
+        # produced 29% win rate / net -$60 / 5 WATCHDOG_FORCE_SELLs across
+        # n=17. Cap at tier-2 sizing to reduce the asymmetric downside.
+        if settings.brain_momentum_force_tier2 and sig.get("signal_style") == "MOMENTUM":
+            return 2, 0.5, "validated_momentum_capped"
         return 1, 1.0, "validated"
 
     # Tier 2: low confidence AI + higher score bar
@@ -1444,6 +1450,36 @@ def process_virtual_trades(
                 f"({pw_cooldown_hours}h): {sorted(post_winner_cooldown_symbols)}"
             )
 
+    # Day 47: post-LOSING-close cooldown. Different from the three above:
+    # - thesis-rebuy fires on THESIS_INVALIDATED (any P&L) within 60min
+    # - watchdog-exit fires on WATCHDOG_EXIT (any P&L) within 168h
+    # - post-winner fires on PROFITABLE soft exits within 336h
+    # This one fires on ANY LOSING close (any exit_reason) within 24h —
+    # the narrow "don't immediately re-enter a losing name" guard. The
+    # observed case (OSCR May 28 -> OSCR May 28 3h later -> lost again)
+    # is the entire historical cohort, but the mechanism is sound: a
+    # loss-then-immediate-rebuy hasn't been given fresh information.
+    pl_cooldown_hours = settings.brain_post_loss_cooldown_hours
+    post_loss_cooldown_symbols: set[str] = set()
+    if pl_cooldown_hours > 0:
+        pl_cutoff = (datetime.now(timezone.utc) - timedelta(hours=pl_cooldown_hours)).isoformat()
+        pl_rows = (
+            db.table("virtual_trades")
+            .select("symbol, exit_date, pnl_amount, exit_reason")
+            .eq("source", "brain")
+            .eq("status", "CLOSED")
+            .eq("is_wallet_trade", True)
+            .lt("pnl_amount", 0)
+            .gte("exit_date", pl_cutoff)
+            .execute()
+        ).data or []
+        post_loss_cooldown_symbols = {r["symbol"] for r in pl_rows if r.get("symbol")}
+        if post_loss_cooldown_symbols:
+            logger.info(
+                f"Post-loss re-buy cooldown active on {len(post_loss_cooldown_symbols)} symbols "
+                f"({pl_cooldown_hours}h): {sorted(post_loss_cooldown_symbols)}"
+            )
+
     # Resolve once: brain runs single-tenant, every insert is stamped with
     # this user_id so the rows are correctly attributed and queryable.
     brain_user_id = queries.get_brain_user_id()
@@ -1826,6 +1862,7 @@ def process_virtual_trades(
             and symbol not in cooldown_brain_symbols  # post-THESIS_INVALIDATED cooldown
             and symbol not in watchdog_cooldown_symbols  # Day 26: post-WATCHDOG_EXIT cooldown
             and symbol not in post_winner_cooldown_symbols  # Day 37: post-WINNER cooldown
+            and symbol not in post_loss_cooldown_symbols  # Day 47: post-LOSING-close cooldown
         ):
             # ── Rotation: brain at max capacity, only rotate if the new
             # ── signal is meaningfully better (+5 points) than the weakest
@@ -2125,6 +2162,13 @@ def process_virtual_trades(
         # that just produced a winning thesis-exit shouldn't be re-targeted
         # in either direction within the cooldown window.
         if symbol in post_winner_cooldown_symbols:
+            continue
+
+        # Day 47: post-LOSING-close cooldown — mirror the post-winner block
+        # on the SHORT path. A name that just lost in either direction
+        # shouldn't be re-entered (long or short) within 24h without fresh
+        # information.
+        if symbol in post_loss_cooldown_symbols:
             continue
 
         short_tier, short_mult, short_reason = _eval_brain_short_tier(sig)
