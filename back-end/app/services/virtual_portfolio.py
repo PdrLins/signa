@@ -528,6 +528,15 @@ def _eval_brain_trust_tier(sig: dict, portfolio_heat: int = 0) -> tuple[int, flo
         # n=17. Cap at tier-2 sizing to reduce the asymmetric downside.
         if settings.brain_momentum_force_tier2 and sig.get("signal_style") == "MOMENTUM":
             return 2, 0.5, "validated_momentum_capped"
+        # Day 55: NEUTRAL ≥85 tier cap. See config.brain_neutral_high_score_force_tier2
+        # for the full backtest rationale. Short version: NEUTRAL tier-1 ≥85
+        # produced 25% win rate / net -$97 / 4 WATCHDOG_FORCE_SELLs across
+        # n=8. Cap at tier-2 sizing for the same mechanism as the MOMENTUM
+        # rule — high-conviction extension at amplified sizing reverses.
+        if (settings.brain_neutral_high_score_force_tier2
+                and sig.get("signal_style") == "NEUTRAL"
+                and score >= settings.brain_neutral_high_score_threshold):
+            return 2, 0.5, "validated_neutral_high_score_capped"
         return 1, 1.0, "validated"
 
     # Tier 2: low confidence AI + higher score bar

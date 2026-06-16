@@ -136,6 +136,33 @@ async def catch_up_missed_scans():
             logger.error(f"Catch-up scan {scan_type} failed: {e}")
 
 
+async def daily_learning_loop():
+    """5:30 PM ET — Autonomous Daily Learning Loop.
+
+    Runs after the AFTER_CLOSE scan (16:30 ET) and virtual_portfolio_snapshot
+    (17:00 ET) have completed for the day. Produces a daily MD report at
+    docs/daily-reports/YYYY-MM-DD.md, a Telegram digest (heartbeat — fires
+    every market day including zero-finding days), brain_suggestions
+    INVESTIGATE rows for actionable findings, and auto-creates / auto-
+    graduates / auto-rejects signal_thinking hypotheses based on
+    observed cohort drift and explicit pattern matchers.
+
+    See `app/services/daily_learning/` for the full design.
+    """
+    logger.info("⏰ Daily Learning Loop triggered (5:30 PM ET)")
+    try:
+        from app.services.daily_learning import run_daily_learning
+        result = await run_daily_learning()
+        logger.info(
+            f"📋 Daily Learning complete: {result.get('status')} "
+            f"findings={result.get('findings_count', 0)} "
+            f"created={result.get('hypotheses_created', 0)} "
+            f"graduated={result.get('hypotheses_graduated', 0)}"
+        )
+    except Exception as e:
+        logger.error(f"Daily Learning Loop failed: {e}")
+
+
 async def brain_watchdog():
     """Every 15 min during market hours -- monitor open brain positions.
 

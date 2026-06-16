@@ -263,6 +263,34 @@ class Settings(BaseSettings):
     # Default True. Set False to revert.
     brain_momentum_force_tier2: bool = True
 
+    # Day 55 (Jun 15): NEUTRAL ≥85 tier cap. Mirrors the Day-47 MOMENTUM cap
+    # but for the NEUTRAL cohort, discovered during the Pedro-away week:
+    #   - n=8 closed wallet trades with signal_style=NEUTRAL, entry_tier=1,
+    #     entry_score>=85.
+    #   - 2W/6L = 25% win rate; net P&L -$97.68.
+    #   - 4 of 6 losses were WATCHDOG-family closes (FSLR -$65, TEAM -$64,
+    #     ONDS -$27 twice as ONDS NEUTRAL ≥85 before the Day-47 MOMENTUM cap).
+    # Backtest (sizing ratio 0.447, matching the actual observed tier-2/tier-1
+    # ratio):
+    #   - actual cohort net: -$97.68
+    #   - simulated at tier-2: -$43.65
+    #   - DELTA: +$54.03 improvement
+    #   - 2 winners cut (IONQ +$64→+$29, SOUN +$30→+$14): -$52 upside lost
+    #   - 6 losers cut: +$106 downside saved
+    # Sensitivity: dropping threshold to ≥80 yields nearly identical delta
+    # (+$56) but cuts 9 more trades that net out — too mixed to justify.
+    # The ≥85 cohort is the structural negative-EV cell.
+    # Cross-cutting context: the combined Day-47 (MOMENTUM ≥83) + Day-55
+    # (NEUTRAL ≥85) finding suggests "high score + amplified tier-1 sizing"
+    # is the deeper mechanism. Per-style caps are cleaner to operate and
+    # easier to revert independently if one cohort regime-shifts.
+    # Invalidation: if the next 5 NEUTRAL ≥85 entries at tier-2 produce
+    # >=3 wins AND positive net P&L, revisit. Same shape as the MOMENTUM
+    # invalidation criterion.
+    # Default True. Set False to revert.
+    brain_neutral_high_score_force_tier2: bool = True
+    brain_neutral_high_score_threshold: int = 85
+
     # --- Trade Horizon (SHORT vs LONG) ---
     # SHORT: momentum trades, 1-7d hold, tight trail, every-scan thesis re-eval.
     # LONG: trend trades, up to 60d, wide trail, daily thesis re-eval (AFTER_CLOSE only).

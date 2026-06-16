@@ -10,6 +10,7 @@ from app.scheduler.jobs import (
     after_close_scan,
     brain_watchdog,
     cleanup_expired_tokens,
+    daily_learning_loop,
     midday_scan,
     morning_scan,
     pre_close_scan,
@@ -76,6 +77,17 @@ def init_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # 5:30 PM ET — Daily Learning Loop. Must run AFTER virtual_portfolio_snapshot
+    # (5:00 PM) and the AFTER_CLOSE scan (4:30 PM) so the analysis sees the
+    # day's full close-out. See app/services/daily_learning/ for design.
+    scheduler.add_job(
+        daily_learning_loop,
+        CronTrigger(hour=17, minute=30, day_of_week="mon-fri", timezone=settings.timezone),
+        id="daily_learning_loop",
+        name="Daily Learning Loop (5:30 PM ET)",
+        replace_existing=True,
+    )
+
     # Every 15 min during market hours (9 AM - 5 PM ET, Mon-Fri)
     if settings.watchdog_enabled:
         scheduler.add_job(
@@ -98,7 +110,8 @@ def init_scheduler() -> AsyncIOScheduler:
 
     watchdog_status = "enabled" if settings.watchdog_enabled else "disabled"
     logger.info(
-        f"Scheduler configured: {len(SCAN_SCHEDULE)} scans + cleanup + snapshot + watchdog ({watchdog_status}) "
+        f"Scheduler configured: {len(SCAN_SCHEDULE)} scans + cleanup + snapshot "
+        f"+ daily-learning + watchdog ({watchdog_status}) "
         f"(timezone: {settings.timezone})"
     )
 

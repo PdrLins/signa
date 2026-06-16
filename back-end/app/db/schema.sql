@@ -404,6 +404,40 @@ CREATE TABLE IF NOT EXISTS brain_suggestions (
 );
 CREATE INDEX IF NOT EXISTS idx_brain_suggestions_status ON brain_suggestions(status);
 CREATE INDEX IF NOT EXISTS idx_brain_suggestions_date ON brain_suggestions(analysis_date DESC);
+-- brain_suggestions.suggestion_type vocabulary:
+-- MODIFY_RULE | MODIFY_WEIGHT | DISABLE_RULE | NEW_RULE | INVESTIGATE.
+-- INVESTIGATE rows are emitted by the daily_learning_loop (see table below)
+-- when a finding has no associated rule yet — Pedro investigates manually
+-- before any code change is proposed.
+
+-- 16b. DAILY LEARNING RUNS — one row per autonomous daily_learning_loop fire
+-- See migration 004 for the full design rationale. Idempotency is enforced
+-- by the partial unique index on (target_date) WHERE status='COMPLETE' —
+-- at most one COMPLETE row per market day, but FAILED/SKIPPED retries can
+-- stack so the audit trail captures every attempt.
+CREATE TABLE IF NOT EXISTS daily_learning_runs (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    target_date           DATE NOT NULL,
+    started_at            TIMESTAMPTZ DEFAULT now(),
+    completed_at          TIMESTAMPTZ,
+    status                VARCHAR DEFAULT 'RUNNING',
+        -- RUNNING | COMPLETE | FAILED | SKIPPED_DUPLICATE | SKIPPED_NO_SCAN
+    metrics               JSONB,
+    findings_count        INT DEFAULT 0,
+    hypotheses_created    INT DEFAULT 0,
+    hypotheses_graduated  INT DEFAULT 0,
+    hypotheses_rejected   INT DEFAULT 0,
+    suggestions_created   INT DEFAULT 0,
+    md_report_path        TEXT,
+    runtime_ms            INT,
+    error                 TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_learning_runs_date_complete
+    ON daily_learning_runs(target_date) WHERE status = 'COMPLETE';
+CREATE INDEX IF NOT EXISTS idx_daily_learning_runs_started
+    ON daily_learning_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_daily_learning_runs_status
+    ON daily_learning_runs(status);
 
 
 -- 17. USER SETTINGS (per-user preferences)
