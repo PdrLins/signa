@@ -1,5 +1,6 @@
-"""Budget days follow ET; scans use free news first and add Grok only before
-the decision model; missing sentiment is labelled a data gap."""
+"""Budget days follow ET; scans are Grok-first with the daily Grok budget
+reserved in candidate-rank order; a missing Grok result is retried once
+before the decision model; missing sentiment is labelled a data gap."""
 
 import asyncio
 from datetime import datetime, timezone
@@ -35,7 +36,7 @@ def test_skipped_sentiment_prompt_text():
     assert "not used" in text and "UNAVAILABLE" not in text
 
 
-# ── 2. Grok only before the decision model ───────────────────────────
+# ── 2. Grok retried before the decision model when it was missing ────
 
 def _run_upgrade(monkeypatch, grok_data, fresh, enabled=True):
     calls = []
@@ -50,8 +51,8 @@ def _run_upgrade(monkeypatch, grok_data, fresh, enabled=True):
     return calls
 
 
-def test_free_sentiment_upgraded_to_grok_keeping_context(monkeypatch):
-    gd = {"_provider": "gemini", "score": 55, "_market_regime": "TRENDING", "_knowledge_block": "kb"}
+def test_missing_sentiment_upgraded_to_grok_keeping_context(monkeypatch):
+    gd = {"_provider": "none", "error": "Grok daily budget used", "score": 50, "_market_regime": "TRENDING", "_knowledge_block": "kb"}
     calls = _run_upgrade(monkeypatch, gd, {"_provider": "grok", "score": 70, "citations": ["x"], "confidence": 80})
     assert calls == [{}]                       # default = Grok-first path
     assert gd["_provider"] == "grok" and gd["score"] == 70
@@ -64,13 +65,13 @@ def test_existing_grok_not_refetched(monkeypatch):
 
 
 def test_grok_failure_keeps_original(monkeypatch):
-    gd = {"_provider": "gemini", "score": 55}
+    gd = {"_provider": "none", "error": "x", "score": 50}
     _run_upgrade(monkeypatch, gd, {"error": "budget", "_provider": "none"})
-    assert gd == {"_provider": "gemini", "score": 55}
+    assert gd == {"_provider": "none", "error": "x", "score": 50}
 
 
 def test_upgrade_can_be_disabled(monkeypatch):
-    gd = {"_provider": "gemini"}
+    gd = {"_provider": "none", "error": "x"}
     assert _run_upgrade(monkeypatch, gd, {"_provider": "grok"}, enabled=False) == []
 
 

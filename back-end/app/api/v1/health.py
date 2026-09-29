@@ -58,7 +58,7 @@ class BudgetUpdateRequest(BaseModel):
     daily_limit: Optional[float] = Field(None, ge=0.10, le=50.0)
     claude_monthly: Optional[float] = Field(None, ge=0, le=100.0)
     grok_monthly: Optional[float] = Field(None, ge=0, le=100.0)
-    gemini_monthly: Optional[float] = Field(None, ge=0, le=100.0)
+    openai_monthly: Optional[float] = Field(None, ge=0, le=100.0)
 
 
 router = APIRouter(tags=["Health"])
@@ -166,28 +166,36 @@ async def integration_status(user: dict = Depends(get_current_user)):
         except Exception:
             return "grok", {"status": "error", "ok": False}
 
-    async def _check_gemini() -> tuple[str, dict]:
-        if not settings.gemini_api_key:
-            return "gemini", {"status": "not_configured", "ok": False}
+    async def _check_codex() -> tuple[str, dict]:
+        # Never a model call: CLI = `codex login status` only; API = config only.
         try:
-            from google import genai
-            def _test():
-                gc = genai.Client(api_key=settings.gemini_api_key)
-                gc.models.generate_content(model=settings.gemini_model, contents="hi")
-            await asyncio.to_thread(_test)
-            return "gemini", {"status": "connected", "ok": True}
-        except Exception as e:
-            err = str(e)
-            if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                return "gemini", {"status": "rate_limited", "ok": True}
-            elif "invalid" in err.lower() or "API_KEY" in err:
-                return "gemini", {"status": "invalid_key", "ok": False}
-            return "gemini", {"status": "error", "ok": False}
+            from app.ai import codex_client
+            a = await codex_client.availability()
+        except Exception:
+            return "codex", {"status": "error", "ok": False}
+        status = a["status"]
+        if status == "disabled":
+            # Optional reviewer: switched off is not a failure.
+            return "codex", {"status": "disabled", "ok": True, "detail": "Codex review is off"}
+        if a["available"]:
+            label = "cli_logged_in" if a["mode"] == "cli" else "api"
+            detail = ("Codex CLI (ChatGPT login) — $0 cost" if a["mode"] == "cli"
+                      else "OpenAI API (budget-capped)")
+            return "codex", {"status": label, "ok": True, "mode": a["mode"],
+                             "detail": f"{detail} · mode {settings.codex_decision_mode}"}
+        hints = {
+            "not_installed": "codex command not found in PATH",
+            "not_logged_in": "Run `codex login` on this machine",
+            "not_configured": "OPENAI_API_KEY not set",
+            "no_model": "CODEX_MODEL is required for the API path",
+        }
+        return "codex", {"status": status, "ok": False, "mode": a["mode"],
+                         "detail": hints.get(status, "Codex unavailable")}
 
     # Run all checks in parallel (~5s instead of ~25s)
     checks = await asyncio.gather(
         _check_supabase(), _check_telegram(), _check_claude(),
-        _check_grok(), _check_gemini(),
+        _check_grok(), _check_codex(),
     )
     results = dict(checks)
 
@@ -245,9 +253,9 @@ async def update_budget(
     if body.grok_monthly is not None:
         settings.budget_grok_monthly_usd = body.grok_monthly
         changed.append("grok_monthly")
-    if body.gemini_monthly is not None:
-        settings.budget_gemini_monthly_usd = body.gemini_monthly
-        changed.append("gemini_monthly")
+    if body.openai_monthly is not None:
+        settings.budget_openai_monthly_usd = body.openai_monthly
+        changed.append("openai_monthly")
 
     if changed:
         uid = user.get("user_id")
@@ -273,14 +281,17 @@ async def get_ai_config(user: dict = Depends(get_current_user)):
             "claude_local": settings.claude_local,
             "available": {
                 "claude": {"configured": bool(settings.anthropic_api_key) or settings.claude_local},
-                "gemini": {"configured": bool(settings.gemini_api_key)},
             },
+        },
+        "review": {
+            "codex_enabled": settings.codex_enabled,
+            "codex_local": settings.codex_local,
+            "decision_mode": settings.codex_decision_mode,
         },
         "sentiment": {
             "providers": settings.sentiment_providers,
             "available": {
                 "grok": {"configured": bool(settings.xai_api_key)},
-                "gemini": {"configured": bool(settings.gemini_api_key)},
             },
         },
         "scanning": {
@@ -323,8 +334,8 @@ async def update_ai_config(
     from app.core.utils import get_client_ip
     from app.db.queries import insert_audit_log
 
-    valid_synthesis = {"claude", "gemini"}
-    valid_sentiment = {"grok", "gemini"}
+    valid_synthesis = {"claude"}
+    valid_sentiment = {"grok"}
 
     updates = body.model_dump(exclude_none=True)
 

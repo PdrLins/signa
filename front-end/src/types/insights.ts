@@ -213,6 +213,15 @@ export interface PerformanceInsights {
     direction: 'veto_helps' | 'veto_costs' | null
   }
   skip_reasons: SkipGateRow[]
+  /** Opus-confirmed BUYs reviewed by Codex: agreed (BUY) vs disagreed. */
+  codex?: {
+    reviewed: number
+    agree: StatSummary
+    disagree: StatSummary
+    diff: number | null
+    diff_ci: [number, number] | null
+    direction: 'codex_helps' | 'codex_costs' | null
+  }
 }
 
 // ── /insights/backtest ───────────────────────────────────────
@@ -274,6 +283,17 @@ export interface DecisionModelVerdict extends ModelVerdict {
   status: 'confirmed' | 'vetoed' | 'unavailable'
 }
 
+/** Independent Codex (OpenAI) review of a decision-model BUY. */
+export interface CodexVerdict extends ModelVerdict {
+  key_risks: string[]
+  provider: 'codex-cli' | 'codex-api' | string | null
+  /** record | veto (off never stores a verdict) */
+  mode: string | null
+  /** true = veto mode turned the BUY into HOLD */
+  vetoed: boolean
+  error: string | null
+}
+
 export interface RedFlag {
   text: string
   url: string | null
@@ -315,6 +335,8 @@ export interface SignalTrail {
   } | null
   routine: ModelVerdict | null
   decision_model: DecisionModelVerdict | null
+  /** absent/null when Codex did not review this signal */
+  codex?: CodexVerdict | null
   order: {
     ref_price: number | null
     fill: number | null

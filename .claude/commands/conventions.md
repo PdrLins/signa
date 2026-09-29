@@ -6,7 +6,7 @@ Show the coding conventions and patterns for Signa backend.
 
 ## Async Patterns
 - All FastAPI routes are `async def`
-- Blocking I/O wrapped in `asyncio.to_thread()`: yfinance, Supabase calls in async contexts, Claude/Gemini sync clients
+- Blocking I/O wrapped in `asyncio.to_thread()`: yfinance, Supabase calls in async contexts, sync SDK clients
 - `asyncio.gather()` for parallel I/O (data fetching, integration health checks)
 - `asyncio.Semaphore(10)` for scan concurrency control
 - `asyncio.Lock()` for async-safe singletons (budget service)

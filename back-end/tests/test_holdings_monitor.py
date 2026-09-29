@@ -1,5 +1,5 @@
 """My holdings monitor — price status, state-change alerts + de-dup,
-one free-path AI call per holding per day, prefer_free provider order.
+cached-Grok reuse and a weekly, budget-checked Grok refresh per stock.
 yfinance / AI / DB / Telegram are all mocked."""
 
 import asyncio
@@ -148,51 +148,95 @@ def test_send_alerts_respects_switch(monkeypatch):
     assert len(sent) == 1
 
 
-# ── red flags: free path, stocks only, once per day ──
+# ── red flags: cached Grok reuse, weekly Grok refresh, stocks only ──
 
 class FakeSentiment:
     def __init__(self, result=None):
         self.calls = []
-        self.result = result or {"score": 40, "confidence": 0.7, "_provider": "gemini", "red_flags": [
+        self.result = result or {"score": 40, "confidence": 0.7, "_provider": "grok", "red_flags": [
             {"text": "Accounting restatement", "url": "https://news/x", "severity": "high", "category": "accounting"}]}
 
-    async def __call__(self, ticker, market_cap=None, prefer_free=False, free_only=False):
-        self.calls.append({"ticker": ticker, "prefer_free": prefer_free, "free_only": free_only})
+    async def __call__(self, ticker, market_cap=None, **kw):
+        self.calls.append({"ticker": ticker, "market_cap": market_cap, **kw})
         return dict(self.result)
 
 
+class HoldingsBudget:
+    def __init__(self, allowed=True):
+        self.allowed = allowed
+        self.checks = 0
+
+    async def can_call(self, provider_name, call_type="sentiment"):
+        self.checks += 1
+        return (True, "ok") if self.allowed else (False, "Daily budget exceeded")
+
+
 @pytest.fixture
-def fake_sent(monkeypatch):
+def fake_budget(monkeypatch):
+    from app.services import budget_service
+    b = HoldingsBudget()
+
+    async def get_instance():
+        return b
+    monkeypatch.setattr(budget_service.BudgetService, "get_instance", staticmethod(get_instance))
+    return b
+
+
+@pytest.fixture
+def fake_sent(monkeypatch, fake_budget):
     f = FakeSentiment()
+    cache: dict = {}
+    f.cache = cache
     monkeypatch.setattr(provider, "analyze_sentiment", f)
+    monkeypatch.setattr(provider, "get_cached_sentiment", lambda t: cache.get(t))
     monkeypatch.setattr(hm, "_market_cap", lambda s: 1e9)
     monkeypatch.setattr(settings, "ai_enabled", True)
     monkeypatch.setattr(settings, "holdings_ai_red_flags", True)
-    monkeypatch.setattr(settings, "holdings_sentiment_paid_fallback", False)
+    monkeypatch.setattr(settings, "holdings_grok_refresh_days", 7)
+    monkeypatch.setattr(settings, "xai_api_key", "x")
     return f
 
 
-def test_red_flag_check_uses_free_path_once_per_day(fake_sent):
+def test_red_flag_check_calls_grok_once_per_refresh_window(fake_sent):
     h = {"symbol": "PLTR", "asset_type": "STOCK"}
     today = date(2026, 9, 28)
     flags, meta = asyncio.run(hm.red_flag_check(h, None, today))
     assert len(flags) == 1 and flags[0]["key"] and meta["checked_on"] == "2026-09-28"
-    assert fake_sent.calls == [{"ticker": "PLTR", "prefer_free": True, "free_only": True}]
+    assert meta["grok_on"] == "2026-09-28"
+    assert fake_sent.calls == [{"ticker": "PLTR", "market_cap": 1e9}]
     # stored snapshot says checked today -> reused, no second call
     flags2, meta2 = asyncio.run(hm.red_flag_check(h, {"red_flags": flags, "sentiment": meta}, today))
     assert flags2 == flags and meta2.get("reused") and len(fake_sent.calls) == 1
     # even if the stored snapshot was lost, the in-process guard blocks a 2nd call
     asyncio.run(hm.red_flag_check(h, None, today))
     assert len(fake_sent.calls) == 1
-    # next day: one new call
-    asyncio.run(hm.red_flag_check(h, {"sentiment": meta}, date(2026, 9, 29)))
+    # next days inside the 7-day window: stored flags kept, no Grok call
+    f3, m3 = asyncio.run(hm.red_flag_check(h, {"red_flags": flags, "sentiment": meta}, date(2026, 10, 2)))
+    assert f3 == flags and m3.get("reused") and m3["grok_on"] == "2026-09-28"
+    assert len(fake_sent.calls) == 1
+    # a week later: one new Grok call
+    asyncio.run(hm.red_flag_check(h, {"red_flags": flags, "sentiment": m3}, date(2026, 10, 5)))
     assert len(fake_sent.calls) == 2
 
 
-def test_red_flag_check_paid_fallback_setting(fake_sent, monkeypatch):
-    monkeypatch.setattr(settings, "holdings_sentiment_paid_fallback", True)
-    asyncio.run(hm.red_flag_check({"symbol": "AMD", "asset_type": "STOCK"}, None, date(2026, 9, 28)))
-    assert fake_sent.calls[-1] == {"ticker": "AMD", "prefer_free": True, "free_only": False}
+def test_red_flag_check_reuses_cached_grok_for_free(fake_sent, fake_budget):
+    fake_sent.cache["NVDA"] = {**fake_sent.result, "_cached": True}
+    prev = {"sentiment": {"checked_on": "2026-09-27", "grok_on": "2026-09-27"}}
+    flags, meta = asyncio.run(hm.red_flag_check({"symbol": "NVDA", "asset_type": "STOCK"}, prev, date(2026, 9, 28)))
+    assert len(flags) == 1 and meta["cached"] is True and meta["provider"] == "grok"
+    assert fake_sent.calls == [] and fake_budget.checks == 0
+    assert meta["grok_on"] == "2026-09-27"      # a cache hit is not a paid call
+
+
+def test_red_flag_check_respects_grok_budget(fake_sent, fake_budget):
+    fake_budget.allowed = False
+    prev = {"red_flags": [{"text": "old", "url": "u", "key": "k"}], "sentiment": {}}
+    flags, meta = asyncio.run(hm.red_flag_check({"symbol": "AMD", "asset_type": "STOCK"}, prev, date(2026, 9, 28)))
+    assert flags == prev["red_flags"] and meta["error"] == "budget" and fake_sent.calls == []
+    assert not meta.get("grok_on")              # blocked: not counted, retried next run
+    fake_budget.allowed = True
+    asyncio.run(hm.red_flag_check({"symbol": "AMD", "asset_type": "STOCK"}, prev, date(2026, 9, 29)))
+    assert len(fake_sent.calls) == 1
 
 
 @pytest.mark.parametrize("sym,at", [("XEQT.TO", "ETF"), ("BTC-USD", "CRYPTO"), ("FBTC", "ETF")])
@@ -270,17 +314,22 @@ def test_run_holdings_monitor_table_missing(monkeypatch):
     assert asyncio.run(hm.run_holdings_monitor()) == {"status": "unavailable"}
 
 
-# ── provider: prefer_free routing order ──
+# ── provider: Grok-only sentiment routing ──
 
 class FakeBudget:
-    def __init__(self):
+    def __init__(self, allowed=True):
         self.recorded = []
+        self.allowed = allowed
+        self.released = 0
 
     async def can_call(self, provider_name, call_type):
-        return True, ""
+        return (True, "") if self.allowed else (False, "Daily budget exceeded")
 
     async def record_call(self, provider_name, call_type, ticker, success=True):
         self.recorded.append((provider_name, success))
+
+    async def release(self, provider_name, call_type):
+        self.released += 1
 
 
 @pytest.fixture
@@ -295,69 +344,51 @@ def routed(monkeypatch):
         order.append("grok")
         return {"score": 60, "confidence": 0.8}
 
-    async def gemini(ticker, market_cap=None):
-        order.append("gemini")
-        return {"score": 55, "confidence": 0.6}
-
-    import app.ai.gemini_client as gc
     import app.ai.grok_client as xc
     monkeypatch.setattr(provider, "_get_budget", get_budget)
     monkeypatch.setattr(xc, "analyze_sentiment", grok)
-    monkeypatch.setattr(gc, "analyze_sentiment", gemini)
     monkeypatch.setattr(settings, "xai_api_key", "x")
-    monkeypatch.setattr(settings, "gemini_api_key", "g")
-    monkeypatch.setattr(settings, "sentiment_providers", ["grok", "gemini"])
-    return order, budget
+    monkeypatch.setattr(settings, "sentiment_providers", ["grok"])
+    provider.clear_ai_caches()
+    yield order, budget
+    provider.clear_ai_caches()
 
 
-def test_provider_order_helper(monkeypatch):
-    monkeypatch.setattr(settings, "sentiment_providers", ["grok", "gemini"])
-    assert provider.sentiment_provider_order() == ["grok", "gemini"]
-    assert provider.sentiment_provider_order(prefer_free=True) == ["gemini", "grok"]
-    assert provider.sentiment_provider_order(free_only=True) == ["gemini"]
-
-
-def test_default_sentiment_still_grok_first(routed):
-    order, _ = routed
-    r = asyncio.run(provider.analyze_sentiment("NVDA"))
-    assert order == ["grok"] and r["_provider"] == "grok"
-
-
-def test_prefer_free_tries_gemini_first(routed):
+def test_sentiment_is_grok_and_cached(routed):
     order, budget = routed
-    r = asyncio.run(provider.analyze_sentiment("NVDA", prefer_free=True))
-    assert order == ["gemini"] and r["_provider"] == "gemini" and budget.recorded == [("gemini", True)]
+    r = asyncio.run(provider.analyze_sentiment("NVDA"))
+    assert order == ["grok"] and r["_provider"] == "grok" and budget.recorded == [("grok", True)]
+    assert provider.get_cached_sentiment("NVDA")["_cached"] is True
+    r2 = asyncio.run(provider.analyze_sentiment("NVDA"))
+    assert r2["_cached"] is True and order == ["grok"]
 
 
-def test_prefer_free_falls_back_to_grok(routed, monkeypatch):
-    order, _ = routed
-    import app.ai.gemini_client as gc
-
-    async def gemini_fail(ticker, market_cap=None):
-        order.append("gemini")
-        return {"error": "no grounding"}
-    monkeypatch.setattr(gc, "analyze_sentiment", gemini_fail)
-    r = asyncio.run(provider.analyze_sentiment("NVDA", prefer_free=True))
-    assert order == ["gemini", "grok"] and r["_provider"] == "grok"
+def test_sentiment_budget_blocked_is_a_data_gap(routed):
+    order, budget = routed
+    budget.allowed = False
+    r = asyncio.run(provider.analyze_sentiment("NVDA"))
+    assert order == [] and r.get("error") and r["confidence"] == 0 and r["_provider"] == "none"
+    assert provider.get_cached_sentiment("NVDA") is None
 
 
-def test_free_only_never_calls_grok(routed, monkeypatch):
-    order, _ = routed
-    import app.ai.gemini_client as gc
-
-    async def gemini_fail(ticker, market_cap=None):
-        order.append("gemini")
-        return {"error": "no grounding"}
-    monkeypatch.setattr(gc, "analyze_sentiment", gemini_fail)
-    r = asyncio.run(provider.analyze_sentiment("NVDA", free_only=True))
-    assert order == ["gemini"] and r.get("error")
+def test_reserved_call_skips_budget_check_and_releases(routed):
+    order, budget = routed
+    budget.allowed = False   # the reservation already paid the check
+    r = asyncio.run(provider.analyze_sentiment("AMD", budget_reserved=True))
+    assert order == ["grok"] and r["_provider"] == "grok" and budget.released == 1
+    # cache hit with a reservation: released, no call
+    asyncio.run(provider.analyze_sentiment("AMD", budget_reserved=True))
+    assert order == ["grok"] and budget.released == 2
 
 
-def test_free_path_reuses_cached_grok_and_does_not_pollute_scan_cache(routed):
-    order, _ = routed
-    asyncio.run(provider.analyze_sentiment("NVDA"))                 # scan: Grok, cached
-    r = asyncio.run(provider.analyze_sentiment("NVDA", prefer_free=True))
-    assert r["_cached"] is True and r["_provider"] == "grok" and order == ["grok"]
-    asyncio.run(provider.analyze_sentiment("AMD", prefer_free=True))  # free path: Gemini
-    r2 = asyncio.run(provider.analyze_sentiment("AMD"))              # scan must still ask Grok
-    assert order == ["grok", "gemini", "grok"] and r2["_provider"] == "grok"
+def test_no_gemini_in_routing(monkeypatch):
+    import importlib.util
+
+    from app.core.config import Settings
+    assert importlib.util.find_spec("app.ai.gemini_client") is None
+    s = Settings(synthesis_providers=["claude", "gemini"], sentiment_providers=["grok", "gemini"])
+    assert s.synthesis_providers == ["claude"] and s.sentiment_providers == ["grok"]
+    assert not hasattr(provider, "sentiment_provider_order")
+    import inspect
+    src = inspect.getsource(provider)
+    assert "gemini_client" not in src and '"gemini"' not in src

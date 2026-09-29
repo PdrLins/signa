@@ -137,8 +137,8 @@ def validate_trade_levels(
 def synthesis_error_response(reason: str) -> dict:
     """Return the canonical "synthesis failed" dict.
 
-    Used by all 3 AI clients (claude_client, claude_local_client,
-    gemini_client) when their provider exhausts retries. Contains a safe
+    Used by the synthesis clients (claude_client, claude_local_client)
+    when their provider exhausts retries. Contains a safe
     HOLD signal so downstream code never crashes on missing fields, plus
     `error` set to the reason string so `_process_candidate` can classify
     the candidate as `ai_status="failed"` and route it through the tech-only
@@ -910,7 +910,8 @@ def build_synthesis_prompt(
     """Build the full Claude synthesis prompt from the raw data dicts.
 
     Centralizes the prompt-prep boilerplate that was previously duplicated
-    across all 3 AI clients (claude_client, claude_local_client, gemini_client).
+    across the AI clients (claude_client, claude_local_client; codex_client
+    reuses it for its independent review).
     Each client now calls this ONE function instead of re-implementing:
 
         market_regime = grok_data.get(...) if isinstance(...) else ...

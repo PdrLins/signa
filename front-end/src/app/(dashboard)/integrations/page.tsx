@@ -10,7 +10,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Badge } from '@/components/ui/Badge'
-import { Database, Send, Brain, Zap, Sparkles, Clock, RefreshCw, DollarSign, Eye } from 'lucide-react'
+import { Database, Send, Brain, Zap, ShieldCheck, Clock, RefreshCw, DollarSign, Eye } from 'lucide-react'
 
 interface Integration {
   status: string
@@ -45,7 +45,8 @@ const META_STATIC: Record<string, { icon: typeof Brain; color: string }> = {
   supabase: { icon: Database, color: '#3ECF8E' },
   telegram: { icon: Send, color: '#29B6F6' },
   claude: { icon: Brain, color: '#D97706' },
-  gemini: { icon: Sparkles, color: '#4285F4' },
+  codex: { icon: ShieldCheck, color: '#10A37F' },
+  openai: { icon: ShieldCheck, color: '#10A37F' },
   grok: { icon: Zap, color: '#1DA1F2' },
   scheduler: { icon: Clock, color: '#8B5CF6' },
   watchdog: { icon: Eye, color: '#F59E0B' },
@@ -55,11 +56,11 @@ function useMeta() {
   const it = useI18nStore((s) => s.t).integrations
   const names: Record<string, string> = {
     supabase: it.supabase, telegram: it.telegram, claude: it.claude,
-    gemini: it.gemini, grok: it.grok, scheduler: it.scheduler, watchdog: it.watchdog,
+    codex: it.codex, openai: it.codex, grok: it.grok, scheduler: it.scheduler, watchdog: it.watchdog,
   }
   const descriptions: Record<string, string> = {
     supabase: it.supabaseDesc, telegram: it.telegramDesc, claude: it.claudeDesc,
-    gemini: it.geminiDesc, grok: it.grokDesc, scheduler: it.schedulerDesc, watchdog: it.watchdogDesc,
+    codex: it.codexDesc, openai: it.codexDesc, grok: it.grokDesc, scheduler: it.schedulerDesc, watchdog: it.watchdogDesc,
   }
   return (key: string) => ({
     name: names[key] || key,
@@ -70,11 +71,12 @@ function useMeta() {
 }
 
 function StatusBadge({ status, ok }: { status: string; ok: boolean }) {
+  const s = status.replace(/_/g, ' ')
   const variant = ok ? 'confirmed'
-    : status === 'rate limited' ? 'hold'
-    : status === 'no credits' ? 'weakening'
+    : s === 'rate limited' || s === 'not logged in' ? 'hold'
+    : s === 'no credits' ? 'weakening'
     : 'cancelled'
-  return <Badge variant={variant}>{status.toUpperCase()}</Badge>
+  return <Badge variant={variant}>{status.replace(/_/g, ' ').toUpperCase()}</Badge>
 }
 
 function BudgetBar({ pct, color }: { pct: number; color: string }) {
@@ -96,7 +98,8 @@ function BudgetCard({ budget, claudeLocal }: { budget: BudgetData; claudeLocal?:
   const queryClient = useQueryClient()
   const it = useI18nStore((s) => s.t).integrations
   const getMeta = useMeta()
-  const providers = ['claude', 'grok', 'gemini'] as const
+  // openai appears only when Codex runs on the paid API path
+  const providers = ['claude', 'grok', 'openai'] as const
   const [editing, setEditing] = useState(false)
   const [limits, setLimits] = useState({
     daily_limit: budget.daily_limit_usd,

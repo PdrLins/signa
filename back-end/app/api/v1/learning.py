@@ -87,7 +87,7 @@ async def run_analysis(
     days: int = Query(7, ge=1, le=90),
     user: dict = Depends(require_brain_token),
 ):
-    """Run Claude/Gemini analysis on recent trade outcomes.
+    """Run Claude analysis on recent trade outcomes.
 
     Generates brain suggestions with proposed rule changes.
     Requires brain 2FA.

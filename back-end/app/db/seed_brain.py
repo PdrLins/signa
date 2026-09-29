@@ -585,7 +585,7 @@ SIGNAL_KNOWLEDGE = [
     {
         "topic": "SENTIMENT",
         "key_concept": "sentiment_provider_hierarchy",
-        "explanation": "Sentiment is analyzed by AI providers in priority order: (1) Grok — has real-time X/Twitter access, most accurate but requires paid credits. (2) Gemini — uses training data knowledge, free tier, good fallback. When all providers fail, sentiment defaults to neutral (score 50, confidence 0). The confidence field distinguishes real sentiment from fallback — confidence 0 means no real data was available.",
+        "explanation": "Sentiment is analyzed by Grok, which has real-time X/Twitter and web search access (paid, budget-capped; results are cached 24h per ticker). When Grok fails or its budget is used up, sentiment defaults to neutral (score 50, confidence 0) and the prompt labels it a data gap. The confidence field distinguishes real sentiment from fallback — confidence 0 means no real data was available.",
         "source_name": "Signa AI Provider System",
     },
     {

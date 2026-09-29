@@ -30,20 +30,14 @@ def calls(monkeypatch):
         seen.append(("api", tier))
         return {"signal": "BUY", "confidence": 80}
 
-    async def gemini(*a, **k):
-        seen.append(("gemini", "routine"))
-        return {"signal": "HOLD", "confidence": 60}
-
     async def budget():
         return _Budget()
 
     monkeypatch.setattr(provider, "_get_budget", budget)
     monkeypatch.setitem(sys.modules, "app.ai.claude_local_client", types.SimpleNamespace(synthesize_signal=cli))
     monkeypatch.setitem(sys.modules, "app.ai.claude_client", types.SimpleNamespace(synthesize_signal=api))
-    monkeypatch.setitem(sys.modules, "app.ai.gemini_client", types.SimpleNamespace(synthesize_signal=gemini))
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-test")
-    monkeypatch.setattr(settings, "gemini_api_key", "g-test")
-    monkeypatch.setattr(settings, "synthesis_providers", ["claude", "gemini"])
+    monkeypatch.setattr(settings, "synthesis_providers", ["claude"])
     return seen
 
 
@@ -55,8 +49,8 @@ def test_local_mode_never_calls_api_even_with_key(monkeypatch, calls):
     monkeypatch.setattr(settings, "claude_local", True)
     result = _run()
     assert ("api", "routine") not in calls
-    assert calls == [("cli", "routine"), ("gemini", "routine")]
-    assert result["_provider"] == "gemini"
+    assert calls == [("cli", "routine")]
+    assert result.get("error") and result["_provider"] == "none"
 
 
 def test_local_mode_decision_fails_instead_of_using_api(monkeypatch, calls):

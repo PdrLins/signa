@@ -89,11 +89,11 @@ reported to the scans table for the frontend's progress bar.
     Claude CLI subprocess only — sentiment/options/scoring run unguarded):
       • Reuse price_df + fundamentals + technicals from `prescore_cache`
         (no yfinance refetch).
-      • Fetch sentiment via Grok / Gemini fallback (HIGH_RISK only —
+      • Fetch sentiment via Grok (HIGH_RISK only —
         SAFE_INCOME hardcodes neutral to save cost).
       • Fetch Barchart options flow (free, all candidates).
       • Run AI synthesis via `provider.synthesize_signal` (Claude Local
-        → Claude API → Gemini fallback chain).
+        or Claude API, per CLAUDE_LOCAL).
       • Classify ai_status: validated (AI said BUY, conf >= 60) /
         low_confidence / rejected (AI not BUY) / failed.
       • Update AI retry queue (clear on success, add on failure).
@@ -570,11 +570,13 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 "analyzing",
                 ticker,
             )
+            reserved = grok_reservations.get(ticker)
             try:
                 result = await _process_candidate(
                     ticker, macro_data, screening_data, previous_signals,
                     scan_id, yfinance_sem, ai_sem, market_regime, _knowledge_block,
                     discovered_set, prescore_cache.get(ticker),
+                    grok_reserved=reserved, grok_used=grok_used,
                 )
                 return result
             except Exception as e:
@@ -582,8 +584,17 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 logger.debug(f"AI processing failed {ticker}: {e}")
                 return None
 
+        # Best candidates first: the daily Grok budget is reserved in this
+        # order before any call starts, so when it runs short the lower-
+        # ranked candidates (not the best ones) go without live sentiment.
+        ai_candidates = _grok_priority_order(ai_candidates, screening_data)
+        grok_reservations = await _reserve_grok_in_rank_order(ai_candidates) if ai_candidates else {}
+        grok_used: set[str] = set()
         ai_tasks = [_process_ai(item, i) for i, item in enumerate(ai_candidates)]
-        ai_results = await asyncio.gather(*ai_tasks)
+        try:
+            ai_results = await asyncio.gather(*ai_tasks)
+        finally:
+            await _release_unused_grok(grok_reservations, grok_used)
         _t_pass2_done = _time.perf_counter()
         logger.info(f"⏱ PASS 2 (AI synthesis {len(ai_candidates)} candidates): {_t_pass2_done - _t_pass1_done:.1f}s")
         valid_signals.extend(s for s in ai_results if isinstance(s, dict))
@@ -867,6 +878,80 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         reset_current_scan_type(_scan_ctx_token)
 
 
+def _grok_priority_order(ai_candidates: list[tuple], screening_data: dict | None) -> list[tuple]:
+    """AI candidates in the order they should get the (limited) daily Grok
+    budget: the existing selection order — technical filter passed first,
+    then the prefilter's trend quality, then pre-score. Stable, so retry /
+    forced candidates keep their relative order within a tie."""
+    def _key(x):
+        feats = (screening_data or {}).get(x[0])
+        tqs = trend_quality_score(feats) if feats else float("-inf")
+        return (0 if _tech_filter_passed(x) else 1, -tqs, -(x[1] or 0))
+    return sorted(ai_candidates, key=_key)
+
+
+async def _reserve_grok_in_rank_order(ranked: list[tuple]) -> dict[str, bool]:
+    """Walk the ranked AI candidates once, in order, and reserve one Grok
+    sentiment call for each HIGH_RISK one that has no cached result, until
+    the budget says no. {ticker: reserved} for the candidates that need a
+    call; tickers missing from the map need no decision (SAFE_INCOME skips
+    sentiment, a cached result is reused). Reservations are consumed or
+    released by provider.analyze_sentiment; `_release_unused` frees any a
+    crashed candidate never used."""
+    out: dict[str, bool] = {}
+    if not settings.xai_api_key or "grok" not in (settings.sentiment_providers or []):
+        return out
+    from app.services.budget_service import BudgetService
+    budget = await BudgetService.get_instance()
+    blocked_reason = None
+    for item in ranked:
+        ticker, bucket = item[0], item[2]
+        if bucket == "SAFE_INCOME" or ticker in out:
+            continue
+        if ai_provider.get_cached_sentiment(ticker) is not None:
+            continue
+        if blocked_reason is None:
+            ok, reason = await budget.reserve("grok", "sentiment")
+            if ok:
+                out[ticker] = True
+                continue
+            blocked_reason = reason
+        out[ticker] = False
+    skipped = [t for t, ok in out.items() if not ok]
+    if skipped:
+        logger.warning(
+            f"Grok budget: {len(out) - len(skipped)} candidate(s) get live sentiment; "
+            f"{len(skipped)} lower-ranked proceed without it ({blocked_reason}): {', '.join(skipped)}"
+        )
+    return out
+
+
+async def _release_unused_grok(reservations: dict[str, bool], used: set[str]) -> None:
+    leftover = [t for t, ok in reservations.items() if ok and t not in used]
+    if not leftover:
+        return
+    from app.services.budget_service import BudgetService
+    budget = await BudgetService.get_instance()
+    for _ in leftover:
+        await budget.release("grok", "sentiment")
+
+
+async def _scan_sentiment(ticker: str, fundamental_data: dict | None, grok_reserved: bool | None,
+                          grok_used: set | None = None) -> dict:
+    """Sentiment for one PASS-2 candidate (see `_process_candidate`)."""
+    mcap = (fundamental_data or {}).get("market_cap")
+    if grok_reserved is False:
+        cached = ai_provider.get_cached_sentiment(ticker)
+        if cached is not None:
+            return cached
+        return ai_provider.sentiment_unavailable(
+            ticker, "Grok daily budget used by higher-ranked candidates — sentiment unavailable",
+        )
+    if grok_reserved and grok_used is not None:
+        grok_used.add(ticker)  # the provider now owns (consumes/releases) the reservation
+    return await ai_provider.analyze_sentiment(ticker, market_cap=mcap, budget_reserved=bool(grok_reserved))
+
+
 async def _process_candidate(
     ticker: str,
     macro_data: dict,
@@ -879,6 +964,8 @@ async def _process_candidate(
     knowledge_block: str = "",
     discovered_set: set | None = None,
     prescore_data: dict | None = None,
+    grok_reserved: bool | None = None,
+    grok_used: set | None = None,
 ) -> dict:
     """Run the FULL Pass-2 pipeline for a single AI candidate ticker.
 
@@ -913,7 +1000,7 @@ async def _process_candidate(
       2. Fetch in parallel:
            - 1y price history (yfinance) — REUSED from PASS 1 if available
            - Fundamentals (yfinance .info) — REUSED from PASS 1 if available
-           - Sentiment (Grok / Gemini fallback) — HIGH_RISK only
+           - Sentiment (Grok; budget reserved in rank order) — HIGH_RISK only
            - Barchart options flow (free, all candidates)
       3. Compute technical indicators from the price data
       4. Inject regime context + brain knowledge into grok_data so the
@@ -951,6 +1038,13 @@ async def _process_candidate(
             and `technical_data` from PASS 1. When supplied, skips the
             yfinance refetch entirely. Saves ~2 yfinance calls per AI
             candidate.
+        grok_reserved: None = ordinary budget-checked Grok call. True = a
+            Grok call was reserved for this candidate in rank order
+            (`_reserve_grok_in_rank_order`). False = the daily Grok budget
+            went to higher-ranked candidates: use a cached result or mark
+            sentiment unavailable (no call).
+        grok_used: the scan's set of tickers whose reservation was handed
+            to the provider (anything reserved but not in it is released).
 
     Returns:
         A signal_data dict ready for `queries.insert_signals_batch`.
@@ -980,10 +1074,7 @@ async def _process_candidate(
             grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [], "summary": "Sentiment skipped for Safe Income (10% weight)", "_skipped": True}
         else:
             grok_data, options_flow = await asyncio.gather(
-                ai_provider.analyze_sentiment(
-                    ticker, market_cap=(fundamental_data or {}).get("market_cap"),
-                    free_only=settings.scan_sentiment_free_first,
-                ),
+                _scan_sentiment(ticker, fundamental_data, grok_reserved, grok_used),
                 barchart_scanner.get_options_flow(ticker),
             )
     else:
@@ -999,10 +1090,7 @@ async def _process_candidate(
             grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [], "summary": "Sentiment skipped for Safe Income (10% weight)", "_skipped": True}
         else:
             grok_data, options_flow = await asyncio.gather(
-                ai_provider.analyze_sentiment(
-                    ticker, market_cap=(fundamental_data or {}).get("market_cap"),
-                    free_only=settings.scan_sentiment_free_first,
-                ),
+                _scan_sentiment(ticker, fundamental_data, grok_reserved, grok_used),
                 barchart_scanner.get_options_flow(ticker),
             )
         fundamental_data = dict(fundamental_data or {})
@@ -1311,7 +1399,7 @@ async def _process_candidate(
 _PROMPT_CONTEXT_KEYS = (
     "_market_regime", "_catalyst_context", "_regime_note", "_knowledge_block",
     "_options_flow", "_levels_source", "_earnings_blackout",
-    "_ai_signal", "_decision", "_self_check", "_skipped",
+    "_ai_signal", "_decision", "_self_check", "_skipped", "_codex",
 )
 
 
@@ -1378,7 +1466,60 @@ async def _confirm_buy_with_decision_model(
         f"Decision model [{ticker}]: routine BUY → {decision.get('signal')} "
         f"confidence={decision.get('confidence')}"
     )
-    return {**decision, "_routine_signal": synthesis.get("signal"), "_decision": "confirmed"}
+    confirmed = {**decision, "_routine_signal": synthesis.get("signal"), "_decision": "confirmed"}
+    if _classify_ai_status(confirmed) == "validated":
+        confirmed = await _codex_review(ticker, confirmed, technical_data, fundamental_data, macro_data, grok_data)
+    return confirmed
+
+
+def _codex_vetoes(verdict: dict | None) -> bool:
+    """veto mode only: a confident, error-free Codex AVOID/SELL."""
+    if settings.codex_decision_mode != "veto" or not isinstance(verdict, dict) or verdict.get("error"):
+        return False
+    return (verdict.get("signal") in ("AVOID", "SELL")
+            and (verdict.get("confidence") or 0) >= settings.codex_veto_min_confidence)
+
+
+async def _codex_review(ticker: str, decision: dict, technical_data: dict, fundamental_data: dict,
+                        macro_data: dict, grok_data: dict) -> dict:
+    """Independent Codex review of a decision-model BUY (validated).
+
+    The verdict is stored in grok_data["_codex"] (persisted with the signal,
+    no migration). record mode: no effect. veto mode: a confident AVOID/SELL
+    turns the BUY into HOLD (ai_status "rejected", reason codex_veto). off /
+    unavailable / error: nothing blocks. Never raises.
+    """
+    if not settings.codex_enabled or settings.codex_decision_mode == "off":
+        return decision
+    try:
+        from app.ai import codex_client
+        verdict = await codex_client.review_buy(ticker, technical_data, fundamental_data, macro_data, grok_data)
+    except Exception as e:
+        logger.warning(f"Codex review crashed for {ticker}: {e}")
+        return decision
+    if verdict is None:
+        return decision  # unavailable: nothing recorded
+    record = {k: verdict.get(k) for k in ("signal", "confidence", "p_win", "reasoning", "key_risks", "provider", "error")}
+    record["mode"] = settings.codex_decision_mode
+    vetoed = _codex_vetoes(verdict)
+    record["vetoed"] = vetoed
+    if isinstance(grok_data, dict):
+        grok_data["_codex"] = record
+    if not vetoed:
+        return {**decision, "_codex": record}
+    logger.info(
+        f"Codex veto [{ticker}]: {verdict.get('signal')} confidence={verdict.get('confidence')} "
+        f"— decision-model BUY downgraded to HOLD"
+    )
+    reason = f"[Codex veto] Codex said {verdict.get('signal')} ({verdict.get('confidence')}): {verdict.get('reasoning') or ''}"
+    return {
+        **decision,
+        "signal": "HOLD",
+        "_decision_signal": decision.get("signal"),  # what the decision model said (audit)
+        "_codex": record,
+        "_codex_veto": True,
+        "reasoning": ((decision.get("reasoning") or "") + "\n" + reason).strip(),
+    }
 
 
 # Columns added by migration 008. If the migration hasn't been applied
@@ -1397,7 +1538,9 @@ def _decision_audit_fields(synthesis: dict) -> dict:
     - not escalated: routine = the synthesis signal (the routine model's
       own answer), overturned = None
     """
-    signal = synthesis.get("signal") or None
+    # A Codex veto changes the final signal but not what the decision model
+    # said: the routine-vs-decision audit must keep measuring Opus.
+    signal = synthesis.get("_decision_signal") or synthesis.get("signal") or None
     if synthesis.get("_decision") == "confirmed":
         routine = synthesis.get("_routine_signal") or None
         overturned = (

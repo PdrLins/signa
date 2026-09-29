@@ -1,6 +1,6 @@
 """Application settings loaded from environment variables."""
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -109,18 +109,33 @@ class Settings(BaseSettings):
     # Latency: each server-side search turn costs ~10-20s (observed ~57s
     # per call at 4 turns). 3 turns (one X + one web search + a follow-up)
     # is enough for a 48h window; a timed-out request is not retried
-    # (router falls through to Gemini). Results are cached 24h per ticker.
+    # (sentiment is then marked unavailable). Results are cached 24h per ticker.
     grok_max_turns: int = 3  # cap on server-side search tool turns per request
     grok_timeout_s: int = 75
 
-    # --- Gemini ---
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.8-flash"
+    # --- Codex (OpenAI) — independent second opinion on decision-model BUYs ---
+    # Runs only after the decision model (Opus) confirmed a BUY. CODEX_LOCAL:
+    # True = the local `codex` CLI (ChatGPT login, `codex login`), read-only
+    # sandbox in an empty temp dir; False = the OpenAI API (OPENAI_API_KEY,
+    # budget-capped). The API path REQUIRES CODEX_MODEL; empty on the CLI
+    # path = the CLI's own default model.
+    codex_enabled: bool = True
+    codex_local: bool = True
+    openai_api_key: str = ""
+    codex_model: str = ""
+    # record = store the verdict only (default); veto = a confident Codex
+    # AVOID/SELL (>= codex_veto_min_confidence) downgrades the BUY to HOLD;
+    # off = never run. Codex unavailable / erroring never blocks a BUY.
+    codex_decision_mode: str = "record"
+    codex_veto_min_confidence: int = 60
+    codex_timeout_s: int = 120
 
     # --- AI Provider Preferences ---
     # Ordered list of providers to try for each task. First available wins.
-    synthesis_providers: list[str] = ["claude", "gemini"]
-    sentiment_providers: list[str] = ["grok", "gemini"]
+    # Gemini was removed (2026-09); a leftover "gemini" in an old .env is
+    # dropped by the validator below.
+    synthesis_providers: list[str] = ["claude"]
+    sentiment_providers: list[str] = ["grok"]
 
     # --- Scoring Thresholds ---
     score_buy: int = 65           # Default BUY threshold (configurable in Settings)
@@ -488,22 +503,30 @@ class Settings(BaseSettings):
 
     # --- AI Budget Limits ---
     # ~$50/month total. Daily caps ≈ monthly / 21 trading days so one bad
-    # day can't burn the month; a capped provider falls through to Gemini.
+    # day can't burn the month. Claude normally runs free via the local CLI
+    # (CLAUDE_LOCAL=true); its budget only matters on the API path. When
+    # Grok is capped, sentiment is marked unavailable (a data gap).
     budget_daily_limit_usd: float = 1.20     # Default daily cap per provider
     budget_monthly_limit_usd: float = 5.00   # Default monthly cap per provider
-    budget_claude_monthly_usd: float = 25.00
-    budget_claude_daily_usd: float = 1.20
-    budget_grok_monthly_usd: float = 20.00
-    budget_grok_daily_usd: float = 0.95
-    budget_gemini_monthly_usd: float = 5.00
-    budget_gemini_daily_usd: float = 0.25
+    budget_claude_monthly_usd: float = 5.00
+    budget_claude_daily_usd: float = 0.25
+    budget_grok_monthly_usd: float = 45.00
+    budget_grok_daily_usd: float = 2.15
+    # OpenAI (Codex API path only; the CLI path is $0). 0 = unset -> the
+    # API path is capped at $5/month anyway (see codex_client).
+    budget_openai_monthly_usd: float = 0.0
+    budget_openai_daily_usd: float = 0.25
 
     # --- AI call caching (cuts repeat calls across the day's scans) ---
     sentiment_cache_hours: int = 24     # X/news sentiment reused per ticker
-    # Scan news: free Gemini (Google Search) for every AI candidate; paid Grok
-    # (live X + web) only for stocks the routine model says BUY, right before
-    # the decision model confirms. Off = old Grok-first behaviour.
-    scan_sentiment_free_first: bool = True
+    # Scans are Grok-first (live X + web, cached 24h per ticker). PASS 2
+    # reserves the daily Grok budget in candidate-rank order, so the best
+    # candidates get sentiment first; the rest proceed with sentiment marked
+    # unavailable. scan_grok_on_buy: before the decision model rules on a
+    # routine BUY whose sentiment is missing, try Grok once more (a no-op
+    # when grok_data already came from Grok). scan_sentiment_free_first is
+    # kept only so old .env files parse; there is no free path any more.
+    scan_sentiment_free_first: bool = False
     scan_grok_on_buy: bool = True
     synthesis_cache_hours: int = 3      # routine synthesis reused per ticker...
     synthesis_cache_max_move_pct: float = 2.0  # ...unless price moved more than this
@@ -545,12 +568,11 @@ class Settings(BaseSettings):
     holdings_alerts_enabled: bool = True
     holdings_max_weight_pct: float = 15.0        # "overweight" above this share of the book
     holdings_earnings_alert_trading_days: int = 3
-    # Red-flag search for held stocks uses the FREE path (Gemini grounded
-    # search first; a cached Grok result is reused). At most one AI
-    # sentiment call per holding per ET day; never for ETFs / crypto.
+    # Red-flag search for held STOCKS (never ETFs / crypto): reuse a cached
+    # Grok result from a scan / check when there is one; otherwise call Grok
+    # at most once per stock per holdings_grok_refresh_days (budget-checked).
     holdings_ai_red_flags: bool = True
-    # When Gemini fails, may the monitor fall back to paid Grok? Off = $0.
-    holdings_sentiment_paid_fallback: bool = False
+    holdings_grok_refresh_days: int = 7
     # Long-term reviews (POST /holdings/review): "review all" at most once
     # per N days; a single request may review at most N selected holdings.
     holdings_review_all_days: int = 7
@@ -565,6 +587,18 @@ class Settings(BaseSettings):
 
     # extra="ignore": tolerate retired keys (e.g. AUTH_ENABLED) left in old .env files
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+
+    @field_validator("synthesis_providers", "sentiment_providers", mode="after")
+    @classmethod
+    def _drop_retired_providers(cls, v: list[str]) -> list[str]:
+        # Gemini was removed; an old .env may still list it.
+        return [p for p in (v or []) if str(p).strip().lower() != "gemini"]
+
+    @field_validator("codex_decision_mode", mode="after")
+    @classmethod
+    def _codex_mode(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        return v if v in ("record", "veto", "off") else "record"
 
     @model_validator(mode="after")
     def validate_security(self):

@@ -151,18 +151,13 @@ class TestSuggestionApprovalIsHonest:
         })
         captured = {}
 
-        class _Models:
-            def generate_content(self, model, contents):
-                captured["prompt"] = contents
-                return type("R", (), {"text": "[]"})()
-
-        class _Client:
-            def __init__(self, **_k):
-                self.models = _Models()
+        async def _claude(prompt, schema, label="", tier="routine"):
+            captured["prompt"] = prompt
+            return {"suggestions": []}
 
         with patch("app.services.learning_service.get_client", return_value=db), \
              patch("app.services.knowledge_service.get_client", return_value=db), \
-             patch("google.genai.Client", _Client):
+             patch("app.ai.provider.claude_structured", _claude):
             asyncio.run(learning_service.run_weekly_analysis(period_days=7))
         prompt = captured["prompt"]
         assert "CURRENT INVESTMENT RULES" not in prompt and "momentum_trap" not in prompt

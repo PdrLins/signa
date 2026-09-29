@@ -13,6 +13,15 @@ os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
 
 
+@pytest.fixture(autouse=True)
+def _no_live_codex(monkeypatch):
+    """Codex is on by default and the owner's CLI may be logged in: never let
+    a test reach the real `codex` binary. Codex tests re-enable it and mock
+    the subprocess / SDK."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "codex_enabled", False)
+
+
 @pytest.fixture
 def sample_indicators():
     """Sample technical indicators for a healthy stock."""

@@ -73,10 +73,10 @@ Show the full API endpoint reference for Signa backend.
 ### Health / Config
 | Method | Path | Body | Response |
 |--------|------|------|----------|
-| GET | `/health/integrations` | — | `{ status, integrations: { supabase, telegram, claude, grok, gemini, scheduler } }` |
+| GET | `/health/integrations` | — | `{ status, integrations: { supabase, telegram, claude, grok, codex, scheduler } }` |
 | POST | `/health/ping-telegram` | — | `{ status, message }` |
 | GET | `/health/budget` | — | budget summary |
-| PUT | `/health/budget` | `{ daily_limit?, claude_monthly?, grok_monthly?, gemini_monthly? }` | budget summary |
+| PUT | `/health/budget` | `{ daily_limit?, claude_monthly?, grok_monthly?, openai_monthly? }` | budget summary |
 | GET | `/health/ai-config` | — | provider config |
 | PUT | `/health/ai-config` | `{ language?, synthesis_providers?, sentiment_providers?, ai_enabled?, ... }` | updated config |
 

@@ -29,7 +29,7 @@ Shared across all users. No user_id filtering.
 | **signal_knowledge** | Brain knowledge entries — 34 concepts the AI uses during synthesis. Topics like score ranges, GEM conditions, market regime detection, contrarian sentiment. Injected into the Claude prompt as context. |
 | **brain_suggestions** | Self-learning output — generated when Claude analyzes trade outcomes. Each suggestion proposes a rule change (adjust threshold, change weight) with reasoning and expected impact. User approves/rejects/applies via Brain Editor. |
 | **virtual_trades** | Brain accuracy tracking — automatic paper trades based on scan signals. When a watchlisted ticker gets BUY, the brain "buys" virtually. When it gets SELL/AVOID, it "sells" and calculates P&L. Two sources: "watchlist" (user's picks) and "brain" (auto-picks score 72+). Powers the win rate metric. |
-| **ai_usage** | API cost tracking — logs every Claude/Grok/Gemini call with provider, type (synthesis/sentiment), ticker, estimated cost, success/failure. Powers the budget system (daily/monthly limits per provider), the AI Cost stat on the dashboard, and the budget widget. |
+| **ai_usage** | API cost tracking — logs every Claude/Grok/OpenAI call with provider, type (synthesis/sentiment), ticker, estimated cost, success/failure. Powers the budget system (daily/monthly limits per provider), the AI Cost stat on the dashboard, and the budget widget. |
 
 ## Auth Tables
 

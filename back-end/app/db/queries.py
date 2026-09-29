@@ -1148,6 +1148,23 @@ def get_candidate_outcome_for_signal(signal_id: str) -> dict | None:
     return rows[0] if rows else None
 
 
+def get_signal_codex_verdicts(signal_ids: list[str], chunk: int = 100) -> dict[str, dict]:
+    """{signal_id: grok_data._codex} for the given signals (read-only).
+    Signals without a stored Codex review are omitted."""
+    ids = [s for s in dict.fromkeys(str(i) for i in signal_ids if i)]
+    if not ids:
+        return {}
+    client = get_client()
+    out: dict[str, dict] = {}
+    for i in range(0, len(ids), chunk):
+        part = ids[i:i + chunk]
+        rows = (client.table("signals").select("id, codex:grok_data->_codex").in_("id", part).execute()).data or []
+        for r in rows:
+            if isinstance(r.get("codex"), dict):
+                out[str(r["id"])] = r["codex"]
+    return out
+
+
 _SIGNAL_VERDICT_COLUMNS = (
     "id, ai_status, ai_signal, p_win, routine_ai_signal, decision_overturned, "
     "tech_filter:technical_data->_tech_filter"

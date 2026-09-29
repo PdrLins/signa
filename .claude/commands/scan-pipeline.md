@@ -28,7 +28,7 @@ Trigger endpoint has a concurrency guard — rejects if a scan is already RUNNIN
 **Pass 2 — PAID (top 15 by pre-score, budget-checked):**
 - Balanced: at least 5 HIGH_RISK slots (sentiment matters most there)
 - Safe Income tickers skip sentiment (only 10% weight — not worth the cost)
-- For each: sentiment (Grok/Gemini) + synthesis (Claude/Gemini) in parallel
+- For each: sentiment (Grok, daily budget reserved best-candidate-first) + synthesis (Claude); an Opus-confirmed BUY also gets a Codex review
 - Full scoring with all weights
 - Contrarian detection, blocker checks, GEM detection, status tracking
 - Kelly position sizing for BUY signals
@@ -93,7 +93,7 @@ Every AI synthesis call now includes 4 evidence layers fed into the prompt:
 {Claude's decision question}
 ```
 
-The 3 AI clients (`claude_local_client`, `claude_client`, `gemini_client`) all build the same prompt via `format_warning_signs(signal_for_warnings)`. The knowledge block is loaded once per scan and per-ticker pattern stats are appended.
+The AI clients (`claude_local_client`, `claude_client`, and `codex_client` for its review) all build the same prompt via `format_warning_signs(signal_for_warnings)`. The knowledge block is loaded once per scan and per-ticker pattern stats are appended.
 
 ## Brain trust gate (unchanged from Stage 0)
 

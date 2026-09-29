@@ -7,13 +7,12 @@ For each of the owner's real holdings:
   drawdown     % below the 52-week (252-bar) high
   earnings     stocks only: next report date (app/signals/earnings.py) and
                trading days until it
-  red flags    stocks only: material, CITED red flags from a sentiment search
-               on the FREE path — provider.analyze_sentiment(prefer_free=True):
-               a cached result (e.g. today's scan's Grok answer) is reused,
-               else Gemini grounded search; paid Grok only when
-               settings.holdings_sentiment_paid_fallback. At most ONE AI call
-               per holding per ET day (stored in holding_status.sentiment).
-               ETFs / crypto never call AI.
+  red flags    stocks only: material, CITED red flags from Grok sentiment.
+               A cached Grok result from a scan / "Check a stock" is reused
+               ($0); otherwise Grok is called at most once per stock per
+               settings.holdings_grok_refresh_days (stored in
+               holding_status.sentiment.grok_on), budget-checked. ETFs /
+               crypto never call AI.
   position     when shares are known: value, weight, unrealized gain (own
                currency + CAD via CAD=X), overweight flag
                (> settings.holdings_max_weight_pct)
@@ -52,8 +51,11 @@ ALERT_SEVERITIES = ("high", "critical")
 MAX_REMEMBERED_FLAGS = 30
 
 # symbol|ET-date -> True: in-process guard on top of the stored
-# sentiment.checked_on, so a failed DB write can't cause a second call.
+# sentiment.checked_on, so a failed DB write can't cause a second check.
 _sentiment_calls: dict[str, bool] = {}
+# symbol -> ET date of the last paid Grok call made by the monitor (guards
+# the weekly refresh even if the stored snapshot is lost).
+_grok_calls: dict[str, date] = {}
 _run_lock = asyncio.Lock()
 
 
@@ -218,9 +220,28 @@ def flag_key(f: dict) -> str:
     return hashlib.sha1(raw.encode("utf-8", "ignore")).hexdigest()[:16]
 
 
+def _grok_due(last: str | date | None, today: date) -> bool:
+    if not last:
+        return True
+    try:
+        d = last if isinstance(last, date) else date.fromisoformat(str(last)[:10])
+    except ValueError:
+        return True
+    return (today - d).days >= max(1, int(settings.holdings_grok_refresh_days))
+
+
 async def red_flag_check(h: dict, prev_status: dict | None, today: date | None = None) -> tuple[list[dict], dict]:
-    """(material cited red flags, sentiment meta). Free path, one call/day."""
-    today_s = (today or _today_et()).isoformat()
+    """(material cited red flags, sentiment meta). Stocks only.
+
+    1. already checked today → reuse the stored flags;
+    2. a cached Grok result (from a scan / check, 24h) → use it, $0;
+    3. the last paid Grok call for this stock is < holdings_grok_refresh_days
+       old → keep the stored flags;
+    4. else one Grok call, budget-checked (a blocked budget is not counted
+       as a call, so the next run tries again).
+    """
+    today_d = today or _today_et()
+    today_s = today_d.isoformat()
     prev = prev_status or {}
     prev_flags = list(prev.get("red_flags") or [])
     prev_meta = prev.get("sentiment") or {}
@@ -237,16 +258,34 @@ async def red_flag_check(h: dict, prev_status: dict | None, today: date | None =
     from app.services.long_term_check import material_red_flags
 
     _sentiment_calls[guard] = True
-    mcap = await asyncio.to_thread(_market_cap, sym)
-    meta: dict = {"checked_on": today_s}
-    try:
-        res = await ai_provider.analyze_sentiment(
-            sym, market_cap=mcap, prefer_free=True,
-            free_only=not settings.holdings_sentiment_paid_fallback,
-        )
-    except Exception as e:
-        logger.warning(f"holdings monitor: sentiment({sym}) failed: {e}")
-        return prev_flags, {**meta, "error": "failed"}
+    last_grok = _grok_calls.get(sym) or prev_meta.get("grok_on")
+    if isinstance(last_grok, date):
+        last_grok = last_grok.isoformat()
+    meta: dict = {"checked_on": today_s, "grok_on": last_grok}
+
+    res = ai_provider.get_cached_sentiment(sym)
+    if res is None:
+        if not _grok_due(last_grok, today_d):
+            return prev_flags, {**prev_meta, "checked_on": today_s, "grok_on": last_grok, "reused": True}
+        try:
+            from app.services.budget_service import BudgetService
+            budget = await BudgetService.get_instance()
+            allowed, reason = await budget.can_call("grok", "sentiment")
+        except Exception as e:
+            allowed, reason = False, str(e)
+        if not allowed or not settings.xai_api_key:
+            logger.info(f"holdings monitor: Grok skipped for {sym} ({reason if not allowed else 'no XAI_API_KEY'})")
+            return prev_flags, {**meta, "error": "budget" if not allowed else "unavailable"}
+        mcap = await asyncio.to_thread(_market_cap, sym)
+        _grok_calls[sym] = today_d
+        meta["grok_on"] = today_s
+        try:
+            res = await ai_provider.analyze_sentiment(sym, market_cap=mcap)
+        except Exception as e:
+            logger.warning(f"holdings monitor: sentiment({sym}) failed: {e}")
+            return prev_flags, {**meta, "error": "failed"}
+    else:
+        mcap = await asyncio.to_thread(_market_cap, sym)
     meta["provider"] = res.get("_provider")
     meta["cached"] = bool(res.get("_cached"))
     if res.get("error"):
@@ -453,4 +492,5 @@ def is_running() -> bool:
 def _reset_state() -> None:
     """Test helper."""
     _sentiment_calls.clear()
+    _grok_calls.clear()
 

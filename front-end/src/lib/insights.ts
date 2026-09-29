@@ -137,6 +137,8 @@ export function formatReason(reason: ReasonInfo | null | undefined, t: T): strin
       })
     case 'decision_veto':
       return fill(t.reasons.decision_veto, { signal: p.decision_signal ?? p.signal })
+    case 'codex_veto':
+      return fill(t.reasons.codex_veto, { signal: p.signal, confidence: p.confidence != null ? Math.round(Number(p.confidence)) : null })
     case 'reentry_cooldown':
       return fill(t.reasons.reentry_cooldown, { days: p.days != null ? `${p.days}d` : null })
     case 'other':

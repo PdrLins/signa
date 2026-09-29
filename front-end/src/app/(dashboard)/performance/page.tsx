@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import { VerdictBanner } from '@/components/performance/VerdictBanner'
 import { EquityChart } from '@/components/performance/EquityChart'
-import { CohortsCard, CalibrationCard, OpusCard, SkipRulesCard } from '@/components/performance/OutcomeCards'
+import { CohortsCard, CalibrationCard, OpusCard, CodexCard, SkipRulesCard } from '@/components/performance/OutcomeCards'
 import { BacktestSection } from '@/components/performance/BacktestSection'
 
 export default function PerformancePage() {
@@ -48,6 +48,7 @@ export default function PerformancePage() {
             <CohortsCard data={data} />
             <CalibrationCard data={data} />
             <OpusCard data={data} />
+            <CodexCard data={data} />
             <SkipRulesCard data={data} />
           </div>
         </>

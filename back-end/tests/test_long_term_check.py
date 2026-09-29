@@ -193,17 +193,12 @@ def ai_calls(monkeypatch):
         return {"verdict": "NOT_A_GOOD_FIT", "summary": "no", "strengths": [], "concerns": [],
                 "what_to_watch": [], "dca_note": "x", "confidence": 40}
 
-    async def gemini(*a, **k):
-        seen.append(("gemini", None))
-        return {}
-
     async def get_budget():
         return budget
 
     monkeypatch.setattr(provider, "_get_budget", get_budget)
     monkeypatch.setitem(sys.modules, "app.ai.claude_local_client", types.SimpleNamespace(call_with_prompt=cli))
     monkeypatch.setitem(sys.modules, "app.ai.claude_client", types.SimpleNamespace(create_structured=api_call))
-    monkeypatch.setitem(sys.modules, "app.ai.gemini_client", types.SimpleNamespace(synthesize_signal=gemini))
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-test")
     return seen, budget
 
@@ -217,7 +212,7 @@ def test_local_mode_uses_cli_decision_tier_only(monkeypatch, ai_calls):
     assert budget.recorded == []
 
 
-def test_local_mode_failure_never_falls_to_api_or_gemini(monkeypatch, ai_calls):
+def test_local_mode_failure_never_falls_to_api(monkeypatch, ai_calls):
     seen, _ = ai_calls
 
     async def bad_cli(*a, **k):

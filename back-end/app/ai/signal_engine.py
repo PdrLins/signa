@@ -193,7 +193,7 @@ def compute_score(
             funds, VIX, CPI, unemployment, Fear & Greed Index, intermarket
             signals. Single value per scan, shared across all tickers.
         grok_data: Output of `provider.analyze_sentiment` — X/Twitter
-            sentiment from Grok or Gemini. Includes mention_count which
+            sentiment from Grok. Includes mention_count which
             gates the dynamic sentiment weight collapse.
         synthesis: Output of `provider.synthesize_signal` — the AI's
             BUY/HOLD/SELL/AVOID recommendation with confidence, target,

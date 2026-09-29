@@ -10,7 +10,7 @@ import { client } from '@/lib/api'
 import { WatchlistTable } from '@/components/watchlist/WatchlistTable'
 import { BrainPerformanceWidget } from '@/components/dashboard/DashboardWidgets'
 import { Card } from '@/components/ui/Card'
-import { Database, Send, Brain, Zap, Sparkles, Clock, Eye } from 'lucide-react'
+import { Database, Send, Brain, Zap, ShieldCheck, Clock, Eye } from 'lucide-react'
 
 interface Integration {
   status: string
@@ -22,7 +22,7 @@ const ICONS: Record<string, typeof Brain> = {
   telegram: Send,
   claude: Brain,
   grok: Zap,
-  gemini: Sparkles,
+  codex: ShieldCheck,
   scheduler: Clock,
   watchdog: Eye,
 }

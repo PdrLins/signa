@@ -170,6 +170,26 @@ def apply_suggestion(suggestion_id: str, user_id: str) -> dict:
     }
 
 
+_SUGGESTION_ITEM = {
+    "type": "object",
+    "properties": {
+        "rule_name": {"type": "string"},
+        "suggestion_type": {"type": "string", "enum": ["MODIFY_RULE", "MODIFY_WEIGHT", "DISABLE_RULE", "NEW_RULE"]},
+        "current_value": {"type": "object"},
+        "proposed_value": {"type": "object"},
+        "reasoning": {"type": "string"},
+        "confidence": {"type": "integer"},
+        "expected_impact": {"type": "string"},
+    },
+    "required": ["rule_name", "suggestion_type", "reasoning", "confidence"],
+}
+_SUGGESTIONS_SCHEMA = {
+    "type": "object",
+    "properties": {"suggestions": {"type": "array", "items": _SUGGESTION_ITEM}},
+    "required": ["suggestions"],
+}
+
+
 async def run_weekly_analysis(period_days: int = 7) -> list[dict]:
     """Run Claude analysis on recent trade outcomes and generate suggestions.
 
@@ -213,8 +233,7 @@ Average return: {avg_return:+.2f}%
 ## YOUR TASK
 Based on the trade outcomes, identify patterns and suggest specific rule changes that would improve future signal quality. For each suggestion provide:
 
-Return a JSON array of suggestions:
-[
+Return a JSON object {{"suggestions": [...]}} where each suggestion is:
   {{
     "rule_name": "settings field or code rule to change (e.g. tech_filter_max_rsi), or NEW_RULE",
     "suggestion_type": "MODIFY_RULE" | "MODIFY_WEIGHT" | "DISABLE_RULE" | "NEW_RULE",
@@ -224,7 +243,6 @@ Return a JSON array of suggestions:
     "confidence": 0-100,
     "expected_impact": "Expected improvement description"
   }}
-]
 
 Rules:
 - Only suggest changes supported by the outcome data — no speculation
@@ -239,24 +257,15 @@ Rules:
 
 Return JSON only."""
 
-    # Call Gemini directly for learning analysis
+    # Claude (CLI or budget-checked API, per CLAUDE_LOCAL) — structured output.
     try:
-        import asyncio
-        import json
+        from app.ai import provider as ai_provider
 
-        from app.core.config import settings
-        from google import genai
-
-        client = genai.Client(api_key=settings.gemini_api_key)
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=settings.gemini_model,
-            contents=prompt,
-        )
-
-        from app.ai.prompts import clean_json_response
-        text = clean_json_response(response.text)
-        suggestions_data = json.loads(text)
+        data = await ai_provider.claude_structured(prompt, _SUGGESTIONS_SCHEMA, label="weekly_analysis")
+        if data is None:
+            logger.warning("Weekly analysis: Claude unavailable — no suggestions generated")
+            return []
+        suggestions_data = data.get("suggestions") if isinstance(data, dict) else data
 
         if not isinstance(suggestions_data, list):
             suggestions_data = [suggestions_data]

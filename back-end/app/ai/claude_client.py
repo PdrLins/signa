@@ -28,7 +28,7 @@ RESPONSE SCHEMA
 ============================================================
 
 This client returns the same dict shape as `claude_local_client.py`
-and `gemini_client.py` so the router can swap between them transparently:
+so the router can swap between them transparently:
 
   {
     "signal": "BUY" | "HOLD" | "SELL" | "AVOID",

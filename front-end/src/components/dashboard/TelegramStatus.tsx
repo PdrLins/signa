@@ -9,7 +9,7 @@ import { client } from '@/lib/api'
 import { useI18nStore } from '@/store/i18nStore'
 import { useToast } from '@/hooks/useToast'
 import Link from 'next/link'
-import { Database, Send, Brain, Zap, Sparkles, Clock, Eye } from 'lucide-react'
+import { Database, Send, Brain, Zap, ShieldCheck, Clock, Eye } from 'lucide-react'
 
 interface Integration {
   status: string
@@ -27,7 +27,7 @@ const LABELS: Record<string, { icon: typeof Send; pingable?: boolean }> = {
   supabase: { icon: Database },
   telegram: { icon: Send, pingable: true },
   claude: { icon: Brain },
-  gemini: { icon: Sparkles },
+  codex: { icon: ShieldCheck },
   grok: { icon: Zap },
   scheduler: { icon: Clock },
   watchdog: { icon: Eye },
@@ -64,7 +64,7 @@ export function TelegramStatus() {
       telegram: t.integrations.telegram,
       claude: t.integrations.claude,
       grok: t.integrations.grok,
-      gemini: t.integrations.gemini,
+      codex: t.integrations.codex,
       scheduler: t.integrations.scheduler,
       watchdog: t.integrations.watchdog,
     }

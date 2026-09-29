@@ -205,6 +205,14 @@ def describe_reason(raw_reason: str | None, details: Mapping | None = None,
     if rl.startswith("short:"):
         return _reason("other", {"raw": _humanize(r)}, f"Short entry skipped: {_humanize(r[6:])}", raw)
 
+    # ── Codex veto (veto mode): the decision model said BUY, Codex overruled ──
+    g = s.get("grok_data") if isinstance(s.get("grok_data"), Mapping) else {}
+    cx = g.get("_codex") if isinstance(g, Mapping) else None
+    if isinstance(cx, Mapping) and cx.get("vetoed") and (not rl or rl.startswith("not_ai_buy")):
+        csig, cconf = cx.get("signal"), _num(cx.get("confidence"))
+        return _reason("codex_veto", {"signal": csig, "confidence": cconf},
+                       f"Codex review vetoed the BUY ({csig or '?'}, confidence {_fmt_num(cconf, 0)})", raw)
+
     # ── decision model veto takes precedence over "AI said no" ──
     if s.get("decision_overturned") is True and (not rl or rl.startswith("not_ai_buy") or rl == "ai_failed"):
         sig = s.get("ai_signal")
@@ -770,8 +778,35 @@ def build_equity_curve(snapshots: list[dict], spy_series=None, xiu_series=None) 
     return {"points": points, "signa_pct": last(signa), "spy_pct": last(spy), "xiu_pct": last(xiu)}
 
 
+def codex_agreement(rows: list[dict], codex_by_signal: Mapping[str, Mapping] | None,
+                    horizon: int, min_n: int) -> dict:
+    """Decision-model BUYs that Codex reviewed: Codex agreed (BUY) vs
+    disagreed (HOLD/AVOID/SELL) -> forward excess returns. Errored reviews
+    are left out. diff = agree − disagree, only when both n >= min_n."""
+    from app.services.daily_learning.outcomes import _values, diff_ci, summarize
+
+    field = f"excess_ret_{horizon}d"
+    agree, disagree = [], []
+    for r in rows:
+        cx = (codex_by_signal or {}).get(str(r.get("signal_id")))
+        if not isinstance(cx, Mapping) or cx.get("error") or not cx.get("signal"):
+            continue
+        (agree if str(cx.get("signal")).upper() == "BUY" else disagree).append(r)
+    a_vals, d_vals = _values(agree, field), _values(disagree, field)
+    a, d = summarize(a_vals, min_n=min_n), summarize(d_vals, min_n=min_n)
+    out = {"reviewed": len(agree) + len(disagree), "agree": _summary(a), "disagree": _summary(d),
+           "diff": None, "diff_ci": None, "direction": None}
+    if a["n"] >= min_n and d["n"] >= min_n:
+        out["diff"] = a["mean"] - d["mean"]
+        lo, hi = diff_ci(a_vals, d_vals)
+        out["diff_ci"] = [lo, hi]
+        out["direction"] = "codex_helps" if lo > 0 else "codex_costs" if hi < 0 else None
+    return out
+
+
 def build_performance(rows: list[dict], snapshots: list[dict], closed_trades: int,
-                      spy_series=None, xiu_series=None) -> dict:
+                      spy_series=None, xiu_series=None,
+                      codex_by_signal: Mapping[str, Mapping] | None = None) -> dict:
     """Pure assembly of the /insights/performance payload."""
     from app.services.daily_learning.outcomes import (
         _values, calibration_table, overturn_stats, skip_reason_effectiveness, summarize,
@@ -831,6 +866,7 @@ def build_performance(rows: list[dict], snapshots: list[dict], closed_trades: in
         },
         "skip_reasons": [{"reason": g["reason"], **_summary(g), "verdict": _normalize_gate_verdict(g.get("verdict"))}
                          for g in skips.get("gates") or []],
+        "codex": codex_agreement(rows, codex_by_signal, h, MIN_OBSERVATIONS),
     })
 
 
@@ -848,7 +884,10 @@ def get_performance() -> dict:
     if sum(1 for s in snapshots if _num(s.get("spy_price"))) < 2 and snapshots:
         spy_series = _bench_closes("SPY")
     xiu_series = _bench_closes("XIU.TO") if snapshots else None
-    return build_performance(rows, snapshots, closed, spy_series, xiu_series)
+    # Codex only reviews decision-model BUYs (decision_overturned is False).
+    reviewed_ids = [r.get("signal_id") for r in rows if r.get("decision_overturned") is False]
+    codex = _safe(lambda: queries.get_signal_codex_verdicts(reviewed_ids), {}, "codex verdicts")
+    return build_performance(rows, snapshots, closed, spy_series, xiu_series, codex)
 
 
 # ============================================================
@@ -1019,6 +1058,9 @@ def model_verdicts(sig: Mapping) -> tuple[dict | None, dict | None]:
     overturned = sig.get("decision_overturned")
     own = {"signal": sig.get("ai_signal"), "confidence": _num(sig.get("confidence")),
            "p_win": _num(sig.get("p_win")), "reasoning": sig.get("reasoning") or None}
+    cx = g.get("_codex") if isinstance(g, Mapping) else None
+    if isinstance(cx, Mapping) and cx.get("vetoed"):
+        own["signal"] = "BUY"  # the decision model said BUY; Codex vetoed it
     if dec_state == "unavailable":
         return own, {"signal": None, "confidence": None, "p_win": None, "reasoning": None, "status": "unavailable"}
     if dec_state == "confirmed" or overturned is not None:
@@ -1028,6 +1070,24 @@ def model_verdicts(sig: Mapping) -> tuple[dict | None, dict | None]:
     if sig.get("ai_status") in (None, "skipped"):
         return None, None
     return own, None
+
+
+def codex_verdict(g: Mapping | None) -> dict | None:
+    """The stored Codex review (grok_data["_codex"]) for the trail, or None."""
+    cx = g.get("_codex") if isinstance(g, Mapping) else None
+    if not isinstance(cx, Mapping):
+        return None
+    return {
+        "signal": cx.get("signal"),
+        "confidence": _num(cx.get("confidence")),
+        "p_win": _num(cx.get("p_win")),
+        "reasoning": cx.get("reasoning") or None,
+        "key_risks": [str(r) for r in (cx.get("key_risks") or []) if r][:5],
+        "provider": cx.get("provider"),
+        "mode": cx.get("mode"),
+        "vetoed": bool(cx.get("vetoed")),
+        "error": cx.get("error"),
+    }
 
 
 def _due_date(start: date, n: int, crypto: bool) -> date:
@@ -1164,6 +1224,7 @@ def build_trail(sig: Mapping, decision: Mapping | None, trade: Mapping | None, o
         "grok": _grok(sig.get("grok_data")),
         "routine": routine,
         "decision_model": dmodel,
+        "codex": codex_verdict(sig.get("grok_data")),
         "order": order,
         "correlation": corr,
         "sector_exposure": sector_exp,

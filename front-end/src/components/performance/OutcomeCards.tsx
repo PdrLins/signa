@@ -153,6 +153,55 @@ export function OpusCard({ data }: { data: PerformanceInsights }) {
   )
 }
 
+export function CodexCard({ data }: { data: PerformanceInsights }) {
+  const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
+  const k = t.performance.codex
+  const need = data.threshold
+  const cx = data.codex
+  if (!cx) return null
+  const rows: { key: string; label: string; s: StatSummary; highlight: boolean }[] = [
+    { key: 'agree', label: k.agree, s: cx.agree, highlight: true },
+    { key: 'disagree', label: k.disagree, s: cx.disagree, highlight: false },
+  ]
+  const decided = cx.agree.sufficient && cx.disagree.sufficient
+  const diff = cx.diff != null ? signedFracPct(Math.abs(cx.diff)) : ''
+  return (
+    <Panel title={k.title} subtitle={k.sub}>
+      {cx.reviewed === 0 ? (
+        <p className="text-[13px]" style={{ color: theme.colors.textSub }}>{k.none}</p>
+      ) : (
+        <table className="w-full text-left">
+          <thead>
+            <tr className="grid grid-cols-[minmax(0,1fr)_40px_minmax(72px,auto)] gap-2.5 py-2 text-[12px]" style={{ color: theme.colors.textSub, borderBottom: `1px solid ${theme.colors.border}` }}>
+              <th scope="col" className="font-normal">{t.performance.skip.colReason}</th>
+              <th scope="col" className="font-normal text-right">{t.performance.skip.colN}</th>
+              <th scope="col" className="font-normal text-right">{fill(t.performance.skip.colRet, { h: data.horizon })}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key} className="grid grid-cols-[minmax(0,1fr)_40px_minmax(72px,auto)] gap-2.5 py-2.5 items-center" style={{ borderBottom: `1px solid ${theme.colors.border}` }}>
+                <td className="text-[13px]" style={{ color: theme.colors.text }}>{r.label}</td>
+                <td className="text-[13px] text-right tabular-nums" style={{ color: theme.colors.text, fontFamily: 'var(--font-mono)' }}>{r.s.n}</td>
+                <td className="text-[13px] text-right tabular-nums" style={{ color: r.s.sufficient && r.s.mean != null && r.highlight ? theme.colors.up : theme.colors.text, fontFamily: 'var(--font-mono)' }}>
+                  {r.s.sufficient && r.s.mean != null ? signedFracPct(r.s.mean, 1) : <NotEnough n={r.s.n} needed={need} label={t.performance.notEnough} />}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="mt-3 text-[12px]" style={{ color: decided ? theme.colors.textSub : theme.colors.warning }}>
+        {!decided ? fill(k.note, { needed: need })
+          : cx.direction === 'codex_helps' ? fill(k.helps, { diff })
+          : cx.direction === 'codex_costs' ? fill(k.costs, { diff })
+          : k.noDiff}
+      </p>
+    </Panel>
+  )
+}
+
 export function SkipRulesCard({ data }: { data: PerformanceInsights }) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)

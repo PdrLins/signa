@@ -14,7 +14,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { SettingsLinks } from '@/components/layout/SettingsLinks'
-import { Check, Brain, Zap, Sparkles, ChevronUp, ChevronDown } from 'lucide-react'
+import { Check, Brain, Zap, ChevronUp, ChevronDown } from 'lucide-react'
 
 const themeIds = Object.keys(themes) as ThemeId[]
 
@@ -71,7 +71,6 @@ const SCAN_LABEL_KEYS: { type: string; labelKey: ScanLabelKey }[] = [
 
 const PROVIDER_META: Record<string, { name: string; icon: typeof Brain; color: string }> = {
   claude: { name: 'Claude', icon: Brain, color: '#D97706' },
-  gemini: { name: 'Gemini', icon: Sparkles, color: '#4285F4' },
   grok: { name: 'Grok', icon: Zap, color: '#1DA1F2' },
 }
 

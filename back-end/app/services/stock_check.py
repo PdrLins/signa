@@ -15,9 +15,11 @@ Pipeline (mirrors scan_service._process_candidate + the brain entry gate):
   resolving    normalize + validate; try SYMBOL, SYMBOL.TO, SYMBOL-USD
   market_data  1y history, fundamentals, earnings, macro, knowledge block
   filter       check_blockers (tech-level) + technical_filter
-  sentiment    Grok/Gemini (HIGH_RISK only, as in the scan) + options flow
+  sentiment    Grok (HIGH_RISK only, as in the scan) + options flow
   synthesis    routine model  (provider.synthesize_signal)
-  decision     decision model (scan_service._confirm_buy_with_decision_model)
+  decision     decision model (scan_service._confirm_buy_with_decision_model),
+               then the independent Codex review when the decision model
+               confirmed a BUY (verdict in grok_data["_codex"] → trail.codex)
   risk         score, blockers, earnings blackout, levels, R:R, sizing,
                portfolio limits, correlation, drawdown breaker
 
@@ -590,6 +592,8 @@ async def run_check(resolved: dict, progress: ProgressFn | None = None) -> dict:
                                        "reasoning": None, "status": "unavailable"}
         elif dec_state == "confirmed":
             dm = _model_verdict(synthesis) or {}
+            if synthesis.get("_decision_signal"):  # Codex vetoed: keep what the decision model said
+                dm["signal"] = str(synthesis["_decision_signal"]).upper()
             trail["decision_model"] = {**dm, "status": "confirmed" if dm.get("signal") == "BUY" else "vetoed"}
         else:
             trail["decision_model"] = None

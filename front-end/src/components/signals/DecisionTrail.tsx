@@ -112,6 +112,8 @@ export function DecisionTrail({ trail, options = {} }: { trail: SignalTrail; opt
   // 3/4. models
   const r = trail.routine
   const dm = trail.decision_model
+  const cx = trail.codex ?? null
+  const tc = tr.codex
   const verdictLine = (sig: string | null, conf: number | null, pwin: number | null) =>
     [sig ?? DASH, conf != null ? fill(tr.conf, { c: Math.round(conf) }) : null, pwin != null ? fill(tr.pwin, { p: num(pwin) }) : null].filter(Boolean).join(' · ')
   // 5. order
@@ -277,8 +279,47 @@ export function DecisionTrail({ trail, options = {} }: { trail: SignalTrail; opt
             )}
           </Step>
 
+          {cx && (
+            <Step
+              n={5}
+              title={tc.title}
+              right={!cx.error ? (
+                <span className="text-[13px]" style={{ ...mono, color: verdictColor(cx.signal) }}>{verdictLine(cx.signal, cx.confidence, cx.p_win)}</span>
+              ) : undefined}
+            >
+              {cx.error ? (
+                <p className="text-[13px]" style={{ color: theme.colors.warning }}>{fill(tc.error, { error: cx.error })}</p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-[12px] font-semibold" style={{ color: cx.vetoed ? theme.colors.warning : cx.signal === 'BUY' ? theme.colors.up : theme.colors.textSub }}>
+                      {cx.vetoed ? tc.vetoed : cx.signal === 'BUY' ? tc.agrees : tc.disagrees}
+                    </span>
+                    {!cx.vetoed && cx.signal !== 'BUY' && (
+                      <span className="text-[12px]" style={{ color: theme.colors.textSub }}>· {tc.recordOnly}</span>
+                    )}
+                    {cx.provider && (
+                      <span className="text-[11px]" style={{ ...mono, color: theme.colors.textSub }}>{fill(tc.via, { provider: cx.provider })}</span>
+                    )}
+                  </div>
+                  {cx.reasoning && <p className="text-[13px] leading-relaxed whitespace-pre-line break-words" style={{ color: theme.colors.text }}>{cx.reasoning}</p>}
+                  {cx.key_risks.length > 0 && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[12px]" style={{ color: theme.colors.textSub }}>{tc.risks}</span>
+                      <ul className="flex flex-col gap-0.5 list-disc pl-4">
+                        {cx.key_risks.map((k, i) => (
+                          <li key={i} className="text-[12px] break-words" style={{ color: theme.colors.text }}>{k}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
+            </Step>
+          )}
+
           <Step
-            n={5}
+            n={cx ? 6 : 5}
             last
             active={bought}
             title={options.orderTitle ?? tr.order.title}

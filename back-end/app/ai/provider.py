@@ -1,82 +1,53 @@
-"""AI provider router — fallback chain for synthesis + sentiment.
+"""AI provider router — synthesis + sentiment.
 
 ============================================================
 WHAT THIS MODULE IS
 ============================================================
 
-Signa uses three AI providers and falls back between them when one
-fails or runs out of budget. This module is the single entry point for
-the rest of the codebase to call AI — `scan_service` only ever calls
-`provider.synthesize_signal()` and `provider.analyze_sentiment()`,
-never the individual provider clients directly.
+Signa uses two AI providers for the pipeline (plus Codex as an optional
+independent reviewer, see app/ai/codex_client.py). This module is the
+single entry point for the rest of the codebase to call AI —
+`scan_service` only ever calls `provider.synthesize_signal()` and
+`provider.analyze_sentiment()`, never the individual provider clients.
 
-The router has two responsibilities:
+  1. Iterate through `settings.synthesis_providers` (["claude"]) or
+     `settings.sentiment_providers` (["grok"]) and try each one.
+  2. Skip any provider whose budget is exhausted.
 
-  1. Iterate through `settings.synthesis_providers` (or
-     `settings.sentiment_providers`) in order and try each one.
-  2. Skip any provider whose budget is exhausted, and fall through
-     to the next on transient failures.
-
-============================================================
-THE SYNTHESIS FALLBACK CHAIN
-============================================================
-
-Configuration: `settings.synthesis_providers = ["claude", "gemini"]`
-plus `settings.claude_local: bool = True`, which picks exactly ONE way
-to reach Claude — they never mix:
-
-  claude_local=True   (running on your own machine)
-       Claude goes through the local `claude` CLI only (your
-       subscription, $0). The Anthropic API is never called, even if
-       ANTHROPIC_API_KEY is set. If the CLI fails, routine synthesis
-       falls to Gemini; the decision tier and thesis re-eval get no
-       answer (→ no auto-buy / no thesis change).
-
-  claude_local=False  (e.g. a server without the CLI)
-       Claude goes through the paid Anthropic API only, budget-checked
-       before every call. If it fails, routine synthesis falls to Gemini.
-
-GEMINI (free tier) is the last resort for routine synthesis in both
-modes. When everything fails the router returns a generic error (the
-brain treats it as ai_status="failed" and queues the ticker for retry).
+Gemini was removed (2026-09): there is no free fallback. A failure or a
+capped budget returns an explicit error result that downstream code treats
+as ai_status="failed" (synthesis) or a sentiment data gap (sentiment).
 
 ============================================================
-THE SENTIMENT FALLBACK CHAIN
+SYNTHESIS
 ============================================================
 
-Configuration: `settings.sentiment_providers = ["grok", "gemini"]`.
+`settings.claude_local: bool = True` picks exactly ONE way to reach
+Claude — they never mix:
 
-  1. GROK (paid, see budget_service.COST_ESTIMATES)
-       xAI Responses API with live x_search + web_search (last 48h).
-       The ONLY provider with live X access. Results without citations
-       come back with `error` set and are skipped.
-       Failure mode → cascade to step 2.
+  claude_local=True   the local `claude` CLI only (subscription, $0).
+                      The Anthropic API is never called.
+  claude_local=False  the paid Anthropic API only, budget-checked before
+                      every call.
 
-  2. GEMINI (free, $0)
-       Google Gemini grounded with Google Search (48h window). No X
-       access (mention_count=0); rejected when no grounding sources.
+============================================================
+SENTIMENT
+============================================================
 
-If both fail, the router returns a neutral fallback (score=50,
-confidence=0) with `error="All providers failed or budget exceeded"`.
-The downstream code treats this as ai_status="failed" and the brain
-queues the ticker for retry.
+GROK (paid, see budget_service.COST_ESTIMATES): xAI Responses API with
+live x_search + web_search (last 48h). Results without citations come
+back with `error` set and are not used. Successful results are cached
+per ticker for settings.sentiment_cache_hours (shared by scans, "Check a
+stock" and the holdings monitor).
 
 ============================================================
 BUDGET ENFORCEMENT
 ============================================================
 
-Every paid provider call goes through `BudgetService.can_call()` BEFORE
-being made. If the daily limit (default $1) or the monthly limit
-(default $5/provider) would be exceeded, the call is skipped and the
-loop falls through to the next provider.
-
-This is what protects the user from runaway costs — even if every
-ticker fails AI synthesis and triggers retries, the budget cap stops
-the bleeding.
-
-After each successful call, `BudgetService.record_call()` updates the
-running totals AND triggers tiered Telegram alerts at 70/90/100% so the
-user can top up before the brain goes blind.
+Every paid call goes through `BudgetService.can_call()` (or a prior
+`reserve()`, used by the scan to hand the daily Grok budget to its best
+candidates first) BEFORE being made; `record_call()` updates the totals
+and fires the 70/90/100% Telegram alerts.
 """
 
 from loguru import logger
@@ -89,15 +60,10 @@ from app.core.config import settings
 _sentiment_cache = TTLCache(max_size=500, default_ttl=3600)
 _synthesis_cache = TTLCache(max_size=500, default_ttl=3600)
 _decision_cache = TTLCache(max_size=200, default_ttl=3600)
-# Free-path (prefer_free / free_only) sentiment results — kept apart so a
-# Gemini answer fetched for the holdings monitor never replaces the scan's
-# Grok (live X) sentiment.
-_free_sentiment_cache = TTLCache(max_size=500, default_ttl=3600)
 
 
 def clear_ai_caches() -> None:
     _sentiment_cache.clear()
-    _free_sentiment_cache.clear()
     _synthesis_cache.clear()
     _decision_cache.clear()
 
@@ -134,16 +100,13 @@ async def synthesize_signal(
 ) -> dict:
     """Route synthesis to the first available provider within budget.
 
-    tier="routine" (default) uses settings.claude_model and may fall back to
-    Gemini. tier="decision" is the final BUY confirmation:
-    settings.claude_decision_model only — never Gemini — so a BUY is never
-    "confirmed" by a weaker model. Both tiers cache per ticker for
-    synthesis_cache_hours, invalidated when price moves more than
-    synthesis_cache_max_move_pct.
+    tier="routine" (default) uses settings.claude_model; tier="decision" is
+    the final BUY confirmation on settings.claude_decision_model. Both tiers
+    cache per ticker for synthesis_cache_hours, invalidated when price moves
+    more than synthesis_cache_max_move_pct.
 
-    Fallback chain when claude_local=True:   Claude CLI ($0)  →  Gemini
-    Fallback chain when claude_local=False:  Claude API (paid) →  Gemini
-    The decision tier is Claude-only (never Gemini) in both modes.
+    claude_local=True:  Claude CLI ($0) only.
+    claude_local=False: Claude API (paid, budget-checked) only.
     """
     cache = _decision_cache if tier == "decision" else _synthesis_cache
     current_price = (technical_data or {}).get("current_price")
@@ -227,24 +190,6 @@ async def _route_synthesis(
                     logger.warning(f"Claude API synthesis error for {ticker}: {e}")
             continue
 
-        elif provider == "gemini":
-            allowed, reason = await budget.can_call("gemini", "synthesis")
-            if not allowed:
-                logger.warning(f"Budget blocked Gemini synthesis for {ticker}: {reason}")
-                continue
-            if not settings.gemini_api_key:
-                continue
-            try:
-                from app.ai.gemini_client import synthesize_signal as gemini_synth
-                result = await gemini_synth(ticker, technical_data, fundamental_data, macro_data, grok_data)
-                if not result.get("error"):
-                    result["_provider"] = "gemini"
-                    await budget.record_call("gemini", "synthesis", ticker, success=True)
-                    return result
-                logger.warning(f"Gemini synthesis failed for {ticker}: {result.get('error')}")
-            except Exception as e:
-                logger.warning(f"Gemini synthesis error for {ticker}: {e}")
-            continue
 
     # All providers failed or over budget — return generic fallback
     logger.error(f"All synthesis providers failed/blocked for {ticker}")
@@ -266,94 +211,19 @@ async def _route_synthesis(
     }
 
 
-def sentiment_provider_order(prefer_free: bool = False, free_only: bool = False) -> list[str]:
-    """Provider order for a sentiment call.
-
-    Default: settings.sentiment_providers unchanged (Grok first).
-    prefer_free: Gemini (free) first, then the rest in configured order.
-    free_only: Gemini only (never a paid provider).
-    """
-    configured = list(settings.sentiment_providers)
-    if free_only:
-        return ["gemini"]
-    if prefer_free:
-        return ["gemini"] + [p for p in configured if p != "gemini"]
-    return configured
+def get_cached_sentiment(ticker: str) -> dict | None:
+    """A cached (successful) sentiment result for `ticker`, or None. Never
+    calls a provider — used by the holdings monitor to reuse the Grok
+    answer a scan / check already paid for."""
+    if settings.sentiment_cache_hours <= 0:
+        return None
+    cached = _sentiment_cache.get(ticker)
+    return {**cached, "_cached": True} if cached is not None else None
 
 
-async def analyze_sentiment(
-    ticker: str,
-    market_cap: float | None = None,
-    prefer_free: bool = False,
-    free_only: bool = False,
-) -> dict:
-    """Route sentiment analysis to the first available provider within budget.
-
-    Successful results are cached per ticker for sentiment_cache_hours — the
-    search window is 48h, so re-searching X every scan buys almost nothing.
-
-    prefer_free=True (used by the My-holdings monitor) tries Gemini grounded
-    search before Grok; free_only=True never calls a paid provider. Either
-    way a cached result (e.g. a Grok answer from today's scan) is reused
-    first. Results obtained on the free path go to a separate cache so the
-    scan's default (Grok-first, live X) behaviour is unchanged.
-    """
-    free_path = prefer_free or free_only
-    if settings.sentiment_cache_hours > 0:
-        cached = _sentiment_cache.get(ticker)
-        if cached is None and free_path:
-            cached = _free_sentiment_cache.get(ticker)
-        if cached is not None:
-            return {**cached, "_cached": True}
-    if free_path:
-        providers = sentiment_provider_order(prefer_free, free_only)
-        result = await _route_sentiment(ticker, market_cap, providers=providers)
-    else:
-        result = await _route_sentiment(ticker, market_cap)
-    if not result.get("error") and settings.sentiment_cache_hours > 0:
-        cache = _free_sentiment_cache if free_path else _sentiment_cache
-        cache.set(ticker, result, ttl=settings.sentiment_cache_hours * 3600)
-    return result
-
-
-async def _route_sentiment(ticker: str, market_cap: float | None = None,
-                           providers: list[str] | None = None) -> dict:
-    providers = providers if providers is not None else settings.sentiment_providers
-    budget = await _get_budget()
-
-    for provider in providers:
-        # Budget check
-        allowed, reason = await budget.can_call(provider, "sentiment")
-        if not allowed:
-            logger.warning(f"Budget blocked {provider} sentiment for {ticker}: {reason}")
-            continue
-
-        try:
-            if provider == "grok" and settings.xai_api_key:
-                from app.ai.grok_client import analyze_sentiment as grok_sent
-                result = await grok_sent(ticker, market_cap=market_cap)
-                if not result.get("error"):
-                    result["_provider"] = "grok"
-                    await budget.record_call("grok", "sentiment", ticker, success=True)
-                    return result
-                logger.debug(f"Grok failed for {ticker}: {result.get('error')}, trying next...")
-                await budget.record_call("grok", "sentiment", ticker, success=False)
-
-            elif provider == "gemini" and settings.gemini_api_key:
-                from app.ai.gemini_client import analyze_sentiment as gemini_sent
-                result = await gemini_sent(ticker, market_cap=market_cap)
-                if not result.get("error"):
-                    result["_provider"] = "gemini"
-                    await budget.record_call("gemini", "sentiment", ticker, success=True)
-                    return result
-                logger.debug(f"Gemini sentiment failed for {ticker}: {result.get('error')}, trying next...")
-
-        except Exception as e:
-            logger.warning(f"Provider {provider} sentiment error for {ticker}: {e}")
-            continue
-
-    # All failed
-    logger.warning(f"All sentiment providers failed/blocked for {ticker}")
+def sentiment_unavailable(ticker: str, reason: str) -> dict:
+    """Neutral, zero-confidence sentiment with `error` set: the prompt
+    labels it a data gap (see prompts.format_sentiment)."""
     return {
         "ticker": ticker,
         "score": 50.0,
@@ -367,19 +237,89 @@ async def _route_sentiment(ticker: str, market_cap: float | None = None,
         "notable_accounts": [],
         "summary": "",
         "citations": [],
-        "error": "All providers failed or budget exceeded",
+        "error": reason,
         "_provider": "none",
     }
+
+
+async def analyze_sentiment(
+    ticker: str,
+    market_cap: float | None = None,
+    budget_reserved: bool = False,
+) -> dict:
+    """Route sentiment analysis to the first available provider within budget.
+
+    Successful results are cached per ticker for sentiment_cache_hours — the
+    search window is 48h, so re-searching X every scan buys almost nothing.
+
+    budget_reserved=True: the caller already reserved one Grok sentiment
+    call with BudgetService.reserve() (the scan does this in candidate-rank
+    order). The reservation is consumed by the call, or released on a cache
+    hit / when Grok is not reached.
+    """
+    if settings.sentiment_cache_hours > 0:
+        cached = _sentiment_cache.get(ticker)
+        if cached is not None:
+            if budget_reserved:
+                budget = await _get_budget()
+                await budget.release("grok", "sentiment")
+            return {**cached, "_cached": True}
+    # _route_sentiment consumes or releases a reservation on every path.
+    if budget_reserved:
+        result = await _route_sentiment(ticker, market_cap, reserved=True)
+    else:
+        result = await _route_sentiment(ticker, market_cap)
+    if not result.get("error") and settings.sentiment_cache_hours > 0:
+        _sentiment_cache.set(ticker, result, ttl=settings.sentiment_cache_hours * 3600)
+    return result
+
+
+async def _route_sentiment(ticker: str, market_cap: float | None = None,
+                           providers: list[str] | None = None, reserved: bool = False) -> dict:
+    providers = providers if providers is not None else settings.sentiment_providers
+    budget = await _get_budget()
+    reservation_open = reserved
+
+    try:
+        for provider in providers:
+            if provider != "grok":
+                continue  # the only sentiment provider
+            if not settings.xai_api_key:
+                continue
+            if reservation_open:
+                # Budget was reserved up front; recording the call replaces it.
+                reservation_open = False
+                await budget.release("grok", "sentiment")
+            else:
+                allowed, reason = await budget.can_call("grok", "sentiment")
+                if not allowed:
+                    logger.warning(f"Budget blocked grok sentiment for {ticker}: {reason}")
+                    return sentiment_unavailable(ticker, "Grok budget exhausted — sentiment unavailable")
+            try:
+                from app.ai.grok_client import analyze_sentiment as grok_sent
+                result = await grok_sent(ticker, market_cap=market_cap)
+                if not result.get("error"):
+                    result["_provider"] = "grok"
+                    await budget.record_call("grok", "sentiment", ticker, success=True)
+                    return result
+                logger.debug(f"Grok failed for {ticker}: {result.get('error')}")
+                await budget.record_call("grok", "sentiment", ticker, success=False)
+            except Exception as e:
+                logger.warning(f"Provider grok sentiment error for {ticker}: {e}")
+    finally:
+        if reservation_open:
+            await budget.release("grok", "sentiment")
+
+    logger.warning(f"All sentiment providers failed/blocked for {ticker}")
+    return sentiment_unavailable(ticker, "All providers failed or budget exceeded")
 
 
 # ============================================================
 # THESIS RE-EVALUATION (Stage 6)
 # ============================================================
 #
-# Lighter than synthesize_signal — same provider chain (Claude Local first,
-# then paid Claude API) but skips Gemini. Gemini's reasoning is too crude
-# for nuanced thesis evaluation. If Claude is unavailable for both tiers,
-# we return None and the thesis tracker treats the position as "not
+# Lighter than synthesize_signal — same CLAUDE_LOCAL routing (CLI only, or
+# budget-checked API only). If Claude is unavailable we return None and the thesis tracker treats the position as "not
 # re-evaluated this scan" (existing exit gates fall back to no thesis check).
 
 async def re_evaluate_thesis(
@@ -529,8 +469,8 @@ async def re_evaluate_thesis(
 # One decision-tier Claude call (settings.claude_decision_model) returning
 # a free-form structured assessment (prompts.LONG_TERM_JSON_SCHEMA). Same
 # CLAUDE_LOCAL routing as everything else: CLI only when claude_local=True,
-# budget-checked API only otherwise. Never Gemini — a long-term verdict is
-# a decision-tier judgement. Returns None on any failure; the caller then
+# budget-checked API only otherwise — a long-term verdict is a
+# decision-tier judgement. Returns None on any failure; the caller then
 # falls back to the deterministic scorecard verdict.
 
 async def assess_long_term(symbol: str, prompt: str) -> dict | None:
@@ -571,4 +511,38 @@ async def assess_long_term(symbol: str, prompt: str) -> dict | None:
     except Exception as e:
         logger.warning(f"Long-term assessment Claude API failed for {symbol}: {e}")
         await budget.record_call("claude", "decision", symbol, success=False)
+        return None
+
+
+# ============================================================
+# GENERIC STRUCTURED CLAUDE CALL (learning analysis, tools)
+# ============================================================
+
+async def claude_structured(prompt: str, schema: dict, label: str = "",
+                            tier: str = "routine") -> dict | None:
+    """One Claude call constrained to `schema`, routed like everything else:
+    CLI only when claude_local=True, budget-checked API only otherwise.
+    Returns the parsed dict or None on any failure."""
+    if settings.claude_local:
+        try:
+            from app.ai.claude_local_client import call_with_prompt
+            return await call_with_prompt(prompt, json_schema=schema, tier=tier)
+        except Exception as e:
+            logger.warning(f"Claude Local call failed ({label}): {e}")
+            return None
+
+    budget = await _get_budget()
+    call_type = "decision" if tier == "decision" else "synthesis"
+    allowed, reason = await budget.can_call("claude", call_type)
+    if not allowed or not settings.anthropic_api_key:
+        logger.warning(f"Claude API call skipped ({label}): {reason if not allowed else 'no API key'}")
+        return None
+    try:
+        from app.ai.claude_client import create_structured
+        data = await create_structured(prompt, schema, tier=tier)
+        await budget.record_call("claude", call_type, label, success=True)
+        return data
+    except Exception as e:
+        logger.warning(f"Claude API call failed ({label}): {e}")
+        await budget.record_call("claude", call_type, label, success=False)
         return None

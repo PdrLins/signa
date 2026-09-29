@@ -12,13 +12,13 @@ breaker.
 
 It enforces TWO independent caps per provider:
   • DAILY     — default $1.00 across all providers
-  • MONTHLY   — default $5.00 per provider (Claude=$5, Grok=$5,
-                Gemini=$0/unlimited because it's free tier)
+  • MONTHLY   — per provider (Grok $45, Claude API $5, OpenAI API $5)
 
 Every paid AI call goes through `can_call()` BEFORE being made. If
 the call would push spending over either limit, it returns False and
-`provider.synthesize_signal` (or `analyze_sentiment`) skips that
-provider and falls through to the next in the chain.
+the call is skipped (synthesis fails / sentiment is marked unavailable).
+`reserve()` / `release()` hold budget for an in-flight call so a burst of
+concurrent requests can't all pass the check before any is recorded.
 
 After each successful call, `record_call()` updates the running totals,
 fires Telegram alerts at 70/90/100% thresholds, and persists the call
@@ -36,7 +36,7 @@ trade-off for avoiding DB writes on the hot path).
 The alerts say:
   •  70% — "Heads up — budget at 70%. Plan ahead before it runs out."
   •  90% — "Approaching limit. Consider increasing budget or reducing scans."
-  • 100% — "Provider blocked. Brain will fall back to next provider in chain."
+  • 100% — "Provider blocked until the budget resets or is raised."
 
 100% is the most important: that's when the brain effectively goes
 blind on this provider until the user takes action.
@@ -71,12 +71,12 @@ Estimated per-call costs (validated against real usage):
                                 ~$0.025 (~4K in @ $2/M + ~1.5K out @ $10/M)
   Claude decision (Opus 5.5, effort=high, only on routine BUYs):
                                 ~$0.08  (~4K in @ $4/M + ~3K out @ $20/M)
-  Gemini synthesis (Flash):     $0.000  (free tier)
   Grok sentiment (grok-4.7 + live x_search/web_search):
                                 ~$0.15  (search-inflated input tokens +
                                 ~$5 per 1K X posts fetched) — UNVALIDATED,
                                 re-check against the first xAI invoice
-  Gemini sentiment (Flash + Google Search grounding): $0.000 (free tier)
+  OpenAI Codex review (API path only; the CLI path is $0):
+                                ~$0.05 (estimate — agent overhead ~15K tokens)
 
 If actual usage diverges from these, update COST_ESTIMATES at the
 top of this file. The dashboard's "AI Cost Today" reflects these
@@ -127,14 +127,23 @@ COST_ESTIMATES: dict[str, dict[str, float]] = {
         # ~4K in + ~3K out incl. thinking → ~$0.08. Only for routine BUYs.
         "decision": 0.08,
     },
-    "gemini": {
-        "synthesis": 0.0,     # Free tier (Gemini Flash)
-        "sentiment": 0.0,     # Free tier
-    },
     "grok": {
         "sentiment": 0.15,    # grok-4.7 + x_search/web_search tool fees → ~$0.15/call (estimate)
     },
+    "openai": {
+        "review": 0.05,       # Codex second opinion via the OpenAI API (estimate)
+    },
 }
+
+# OpenAI API path with no configured monthly budget -> this hard cap.
+OPENAI_DEFAULT_MONTHLY_CAP_USD = 5.0
+
+
+def provider_monthly_limit(provider: str) -> float:
+    limit = getattr(settings, f"budget_{provider}_monthly_usd", settings.budget_monthly_limit_usd)
+    if provider == "openai" and not limit:
+        return OPENAI_DEFAULT_MONTHLY_CAP_USD
+    return limit
 
 # Only keep this many days of daily data in memory
 _MAX_DAILY_HISTORY = 7
@@ -157,6 +166,8 @@ class BudgetService:
         # so we don't spam Telegram on every call. Resets at start of new month.
         # Format: {f"{provider}:{month_str}": set([70, 90, 100])}
         self._alert_sent: dict[str, set[int]] = {}
+        # {provider: estimated cost of reserved, not-yet-recorded calls}
+        self._reserved: dict[str, float] = {}
         self._data_lock = asyncio.Lock()
         self._initialized = False
 
@@ -243,34 +254,44 @@ class BudgetService:
         """Get today's call count for a provider."""
         return self._daily_calls.get(provider, {}).get(self._today(), 0)
 
+    def _check_locked(self, provider: str, call_type: str) -> tuple[bool, str, float]:
+        """(allowed, reason, cost) including reserved in-flight spend. Caller holds _data_lock."""
+        daily_limit = getattr(
+            settings, f"budget_{provider}_daily_usd", settings.budget_daily_limit_usd
+        )
+        provider_limit = provider_monthly_limit(provider)  # 0 = unlimited
+        pending = self._reserved.get(provider, 0.0)
+        daily_spend = self.get_daily_spend(provider) + pending
+        monthly_spend = self.get_monthly_spend(provider) + pending
+
+        cost = COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
+        if cost == 0:
+            return True, "free_tier", cost
+        if daily_limit > 0 and daily_spend + cost > daily_limit:
+            return False, f"Daily budget exceeded (${daily_spend:.3f}/${daily_limit:.2f})", cost
+        if provider_limit > 0 and monthly_spend + cost > provider_limit:
+            return False, f"Monthly budget exceeded for {provider} (${monthly_spend:.3f}/${provider_limit:.2f})", cost
+        return True, "ok", cost
+
     async def can_call(self, provider: str, call_type: str = "synthesis") -> tuple[bool, str]:
-        """Check if a provider call is within budget. Thread-safe."""
+        """Check if a provider call is within budget (incl. reservations). Thread-safe."""
         async with self._data_lock:
-            daily_limit = getattr(
-                settings, f"budget_{provider}_daily_usd", settings.budget_daily_limit_usd
-            )
-            monthly_limit = settings.budget_monthly_limit_usd
+            allowed, reason, _ = self._check_locked(provider, call_type)
+            return allowed, reason
 
-            # Per-provider monthly limit (0 = unlimited, e.g. Gemini free tier)
-            provider_limit = getattr(settings, f"budget_{provider}_monthly_usd", monthly_limit)
+    async def reserve(self, provider: str, call_type: str) -> tuple[bool, str]:
+        """Atomically check AND hold the estimated cost of one call. The
+        holder must later `release()` it (record_call does not)."""
+        async with self._data_lock:
+            allowed, reason, cost = self._check_locked(provider, call_type)
+            if allowed and cost > 0:
+                self._reserved[provider] = self._reserved.get(provider, 0.0) + cost
+            return allowed, reason
 
-            daily_spend = self.get_daily_spend(provider)
-            monthly_spend = self.get_monthly_spend(provider)
-
-            # Free tier providers — always allow
-            cost = COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
-            if cost == 0:
-                return True, "free_tier"
-
-            # Check daily limit
-            if daily_limit > 0 and daily_spend + cost > daily_limit:
-                return False, f"Daily budget exceeded (${daily_spend:.3f}/${daily_limit:.2f})"
-
-            # Check provider monthly limit (0 = unlimited)
-            if provider_limit > 0 and monthly_spend + cost > provider_limit:
-                return False, f"Monthly budget exceeded for {provider} (${monthly_spend:.3f}/${provider_limit:.2f})"
-
-            return True, "ok"
+    async def release(self, provider: str, call_type: str) -> None:
+        cost = COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
+        async with self._data_lock:
+            self._reserved[provider] = max(0.0, self._reserved.get(provider, 0.0) - cost)
 
     async def record_call(self, provider: str, call_type: str, ticker: str = "", success: bool = True):
         """Record an AI call and its estimated cost. Thread-safe."""
@@ -318,7 +339,7 @@ class BudgetService:
         # Tiered budget alerts: log warning + Telegram at 70%, 90%, 100%.
         # Each threshold fires at most once per provider per month.
         monthly_spend = self.get_monthly_spend(provider)
-        provider_limit = getattr(settings, f"budget_{provider}_monthly_usd", settings.budget_monthly_limit_usd)
+        provider_limit = provider_monthly_limit(provider)
         if provider_limit > 0:
             pct = (monthly_spend / provider_limit) * 100
             await self._maybe_send_threshold_alert(provider, monthly_spend, provider_limit, pct)
@@ -352,7 +373,7 @@ class BudgetService:
             from app.notifications.messages import msg
             from app.notifications.telegram_bot import enqueue
             if highest_crossed >= 100:
-                threshold_msg = "Provider blocked. Brain will fall back to next provider in chain."
+                threshold_msg = "Provider blocked until the budget resets or is raised."
             elif highest_crossed >= 90:
                 threshold_msg = "Approaching limit. Consider increasing budget or reducing scans."
             else:
@@ -383,7 +404,10 @@ class BudgetService:
 
     def get_budget_summary(self) -> dict:
         """Return budget summary for all providers."""
-        providers = ["claude", "gemini", "grok"]
+        providers = ["claude", "grok"]
+        # OpenAI is only paid on the Codex API path (the CLI path is $0).
+        if (settings.codex_enabled and not settings.codex_local) or self.get_monthly_spend("openai") > 0:
+            providers.append("openai")
 
         summary = {
             "daily_limit_usd": settings.budget_daily_limit_usd,
@@ -392,7 +416,7 @@ class BudgetService:
         }
 
         for p in providers:
-            provider_limit = getattr(settings, f"budget_{p}_monthly_usd", settings.budget_monthly_limit_usd)
+            provider_limit = provider_monthly_limit(p)
             daily_spend = self.get_daily_spend(p)
             monthly_spend = self.get_monthly_spend(p)
             daily_calls = self.get_daily_calls(p)

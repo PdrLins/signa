@@ -39,10 +39,10 @@ health.py     → health check, parallel integration checks, budget CRUD, AI con
 
 ### AI System (app/ai/)
 ```
-provider.py        → Fallback router: synthesis (claude→gemini), sentiment (grok→gemini). Budget-checked.
+provider.py        → Router: synthesis (Claude CLI or API per CLAUDE_LOCAL), sentiment (Grok). Budget-checked; Grok budget reserved in candidate-rank order by the scan.
 claude_client.py   → Anthropic synthesis: technical+fundamental+macro+sentiment → BUY/HOLD/SELL/AVOID
 grok_client.py     → xAI sentiment: X/Twitter analysis → score, label, confidence, themes, news
-gemini_client.py   → Google free tier fallback for both synthesis and sentiment. Rate-limited semaphore.
+codex_client.py    → Independent Codex (OpenAI) review of Opus-confirmed BUYs: `codex exec` CLI (read-only sandbox) or OpenAI API. record | veto | off.
 signal_engine.py   → Scoring (bucket-specific weights), GEM detection (5 conditions), blockers (5 checks), status tracking
 prompts.py         → All prompt templates + format_technicals/fundamentals/macro/sentiment + clean_json_response
 ```

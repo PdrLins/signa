@@ -31,7 +31,7 @@ WHAT WAS REMOVED IN THE 2026-09 RESET (and why)
   * The fixed −8% "catastrophic" force-sell — replaced by the position's
     real stop, which is always hard. A row with no stop uses
     `brain_catastrophic_stop_pct` as a safety net inside evaluate_exit.
-  * Sentiment calls (Grok/Gemini) — no longer needed; zero AI cost.
+  * Sentiment calls (Grok) — no longer needed; zero AI cost.
 
 What remains besides exits: a WARNING alert (no action) when price is
 within `watchdog_stop_proximity_pct` of the stop, throttled per position.
