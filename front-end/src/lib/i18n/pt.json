@@ -994,7 +994,10 @@
       "aiNotCalled": "não chamada",
       "notAsked": "não consultado",
       "empty": "Nenhuma decisão registrada nesta varredura.",
-      "emptyFilter": "Nada neste filtro."
+      "emptyFilter": "Nada neste filtro.",
+      "noLogBadge": "SEM REGISTRO",
+      "noLog": "Varredura anterior ao registro de decisões",
+      "noLogNote": "Esta varredura rodou antes de o Signa registrar os motivos de compra e descarte, então não há motivos disponíveis."
     },
     "positions": {
       "title": "Posições abertas",
@@ -1017,7 +1020,9 @@
       "rule": "Uma nova compra é pulada com correlação {pair} com uma posição, ou {cluster} com duas.",
       "unavailable": "Ainda sem métricas de risco (sem posições abertas ou sem histórico de preços)."
     },
-    "sampleNote": "Dados reais"
+    "sampleNote": "Dados reais",
+    "runningTitle": "Varredura em andamento · {pct}%",
+    "runningBody": "Os resultados abaixo são da varredura anterior. Esta página se atualiza sozinha quando terminar."
   },
   "reasons": {
     "entered": "Passou em todas as checagens · tamanho {size} ({risk}% de risco)",

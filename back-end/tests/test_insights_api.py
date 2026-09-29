@@ -45,11 +45,12 @@ def test_authorized_calls(client, monkeypatch):
         return None
     monkeypatch.setattr(insights_api, "_ai_spend", no_spend)
     monkeypatch.setattr(svc, "get_today", lambda spend=None: {"ok": "today"})
+    monkeypatch.setattr(svc, "newest_scan", lambda: None)
     monkeypatch.setattr(svc, "get_performance", lambda: {"ok": "perf"})
     monkeypatch.setattr(svc, "parse_backtests", lambda base=None: {"runs": [], "latest": None})
     monkeypatch.setattr(svc, "get_signal_trail", lambda sym: {"symbol": sym})
     h = _auth()
-    assert client.get(PATHS[0], headers=h).json() == {"ok": "today"}
+    assert client.get(PATHS[0], headers=h).json() == {"ok": "today", "running_scan": None}
     assert client.get(PATHS[1], headers=h).json() == {"ok": "perf"}
     assert client.get(PATHS[2], headers=h).json() == {"runs": [], "latest": None}
     assert client.get("/api/v1/insights/signal/nvda", headers=h).json() == {"symbol": "NVDA"}
@@ -95,3 +96,23 @@ def test_verdicts_ok(client, monkeypatch):
                          "tech_filter_passed": True}
     assert body["x-no-cols"]["tech_filter_passed"] is None
     assert body["x-no-cols"]["ai_signal"] is None
+
+
+def test_today_cache_follows_newest_scan(client, monkeypatch):
+    """A scan finishing changes the cache key, so fresh results show at once."""
+    async def no_spend():
+        return None
+    insights_api._cache.clear()
+    monkeypatch.setattr(insights_api, "_ai_spend", no_spend)
+    newest = {"id": "s1", "status": "RUNNING", "started_at": None, "progress_pct": 40, "phase": "analyzing"}
+    calls = []
+    monkeypatch.setattr(svc, "newest_scan", lambda: dict(newest))
+    monkeypatch.setattr(svc, "get_today", lambda spend=None: calls.append(1) or {"n": len(calls)})
+    h = _auth()
+    first = client.get(PATHS[0], headers=h).json()
+    assert first["running_scan"]["progress_pct"] == 40
+    assert client.get(PATHS[0], headers=h).json()["n"] == 1      # cached while running
+    newest["status"] = "COMPLETE"
+    done = client.get(PATHS[0], headers=h).json()
+    assert done["n"] == 2 and done["running_scan"] is None       # recomputed on completion
+    insights_api._cache.clear()

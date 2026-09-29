@@ -112,10 +112,22 @@ export interface RiskLimits {
   risk_per_trade_pct: number
 }
 
+export interface RunningScan {
+  id: string
+  type: string | null
+  started_at: string | null
+  progress_pct: number | null
+  phase: string | null
+}
+
 export interface TodayInsights {
   as_of: string
   status: TodayStatus
   scan: ScanRef | null
+  /** A scan still in flight (results below are from the previous one). */
+  running_scan?: RunningScan | null
+  /** False when the scan predates the brain decision log. */
+  decisions_logged?: boolean
   funnel: ScanFunnel | null
   decisions: TodayDecision[]
   positions: TodayPosition[]

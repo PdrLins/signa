@@ -27,7 +27,7 @@ function bucketLabel(b: string | null, t: typeof en): string {
   return b ?? ''
 }
 
-export function DecisionsList({ decisions }: { decisions: TodayDecision[] }) {
+export function DecisionsList({ decisions, decisionsLogged = true }: { decisions: TodayDecision[]; decisionsLogged?: boolean }) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const d = t.today.decisions
@@ -44,9 +44,11 @@ export function DecisionsList({ decisions }: { decisions: TodayDecision[] }) {
   const badge = (x: TodayDecision) => {
     if (x.decision === 'ENTER') return { text: d.boughtBadge, color: theme.colors.bg, bg: theme.colors.up }
     if (x.decision === 'SKIP') return { text: d.skippedBadge, color: theme.colors.text, bg: theme.colors.surfaceAlt }
+    if (!decisionsLogged) return { text: d.noLogBadge, color: theme.colors.textSub, bg: 'transparent' }
     return { text: d.noDecisionBadge, color: theme.colors.textSub, bg: 'transparent' }
   }
-  const why = (x: TodayDecision) => (x.reason ? formatReason(x.reason, t) : d.noDecision)
+  const why = (x: TodayDecision) =>
+    (x.reason ? formatReason(x.reason, t) : decisionsLogged ? d.noDecision : d.noLog)
 
   const filterButtons: { key: Filter; label: string }[] = [
     { key: 'all', label: fill(d.all, { n: counts.all }) },
@@ -92,6 +94,9 @@ export function DecisionsList({ decisions }: { decisions: TodayDecision[] }) {
             <span>{d.colSymbol}</span><span>{d.colDecision}</span><span>{d.colWhy}</span>
             <span>{d.colAi}</span><span>{d.colPwin}</span><span>{d.colRr}</span>
           </div>
+          {!decisionsLogged && (
+            <p className="px-5 md:px-6 pt-3 text-[13px]" style={{ color: theme.colors.textSub }}>{d.noLogNote}</p>
+          )}
           {rows.length === 0 && (
             <p className="px-5 md:px-6 py-4 text-sm" style={{ color: theme.colors.textSub }}>{d.emptyFilter}</p>
           )}

@@ -16,12 +16,13 @@ import {
   ChartLine,
   Settings,
   Brain,
+  HelpCircle,
   LogOut,
 } from 'lucide-react'
 
 // Pages reached through Settings (and the mobile "More" sheet) keep the
 // Settings rail item highlighted.
-const SETTINGS_CHILDREN = ['/settings', '/integrations', '/logs', '/how-it-works', '/watchlist']
+const SETTINGS_CHILDREN = ['/settings', '/integrations', '/logs', '/watchlist']
 
 export function isNavActive(href: string, pathname: string): boolean {
   if (href === '/settings') return SETTINGS_CHILDREN.some((p) => pathname === p || pathname.startsWith(p + '/'))
@@ -67,14 +68,15 @@ export function LeftNav() {
 
   const dotColor = open ? theme.colors.up : theme.colors.textHint
 
-  // Primary destinations, then (after a divider) Settings, which links
-  // onward to Integrations, Logs, Watchlist and How it works.
+  // Primary destinations, How it works, then (after a divider) Settings,
+  // which links onward to Integrations, Logs and Watchlist.
   const NAV_ITEMS = [
     { label: t.nav.today, href: '/today', icon: LayoutDashboard },
     { label: t.nav.signals, href: '/signals', icon: Activity },
     { label: t.nav.positions, href: '/positions', icon: Briefcase },
     { label: t.nav.isItWorking, href: '/performance', icon: ChartLine },
     { label: t.nav.brain, href: '/brain', icon: Brain },
+    { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle },
     { label: t.nav.settings, href: '/settings', icon: Settings },
   ]
 

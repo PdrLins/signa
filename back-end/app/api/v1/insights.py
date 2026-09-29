@@ -37,13 +37,18 @@ async def _ai_spend() -> dict | None:
 
 @router.get("/today")
 async def get_today(user: dict = Depends(get_current_user)):
-    cached = _cache.get("today")
-    if cached is not None:
-        return cached
-    spend = await _ai_spend()
-    data = await asyncio.to_thread(insights_service.get_today, spend)
-    _cache.set("today", data, TTL_TODAY)
-    return data
+    # Key the cache on the newest scan's id + status: a scan finishing (or
+    # starting) changes the key, so the page sees fresh results immediately
+    # instead of up to TTL_TODAY seconds later. Progress of a running scan is
+    # read fresh on every request and never cached.
+    newest = await asyncio.to_thread(insights_service.newest_scan)
+    key = f"today:{(newest or {}).get('id')}:{(newest or {}).get('status')}"
+    data = _cache.get(key)
+    if data is None:
+        spend = await _ai_spend()
+        data = await asyncio.to_thread(insights_service.get_today, spend)
+        _cache.set(key, data, TTL_TODAY)
+    return {**data, "running_scan": insights_service.running_scan_ref(newest)}
 
 
 @router.get("/performance")

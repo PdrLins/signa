@@ -259,3 +259,14 @@ def test_build_trail_minimal_returns_nulls():
     assert tr["routine"] is None and tr["order"] is None and tr["correlation"] is None
     assert tr["sector_exposure"] is None
     assert math.isnan(float("nan"))  # sanity
+
+
+def test_running_scan_ref_only_for_live_scans():
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    live = {"id": "s", "status": "RUNNING", "started_at": now.isoformat(), "progress_pct": 55, "phase": "saving"}
+    assert svc.running_scan_ref(live)["progress_pct"] == 55
+    assert svc.running_scan_ref({**live, "status": "COMPLETE"}) is None
+    stale = {**live, "started_at": (now - timedelta(hours=2)).isoformat()}
+    assert svc.running_scan_ref(stale) is None
+    assert svc.running_scan_ref(None) is None

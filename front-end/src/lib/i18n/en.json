@@ -994,7 +994,10 @@
       "aiNotCalled": "not called",
       "notAsked": "not asked",
       "empty": "No decisions recorded for this scan.",
-      "emptyFilter": "Nothing in this filter."
+      "emptyFilter": "Nothing in this filter.",
+      "noLogBadge": "NO LOG",
+      "noLog": "Scanned before decision logging existed",
+      "noLogNote": "This scan ran before Signa recorded buy and skip reasons, so no reasons are available."
     },
     "positions": {
       "title": "Open positions",
@@ -1017,7 +1020,9 @@
       "rule": "A new buy is skipped at {pair} correlation with one holding, or {cluster} with two.",
       "unavailable": "No risk metrics yet (no open positions or no price history)."
     },
-    "sampleNote": "Live data"
+    "sampleNote": "Live data",
+    "runningTitle": "Scan in progress · {pct}%",
+    "runningBody": "Results below are from the previous scan. This page updates by itself when it finishes."
   },
   "reasons": {
     "entered": "Passed every check · size {size} ({risk}% risk)",

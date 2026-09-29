@@ -7,7 +7,10 @@ export function useTodayInsights() {
     queryKey: ['insights', 'today'],
     queryFn: () => insightsApi.getToday(),
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    // While any scan runs (manual, scheduled, or started from another page)
+    // poll every 4s; the response switches to the new scan as soon as it
+    // completes, so the page refreshes itself.
+    refetchInterval: (query) => (query.state.data?.running_scan ? 4_000 : 60_000),
   })
 }
 

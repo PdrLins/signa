@@ -625,6 +625,31 @@ def _safe(fn, default, what: str):
         return default
 
 
+STALE_SCAN_MINUTES = 30
+
+
+def newest_scan() -> dict | None:
+    """The most recent scan of any status (None on failure)."""
+    rows = _safe(lambda: queries.get_scans(limit=1), [], "newest scan")
+    return rows[0] if rows else None
+
+
+def running_scan_ref(scan: Mapping | None) -> dict | None:
+    """Progress of a scan still in flight, else None."""
+    if not scan or str(scan.get("status") or "").upper() not in ("RUNNING", "QUEUED", "PENDING"):
+        return None
+    started = _parse_dt(scan.get("started_at"))
+    if started and (datetime.now(timezone.utc) - started) > timedelta(minutes=STALE_SCAN_MINUTES):
+        return None  # a crashed scan left RUNNING; don't show a banner forever
+    return {
+        "id": str(scan.get("id")),
+        "type": scan.get("scan_type"),
+        "started_at": scan.get("started_at"),
+        "progress_pct": _int(scan.get("progress_pct")),
+        "phase": scan.get("phase"),
+    }
+
+
 def get_today(ai_spend: dict | None = None) -> dict:
     wallet = _wallet()
     reset_date = _et_date((wallet or {}).get("created_at"))
@@ -651,6 +676,9 @@ def get_today(ai_spend: dict | None = None) -> dict:
                  if scan and scan.get("id") else None),
         "funnel": build_funnel(scan, signals, decisions) if scan else None,
         "decisions": build_decisions(signals, decisions),
+        # False = the scan predates the brain_decisions log (or the brain never
+        # ran for it), so rows without a decision are "no log", not "skipped".
+        "decisions_logged": bool(decisions),
         "positions": build_positions(open_trades, prices),
         "risk": _safe(_risk, None, "portfolio risk") if open_trades else None,
         "limits": risk_limits(),

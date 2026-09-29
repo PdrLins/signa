@@ -80,6 +80,23 @@ export default function TodayPage() {
 
       {scanning && progress && <ScanProgressPanel progress={progress} phaseLabel={phaseLabel} />}
 
+      {!scanning && data?.running_scan && (
+        <div
+          role="status"
+          className="rounded-2xl px-5 py-4 flex items-center gap-4"
+          style={{ backgroundColor: theme.colors.surface, border: `1px solid ${theme.colors.border}` }}
+        >
+          <RefreshCw size={18} aria-hidden="true" className="animate-spin shrink-0" style={{ color: theme.colors.primary }} />
+          <div className="flex flex-col gap-1 min-w-0">
+            <span className="text-sm font-medium" style={{ color: theme.colors.text }}>
+              {fill(tt.runningTitle, { pct: data.running_scan.progress_pct ?? 0 })}
+              {data.running_scan.phase ? ` · ${phaseLabel(data.running_scan.phase)}` : ''}
+            </span>
+            <span className="text-[13px]" style={{ color: theme.colors.textSub }}>{tt.runningBody}</span>
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -98,7 +115,7 @@ export default function TodayPage() {
           <StatusStrip status={data.status} />
           {data.funnel && <ScanFunnel funnel={data.funnel} scan={data.scan} limits={data.limits} />}
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-4 md:gap-5 items-start">
-            <DecisionsList decisions={data.decisions} />
+            <DecisionsList decisions={data.decisions} decisionsLogged={data.decisions_logged ?? true} />
             <aside className="flex flex-col gap-4 md:gap-5">
               <OpenPositionsCard positions={data.positions} />
               <PortfolioRiskCard risk={data.risk} limits={data.limits} />
