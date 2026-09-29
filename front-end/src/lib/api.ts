@@ -5,7 +5,7 @@ import type { SignalsResponse, SignalFilters, DailyStats, ScanTodayRecord } from
 import type { WatchlistItem, WatchlistResponse, WatchlistAddRequest } from '@/types/watchlist'
 import type { ScansResponse } from '@/types/scan'
 import type { TodayInsights, PerformanceInsights, BacktestInsights, SignalTrail, SignalVerdict } from '@/types/insights'
-import type { CheckJob } from '@/types/check'
+import type { CheckJob, CheckMode } from '@/types/check'
 import type { LoginRequest, LoginResponse, OtpVerifyRequest, AuthResponse } from '@/types/auth'
 import type {
   PortfolioItem,
@@ -366,7 +366,8 @@ async function checkCall<T>(method: 'get' | 'post', url: string, data?: unknown)
 }
 
 export const checkApi = {
-  start: (ticker: string, force = false) => checkCall<CheckJob>('post', '/check', { ticker, force }),
+  start: (ticker: string, force = false, mode: CheckMode = 'short') =>
+    checkCall<CheckJob>('post', '/check', { ticker, force, mode }),
   get: (jobId: string) => checkCall<CheckJob>('get', `/check/${encodeURIComponent(jobId)}`),
 }
 

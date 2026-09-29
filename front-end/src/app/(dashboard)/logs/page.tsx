@@ -99,8 +99,11 @@ function LogViewer() {
   useEffect(() => {
     if (!brainToken || !authToken) return
 
-    const wsUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1')
-      .replace('http', 'ws')
+    // Relative API base ("/api/v1", proxied by Next) → same host as the page.
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || '/api/v1'
+    const wsUrl = apiBase.startsWith('/')
+      ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}${apiBase}`
+      : apiBase.replace(/^http/, 'ws')
     const ws = new WebSocket(`${wsUrl}/logs/stream`, [
       'signa.logs',
       `jwt.${authToken}`,

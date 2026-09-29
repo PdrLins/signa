@@ -1405,6 +1405,227 @@
     "tryAgain": "Try again",
     "todayLabel": "Check a stock",
     "todayPlaceholder": "Ticker…",
-    "todaySubmit": "Check"
+    "todaySubmit": "Check",
+    "subtitleLong": "See whether a stock, ETF or crypto looks like a sound long-term holding (5+ years): long-run returns vs an index, drawdowns, costs and fundamentals. No timing, no sizing.",
+    "modeLabel": "What do you want to know?",
+    "modes": {
+      "short": "Short-term trade",
+      "long": "Long-term hold"
+    },
+    "modeShort": {
+      "short": "Trade",
+      "long": "Hold"
+    },
+    "modeHelp": {
+      "short": "Is the next few days or weeks a good entry for a swing trade?",
+      "long": "Is this a sound thing to hold for 5+ years?"
+    },
+    "recentMode": "{mode}",
+    "longPhases": {
+      "resolving": "Finding the ticker",
+      "history": "Loading the full price history",
+      "benchmark": "Comparing with an index",
+      "fundamentals": "Fund data and fundamentals",
+      "sentiment": "Searching for red flags",
+      "assessment": "Opus long-term assessment",
+      "done": "Done"
+    },
+    "todayMode": "Check type",
+    "long": {
+      "verdict": {
+        "SOLID": "Solid long-term holding",
+        "REASONABLE_WITH_CAVEATS": "Reasonable, with caveats",
+        "NOT_A_GOOD_FIT": "Not a good long-term fit"
+      },
+      "source": {
+        "ai": "Assessment by Opus · confidence {confidence}/100",
+        "scorecard": "Verdict from the rule-based scorecard"
+      },
+      "summaryTitle": "Assessment",
+      "strengths": "Strengths",
+      "concerns": "Concerns",
+      "whatToWatch": "What to watch",
+      "dca": "Buying all at once or gradually",
+      "aiEnglish": "The assessment text is written by the AI in English.",
+      "price": "Price",
+      "history": "History",
+      "historyValue": "{years} years",
+      "dataAsOf": "prices as of {date}",
+      "scorecardTitle": "Scorecard",
+      "scorecardSubtitle": "Simple rule-of-thumb checks. Each one is a heuristic, not a verdict on its own.",
+      "categories": {
+        "cost": "Cost",
+        "diversification": "Diversification",
+        "track_record": "Track record",
+        "valuation": "Valuation",
+        "risk": "Risk",
+        "quality": "Business quality"
+      },
+      "ratings": {
+        "good": "Good",
+        "fair": "Fair",
+        "poor": "Poor",
+        "n/a": "n/a"
+      },
+      "reasons": {
+        "cost": {
+          "no_fee": "No fund fee — you only pay trading costs.",
+          "missing": "Expense ratio not available.",
+          "expense_ratio": "Expense ratio {expense_ratio}%/yr (good ≤ 0.25%, poor > 0.60%)."
+        },
+        "diversification": {
+          "single_stock": "Single company: all the risk sits in one business (an index fund spreads it).",
+          "single_crypto": "Single crypto asset: no diversification.",
+          "missing": "Holdings not available.",
+          "fund_of_funds": "Fund of funds: holds {funds} index funds, so it isn't concentrated in single companies.",
+          "top10": "Top 10 holdings are {top10}% of the fund (good ≤ 30%, poor > 50%)."
+        },
+        "track_record": {
+          "short_history": "Less than {years} years of history.",
+          "vs_benchmark": "{period} CAGR {cagr}% vs {benchmark} {benchmark_cagr}% ({excess} pp/yr).",
+          "absolute": "{period} CAGR {cagr}% (no benchmark comparison)."
+        },
+        "valuation": {
+          "missing": "Valuation data not available.",
+          "etf_pe": "Holdings' average P/E {pe} (good ≤ 18, poor > 28).",
+          "no_earnings": "No earnings or cash flows to value.",
+          "stock": "P/E {pe} · FCF yield {fcf_yield}% (sector-agnostic bands: P/E ≤ 20 good, > 35 poor; FCF yield ≥ 5% good, < 2% poor)."
+        },
+        "risk": {
+          "missing": "Not enough history to measure risk.",
+          "measured": "Max drawdown {max_drawdown}%, volatility {volatility}%/yr (good: shallower than −40%, volatility ≤ 20%)."
+        },
+        "quality": {
+          "not_applicable": "Applies to individual companies only.",
+          "missing": "Profitability and balance-sheet data not available.",
+          "measured": "ROE {roe}% · operating margin {operating_margin}% · debt/equity {debt_to_equity}x · current ratio {current_ratio} (banks and insurers read differently)."
+        }
+      },
+      "returnsTitle": "Returns vs {benchmark}",
+      "returnsTitleNone": "Returns",
+      "returnsSubtitle": "Annualized (CAGR), dividends reinvested. Total return below each figure.",
+      "returnsBenchCcy": "{benchmark} converted to {currency} for a like-for-like comparison.",
+      "period": "Period",
+      "periodValue": "{years}y",
+      "asset": "{symbol}",
+      "benchmark": "{benchmark}",
+      "excess": "Difference",
+      "excessHelp": "percentage points per year",
+      "total": "total {v}",
+      "noBenchmark": "No benchmark",
+      "sinceInception": "Since {date}: {cagr} a year ({total} total)",
+      "noReturns": "Less than a year of history.",
+      "drawdownTitle": "Drawdowns",
+      "maxDrawdown": "Worst fall",
+      "maxDrawdownDates": "{peak} → {trough}",
+      "recovery": "Recovery",
+      "recoveredIn": "{days} days to regain the old peak (on {date})",
+      "notRecovered": "Not yet recovered",
+      "underwater": "{days} days below the old peak",
+      "currentDrawdown": "From all-time high",
+      "athOn": "high of {price} on {date}",
+      "atHigh": "At its all-time high",
+      "worstYear": "Worst calendar year",
+      "volatility": "Volatility",
+      "volatilityValue": "{v}%/yr",
+      "calendarYears": "Calendar-year returns",
+      "fundTitle": "Fund details",
+      "expenseRatio": "Expense ratio",
+      "expenseRatioValue": "{v}%/yr",
+      "aum": "Assets (AUM)",
+      "yield": "Yield",
+      "family": "Fund family",
+      "category": "Category",
+      "holdingsPe": "Holdings P/E",
+      "holdingsPb": "Holdings P/B",
+      "turnover": "Turnover",
+      "topHoldings": "Top holdings",
+      "topHoldingsSub": "Top {n}: {w}% of the fund",
+      "fundOfFunds": "This fund holds other ETFs, shown as-is.",
+      "sectors": "Sector mix",
+      "assetMix": "Asset mix",
+      "noHoldings": "Holdings not available.",
+      "fundamentalsTitle": "Company fundamentals",
+      "valuationGroup": "Valuation",
+      "qualityGroup": "Quality",
+      "growthGroup": "Growth",
+      "dividendGroup": "Dividend",
+      "estimatesGroup": "Analyst estimates",
+      "marketCap": "Market cap",
+      "sector": "Sector",
+      "trailingPe": "P/E (trailing)",
+      "forwardPe": "P/E (forward)",
+      "peg": "PEG",
+      "priceToBook": "Price / book",
+      "evEbitda": "EV / EBITDA",
+      "fcfYield": "FCF yield",
+      "roe": "Return on equity",
+      "profitMargin": "Profit margin",
+      "operatingMargin": "Operating margin",
+      "debtToEquity": "Debt / equity",
+      "currentRatio": "Current ratio",
+      "revenueGrowth": "Revenue growth (yoy)",
+      "earningsGrowth": "Earnings growth (yoy)",
+      "revenueCagr": "Revenue CAGR ({from}–{to})",
+      "netIncomeCagr": "Net income CAGR ({from}–{to})",
+      "dividendYield": "Yield",
+      "payoutRatio": "Payout ratio",
+      "fiveYearYield": "5-year average yield",
+      "revisionMomentum": "EPS estimate revisions",
+      "revisionsCount": "{up} up / {down} down (30 days)",
+      "redFlagsTitle": "Red flags",
+      "redFlagsNone": "No material red flags found in a cited news and X search.",
+      "redFlagsNotSearched": "Only searched for individual stocks.",
+      "severity": {
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "critical": "critical"
+      },
+      "notes": {
+        "ai_unavailable": "The AI assessment was unavailable — the verdict comes from the rule-based scorecard.",
+        "ai_disabled": "AI analysis is disabled — the verdict comes from the rule-based scorecard.",
+        "benchmark_unavailable": "Benchmark data was unavailable.",
+        "benchmark_currency_not_adjusted": "Benchmark returns are in its own currency (exchange-rate data unavailable)."
+      },
+      "caveatsTitle": "Keep in mind",
+      "caveats": {
+        "not_advice": "Not financial advice. Whether it suits you depends on your goals, horizon and risk tolerance.",
+        "past_returns": "Past returns (dividends reinvested) do not predict future returns.",
+        "heuristics": "The scorecard uses simple rule-of-thumb thresholds; they ignore sector norms and context.",
+        "no_timing": "This is a long-term view: it says nothing about whether this week is a good time to buy.",
+        "crypto_high_risk": "Crypto is highly speculative: no cash flows, and drawdowns of 70–80% have happened repeatedly.",
+        "single_stock": "Most individual stocks underperform a broad index fund over long periods."
+      },
+      "sectorNames": {
+        "technology": "Technology",
+        "financial_services": "Financials",
+        "industrials": "Industrials",
+        "basic_materials": "Materials",
+        "consumer_cyclical": "Consumer cyclical",
+        "energy": "Energy",
+        "healthcare": "Health care",
+        "communication_services": "Communication",
+        "consumer_defensive": "Consumer defensive",
+        "utilities": "Utilities",
+        "realestate": "Real estate"
+      },
+      "assetClassNames": {
+        "stockPosition": "Stocks",
+        "bondPosition": "Bonds",
+        "cashPosition": "Cash",
+        "otherPosition": "Other",
+        "preferredPosition": "Preferred",
+        "convertiblePosition": "Convertibles"
+      },
+      "assetType": {
+        "STOCK": "Stock",
+        "ETF": "ETF",
+        "CRYPTO": "Crypto",
+        "OTHER": "Other"
+      },
+      "sourceLink": "Source",
+      "daysValue": "{n} days"
+    }
   }
 }

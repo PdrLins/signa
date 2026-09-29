@@ -8,15 +8,15 @@
 #
 # Recommended way to use Signa from your phone: Tailscale, keeping the default
 # loopback binding and letting `tailscale serve` terminate HTTPS:
-#   tailscale serve --bg --https=443  http://127.0.0.1:3000
-#   tailscale serve --bg --https=8443 http://127.0.0.1:8000
-#   SIGNA_API_URL=https://<machine>.<tailnet>.ts.net:8443/api/v1 ./scripts/start.sh
-# and add "https://<machine>.<tailnet>.ts.net" to CORS_ORIGINS in back-end/.env.
+#   tailscale serve --bg --https=443 http://127.0.0.1:3000
+#   ./scripts/start.sh
+# (the API is proxied through the web server, so only port 3000 is served).
 #
 # Env vars:
-#   SIGNA_LAN=1      bind 0.0.0.0 and add macOS firewall exceptions (sudo)
-#   SIGNA_API_URL    API base URL baked into the frontend build
-#                    (default: http://127.0.0.1:8000/api/v1, or LAN IP in LAN mode)
+#   SIGNA_LAN=1      serve the web page on 0.0.0.0:3000 (same-Wi-Fi phone access)
+#                    and add a macOS firewall exception for Node (sudo); the
+#                    API stays on 127.0.0.1 behind the /api/v1 proxy
+#   SIGNA_API_URL    API base baked into the frontend build (default: /api/v1)
 
 set -e
 
@@ -48,10 +48,13 @@ kill_project_procs "uvicorn main:app" "$BACKEND"
 kill_project_procs "next-server|next start" "$FRONTEND"
 sleep 1
 
+# The backend ALWAYS binds 127.0.0.1. The browser reaches it through the
+# Next.js /api/v1 proxy (front-end/next.config.mjs rewrites), so in LAN mode
+# only the web page (port 3000) is visible on the network.
 if [ "${SIGNA_LAN:-0}" = "1" ]; then
   BIND_HOST="0.0.0.0"
   LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "127.0.0.1")
-  API_URL="${SIGNA_API_URL:-http://$LOCAL_IP:8000/api/v1}"
+  API_URL="${SIGNA_API_URL:-/api/v1}"
 
   echo ""
   echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
@@ -59,23 +62,18 @@ if [ "${SIGNA_LAN:-0}" = "1" ]; then
   echo "  Passwords, OTPs and JWTs cross the network unencrypted — anyone on"
   echo "  this Wi-Fi can sniff them. Use only on a network you fully trust."
   echo "  Recommended instead: Tailscale (see header of this script)."
-  echo "  Remember to add http://$LOCAL_IP:3000 to CORS_ORIGINS in back-end/.env."
   echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
   echo ""
 
-  # macOS firewall exceptions for the exact Python and Node binaries in use
-  FW_PYTHON=$("$PYTHON" -c 'import os, sys
-app = os.path.join(sys.base_prefix, "Resources/Python.app/Contents/MacOS/Python")
-print(app if os.path.exists(app) else os.path.realpath(sys.executable))')
+  # macOS firewall exception for the Node binary serving the web page
   FW_NODE=$(command -v node)
-  echo "Adding firewall exceptions (may ask for password)..."
-  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$FW_PYTHON" > /dev/null 2>&1 || true
+  echo "Adding a firewall exception for Node (may ask for password)..."
   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$FW_NODE" > /dev/null 2>&1 || true
   PHONE_LINE="  Phone:    http://$LOCAL_IP:3000  (plain HTTP!)"
 else
   BIND_HOST="127.0.0.1"
-  API_URL="${SIGNA_API_URL:-http://127.0.0.1:8000/api/v1}"
-  PHONE_LINE="  Phone:    not exposed (use Tailscale serve, or SIGNA_LAN=1)"
+  API_URL="${SIGNA_API_URL:-/api/v1}"
+  PHONE_LINE="  Phone:    not exposed (SIGNA_LAN=1 for same Wi-Fi, or Tailscale serve)"
 fi
 
 echo "========================================="
@@ -90,7 +88,7 @@ echo ""
 
 # Start backend in background (logs to terminal)
 cd "$BACKEND"
-"$PYTHON" -m uvicorn main:app --host "$BIND_HOST" --port 8000 &
+"$PYTHON" -m uvicorn main:app --host 127.0.0.1 --port 8000 &
 BACKEND_PID=$!
 
 # Wait for backend
@@ -133,7 +131,6 @@ cleanup() {
   sleep 1
   if [ "${SIGNA_LAN:-0}" = "1" ]; then
     echo "  Removing firewall exceptions..."
-    sudo /usr/libexec/ApplicationFirewall/socketfilterfw --remove "$FW_PYTHON" > /dev/null 2>&1
     sudo /usr/libexec/ApplicationFirewall/socketfilterfw --remove "$FW_NODE" > /dev/null 2>&1
     echo "  Firewall restored."
   fi

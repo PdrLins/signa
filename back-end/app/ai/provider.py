@@ -480,3 +480,55 @@ async def re_evaluate_thesis(
         logger.warning(f"Thesis re-eval Claude API failed for {symbol}: {e}")
         await budget.record_call("claude", "synthesis", symbol, success=False)
         return None
+
+
+# ============================================================
+# LONG-TERM HOLDING ASSESSMENT ("Check a stock", long-term mode)
+# ============================================================
+#
+# One decision-tier Claude call (settings.claude_decision_model) returning
+# a free-form structured assessment (prompts.LONG_TERM_JSON_SCHEMA). Same
+# CLAUDE_LOCAL routing as everything else: CLI only when claude_local=True,
+# budget-checked API only otherwise. Never Gemini — a long-term verdict is
+# a decision-tier judgement. Returns None on any failure; the caller then
+# falls back to the deterministic scorecard verdict.
+
+async def assess_long_term(symbol: str, prompt: str) -> dict | None:
+    from app.ai.prompts import LONG_TERM_JSON_SCHEMA, normalize_long_term_result
+
+    if settings.claude_local:
+        try:
+            from app.ai.claude_local_client import call_with_prompt
+            data = await call_with_prompt(prompt, json_schema=LONG_TERM_JSON_SCHEMA, tier="decision")
+            result = normalize_long_term_result(data)
+            if result is not None:
+                result["_provider"] = "claude-local-decision"
+                return result
+            if data is not None:
+                logger.warning(f"Long-term assessment [{symbol}] Claude Local returned an invalid shape")
+        except Exception as e:
+            logger.warning(f"Long-term assessment Claude Local failed for {symbol}: {e}")
+        # Local mode never touches the paid API.
+        return None
+
+    budget = await _get_budget()
+    allowed, reason = await budget.can_call("claude", "decision")
+    if not allowed:
+        logger.warning(f"Budget blocked long-term assessment for {symbol}: {reason}")
+        return None
+    if not settings.anthropic_api_key:
+        return None
+    try:
+        from app.ai.claude_client import create_structured
+        data = await create_structured(prompt, LONG_TERM_JSON_SCHEMA, tier="decision")
+        result = normalize_long_term_result(data)
+        await budget.record_call("claude", "decision", symbol, success=result is not None)
+        if result is None:
+            logger.warning(f"Long-term assessment [{symbol}] Claude API returned an invalid shape")
+            return None
+        result["_provider"] = "claude-decision"
+        return result
+    except Exception as e:
+        logger.warning(f"Long-term assessment Claude API failed for {symbol}: {e}")
+        await budget.record_call("claude", "decision", symbol, success=False)
+        return None

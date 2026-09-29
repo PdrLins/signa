@@ -522,6 +522,10 @@ class Settings(BaseSettings):
     stock_check_daily_limit: int = 20
     stock_check_max_concurrent: int = 2
     stock_check_job_ttl_minutes: int = 60
+    # Long-term mode (services/long_term_check.py): results and the
+    # long-run yfinance data (max history, fund/financial data) are cached
+    # this long per resolved symbol. Shares the daily limit above.
+    stock_check_long_cache_hours: int = 24
 
     # --- Language ---
     language: str = "en"  # "en" or "pt"

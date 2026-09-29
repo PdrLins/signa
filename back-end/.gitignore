@@ -4,3 +4,6 @@ __pycache__/
 
 # Brain reset archives (raw DB exports) — keep a copy outside git
 docs/archive/
+
+# Owner's private portfolio exports — never commit
+docs/private/

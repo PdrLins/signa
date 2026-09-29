@@ -1405,6 +1405,227 @@
     "tryAgain": "Tentar de novo",
     "todayLabel": "Checar uma ação",
     "todayPlaceholder": "Ticker…",
-    "todaySubmit": "Checar"
+    "todaySubmit": "Checar",
+    "subtitleLong": "Veja se uma ação, ETF ou cripto parece um bom investimento de longo prazo (5+ anos): retornos históricos vs um índice, quedas, custos e fundamentos. Sem timing, sem tamanho de posição.",
+    "modeLabel": "O que você quer saber?",
+    "modes": {
+      "short": "Trade de curto prazo",
+      "long": "Manter no longo prazo"
+    },
+    "modeShort": {
+      "short": "Trade",
+      "long": "Longo prazo"
+    },
+    "modeHelp": {
+      "short": "Os próximos dias ou semanas são uma boa entrada para um swing trade?",
+      "long": "Faz sentido manter isto por 5+ anos?"
+    },
+    "recentMode": "{mode}",
+    "longPhases": {
+      "resolving": "Encontrando o ticker",
+      "history": "Carregando o histórico completo de preços",
+      "benchmark": "Comparando com um índice",
+      "fundamentals": "Dados do fundo e fundamentos",
+      "sentiment": "Procurando sinais de alerta",
+      "assessment": "Avaliação de longo prazo do Opus",
+      "done": "Pronto"
+    },
+    "todayMode": "Tipo de checagem",
+    "long": {
+      "verdict": {
+        "SOLID": "Sólido para o longo prazo",
+        "REASONABLE_WITH_CAVEATS": "Razoável, com ressalvas",
+        "NOT_A_GOOD_FIT": "Não é bom para o longo prazo"
+      },
+      "source": {
+        "ai": "Avaliação do Opus · confiança {confidence}/100",
+        "scorecard": "Veredito da pontuação por regras"
+      },
+      "summaryTitle": "Avaliação",
+      "strengths": "Pontos fortes",
+      "concerns": "Preocupações",
+      "whatToWatch": "O que acompanhar",
+      "dca": "Comprar de uma vez ou aos poucos",
+      "aiEnglish": "O texto da avaliação é escrito pela IA em inglês.",
+      "price": "Preço",
+      "history": "Histórico",
+      "historyValue": "{years} anos",
+      "dataAsOf": "preços de {date}",
+      "scorecardTitle": "Pontuação",
+      "scorecardSubtitle": "Checagens simples por regra prática. Cada uma é uma heurística, não um veredito sozinha.",
+      "categories": {
+        "cost": "Custo",
+        "diversification": "Diversificação",
+        "track_record": "Histórico",
+        "valuation": "Valuation",
+        "risk": "Risco",
+        "quality": "Qualidade do negócio"
+      },
+      "ratings": {
+        "good": "Bom",
+        "fair": "Médio",
+        "poor": "Fraco",
+        "n/a": "n/d"
+      },
+      "reasons": {
+        "cost": {
+          "no_fee": "Sem taxa de fundo — você paga só os custos de negociação.",
+          "missing": "Taxa de administração indisponível.",
+          "expense_ratio": "Taxa de {expense_ratio}%/ano (bom ≤ 0,25%, fraco > 0,60%)."
+        },
+        "diversification": {
+          "single_stock": "Uma só empresa: todo o risco está em um negócio (um fundo de índice dilui isso).",
+          "single_crypto": "Um só criptoativo: sem diversificação.",
+          "missing": "Carteira indisponível.",
+          "fund_of_funds": "Fundo de fundos: tem {funds} fundos de índice, então não é concentrado em empresas.",
+          "top10": "As 10 maiores posições são {top10}% do fundo (bom ≤ 30%, fraco > 50%)."
+        },
+        "track_record": {
+          "short_history": "Menos de {years} anos de histórico.",
+          "vs_benchmark": "CAGR de {period} {cagr}% vs {benchmark} {benchmark_cagr}% ({excess} p.p./ano).",
+          "absolute": "CAGR de {period} {cagr}% (sem comparação com índice)."
+        },
+        "valuation": {
+          "missing": "Dados de valuation indisponíveis.",
+          "etf_pe": "P/L médio das posições {pe} (bom ≤ 18, fraco > 28).",
+          "no_earnings": "Sem lucros ou fluxo de caixa para avaliar.",
+          "stock": "P/L {pe} · FCF yield {fcf_yield}% (faixas sem ajuste por setor: P/L ≤ 20 bom, > 35 fraco; FCF yield ≥ 5% bom, < 2% fraco)."
+        },
+        "risk": {
+          "missing": "Histórico insuficiente para medir o risco.",
+          "measured": "Queda máxima {max_drawdown}%, volatilidade {volatility}%/ano (bom: menor que −40%, volatilidade ≤ 20%)."
+        },
+        "quality": {
+          "not_applicable": "Vale só para empresas individuais.",
+          "missing": "Dados de rentabilidade e balanço indisponíveis.",
+          "measured": "ROE {roe}% · margem operacional {operating_margin}% · dívida/PL {debt_to_equity}x · liquidez corrente {current_ratio} (bancos e seguradoras se leem diferente)."
+        }
+      },
+      "returnsTitle": "Retornos vs {benchmark}",
+      "returnsTitleNone": "Retornos",
+      "returnsSubtitle": "Anualizados (CAGR), dividendos reinvestidos. Retorno total abaixo de cada número.",
+      "returnsBenchCcy": "{benchmark} convertido para {currency} para uma comparação justa.",
+      "period": "Período",
+      "periodValue": "{years}a",
+      "asset": "{symbol}",
+      "benchmark": "{benchmark}",
+      "excess": "Diferença",
+      "excessHelp": "pontos percentuais por ano",
+      "total": "total {v}",
+      "noBenchmark": "Sem índice",
+      "sinceInception": "Desde {date}: {cagr} ao ano ({total} no total)",
+      "noReturns": "Menos de um ano de histórico.",
+      "drawdownTitle": "Quedas",
+      "maxDrawdown": "Pior queda",
+      "maxDrawdownDates": "{peak} → {trough}",
+      "recovery": "Recuperação",
+      "recoveredIn": "{days} dias para voltar ao topo anterior (em {date})",
+      "notRecovered": "Ainda não se recuperou",
+      "underwater": "{days} dias abaixo do topo anterior",
+      "currentDrawdown": "Desde a máxima histórica",
+      "athOn": "máxima de {price} em {date}",
+      "atHigh": "Na máxima histórica",
+      "worstYear": "Pior ano-calendário",
+      "volatility": "Volatilidade",
+      "volatilityValue": "{v}%/ano",
+      "calendarYears": "Retornos por ano-calendário",
+      "fundTitle": "Detalhes do fundo",
+      "expenseRatio": "Taxa de administração",
+      "expenseRatioValue": "{v}%/ano",
+      "aum": "Patrimônio (AUM)",
+      "yield": "Rendimento",
+      "family": "Gestora",
+      "category": "Categoria",
+      "holdingsPe": "P/L das posições",
+      "holdingsPb": "P/VP das posições",
+      "turnover": "Giro da carteira",
+      "topHoldings": "Maiores posições",
+      "topHoldingsSub": "Top {n}: {w}% do fundo",
+      "fundOfFunds": "Este fundo tem outros ETFs, mostrados como estão.",
+      "sectors": "Setores",
+      "assetMix": "Classes de ativos",
+      "noHoldings": "Carteira indisponível.",
+      "fundamentalsTitle": "Fundamentos da empresa",
+      "valuationGroup": "Valuation",
+      "qualityGroup": "Qualidade",
+      "growthGroup": "Crescimento",
+      "dividendGroup": "Dividendos",
+      "estimatesGroup": "Estimativas de analistas",
+      "marketCap": "Valor de mercado",
+      "sector": "Setor",
+      "trailingPe": "P/L (passado)",
+      "forwardPe": "P/L (projetado)",
+      "peg": "PEG",
+      "priceToBook": "Preço / valor patrimonial",
+      "evEbitda": "EV / EBITDA",
+      "fcfYield": "FCF yield",
+      "roe": "Retorno sobre o PL",
+      "profitMargin": "Margem líquida",
+      "operatingMargin": "Margem operacional",
+      "debtToEquity": "Dívida / PL",
+      "currentRatio": "Liquidez corrente",
+      "revenueGrowth": "Crescimento da receita (anual)",
+      "earningsGrowth": "Crescimento do lucro (anual)",
+      "revenueCagr": "CAGR da receita ({from}–{to})",
+      "netIncomeCagr": "CAGR do lucro líquido ({from}–{to})",
+      "dividendYield": "Dividend yield",
+      "payoutRatio": "Payout",
+      "fiveYearYield": "Yield médio de 5 anos",
+      "revisionMomentum": "Revisões de estimativas de LPA",
+      "revisionsCount": "{up} para cima / {down} para baixo (30 dias)",
+      "redFlagsTitle": "Sinais de alerta",
+      "redFlagsNone": "Nenhum sinal de alerta relevante numa busca citada em notícias e no X.",
+      "redFlagsNotSearched": "Só buscamos para ações individuais.",
+      "severity": {
+        "low": "baixa",
+        "medium": "média",
+        "high": "alta",
+        "critical": "crítica"
+      },
+      "notes": {
+        "ai_unavailable": "A avaliação da IA não estava disponível — o veredito vem da pontuação por regras.",
+        "ai_disabled": "A análise por IA está desligada — o veredito vem da pontuação por regras.",
+        "benchmark_unavailable": "Os dados do índice de comparação não estavam disponíveis.",
+        "benchmark_currency_not_adjusted": "Os retornos do índice estão na moeda dele (câmbio indisponível)."
+      },
+      "caveatsTitle": "Tenha em mente",
+      "caveats": {
+        "not_advice": "Não é recomendação de investimento. Se serve para você depende dos seus objetivos, horizonte e tolerância a risco.",
+        "past_returns": "Retornos passados (dividendos reinvestidos) não preveem retornos futuros.",
+        "heuristics": "A pontuação usa limites simples; ela ignora normas de cada setor e o contexto.",
+        "no_timing": "É uma visão de longo prazo: não diz se esta semana é um bom momento para comprar.",
+        "crypto_high_risk": "Cripto é altamente especulativo: não gera caixa, e quedas de 70–80% já aconteceram várias vezes.",
+        "single_stock": "A maioria das ações individuais rende menos que um fundo de índice amplo no longo prazo."
+      },
+      "sectorNames": {
+        "technology": "Tecnologia",
+        "financial_services": "Financeiro",
+        "industrials": "Industrial",
+        "basic_materials": "Materiais",
+        "consumer_cyclical": "Consumo cíclico",
+        "energy": "Energia",
+        "healthcare": "Saúde",
+        "communication_services": "Comunicação",
+        "consumer_defensive": "Consumo básico",
+        "utilities": "Utilidades",
+        "realestate": "Imobiliário"
+      },
+      "assetClassNames": {
+        "stockPosition": "Ações",
+        "bondPosition": "Renda fixa",
+        "cashPosition": "Caixa",
+        "otherPosition": "Outros",
+        "preferredPosition": "Preferenciais",
+        "convertiblePosition": "Conversíveis"
+      },
+      "assetType": {
+        "STOCK": "Ação",
+        "ETF": "ETF",
+        "CRYPTO": "Cripto",
+        "OTHER": "Outro"
+      },
+      "sourceLink": "Fonte",
+      "daysValue": "{n} dias"
+    }
   }
 }

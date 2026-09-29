@@ -12,10 +12,18 @@ export interface CheckText {
 
 export type CheckVerdict = 'BUY_NOW' | 'WAIT' | 'AVOID'
 
+/** "short" = is the next days/weeks a good swing entry; "long" = is this a
+ *  sound long-term holding (back-end/app/services/long_term_check.py). */
+export type CheckMode = 'short' | 'long'
+
 export type CheckPhase =
   | 'resolving' | 'market_data' | 'filter' | 'sentiment' | 'synthesis' | 'decision' | 'risk' | 'done'
 
+export type LongCheckPhase =
+  | 'resolving' | 'history' | 'benchmark' | 'fundamentals' | 'sentiment' | 'assessment' | 'done'
+
 export interface CheckResult {
+  mode?: 'short'
   input: string
   symbol: string
   exchange: string | null
@@ -79,12 +87,145 @@ export interface CheckJob {
   job_id: string
   input: string
   symbol: string | null
+  mode?: CheckMode
   status: 'running' | 'done' | 'failed'
   phase: CheckPhase | string
   pct: number
   started_at: string
-  result?: CheckResult | null
+  result?: AnyCheckResult | null
   cached?: boolean
   error?: CheckJobError | null
   remaining_today?: number
+}
+
+// ── Long-term mode ──────────────────────────────────────────────────
+
+export type LongVerdict = 'SOLID' | 'REASONABLE_WITH_CAVEATS' | 'NOT_A_GOOD_FIT'
+export type Rating = 'good' | 'fair' | 'poor' | 'n/a'
+
+export interface ScorecardItem {
+  key: 'cost' | 'diversification' | 'track_record' | 'valuation' | 'risk' | 'quality' | string
+  /** stable reason-template id (t.check.long.reasons[key][code]) */
+  code: string
+  rating: Rating
+  /** English fallback */
+  reason: string
+  params: Record<string, string | number | null>
+}
+
+export interface ReturnRow {
+  period: string
+  years: number
+  /** all percentages */
+  asset_total: number
+  asset_cagr: number
+  benchmark_total: number | null
+  benchmark_cagr: number | null
+  excess_cagr: number | null
+}
+
+export interface LongDrawdowns {
+  max: {
+    depth_pct: number
+    peak_date: string | null
+    trough_date: string | null
+    recovery_date: string | null
+    recovered: boolean
+    recovery_days: number | null
+    underwater_days: number | null
+  } | null
+  current: { pct: number; ath: number; ath_date: string } | null
+  worst_year: { year: number; return: number } | null
+  calendar_years: { year: number; return: number }[]
+  volatility: number | null
+  history_years: number
+  since_inception: { total: number; cagr: number | null; years: number; start: string } | null
+}
+
+export interface FundInfo {
+  /** percent (0.2 == 0.20%/yr) */
+  expense_ratio: number | null
+  expense_ratio_source: string | null
+  aum: number | null
+  /** percent */
+  yield: number | null
+  family: string | null
+  category: string | null
+  legal_type: string | null
+  inception_date: string | null
+  /** weight in percent */
+  top_holdings: { symbol: string; name: string | null; weight: number | null }[]
+  holdings_listed: number
+  top10_weight: number | null
+  fund_of_funds: boolean
+  /** percent by Yahoo sector key (e.g. financial_services) */
+  sector_weights: Record<string, number>
+  /** percent by Yahoo key (stockPosition, bondPosition, cashPosition, ...) */
+  asset_classes: Record<string, number>
+  pe: number | null
+  pb: number | null
+  turnover: number | null
+}
+
+export interface StockFundamentals {
+  market_cap: number | null
+  sector: string | null
+  industry: string | null
+  /** fcf_yield in percent */
+  valuation: { trailing_pe: number | null; forward_pe: number | null; peg: number | null; price_to_book: number | null; ev_to_ebitda: number | null; fcf_yield: number | null }
+  /** roe / margins in percent; debt_to_equity in percent (150 == 1.5x) */
+  quality: { roe: number | null; profit_margin: number | null; operating_margin: number | null; debt_to_equity: number | null; current_ratio: number | null }
+  growth: {
+    revenue_growth: number | null
+    earnings_growth: number | null
+    revenue_cagr: number | null
+    net_income_cagr: number | null
+    trend: { year: number; revenue: number | null; net_income: number | null }[]
+  }
+  dividend: { yield: number | null; payout_ratio: number | null; five_year_avg_yield: number | null }
+  estimates: { revision_momentum: number | null; up_30d: number | null; down_30d: number | null; fy1_change_90d: number | null }
+}
+
+export interface LongAssessment {
+  verdict: LongVerdict
+  summary: string
+  strengths: string[]
+  concerns: string[]
+  what_to_watch: string[]
+  dca_note: string | null
+  confidence: number
+}
+
+export interface LongCheckResult {
+  mode: 'long'
+  input: string
+  symbol: string
+  exchange: string | null
+  name: string | null
+  asset_type: 'STOCK' | 'ETF' | 'CRYPTO' | 'OTHER' | string
+  currency: string | null
+  price: number | null
+  verdict: LongVerdict
+  verdict_source: 'ai' | 'scorecard'
+  scorecard_verdict: LongVerdict
+  ai_assessment: LongAssessment | null
+  ai: { called: boolean; provider: string | null; sentiment_called: boolean; status: 'ok' | 'failed' | 'disabled' | string }
+  scorecard: ScorecardItem[]
+  returns: ReturnRow[]
+  benchmark: string | null
+  drawdowns: LongDrawdowns
+  fund: FundInfo | null
+  fundamentals: StockFundamentals | null
+  red_flags: { text: string; url: string | null; severity: string | null; category: string | null }[]
+  notes: CheckText[]
+  data_as_of: string
+  caveats: CheckText[]
+  checked_at: string
+  cached: boolean
+}
+
+export type AnyCheckResult = CheckResult | LongCheckResult
+
+export function isLongResult(r: AnyCheckResult | null | undefined): r is LongCheckResult {
+  return !!r && (r as LongCheckResult).mode === 'long'
 }

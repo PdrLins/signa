@@ -224,14 +224,16 @@ async def call_with_prompt(
     prompt: str,
     max_retries: int = 2,
     json_schema: dict | None = None,
+    tier: str = "routine",
 ) -> dict | None:
     """Run an arbitrary prompt through the local Claude CLI and return parsed JSON.
 
     Used by features beyond `synthesize_signal` (e.g. thesis re-evaluation).
     Returns None on hard failure — callers treat None as "Claude Local
-    unavailable". Pass `json_schema` to get CLI-validated structured output.
+    unavailable". Pass `json_schema` to get CLI-validated structured output
+    and `tier="decision"` to run on settings.claude_decision_model.
     """
-    return await _run_claude_cli(prompt, max_retries=max_retries, json_schema=json_schema)
+    return await _run_claude_cli(prompt, max_retries=max_retries, json_schema=json_schema, tier=tier)
 
 
 async def synthesize_signal(

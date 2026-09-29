@@ -968,3 +968,92 @@ def build_synthesis_prompt(
         knowledge_block=knowledge_block,
         warning_signs=format_warning_signs(signal_for_warnings),
     )
+
+
+# ============================================================
+# LONG-TERM HOLDING ASSESSMENT ("Check a stock", long-term mode)
+# ============================================================
+#
+# Used by `app/services/long_term_check.py`: one decision-tier Claude call
+# that answers "is this a sound LONG-TERM holding?" (5+ years). It is NOT a
+# trading decision: no entry timing, no position sizing, no allocation.
+# The numbers are computed in code; every piece of external text (names,
+# categories, holdings, cited red flags) is wrapped as untrusted data.
+
+LONG_TERM_VERDICTS = ("SOLID", "REASONABLE_WITH_CAVEATS", "NOT_A_GOOD_FIT")
+
+LONG_TERM_JSON_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": list(LONG_TERM_VERDICTS)},
+        "summary": {"type": "string"},
+        "strengths": {"type": "array", "items": {"type": "string"}},
+        "concerns": {"type": "array", "items": {"type": "string"}},
+        "what_to_watch": {"type": "array", "items": {"type": "string"}},
+        "dca_note": {"type": "string"},
+        "confidence": {"type": "integer"},
+    },
+    "required": ["verdict", "summary", "strengths", "concerns", "what_to_watch", "dca_note", "confidence"],
+    "additionalProperties": False,
+}
+
+LONG_TERM_PROMPT = """You are a neutral, evidence-based analyst assessing whether {symbol} is a sound LONG-TERM holding (a horizon of 5+ years) for a buy-and-hold investor.
+
+Today: {today}
+
+{untrusted_notice}
+
+## What this is (and is not)
+- This is NOT a trading call. Do not comment on entry timing, short-term price moves, momentum, "buy the dip", or targets.
+- Do not suggest position sizes, allocation percentages or amounts of money.
+- Use ONLY the data below. If something is missing, say so; do not fill gaps from memory.
+- Keep base rates in mind: over long horizons most actively chosen individual stocks, and most active funds, underperform broad low-cost index funds after costs. A single stock carries company-specific risk that diversification removes. A broad, low-cost, diversified index fund is the usual reference point.
+- Past returns do not guarantee future returns; long history is context, not a forecast.
+- Crypto assets have no cash flows and have had extreme drawdowns; treat them as high-risk.
+- Suitability depends on the investor's own goals, horizon and risk tolerance — your summary or concerns must say so, and say this is not financial advice.
+
+## Asset
+{identity}
+
+## Computed long-run data (by Signa, from daily prices adjusted for dividends and splits)
+{metrics}
+
+## Rule-based scorecard (deterministic heuristics; use as input, you may disagree with reasons)
+{scorecard}
+
+## Cited red flags (material only; from a live news/X search)
+{red_flags}
+
+## Output
+Return ONE JSON object:
+- verdict: SOLID (a sound core long-term holding on this evidence), REASONABLE_WITH_CAVEATS (defensible but with real trade-offs to understand), or NOT_A_GOOD_FIT (poor long-term fit on this evidence).
+- summary: 2-3 sentences, plain language.
+- strengths: up to 5 short bullets, each tied to a number above.
+- concerns: up to 5 short bullets, each tied to a number or missing data.
+- what_to_watch: up to 4 things a long-term holder should monitor (e.g. fees, index changes, debt, margins) — no price levels.
+- dca_note: one or two neutral sentences noting that buying gradually vs all at once is a personal choice (gradual buying reduces regret/timing risk; lump sum historically wins more often because markets tend to rise) — no recommendation.
+- confidence: 0-100, how well the data supports your verdict (lower when history is short or data is missing).
+"""
+
+
+def normalize_long_term_result(data: object) -> dict | None:
+    """Validate a parsed long-term assessment; None when unusable.
+
+    The verdict must be one of LONG_TERM_VERDICTS and the summary non-empty;
+    lists are trimmed, confidence clamped to 0-100 (missing -> 0).
+    """
+    if not isinstance(data, dict):
+        return None
+    verdict = str(data.get("verdict") or "").strip().upper()
+    summary = str(data.get("summary") or "").strip()
+    if verdict not in LONG_TERM_VERDICTS or not summary:
+        return None
+    return {
+        "verdict": verdict,
+        "summary": summary[:1200],
+        "strengths": [s[:300] for s in _str_list(data.get("strengths"), 5)],
+        "concerns": [s[:300] for s in _str_list(data.get("concerns"), 5)],
+        "what_to_watch": [s[:300] for s in _str_list(data.get("what_to_watch"), 4)],
+        "dca_note": str(data.get("dca_note") or "").strip()[:600] or None,
+        "confidence": max(0, min(100, _safe_int(data.get("confidence"), 0))),
+    }

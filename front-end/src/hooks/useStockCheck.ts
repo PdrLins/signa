@@ -2,20 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { checkApi, CheckApiError } from '@/lib/api'
-import type { CheckJob, CheckJobError, CheckResult } from '@/types/check'
+import type { AnyCheckResult, CheckJob, CheckJobError, CheckMode } from '@/types/check'
 
 const POLL_MS = 2_000
 
 export interface StockCheckState {
   job: CheckJob | null
-  result: CheckResult | null
+  result: AnyCheckResult | null
   error: CheckJobError | null
   running: boolean
   /** the ticker the user asked for (as typed) */
   ticker: string | null
+  mode: CheckMode
 }
 
-const IDLE: StockCheckState = { job: null, result: null, error: null, running: false, ticker: null }
+const IDLE: StockCheckState = { job: null, result: null, error: null, running: false, ticker: null, mode: 'short' }
 
 function toError(e: unknown): CheckJobError {
   if (e instanceof CheckApiError) return { code: e.code, message: e.message, status: e.status }
@@ -23,8 +24,8 @@ function toError(e: unknown): CheckJobError {
   return { code: /network/i.test(msg) ? 'network' : 'internal', message: msg, status: 0 }
 }
 
-/** POST /check, then poll GET /check/{id} every 2s until done or failed. */
-export function useStockCheck(onDone?: (r: CheckResult) => void) {
+/** POST /check ({ticker, force, mode}), then poll GET /check/{id} every 2s until done or failed. */
+export function useStockCheck(onDone?: (r: AnyCheckResult) => void) {
   const [state, setState] = useState<StockCheckState>(IDLE)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const runId = useRef(0)
@@ -64,13 +65,13 @@ export function useStockCheck(onDone?: (r: CheckResult) => void) {
     }))
   }, [])
 
-  const start = useCallback(async (ticker: string, force = false) => {
+  const start = useCallback(async (ticker: string, force = false, mode: CheckMode = 'short') => {
     stop()
     const id = ++runId.current
     const clean = ticker.trim()
-    setState({ ...IDLE, running: true, ticker: clean })
+    setState({ ...IDLE, running: true, ticker: clean, mode })
     try {
-      const job = await checkApi.start(clean, force)
+      const job = await checkApi.start(clean, force, mode)
       settle(job, id)
     } catch (e) {
       if (id !== runId.current) return

@@ -21,12 +21,27 @@
       "command": "npm run dev",
       "cwd": "${workspaceFolder}/front-end",
       "env": {
-        "NEXT_PUBLIC_API_URL": "http://localhost:8000/api/v1"
+        "NEXT_PUBLIC_API_URL": "/api/v1"
       },
       "serverReadyAction": {
         "pattern": "Local:\\s+(https?://\\S+)",
         "uriFormat": "%s",
         "action": "openExternally"
+      }
+    },
+    {
+      // Same app, reachable from a phone on the same Wi-Fi at
+      // http://<this-mac-ip>:3000 (printed as "Network:" in the terminal).
+      // Only the web page listens on the network; the API stays on 127.0.0.1
+      // and is reached through Next's /api/v1 proxy. Plain HTTP: use on a
+      // trusted home network only.
+      "name": "Frontend on Wi-Fi (phone)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npx next dev -H 0.0.0.0 -p 3000",
+      "cwd": "${workspaceFolder}/front-end",
+      "env": {
+        "NEXT_PUBLIC_API_URL": "/api/v1"
       }
     }
   ],
@@ -34,6 +49,11 @@
     {
       "name": "Signa (backend + frontend)",
       "configurations": ["Backend (FastAPI :8000)", "Frontend (Next.js :3000)"],
+      "stopAll": true
+    },
+    {
+      "name": "Signa (phone on Wi-Fi)",
+      "configurations": ["Backend (FastAPI :8000)", "Frontend on Wi-Fi (phone)"],
       "stopAll": true
     }
   ]

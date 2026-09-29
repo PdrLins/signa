@@ -1,5 +1,5 @@
 // Helpers for the "Check a stock" page. Pure (plus guarded localStorage).
-import type { CheckResult, CheckText, CheckVerdict } from '@/types/check'
+import type { AnyCheckResult, CheckMode, CheckText, CheckVerdict, LongVerdict } from '@/types/check'
 import { compactUsd, fill, nativePrice, shortDate } from '@/lib/insights'
 import type en from '@/lib/i18n/en.json'
 
@@ -41,8 +41,10 @@ const RECENT_MAX = 8
 export interface RecentCheck {
   symbol: string
   name: string | null
-  verdict: CheckVerdict
+  verdict: CheckVerdict | LongVerdict
   checked_at: string
+  /** entries saved before long-term mode existed have no mode -> short */
+  mode: CheckMode
 }
 
 function isRecent(x: unknown): x is RecentCheck {
@@ -54,15 +56,18 @@ export function loadRecent(): RecentCheck[] {
   try {
     const raw = window.localStorage.getItem(RECENT_KEY)
     const arr: unknown = raw ? JSON.parse(raw) : []
-    return Array.isArray(arr) ? arr.filter(isRecent).slice(0, RECENT_MAX) : []
+    return Array.isArray(arr)
+      ? arr.filter(isRecent).slice(0, RECENT_MAX).map((r) => ({ ...r, mode: r.mode === 'long' ? 'long' : 'short' }))
+      : []
   } catch {
     return []
   }
 }
 
-export function saveRecent(r: CheckResult): RecentCheck[] {
-  const entry: RecentCheck = { symbol: r.symbol, name: r.name, verdict: r.verdict, checked_at: r.checked_at }
-  const next = [entry, ...loadRecent().filter((x) => x.symbol !== r.symbol)].slice(0, RECENT_MAX)
+export function saveRecent(r: AnyCheckResult): RecentCheck[] {
+  const mode: CheckMode = r.mode === 'long' ? 'long' : 'short'
+  const entry: RecentCheck = { symbol: r.symbol, name: r.name, verdict: r.verdict, checked_at: r.checked_at, mode }
+  const next = [entry, ...loadRecent().filter((x) => !(x.symbol === r.symbol && x.mode === mode))].slice(0, RECENT_MAX)
   try {
     window.localStorage.setItem(RECENT_KEY, JSON.stringify(next))
   } catch {
@@ -77,4 +82,34 @@ export function clearRecent(): void {
   } catch {
     // ignore
   }
+}
+
+// ── Preferred mode (per browser) ───────────────────────────────────
+
+const MODE_KEY = 'signa-check-mode'
+
+export function parseMode(v: string | null | undefined): CheckMode | null {
+  return v === 'long' || v === 'short' ? v : null
+}
+
+export function loadMode(): CheckMode {
+  try {
+    return parseMode(window.localStorage.getItem(MODE_KEY)) ?? 'short'
+  } catch {
+    return 'short'
+  }
+}
+
+export function saveMode(mode: CheckMode): void {
+  try {
+    window.localStorage.setItem(MODE_KEY, mode)
+  } catch {
+    // storage disabled — the choice just won't persist
+  }
+}
+
+/** /check URL for a ticker + mode (short is the default and omitted). */
+export function checkHref(ticker: string, mode: CheckMode): string {
+  const q = `ticker=${encodeURIComponent(ticker)}`
+  return mode === 'long' ? `/check?${q}&mode=long` : `/check?${q}`
 }

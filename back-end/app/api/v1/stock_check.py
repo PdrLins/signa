@@ -1,13 +1,18 @@
 """Check a stock — on-demand live analysis of ONE symbol (no trade, no DB rows).
 
-  POST /api/v1/check           {ticker, force?} -> {job_id, status, ...}
+  POST /api/v1/check           {ticker, force?, mode?} -> {job_id, status, ...}
   GET  /api/v1/check/{job_id}  -> progress; `result` when status == "done"
 
 Jobs run as asyncio background tasks in an in-memory registry (single
 worker, like the scan progress state) and expire after
 settings.stock_check_job_ttl_minutes. Results are cached per RESOLVED
-symbol for settings.stock_check_cache_minutes; a repeat check returns the
-cached result immediately (`cached: true`) unless force=true.
+symbol AND mode for settings.stock_check_cache_minutes (mode "short") or
+settings.stock_check_long_cache_hours (mode "long"); a repeat check returns
+the cached result immediately (`cached: true`) unless force=true.
+
+mode: "short" (default) = is the next days/weeks a good swing entry
+(services/stock_check.py); "long" = is this a sound long-term holding
+(services/long_term_check.py). Both share the daily limit.
 
 Limits: settings.stock_check_daily_limit non-cached runs per US-Eastern day
 and settings.stock_check_max_concurrent runs at once. The POST is on the
@@ -26,6 +31,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -34,7 +40,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.dependencies import get_current_user
-from app.services import stock_check
+from app.services import long_term_check, stock_check
 
 router = APIRouter(prefix="/check", tags=["Check"])
 
@@ -45,6 +51,7 @@ _JOB_ID = re.compile(r"^[a-f0-9]{32}$")
 class CheckRequest(BaseModel):
     ticker: str = Field(..., min_length=1, max_length=24)
     force: bool = False
+    mode: Literal["short", "long"] = "short"
 
 
 @dataclass
@@ -52,6 +59,7 @@ class Job:
     id: str
     input: str
     force: bool
+    mode: str = "short"
     status: str = "running"          # running | done | failed
     phase: str = "resolving"
     pct: int = 0
@@ -73,6 +81,7 @@ class Job:
             "job_id": self.id,
             "input": self.input,
             "symbol": self.symbol,
+            "mode": self.mode,
             "status": self.status,
             "phase": self.phase,
             "pct": self.pct,
@@ -88,7 +97,7 @@ class Job:
 
 # ── In-memory state (single-process) ──
 _jobs: dict[str, Job] = {}
-_results: dict[str, tuple[float, dict]] = {}   # resolved symbol -> (stored_at, result)
+_results: dict[str, tuple[float, dict]] = {}   # cache key (symbol[|long]) -> (stored_at, result)
 _alias: dict[str, str] = {}                     # normalized input -> resolved symbol
 _daily: dict[str, object] = {"date": None, "count": 0}
 
@@ -132,6 +141,17 @@ def _next_reset_iso() -> str:
     return tomorrow.isoformat()
 
 
+def _cache_key(symbol: str, mode: str = "short") -> str:
+    """Short-mode results keep the bare symbol key; long mode is suffixed."""
+    return symbol if mode == "short" else f"{symbol}|{mode}"
+
+
+def _cache_ttl_s(key: str) -> float:
+    if key.endswith("|long"):
+        return settings.stock_check_long_cache_hours * 3600
+    return settings.stock_check_cache_minutes * 60
+
+
 def _purge() -> None:
     ttl = settings.stock_check_job_ttl_minutes * 60
     cutoff = time.time() - ttl
@@ -139,20 +159,23 @@ def _purge() -> None:
         job = _jobs.pop(jid)
         if job.task and not job.task.done():
             job.task.cancel()
-    cache_ttl = settings.stock_check_cache_minutes * 60
-    for sym in [s for s, (at, _) in _results.items() if time.time() - at > cache_ttl]:
-        _results.pop(sym, None)
+    for key in [k for k, (at, _) in _results.items() if time.time() - at > _cache_ttl_s(k)]:
+        _results.pop(key, None)
 
 
-def _cached_result(symbol: str | None) -> dict | None:
-    if not symbol or settings.stock_check_cache_minutes <= 0:
+def _cached_result(symbol: str | None, mode: str = "short") -> dict | None:
+    if not symbol:
         return None
-    entry = _results.get(symbol)
+    key = _cache_key(symbol, mode)
+    ttl = _cache_ttl_s(key)
+    if ttl <= 0:
+        return None
+    entry = _results.get(key)
     if not entry:
         return None
     at, result = entry
-    if time.time() - at > settings.stock_check_cache_minutes * 60:
-        _results.pop(symbol, None)
+    if time.time() - at > ttl:
+        _results.pop(key, None)
         return None
     return {**result, "cached": True}
 
@@ -172,17 +195,21 @@ async def _run(job: Job) -> None:
         job.symbol = resolved["symbol"]
         _alias[job.input] = resolved["symbol"]
         if not job.force:
-            cached = _cached_result(job.symbol)
+            cached = _cached_result(job.symbol, job.mode)
             if cached is not None:
                 _refund(job)
                 job.result = cached
                 job.status = "done"
                 job.progress("done", 100)
                 return
-        job.progress("market_data", 6)
-        result = await stock_check.run_check(resolved, progress=job.progress)
+        if job.mode == "long":
+            job.progress("history", 6)
+            result = await long_term_check.run_long_check(resolved, progress=job.progress)
+        else:
+            job.progress("market_data", 6)
+            result = await stock_check.run_check(resolved, progress=job.progress)
         result = {**result, "cached": False}
-        _results[job.symbol] = (time.time(), result)
+        _results[_cache_key(job.symbol, job.mode)] = (time.time(), result)
         job.result = result
         job.status = "done"
         job.progress("done", 100)
@@ -213,9 +240,9 @@ async def start_check(body: CheckRequest, user: dict = Depends(get_current_user)
 
     # Cache hit (by a previously resolved alias) — instant, never counted.
     if not body.force:
-        cached = _cached_result(_alias.get(sym) or sym)
+        cached = _cached_result(_alias.get(sym) or sym, body.mode)
         if cached is not None:
-            job = Job(id=uuid.uuid4().hex, input=sym, force=False, status="done",
+            job = Job(id=uuid.uuid4().hex, input=sym, force=False, mode=body.mode, status="done",
                       phase="done", pct=100, symbol=cached.get("symbol"), result=cached)
             _jobs[job.id] = job
             return job.public()
@@ -229,7 +256,7 @@ async def start_check(body: CheckRequest, user: dict = Depends(get_current_user)
         raise _err("daily_limit", f"Daily limit of {limit} checks reached — resets at midnight ET.",
                    status.HTTP_429_TOO_MANY_REQUESTS, limit=limit, resets_at=_next_reset_iso())
 
-    job = Job(id=uuid.uuid4().hex, input=sym, force=body.force, counted=True)
+    job = Job(id=uuid.uuid4().hex, input=sym, force=body.force, mode=body.mode, counted=True)
     _consume()
     _jobs[job.id] = job
     job.task = asyncio.create_task(_run(job))
