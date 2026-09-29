@@ -384,6 +384,13 @@ async def review_buy(ticker: str, technical_data: dict, fundamental_data: dict,
         return error_review(f"{type(e).__name__}: {str(e)[:160]}", provider)
 
     verdict = normalize_review(raw, provider)
+    if settings.codex_local:
+        try:
+            from app.services.budget_service import BudgetService
+            local_budget = await BudgetService.get_instance()
+            await local_budget.record_call("codex-cli", "review", ticker, success=not verdict.get("error"))
+        except Exception as e:
+            logger.debug(f"local usage record skipped (codex-cli): {e}")
     if budget is not None:
         await budget.record_call("openai", "review", ticker, success=not verdict.get("error"))
     if not verdict.get("error") and settings.synthesis_cache_hours > 0 and current_price:

@@ -1195,3 +1195,24 @@ def get_signal_verdicts(signal_ids: list[str], chunk: int = 100) -> list[dict]:
             cols = _SIGNAL_VERDICT_COLUMNS_MIN
             out.extend((client.table("signals").select(cols).in_("id", part).execute()).data or [])
     return out
+
+
+def get_ai_usage_breakdown(since_iso: str) -> dict[str, dict]:
+    """Calls and estimated cost per provider since `since_iso` (ai_usage, paged)."""
+    client = get_client()
+    out: dict[str, dict] = {}
+    start, page = 0, 1000
+    while True:
+        rows = (
+            client.table("ai_usage").select("provider,estimated_cost")
+            .gte("created_at", since_iso).order("created_at")
+            .range(start, start + page - 1).execute()
+        ).data or []
+        for r in rows:
+            p = r.get("provider") or "unknown"
+            agg = out.setdefault(p, {"calls": 0, "cost_usd": 0.0})
+            agg["calls"] += 1
+            agg["cost_usd"] += float(r.get("estimated_cost") or 0)
+        if len(rows) < page:
+            return out
+        start += page

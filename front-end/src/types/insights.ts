@@ -42,7 +42,12 @@ export interface TodayStatus {
   peak_equity: number | null
   drawdown_pct: number | null
   breaker: BreakerInfo
-  ai_spend: { month_usd: number; budget_usd: number } | null
+  ai_spend: {
+    month_usd: number
+    budget_usd: number
+    /** Paid providers ($) then local CLIs (always $0, not in month_usd). */
+    breakdown?: { provider: string; calls: number; cost_usd: number; local: boolean }[]
+  } | null
 }
 
 export interface ScanRef {

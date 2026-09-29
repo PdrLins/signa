@@ -84,6 +84,15 @@ def _cached_synthesis(cache: TTLCache, ticker: str, current_price) -> dict | Non
     return {**result, "_cached": True}
 
 
+async def _record_local(provider_name: str, call_type: str, ticker: str, success: bool) -> None:
+    """Log a local-CLI call ($0) for the usage breakdown; never raises."""
+    try:
+        budget = await _get_budget()
+        await budget.record_call(provider_name, call_type, ticker, success=bool(success))
+    except Exception as e:
+        logger.debug(f"local usage record skipped ({provider_name}): {e}")
+
+
 async def _get_budget():
     """Lazy-load budget service to avoid circular imports."""
     from app.services.budget_service import BudgetService
@@ -147,6 +156,8 @@ async def _route_synthesis(
                     result = await claude_local_synth(
                         ticker, technical_data, fundamental_data, macro_data, grok_data, tier=tier,
                     )
+                    await _record_local("claude-local", "decision" if decision else "synthesis",
+                                        ticker, not result.get("error"))
                     if not result.get("error"):
                         result["_provider"] = "claude-local" + provider_suffix
                         return result
@@ -417,6 +428,7 @@ async def re_evaluate_thesis(
         try:
             from app.ai.claude_local_client import call_with_prompt
             data = await call_with_prompt(prompt, json_schema=THESIS_REEVAL_JSON_SCHEMA)
+            await _record_local("claude-local", "thesis", symbol, _valid_reeval_shape(data))
             if _valid_reeval_shape(data):
                 data["_provider"] = "claude-local"
                 logger.debug(
@@ -481,6 +493,7 @@ async def assess_long_term(symbol: str, prompt: str) -> dict | None:
             from app.ai.claude_local_client import call_with_prompt
             data = await call_with_prompt(prompt, json_schema=LONG_TERM_JSON_SCHEMA, tier="decision")
             result = normalize_long_term_result(data)
+            await _record_local("claude-local", "long_term", symbol, result is not None)
             if result is not None:
                 result["_provider"] = "claude-local-decision"
                 return result

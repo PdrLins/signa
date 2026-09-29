@@ -958,7 +958,16 @@
       "needAttention": "{n} precisam de atenção",
       "checking": "Verificando…",
       "unknown": "—",
-      "checkStatus": "Abra a página de integrações para verificar"
+      "checkStatus": "Abra a página de integrações para verificar",
+      "providers": {
+        "grok": "Grok",
+        "claude": "Claude API",
+        "openai": "OpenAI API",
+        "claude-local": "Claude CLI",
+        "codex-cli": "Codex CLI"
+      },
+      "localFree": "Local (grátis):",
+      "callsN": "{n} chamadas"
     },
     "funnel": {
       "title": "Última varredura · {time}",
@@ -1312,11 +1321,11 @@
   "check": {
     "title": "Checar uma ação",
     "subtitle": "Roda a análise completa do Signa, ao vivo, em um ticker e mostra se o brain compraria agora. Nada é comprado.",
-    "label": "Ticker",
-    "placeholder": "ex.: XEQT, AAPL, BTC",
+    "label": "Símbolo ou empresa",
+    "placeholder": "ex.: XEQT, Tesla, Royal Bank",
     "submit": "Checar",
     "checking": "Checando…",
-    "inputHelp": "Ações da TSX (.TO) e cripto (-USD) são detectadas automaticamente. Leva cerca de um minuto.",
+    "inputHelp": "Busque pelo símbolo ou pelo nome da empresa. Ações da TSX (.TO) e cripto (-USD) são detectadas automaticamente. Leva cerca de um minuto.",
     "remaining": "{n} checagens restantes hoje",
     "recent": "Checagens recentes",
     "recentEmpty": "Suas checagens aparecem aqui.",
@@ -1432,7 +1441,7 @@
     },
     "tryAgain": "Tentar de novo",
     "todayLabel": "Checar uma ação",
-    "todayPlaceholder": "Ticker…",
+    "todayPlaceholder": "Símbolo ou nome da empresa…",
     "todaySubmit": "Checar",
     "subtitleLong": "Veja se uma ação, ETF ou cripto parece um bom investimento de longo prazo (5+ anos): retornos históricos vs um índice, quedas, custos e fundamentos. Sem timing, sem tamanho de posição.",
     "modeLabel": "O que você quer saber?",
@@ -1459,6 +1468,16 @@
       "done": "Pronto"
     },
     "todayMode": "Tipo de checagem",
+    "search": {
+      "suggestions": "Sugestões",
+      "searching": "Buscando…",
+      "noMatches": "Nenhum resultado para “{q}”",
+      "noMatchesHint": "Pressione Enter para checar como digitado.",
+      "failed": "Busca indisponível — pressione Enter para checar como digitado.",
+      "count": "{n} sugestões disponíveis. Use as setas para cima e para baixo para escolher.",
+      "tracked": "Acompanhado pelo Signa",
+      "types": { "stock": "Ação", "etf": "ETF", "crypto": "Cripto" }
+    },
     "long": {
       "verdict": {
         "SOLID": "Sólido para o longo prazo",

@@ -51,7 +51,6 @@ export default function TodayPage() {
           <p className="text-[13px] md:text-sm" style={{ color: theme.colors.textSub }}>{meta}</p>
         </div>
         <div className="flex items-center gap-2.5 shrink-0">
-          <CheckSearchBox className="hidden lg:flex" />
           <Link
             href="/logs"
             className="hidden md:inline-flex items-center h-11 px-[18px] rounded-[10px] text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
@@ -80,7 +79,7 @@ export default function TodayPage() {
         </div>
       </header>
 
-      <CheckSearchBox className="lg:hidden" />
+      <CheckSearchBox />
 
       {scanning && progress && <ScanProgressPanel progress={progress} phaseLabel={phaseLabel} />}
 

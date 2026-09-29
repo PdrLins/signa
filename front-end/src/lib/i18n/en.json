@@ -958,7 +958,16 @@
       "needAttention": "{n} need attention",
       "checking": "Checking…",
       "unknown": "—",
-      "checkStatus": "Open the integrations page to run a check"
+      "checkStatus": "Open the integrations page to run a check",
+      "providers": {
+        "grok": "Grok",
+        "claude": "Claude API",
+        "openai": "OpenAI API",
+        "claude-local": "Claude CLI",
+        "codex-cli": "Codex CLI"
+      },
+      "localFree": "Local (free):",
+      "callsN": "{n} calls"
     },
     "funnel": {
       "title": "Latest scan · {time}",
@@ -1312,11 +1321,11 @@
   "check": {
     "title": "Check a stock",
     "subtitle": "Run Signa's full live analysis on one ticker and see whether the brain would buy it right now. Nothing is bought.",
-    "label": "Ticker",
-    "placeholder": "e.g. XEQT, AAPL, BTC",
+    "label": "Symbol or company",
+    "placeholder": "e.g. XEQT, Tesla, Royal Bank",
     "submit": "Check",
     "checking": "Checking…",
-    "inputHelp": "TSX listings (.TO) and crypto (-USD) are detected automatically. Takes about a minute.",
+    "inputHelp": "Search by symbol or company name. TSX listings (.TO) and crypto (-USD) are detected automatically. Takes about a minute.",
     "remaining": "{n} checks left today",
     "recent": "Recent checks",
     "recentEmpty": "Your checks will show up here.",
@@ -1432,7 +1441,7 @@
     },
     "tryAgain": "Try again",
     "todayLabel": "Check a stock",
-    "todayPlaceholder": "Ticker…",
+    "todayPlaceholder": "Symbol or company name…",
     "todaySubmit": "Check",
     "subtitleLong": "See whether a stock, ETF or crypto looks like a sound long-term holding (5+ years): long-run returns vs an index, drawdowns, costs and fundamentals. No timing, no sizing.",
     "modeLabel": "What do you want to know?",
@@ -1459,6 +1468,16 @@
       "done": "Done"
     },
     "todayMode": "Check type",
+    "search": {
+      "suggestions": "Suggestions",
+      "searching": "Searching…",
+      "noMatches": "No matches for “{q}”",
+      "noMatchesHint": "Press Enter to check it as typed.",
+      "failed": "Search is unavailable — press Enter to check it as typed.",
+      "count": "{n} suggestions available. Use the up and down arrows to choose.",
+      "tracked": "Tracked by Signa",
+      "types": { "stock": "Stock", "etf": "ETF", "crypto": "Crypto" }
+    },
     "long": {
       "verdict": {
         "SOLID": "Solid long-term holding",

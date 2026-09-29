@@ -6,6 +6,7 @@ import type { WatchlistItem, WatchlistResponse, WatchlistAddRequest } from '@/ty
 import type { ScansResponse } from '@/types/scan'
 import type { TodayInsights, PerformanceInsights, BacktestInsights, SignalTrail, SignalVerdict } from '@/types/insights'
 import type { CheckJob, CheckMode } from '@/types/check'
+import type { SymbolSearchResponse } from '@/types/symbols'
 import type { LoginRequest, LoginResponse, OtpVerifyRequest, AuthResponse } from '@/types/auth'
 import type {
   AllocateResponse, Holding, HoldingPatch, HoldingsResponse, HoldingUpsertItem, ResolveResponse, ReviewJob,
@@ -372,6 +373,12 @@ export const checkApi = {
   start: (ticker: string, force = false, mode: CheckMode = 'short') =>
     checkCall<CheckJob>('post', '/check', { ticker, force, mode }),
   get: (jobId: string) => checkCall<CheckJob>('get', `/check/${encodeURIComponent(jobId)}`),
+}
+
+// Symbol search (ticker or company name, typo tolerant) for the Check box
+export const symbolsApi = {
+  search: (q: string, limit = 8, signal?: AbortSignal) =>
+    get<SymbolSearchResponse>('/symbols/search', { q, limit }, { signal }),
 }
 
 // My holdings — coded 4xx/503 errors are returned as CheckApiError (same

@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useId, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Search } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
@@ -10,12 +10,14 @@ import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Panel } from '@/components/insights/Panel'
 import { CheckResultView, useVerdictStyle } from '@/components/check/CheckResultView'
 import { LongResultView } from '@/components/check/long/LongResultView'
+import { SymbolCombobox, resolveRawEntry } from '@/components/check/SymbolCombobox'
 import { useLongVerdictStyle } from '@/components/check/long/format'
 import {
   checkHref, clearRecent, loadMode, loadRecent, parseMode, saveMode, saveRecent, type RecentCheck,
 } from '@/lib/check'
 import { fill, shortDate } from '@/lib/insights'
 import { isLongResult, type CheckMode, type CheckResult, type CheckVerdict, type LongVerdict } from '@/types/check'
+import type { SymbolMatch } from '@/types/symbols'
 
 const PHASES: Record<CheckMode, string[]> = {
   short: ['resolving', 'market_data', 'filter', 'sentiment', 'synthesis', 'decision', 'risk'],
@@ -102,9 +104,12 @@ function CheckPageInner() {
     if (check.result) headingRef.current?.focus()
   }, [check.result])
 
+  const suggestions = useRef<SymbolMatch[]>([])
+  const onResults = useCallback((r: SymbolMatch[]) => { suggestions.current = r }, [])
+
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!check.running) run(value)
+    if (!check.running) run(resolveRawEntry(value, suggestions.current))
   }
 
   const job = check.job
@@ -171,22 +176,19 @@ function CheckPageInner() {
               <p id={modeHelpId} className="text-[12px]" style={{ color: theme.colors.textSub }}>{tc.modeHelp[mode]}</p>
             </fieldset>
             <label htmlFor={inputId} className="text-[13px] font-medium" style={{ color: theme.colors.text }}>{tc.label}</label>
-            <div className="flex gap-2">
-              <input
+            <div className="relative flex gap-2">
+              <SymbolCombobox
                 id={inputId}
-                type="text"
-                autoCapitalize="characters"
-                autoComplete="off"
-                spellCheck={false}
-                maxLength={20}
                 value={value}
-                onChange={(e) => setValue(e.target.value)}
+                onChange={setValue}
+                onPick={(m) => { if (!check.running) run(m.symbol) }}
+                onResults={onResults}
                 placeholder={tc.placeholder}
-                aria-describedby={helpId}
+                describedBy={helpId}
                 className="flex-1 min-w-0 h-11 rounded-[10px] px-3 text-[15px] outline-none focus-visible:outline focus-visible:outline-2"
                 style={{
                   backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text,
-                  border: `1px solid ${theme.colors.border}`, outlineColor: theme.colors.primary, fontFamily: 'var(--font-mono)',
+                  border: `1px solid ${theme.colors.border}`, outlineColor: theme.colors.primary,
                 }}
               />
               <button

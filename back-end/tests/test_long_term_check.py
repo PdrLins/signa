@@ -209,7 +209,8 @@ def test_local_mode_uses_cli_decision_tier_only(monkeypatch, ai_calls):
     r = run(provider.assess_long_term("XEQT.TO", "prompt"))
     assert seen == [("cli", "decision")]
     assert r["verdict"] == "SOLID" and r["confidence"] == 100 and r["_provider"] == "claude-local-decision"
-    assert budget.recorded == []
+    # Only the free local-CLI usage entry — never a paid provider.
+    assert [rec[:2] for rec in budget.recorded] == [("claude-local", "long_term")]
 
 
 def test_local_mode_failure_never_falls_to_api(monkeypatch, ai_calls):

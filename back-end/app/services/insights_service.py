@@ -471,6 +471,35 @@ def build_status(wallet: Mapping | None, open_trades: list[dict], prices: Mappin
     }
 
 
+PAID_AI_PROVIDERS = ("grok", "claude", "openai")
+LOCAL_AI_PROVIDERS = ("claude-local", "codex-cli")
+
+
+def ai_usage_breakdown(rows: Mapping[str, Mapping] | None) -> list[dict]:
+    """Per-provider calls/cost for the month. Paid providers first (with $),
+    then local CLIs (always $0, never part of the month total)."""
+    rows = rows or {}
+    out = []
+    for key in PAID_AI_PROVIDERS + LOCAL_AI_PROVIDERS:
+        r = rows.get(key) or {}
+        calls = int(r.get("calls") or 0)
+        local = key in LOCAL_AI_PROVIDERS
+        if calls == 0 and key == "openai":
+            continue
+        out.append({
+            "provider": key,
+            "calls": calls,
+            "cost_usd": 0.0 if local else round(float(r.get("cost_usd") or 0.0), 2),
+            "local": local,
+        })
+    return out
+
+
+def _month_start_et_iso() -> str:
+    now = datetime.now(ET)
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+
 def ai_spend_from_summary(summary: Mapping | None) -> dict | None:
     if not summary:
         return None
@@ -678,7 +707,12 @@ def get_today(ai_spend: dict | None = None) -> dict:
 
     return _clean({
         "as_of": datetime.now(timezone.utc).isoformat(),
-        "status": build_status(wallet, open_trades, prices, snapshots, ai_spend),
+        "status": build_status(
+            wallet, open_trades, prices, snapshots,
+            {**ai_spend, "breakdown": ai_usage_breakdown(
+                _safe(lambda: queries.get_ai_usage_breakdown(_month_start_et_iso()), {}, "ai usage breakdown"))}
+            if ai_spend else ai_spend,
+        ),
         "scan": ({"id": str(scan["id"]), "type": scan.get("scan_type"), "status": scan.get("status"),
                   "started_at": scan.get("started_at"), "completed_at": scan.get("completed_at")}
                  if scan and scan.get("id") else None),

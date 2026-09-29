@@ -115,6 +115,28 @@ export function StatusStrip({ status }: { status: TodayStatus }) {
         ) : (
           <span className="text-[12px]" style={{ color: theme.colors.textSub }}>{s.noBudget}</span>
         )}
+        {spend?.breakdown && spend.breakdown.length > 0 && (
+          <div className="flex flex-col gap-0.5 text-[11px] md:text-[12px] tabular-nums" style={{ color: theme.colors.textSub }}>
+            <span>
+              {spend.breakdown.filter((b) => !b.local).map((b, i) => (
+                <span key={b.provider}>
+                  {i > 0 && ' · '}
+                  {s.providers[b.provider as keyof typeof s.providers] ?? b.provider}{' '}
+                  <span style={{ color: theme.colors.text, fontFamily: 'var(--font-mono)' }}>{money(b.cost_usd)}</span>
+                </span>
+              ))}
+            </span>
+            <span>
+              {s.localFree}{' '}
+              {spend.breakdown.filter((b) => b.local).map((b, i) => (
+                <span key={b.provider}>
+                  {i > 0 && ' · '}
+                  {s.providers[b.provider as keyof typeof s.providers] ?? b.provider} {fill(s.callsN, { n: b.calls })}
+                </span>
+              ))}
+            </span>
+          </div>
+        )}
       </div>
       <div
         className="hidden lg:flex rounded-[14px] p-[18px] flex-col gap-2 min-w-0"

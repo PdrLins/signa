@@ -135,6 +135,10 @@ COST_ESTIMATES: dict[str, dict[str, float]] = {
     },
 }
 
+# Local CLIs run on the owner's subscriptions: recorded in ai_usage for the
+# usage breakdown, always at $0, never counted toward budgets or totals.
+LOCAL_PROVIDERS = {"claude-local", "codex-cli"}
+
 # OpenAI API path with no configured monthly budget -> this hard cap.
 OPENAI_DEFAULT_MONTHLY_CAP_USD = 5.0
 
@@ -264,7 +268,7 @@ class BudgetService:
         daily_spend = self.get_daily_spend(provider) + pending
         monthly_spend = self.get_monthly_spend(provider) + pending
 
-        cost = COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
+        cost = 0.0 if provider in LOCAL_PROVIDERS else COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
         if cost == 0:
             return True, "free_tier", cost
         if daily_limit > 0 and daily_spend + cost > daily_limit:
@@ -289,13 +293,13 @@ class BudgetService:
             return allowed, reason
 
     async def release(self, provider: str, call_type: str) -> None:
-        cost = COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
+        cost = 0.0 if provider in LOCAL_PROVIDERS else COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
         async with self._data_lock:
             self._reserved[provider] = max(0.0, self._reserved.get(provider, 0.0) - cost)
 
     async def record_call(self, provider: str, call_type: str, ticker: str = "", success: bool = True):
         """Record an AI call and its estimated cost. Thread-safe."""
-        cost = COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
+        cost = 0.0 if provider in LOCAL_PROVIDERS else COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
         today = self._today()
         month = self._month()
 
