@@ -27,7 +27,7 @@ export function useBrainChallenge() {
   return useMutation({
     mutationFn: async () => {
       const res = await client.post('/brain/challenge')
-      return res.data as { message: string; session_token: string }
+      return res.data as { message: string; session_token?: string; channel?: 'telegram' | 'fallback' }
     },
   })
 }

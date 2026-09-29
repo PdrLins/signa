@@ -797,7 +797,8 @@
     "wfCatalystDetection": "Catalyst detection",
     "wfTechnicalMomentum": "Technical momentum",
     "wfFundamentals": "Fundamentals",
-    "approvedNeedsChange": "Approved — needs a code/config change"
+    "approvedNeedsChange": "Approved — needs a code/config change",
+    "otpFallback": "Telegram is off, so no code was sent. Enter your fallback unlock code."
   },
   "logs": {
     "systemLogs": "Logs",

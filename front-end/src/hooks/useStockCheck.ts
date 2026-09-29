@@ -29,6 +29,10 @@ export function useStockCheck(onDone?: (r: AnyCheckResult) => void) {
   const [state, setState] = useState<StockCheckState>(IDLE)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const runId = useRef(0)
+  // The backend keeps jobs in memory: a restart (e.g. dev auto-reload) loses
+  // them and polling gets 404 job_not_found. Re-submit the same check once.
+  const lastRequest = useRef<{ ticker: string; force: boolean; mode: CheckMode } | null>(null)
+  const restarts = useRef(0)
   const onDoneRef = useRef(onDone)
   onDoneRef.current = onDone
 
@@ -49,7 +53,21 @@ export function useStockCheck(onDone?: (r: AnyCheckResult) => void) {
           settle(next, id)
         } catch (e) {
           if (id !== runId.current) return
-          setState((s) => ({ ...s, running: false, error: toError(e) }))
+          const err = toError(e)
+          const req = lastRequest.current
+          if (err.code === 'job_not_found' && req && restarts.current < 1) {
+            restarts.current += 1
+            try {
+              const again = await checkApi.start(req.ticker, req.force, req.mode)
+              settle(again, id)
+              return
+            } catch (e2) {
+              if (id !== runId.current) return
+              setState((s) => ({ ...s, running: false, error: toError(e2) }))
+              return
+            }
+          }
+          setState((s) => ({ ...s, running: false, error: err }))
         }
       }, POLL_MS)
       return
@@ -69,6 +87,8 @@ export function useStockCheck(onDone?: (r: AnyCheckResult) => void) {
     stop()
     const id = ++runId.current
     const clean = ticker.trim()
+    lastRequest.current = { ticker: clean, force, mode }
+    restarts.current = 0
     setState({ ...IDLE, running: true, ticker: clean, mode })
     try {
       const job = await checkApi.start(clean, force, mode)

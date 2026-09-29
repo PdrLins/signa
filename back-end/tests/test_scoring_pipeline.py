@@ -40,7 +40,7 @@ def run(monkeypatch):
         return None
     monkeypatch.setattr(scan_service.barchart_scanner, "get_options_flow", _opts)
 
-    async def _sent(_t, market_cap=None):
+    async def _sent(_t, market_cap=None, **_kw):
         return {"score": 80, "label": "bullish", "confidence": 70, "mention_count": 300,
                 "citations": ["https://x.com/a/status/1"], "red_flags": [], "top_themes": []}
     monkeypatch.setattr(scan_service.ai_provider, "analyze_sentiment", _sent)

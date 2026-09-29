@@ -775,9 +775,16 @@ def format_sentiment(grok_data: dict) -> str:
     """
     if not isinstance(grok_data, dict):
         return "- No sentiment data available"
+    if grok_data.get("_skipped"):
+        return f"- News/sentiment: not used for this kind of holding ({grok_data.get('summary') or 'skipped by design'})."
     if grok_data.get("error") or not float(grok_data.get("confidence") or 0):
         reason = grok_data.get("error") or "no cited sources / zero confidence"
-        return f"- No reliable sentiment available ({str(reason)[:120]}). Do not weight sentiment."
+        return (
+            f"- News/sentiment: UNAVAILABLE for this scan ({str(reason)[:120]}). "
+            "This is a data gap, not a signal: treat news as UNKNOWN (neither bullish nor "
+            "bearish), and do not read the gap itself as negative. Decide on the remaining "
+            "evidence; if a BUY would depend on news you cannot see, say so in your reasoning."
+        )
     label = str(grok_data.get("label") or "unknown").replace("_", " ").title()
     lines = [
         f"- Sentiment: {label} (score: {float(grok_data.get('score') or 0):.0f}/100)",

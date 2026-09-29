@@ -797,7 +797,8 @@
     "wfCatalystDetection": "Detecção de catalisador",
     "wfTechnicalMomentum": "Momentum técnico",
     "wfFundamentals": "Fundamentos",
-    "approvedNeedsChange": "Aprovada — requer mudança no código/configuração"
+    "approvedNeedsChange": "Aprovada — requer mudança no código/configuração",
+    "otpFallback": "O Telegram está desligado, então nenhum código foi enviado. Digite seu código de desbloqueio alternativo."
   },
   "logs": {
     "systemLogs": "Logs",

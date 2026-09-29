@@ -392,6 +392,21 @@ def _generate_key_points(
 
 # ═══ CHALLENGE / VERIFY (JWT only) ═══
 
+def brain_otp_via_telegram() -> bool:
+    """True when the unlock code goes out by Telegram; False = fallback code.
+
+    Telegram counts as off when BRAIN_OTP_ENABLED=false, or when the bot token
+    or chat id is missing or still the .env.example placeholder.
+    """
+    if not settings.brain_otp_enabled:
+        return False
+    token = (settings.telegram_bot_token or "").strip()
+    chat = str(settings.telegram_chat_id or "").strip()
+    placeholder = (not token or not chat or "ABC-DEF" in token
+                   or token.startswith("123456:") or chat == "123456789")
+    return not placeholder
+
+
 @router.post("/challenge")
 async def brain_challenge(request: Request, user: dict = Depends(get_current_user)):
     user_id = user["user_id"]
@@ -399,7 +414,8 @@ async def brain_challenge(request: Request, user: dict = Depends(get_current_use
     _check_lockout(user_id)
     _check_challenge_rate(user_id)
 
-    otp = generate_otp()
+    telegram_on = brain_otp_via_telegram()
+    otp = generate_otp() if telegram_on else settings.brain_otp_fallback_code
     otp_hashed = hash_otp(otp, salt=user_id)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.brain_otp_expire_seconds)
 
@@ -418,13 +434,19 @@ async def brain_challenge(request: Request, user: dict = Depends(get_current_use
     timestamps.append(datetime.now(timezone.utc).timestamp())
     brain_challenge_cache.set(f"ch:{user_id}", timestamps, ttl=settings.rate_limit_window_minutes * 60)
 
+    if not telegram_on:
+        insert_audit_log(event_type=AuditEvent.BRAIN_CHALLENGE_SENT, success=True, user_id=user_id,
+                         ip_address=ip, metadata={"channel": "fallback_code"})
+        logger.warning("Brain challenge: Telegram off — fallback unlock code accepted (no message sent)")
+        return {"message": "Telegram is off — enter the fallback code", "channel": "fallback"}
+
     db_user = get_user_by_id(user_id)
     chat_id = db_user["telegram_chat_id"] if db_user else settings.telegram_chat_id
     _tg_send(chat_id, msg("brain_otp", otp=otp), urgent=True)
 
     insert_audit_log(event_type=AuditEvent.BRAIN_CHALLENGE_SENT, success=True, user_id=user_id, ip_address=ip)
     logger.info(f"Brain challenge sent for user {user_id}")
-    return {"message": "Code sent to your Telegram"}
+    return {"message": "Code sent to your Telegram", "channel": "telegram"}
 
 
 @router.post("/verify")

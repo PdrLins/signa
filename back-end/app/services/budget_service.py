@@ -87,10 +87,32 @@ monthly.
 import asyncio
 from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
 from app.core.config import settings
+
+# Budget days and months follow the market's clock (US/Eastern), not UTC:
+# an evening scan at 10 PM ET is still "today", not tomorrow's allowance.
+_ET = ZoneInfo("America/New_York")
+
+
+def _et_now() -> datetime:
+    return datetime.now(_ET)
+
+
+def _et_day_month(created_at: str) -> tuple[str, str]:
+    """(YYYY-MM-DD, YYYY-MM) in ET for an ai_usage created_at timestamp."""
+    try:
+        dt = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        et = dt.astimezone(_ET)
+        return et.strftime("%Y-%m-%d"), et.strftime("%Y-%m")
+    except (TypeError, ValueError):
+        raw = str(created_at)
+        return raw[:10], raw[:7]
 
 # ─── Estimated cost per call (USD) ───────────────────────────
 # These are conservative estimates for typical Signa prompts.
@@ -154,18 +176,27 @@ class BudgetService:
         try:
             from app.db.supabase import get_client
             client = get_client()
-            now = datetime.now(timezone.utc)
-            month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            month_start = _et_now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-            result = client.table("ai_usage").select("*").gte(
-                "created_at", month_start.isoformat()
-            ).execute()
+            # Page through the month (PostgREST caps a response at 1000 rows).
+            rows: list[dict] = []
+            page = 1000
+            while True:
+                batch = (
+                    client.table("ai_usage").select("provider,estimated_cost,created_at")
+                    .gte("created_at", month_start.isoformat())
+                    .order("created_at")
+                    .range(len(rows), len(rows) + page - 1)
+                    .execute()
+                ).data or []
+                rows.extend(batch)
+                if len(batch) < page:
+                    break
 
-            for row in result.data or []:
+            for row in rows:
                 provider = row["provider"]
-                cost = float(row.get("estimated_cost", 0))
-                created = row["created_at"][:10]  # YYYY-MM-DD
-                month = row["created_at"][:7]      # YYYY-MM
+                cost = float(row.get("estimated_cost") or 0)
+                created, month = _et_day_month(row["created_at"])
 
                 # Daily
                 if provider not in self._daily_usage:
@@ -189,16 +220,16 @@ class BudgetService:
                 )
 
             self._initialized = True
-            logger.info(f"Budget service loaded — {len(result.data or [])} usage records this month")
+            logger.info(f"Budget service loaded — {len(rows)} usage records this month")
         except Exception as e:
             logger.warning(f"Budget service failed to load from DB: {e}")
             self._initialized = True  # Don't block on DB failure
 
     def _today(self) -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return _et_now().strftime("%Y-%m-%d")
 
     def _month(self) -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m")
+        return _et_now().strftime("%Y-%m")
 
     def get_daily_spend(self, provider: str) -> float:
         """Get today's spend for a provider in USD."""

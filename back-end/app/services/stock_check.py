@@ -478,7 +478,7 @@ async def run_check(resolved: dict, progress: ProgressFn | None = None) -> dict:
             except Exception:
                 options_flow = None
             grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [],
-                         "summary": "Sentiment skipped for Safe Income (10% weight)"}
+                         "summary": "Sentiment skipped for Safe Income (10% weight)", "_skipped": True}
         else:
             got = await asyncio.gather(
                 ai_provider.analyze_sentiment(symbol, market_cap=fund.get("market_cap")),

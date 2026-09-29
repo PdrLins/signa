@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     # True = password + Telegram code. False = password only; acceptable only
     # while the app listens on 127.0.0.1 (the default in start.sh / F5).
     login_otp_enabled: bool = True
+    # Brain Editor unlock code via Telegram. When False — or when Telegram is
+    # not configured (empty/placeholder bot token) — no message is sent and
+    # brain_otp_fallback_code unlocks instead. Local, trusted use only.
+    brain_otp_enabled: bool = True
+    brain_otp_fallback_code: str = "123456"
 
     # --- Rate Limiting ---
     max_login_attempts_per_ip: int = 5
@@ -495,6 +500,11 @@ class Settings(BaseSettings):
 
     # --- AI call caching (cuts repeat calls across the day's scans) ---
     sentiment_cache_hours: int = 24     # X/news sentiment reused per ticker
+    # Scan news: free Gemini (Google Search) for every AI candidate; paid Grok
+    # (live X + web) only for stocks the routine model says BUY, right before
+    # the decision model confirms. Off = old Grok-first behaviour.
+    scan_sentiment_free_first: bool = True
+    scan_grok_on_buy: bool = True
     synthesis_cache_hours: int = 3      # routine synthesis reused per ticker...
     synthesis_cache_max_move_pct: float = 2.0  # ...unless price moved more than this
 

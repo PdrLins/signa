@@ -23,6 +23,7 @@ export function BrainLocked() {
   const verify = useBrainVerify()
 
   const [step, setStep] = useState<Step>('locked')
+  const [fallback, setFallback] = useState(false)
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', ''])
   const [countdown, setCountdown] = useState(60)
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
@@ -37,7 +38,8 @@ export function BrainLocked() {
 
   const handleUnlock = useCallback(async () => {
     try {
-      await challenge.mutateAsync()
+      const res = await challenge.mutateAsync()
+      setFallback(res?.channel === 'fallback')
       setStep('otp')
       setCountdown(60)
       setOtpDigits(['', '', '', '', '', ''])
@@ -102,7 +104,7 @@ export function BrainLocked() {
             <Brain size={32} style={{ color: theme.colors.primary, margin: '0 auto' }} />
             <h2 className="text-lg font-bold" style={{ color: theme.colors.text }}>{t.brain.telegramVerification}</h2>
             <p className="text-sm" style={{ color: theme.colors.textSub }}>
-              {t.brain.otpSent}
+              {fallback ? t.brain.otpFallback : t.brain.otpSent}
             </p>
 
             {/* OTP inputs */}

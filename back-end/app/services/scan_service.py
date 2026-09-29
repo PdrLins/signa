@@ -977,11 +977,12 @@ async def _process_candidate(
         # Sentiment + options still need fetching (not in PASS 1)
         if bucket == "SAFE_INCOME":
             options_flow = await barchart_scanner.get_options_flow(ticker)
-            grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [], "summary": "Sentiment skipped for Safe Income (10% weight)"}
+            grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [], "summary": "Sentiment skipped for Safe Income (10% weight)", "_skipped": True}
         else:
             grok_data, options_flow = await asyncio.gather(
                 ai_provider.analyze_sentiment(
                     ticker, market_cap=(fundamental_data or {}).get("market_cap"),
+                    free_only=settings.scan_sentiment_free_first,
                 ),
                 barchart_scanner.get_options_flow(ticker),
             )
@@ -995,11 +996,12 @@ async def _process_candidate(
             )
         if bucket == "SAFE_INCOME":
             options_flow = await barchart_scanner.get_options_flow(ticker)
-            grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [], "summary": "Sentiment skipped for Safe Income (10% weight)"}
+            grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [], "summary": "Sentiment skipped for Safe Income (10% weight)", "_skipped": True}
         else:
             grok_data, options_flow = await asyncio.gather(
                 ai_provider.analyze_sentiment(
                     ticker, market_cap=(fundamental_data or {}).get("market_cap"),
+                    free_only=settings.scan_sentiment_free_first,
                 ),
                 barchart_scanner.get_options_flow(ticker),
             )
@@ -1306,6 +1308,41 @@ async def _process_candidate(
     return signal_data
 
 
+_PROMPT_CONTEXT_KEYS = (
+    "_market_regime", "_catalyst_context", "_regime_note", "_knowledge_block",
+    "_options_flow", "_levels_source", "_earnings_blackout",
+    "_ai_signal", "_decision", "_self_check", "_skipped",
+)
+
+
+async def _upgrade_sentiment_for_decision(ticker: str, fundamental_data: dict, grok_data: dict) -> None:
+    """Before the decision model rules on a routine BUY, get paid Grok (live
+    X + web) sentiment if the scan only had the free path. Mutates grok_data
+    in place (keeping the scan's prompt-context keys) so the decision model
+    and the stored signal both see it. Failures leave grok_data unchanged."""
+    if not settings.scan_grok_on_buy or not isinstance(grok_data, dict):
+        return
+    if grok_data.get("_skipped"):
+        return  # sentiment deliberately skipped (SAFE_INCOME): stay skipped
+    if grok_data.get("_provider") == "grok" and not grok_data.get("error"):
+        return
+    try:
+        fresh = await ai_provider.analyze_sentiment(
+            ticker, market_cap=(fundamental_data or {}).get("market_cap"),
+        )
+    except Exception as e:
+        logger.warning(f"Grok upgrade before decision failed for {ticker}: {e}")
+        return
+    if fresh.get("error") or fresh.get("_provider") != "grok":
+        logger.info(f"Grok unavailable before decision for {ticker} — deciding on {grok_data.get('_provider') or 'no'} sentiment")
+        return
+    context = {k: grok_data[k] for k in _PROMPT_CONTEXT_KEYS if k in grok_data}
+    grok_data.clear()
+    grok_data.update(fresh)
+    grok_data.update(context)
+    logger.info(f"Grok sentiment added before decision for {ticker} ({len(fresh.get('citations') or [])} citations)")
+
+
 async def _confirm_buy_with_decision_model(
     ticker: str,
     synthesis: dict,
@@ -1323,6 +1360,7 @@ async def _confirm_buy_with_decision_model(
     """
     if not settings.ai_decision_escalation or _classify_ai_status(synthesis) != "validated":
         return synthesis
+    await _upgrade_sentiment_for_decision(ticker, fundamental_data, grok_data)
     decision = await ai_provider.synthesize_signal(
         ticker, technical_data, fundamental_data, macro_data, grok_data, tier="decision",
     )

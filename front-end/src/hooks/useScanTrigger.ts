@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { scansApi, type ScanProgress } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
@@ -17,6 +17,13 @@ export function useScanTrigger() {
   const [progress, setProgress] = useState<ScanProgress | null>(null)
   const [cooldown, setCooldown] = useState(false)
   const scanning = !!scanId
+  // toast/t change identity on every render; reading them through refs keeps
+  // the polling effect below from restarting (and re-polling at once) on each
+  // progress update, which turned the 2.5s poll into a ~70ms loop.
+  const toastRef = useRef(toast)
+  toastRef.current = toast
+  const tRef = useRef(t)
+  tRef.current = t
 
   useEffect(() => {
     if (!scanId) return
@@ -27,8 +34,8 @@ export function useScanTrigger() {
         if (cancelled) return
         setProgress(p)
         if (p.status === 'COMPLETE') {
-          toast.show(
-            t.signals.scanComplete.replace('{signals}', String(p.signals_found)).replace('{gems}', String(p.gems_found)),
+          toastRef.current.show(
+            tRef.current.signals.scanComplete.replace('{signals}', String(p.signals_found)).replace('{gems}', String(p.gems_found)),
             'success',
             5000,
           )
@@ -39,7 +46,7 @@ export function useScanTrigger() {
           queryClient.invalidateQueries({ queryKey: ['stats'] })
           queryClient.invalidateQueries({ queryKey: ['insights'] })
         } else if (p.status === 'FAILED') {
-          toast.show(p.error_message || t.signals.scanFailedGeneric, 'error')
+          toastRef.current.show(p.error_message || tRef.current.signals.scanFailedGeneric, 'error')
           setScanId(null)
           setProgress(null)
         }
@@ -50,8 +57,7 @@ export function useScanTrigger() {
     poll()
     const interval = setInterval(poll, 2500)
     return () => { cancelled = true; clearInterval(interval) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- t.signals refs are stable across renders
-  }, [scanId, queryClient, toast])
+  }, [scanId, queryClient])
 
   const trigger = useCallback(async () => {
     if (scanning || cooldown) return
