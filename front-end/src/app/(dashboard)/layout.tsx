@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuthStore } from '@/store/authStore'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { LeftNav } from '@/components/layout/LeftNav'
 import { BottomNav } from '@/components/layout/BottomNav'
 
@@ -51,7 +51,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {lastLogin && (
         <div className="hidden md:block fixed bottom-4 right-6 z-40">
           <span className="text-[10px]" style={{ color: theme.colors.textHint }}>
-            {t.overview.lastLogin} {new Date(lastLogin).toLocaleString('en-US', {
+            {t.overview.lastLogin} {new Date(lastLogin).toLocaleString(intlLocale(), {
               month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
               timeZone: 'America/New_York', timeZoneName: 'short',
             })}

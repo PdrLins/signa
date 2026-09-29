@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { intlLocale } from '@/store/i18nStore'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -39,7 +40,7 @@ export function formatPct(v: number): string {
  */
 export function formatMoney(v: number | null | undefined): string {
   if (v === null || v === undefined) return '--'
-  return `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return `$${v.toLocaleString(intlLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 /** Mask IPv4 addresses — show only last octet, e.g. ***.***.***.123 */

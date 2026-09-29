@@ -1,5 +1,6 @@
 import type { Theme } from '@/lib/themes'
 import { DEFAULT_TIMEZONE } from '@/lib/utils'
+import { intlLocale } from '@/store/i18nStore'
 
 // ── Track record types ──
 
@@ -183,7 +184,7 @@ export interface VirtualSummary extends TrackStats {
 export function fmtShortDate(iso?: string): string {
   if (!iso) return '--'
   try {
-    return new Date(iso).toLocaleString('en-US', {
+    return new Date(iso).toLocaleString(intlLocale(), {
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
@@ -225,7 +226,7 @@ export const TXN_COLOR: Record<WalletTxnType, 'up' | 'down' | 'warning' | 'prima
 
 export function fmtTxnDate(iso: string): string {
   try {
-    return new Date(iso).toLocaleString('en-US', {
+    return new Date(iso).toLocaleString(intlLocale(), {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',

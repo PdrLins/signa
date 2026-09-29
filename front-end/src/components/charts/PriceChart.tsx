@@ -3,7 +3,7 @@
 import { useState, memo } from 'react'
 import dynamic from 'next/dynamic'
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { usePriceHistory } from '@/hooks/usePriceHistory'
 import { Skeleton } from '@/components/ui/Skeleton'
 import type { TimeRange } from '@/types/chart'
@@ -60,8 +60,8 @@ export const PriceChart = memo(function PriceChart({ symbol, defaultRange = '1D'
 
   const formatDate = (iso: string) => {
     const d = new Date(iso)
-    if (range === '1D') return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Toronto' })
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Toronto' })
+    if (range === '1D') return d.toLocaleTimeString(intlLocale(), { hour: 'numeric', minute: '2-digit', timeZone: 'America/Toronto' })
+    return d.toLocaleDateString(intlLocale(), { month: 'short', day: 'numeric', timeZone: 'America/Toronto' })
   }
 
   return (

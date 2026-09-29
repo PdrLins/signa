@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/Button'
 import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Lock, Brain } from 'lucide-react'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 
 type Step = 'locked' | 'otp'
 
@@ -162,7 +162,7 @@ export function BrainLocked() {
         <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>{t.brain.signalBrain}</h1>
         {Boolean(highlights?.last_rule_updated) && (
           <p className="text-xs mt-1" style={{ color: theme.colors.textSub }}>
-            {new Date(String(highlights?.last_rule_updated)).toLocaleDateString('en-US', { timeZone: DEFAULT_TIMEZONE })}
+            {new Date(String(highlights?.last_rule_updated)).toLocaleDateString(intlLocale(), { timeZone: DEFAULT_TIMEZONE })}
           </p>
         )}
       </div>

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { ChevronDown, ChevronUp, Target, ShieldAlert, Clock, Eye, Activity, Hash } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { relativeTime, DEFAULT_TIMEZONE, formatPct } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -433,7 +433,7 @@ export function OpenPositionsTab({
                         trades keep the plain price. */}
                     {vt.is_wallet_trade && vt.position_size_usd ? (
                       <span className="text-[10px] tabular-nums" style={{ color: theme.colors.textHint }}>
-                        ${vt.position_size_usd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        ${vt.position_size_usd.toLocaleString(intlLocale(), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                         {' @ '}${Number(vt.entry_price).toFixed(2)}
                       </span>
                     ) : (

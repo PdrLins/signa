@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { useAllSignals } from '@/hooks/useSignals'
 import { useScanTrigger } from '@/hooks/useScanTrigger'
 import { ScanProgressPanel } from '@/components/scans/ScanProgressPanel'
@@ -96,7 +96,6 @@ export default function SignalsPage() {
     return latest.created_at
   }, [allSignals])
 
-  const locale = useI18nStore((s) => s.locale)
 
   const formatRelativeTime = (isoDate: string): string => {
     const now = new Date()
@@ -107,7 +106,7 @@ export default function SignalsPage() {
     if (diffMin < 60) return t.signals.minAgo.replace('{n}', String(diffMin))
     const diffHrs = Math.floor(diffMin / 60)
     if (diffHrs < 12) return t.signals.hoursAgo.replace('{n}', String(diffHrs))
-    const timeStr = date.toLocaleTimeString(locale === 'pt' ? 'pt-BR' : 'en-US', { hour: 'numeric', minute: '2-digit' })
+    const timeStr = date.toLocaleTimeString(intlLocale(), { hour: 'numeric', minute: '2-digit' })
     return t.signals.todayAt.replace('{time}', timeStr)
   }
 

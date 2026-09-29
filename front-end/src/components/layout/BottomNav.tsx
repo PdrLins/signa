@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
+import { LangSwitcher } from '@/components/ui/LangSwitcher'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
@@ -112,6 +113,9 @@ export function BottomNav() {
                   </Link>
                 )
               })}
+            </div>
+            <div className="mt-4 pt-4 flex justify-center" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
+              <LangSwitcher />
             </div>
           </div>
         </div>

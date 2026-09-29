@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import { ResponsiveContainer, AreaChart, Area, Tooltip as RechartsTooltip, ReferenceLine } from 'recharts'
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import type { Theme } from '@/lib/themes'
 import { DEFAULT_TIMEZONE, formatPrice, formatPct } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
@@ -117,7 +117,7 @@ export function TradeHistoryTab({ data, brain, brainClosed, trackRecord }: Trade
         running += (t.pnl_amount ?? 0)
         return {
           date: t.exit_date!,
-          label: new Date(t.exit_date!).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: DEFAULT_TIMEZONE }),
+          label: new Date(t.exit_date!).toLocaleDateString(intlLocale(), { month: 'short', day: 'numeric', timeZone: DEFAULT_TIMEZONE }),
           cumulative: parseFloat(running.toFixed(2)),
           symbol: t.symbol,
           tradePnl: t.pnl_amount ?? 0,

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 import { useToast } from '@/hooks/useToast'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { useBrainStore } from '@/store/brainStore'
 import { useAuthStore } from '@/store/authStore'
 import { useBrainChallenge, useBrainVerify } from '@/hooks/useBrain'
@@ -36,7 +36,7 @@ const LEVEL_COLORS: Record<string, string> = {
 const LogLine = memo(function LogLine({ entry }: { entry: LogEntry }) {
   const theme = useTheme()
   const levelColor = LEVEL_COLORS[entry.level] || theme.colors.textSub
-  const time = new Date(entry.timestamp).toLocaleTimeString('en-US', {
+  const time = new Date(entry.timestamp).toLocaleTimeString(intlLocale(), {
     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
   })
 

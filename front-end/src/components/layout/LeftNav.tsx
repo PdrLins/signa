@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
+import { LangSwitcher } from '@/components/ui/LangSwitcher'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { useAuthStore } from '@/store/authStore'
 import { useAllSignals } from '@/hooks/useSignals'
 import { useStats } from '@/hooks/useStats'
@@ -132,7 +133,7 @@ export function LeftNav() {
                 </span>
                 {time && (
                   <span className="text-[12px] tabular-nums" style={{ color: theme.colors.textSub }}>
-                    {time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: DEFAULT_TIMEZONE })}
+                    {time.toLocaleTimeString(intlLocale(), { hour: 'numeric', minute: '2-digit', timeZone: DEFAULT_TIMEZONE })}
                   </span>
                 )}
               </div>
@@ -173,7 +174,7 @@ export function LeftNav() {
                         <span className="text-[12px]" style={{ color: theme.colors.text }}>Gold</span>
                         <div className="flex items-center gap-1.5">
                           <span className="text-[12px] font-semibold tabular-nums" style={{ color: theme.colors.text }}>
-                            ${im.gold_price.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                            ${im.gold_price.toLocaleString(intlLocale(), { maximumFractionDigits: 0 })}
                           </span>
                           {im.gold_change_pct != null && (
                             <span className="text-[12px] font-medium tabular-nums" style={{ color: im.gold_change_pct >= 0 ? theme.colors.up : theme.colors.down }}>
@@ -248,7 +249,7 @@ export function LeftNav() {
                   <span className="text-[12px]" style={{ color: theme.colors.textHint }}>{t.nav?.nextScan ?? 'Next scan'}</span>
                   <span className="text-[12px] tabular-nums" style={{ color: theme.colors.textSub }}>
                     {stats?.next_scan_time
-                      ? new Date(stats.next_scan_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: DEFAULT_TIMEZONE, timeZoneName: 'short' })
+                      ? new Date(stats.next_scan_time).toLocaleTimeString(intlLocale(), { hour: 'numeric', minute: '2-digit', timeZone: DEFAULT_TIMEZONE, timeZoneName: 'short' })
                       : '--'}
                   </span>
                 </div>
@@ -298,11 +299,12 @@ export function LeftNav() {
         )
       })}
 
-      {/* Logout */}
+      {/* Language, then logout */}
       <div
         className="w-6 h-px mx-auto my-1"
         style={{ backgroundColor: theme.colors.border }}
       />
+      <LangSwitcher variant="rail" />
       <button
         type="button"
         onClick={() => {

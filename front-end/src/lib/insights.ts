@@ -3,6 +3,7 @@
 import type { ReasonInfo } from '@/types/insights'
 import { DEFAULT_TIMEZONE } from '@/lib/utils'
 import type en from '@/lib/i18n/en.json'
+import { intlLocale, INTL_LOCALES, type Locale } from '@/store/i18nStore'
 
 type T = typeof en
 
@@ -33,7 +34,7 @@ export function signedFracPct(v: number | null | undefined, digits = 2): string 
 
 export function money(v: number | null | undefined, digits = 2): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return DASH
-  return `$${v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+  return `$${v.toLocaleString(intlLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
 }
 
 /** Native-currency price: CAD for .TO, USD otherwise. */
@@ -41,7 +42,7 @@ export function nativePrice(v: number | null | undefined, symbol?: string | null
   if (v === null || v === undefined || !Number.isFinite(v)) return DASH
   const cad = currency === 'CAD' || (symbol ?? '').toUpperCase().endsWith('.TO')
   const digits = v >= 1000 ? 0 : v >= 1 ? 2 : 4
-  return `${cad ? 'C$' : '$'}${v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+  return `${cad ? 'C$' : '$'}${v.toLocaleString(intlLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
 }
 
 export function num(v: number | null | undefined, digits = 2): string {
@@ -63,7 +64,7 @@ export function etTime(iso: string | null | undefined, locale: string): string {
   if (!iso) return DASH
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return DASH
-  return d.toLocaleTimeString(locale === 'pt' ? 'pt-BR' : 'en-US', {
+  return d.toLocaleTimeString(INTL_LOCALES[locale as Locale] ?? intlLocale(), {
     hour: 'numeric', minute: '2-digit', timeZone: DEFAULT_TIMEZONE, timeZoneName: 'short',
   })
 }
@@ -73,7 +74,7 @@ export function shortDate(iso: string | null | undefined, locale: string, withYe
   // date-only strings are calendar dates, not instants: don't shift them
   const d = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(`${iso}T12:00:00Z`) : new Date(iso)
   if (Number.isNaN(d.getTime())) return DASH
-  return d.toLocaleDateString(locale === 'pt' ? 'pt-BR' : 'en-US', {
+  return d.toLocaleDateString(INTL_LOCALES[locale as Locale] ?? intlLocale(), {
     month: 'short', day: 'numeric', ...(withYear ? { year: 'numeric' } : {}), timeZone: DEFAULT_TIMEZONE,
   })
 }

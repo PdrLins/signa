@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { RefreshCw } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { useTodayInsights } from '@/hooks/useInsights'
 import { useStats } from '@/hooks/useStats'
 import { useScanTrigger } from '@/hooks/useScanTrigger'
@@ -28,7 +28,7 @@ export default function TodayPage() {
   const { scanning, progress, cooldown, trigger, phaseLabel } = useScanTrigger()
   const tt = t.today
 
-  const dateStr = new Date().toLocaleDateString(locale === 'pt' ? 'pt-BR' : 'en-US', {
+  const dateStr = new Date().toLocaleDateString(intlLocale(), {
     weekday: 'long', month: 'short', day: 'numeric', timeZone: DEFAULT_TIMEZONE,
   })
   const scanTime = data?.scan ? etTime(data.scan.completed_at ?? data.scan.started_at, locale) : null

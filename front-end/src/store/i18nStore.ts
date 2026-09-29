@@ -4,10 +4,18 @@ import pt from '@/lib/i18n/pt.json'
 
 const LANG_KEY = 'signa-lang'
 
-type Locale = 'en' | 'pt'
+export type Locale = 'en' | 'pt'
 type Translations = typeof en
 
 const locales: Record<Locale, Translations> = { en, pt }
+
+/** BCP-47 locale used for dates, times and numbers: English (Canada), Portuguese (Brazil). */
+export const INTL_LOCALES: Record<Locale, string> = { en: 'en-CA', pt: 'pt-BR' }
+
+/** Current display locale for Intl/toLocale* calls (safe outside React). */
+export function intlLocale(): string {
+  return INTL_LOCALES[useI18nStore.getState().locale] ?? 'en-CA'
+}
 
 interface I18nStore {
   locale: Locale

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { ThemeSwitcher } from '@/components/ui/ThemeSwitcher'
 import { LangSwitcher } from '@/components/ui/LangSwitcher'
 import { DEFAULT_TIMEZONE } from '@/lib/utils'
@@ -80,7 +80,7 @@ export function TopNav() {
         {/* Right side */}
         <div className="hidden md:flex items-center gap-3">
           <span className="text-xs tabular-nums" style={{ color: theme.colors.textSub }}>
-            {time ? time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: DEFAULT_TIMEZONE }) : '\u00A0'}
+            {time ? time.toLocaleTimeString(intlLocale(), { hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: DEFAULT_TIMEZONE }) : '\u00A0'}
           </span>
           <LangSwitcher />
           <ThemeSwitcher compact />

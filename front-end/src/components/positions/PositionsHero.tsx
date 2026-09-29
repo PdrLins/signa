@@ -4,6 +4,7 @@ import { RefreshCw } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { formatPct } from '@/lib/utils'
 import type { TrackStats, VirtualSummary } from './types'
+import { intlLocale } from '@/store/i18nStore'
 
 interface PositionsHeroProps {
   data: VirtualSummary | undefined
@@ -28,7 +29,7 @@ export function PositionsHero({ data, brain, autoRefresh, countdown, isFetching,
             className="text-[10px] uppercase tracking-[0.18em] mb-3"
             style={{ color: theme.colors.textHint, fontFamily: 'var(--font-mono)' }}
           >
-            BRAIN · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+            BRAIN · {new Date().toLocaleDateString(intlLocale(), { month: 'long', day: 'numeric', year: 'numeric' })}
           </p>
           <h1
             className=" font-medium leading-[0.95] tracking-tight mb-3"
@@ -41,7 +42,7 @@ export function PositionsHero({ data, brain, autoRefresh, countdown, isFetching,
               <>
                 <span style={{ color: theme.colors.textSub, fontSize: '0.5em', verticalAlign: 'top', marginRight: '0.1em' }}>$</span>
                 <span className="tabular-nums" style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>
-                  {portfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {portfolioValue.toLocaleString(intlLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </>
             ) : (

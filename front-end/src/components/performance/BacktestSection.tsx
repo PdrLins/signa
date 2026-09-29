@@ -1,7 +1,7 @@
 'use client'
 
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { Panel } from '@/components/insights/Panel'
 import { fill, signedPct, shortDate } from '@/lib/insights'
 import type { BacktestInsights, BacktestBand } from '@/types/insights'
@@ -24,7 +24,7 @@ function BandBars({ rows }: { rows: BacktestBand[] }) {
               )}
             </div>
             <span className="text-[13px] text-right tabular-nums" style={{ color: theme.colors.text, fontFamily: 'var(--font-mono)' }}>{signedPct(v)}</span>
-            <span className="text-[12px] text-right tabular-nums" style={{ color: theme.colors.textSub, fontFamily: 'var(--font-mono)' }}>n={b.trades.toLocaleString('en-US')}</span>
+            <span className="text-[12px] text-right tabular-nums" style={{ color: theme.colors.textSub, fontFamily: 'var(--font-mono)' }}>n={b.trades.toLocaleString(intlLocale())}</span>
           </li>
         )
       })}
@@ -59,12 +59,12 @@ export function BacktestSection({ data }: { data: BacktestInsights }) {
         <div className="flex flex-col gap-3">
           {spy && row(b.spy, signedPct(spy.total_return_pct, 1))}
           {xiu && row(b.xiu, signedPct(xiu.total_return_pct, 1))}
-          {data.runs.map((r) => row(fill(b.run, { rule: r.entry_rule ?? r.name }), signedPct(r.total_return_pct, 1), fill(b.trades, { n: r.trades.toLocaleString('en-US') })))}
+          {data.runs.map((r) => row(fill(b.run, { rule: r.entry_rule ?? r.name }), signedPct(r.total_return_pct, 1), fill(b.trades, { n: r.trades.toLocaleString(intlLocale()) })))}
           <p className="mt-1 text-[12px] leading-relaxed" style={{ color: theme.colors.textSub }}>{b.note}</p>
         </div>
         <div className="flex flex-col gap-2 min-w-0">
           <span className="text-[13px]" style={{ color: theme.colors.textSub }}>
-            {fill(b.bandsTitle, { n: (latest.study_trades ?? 0).toLocaleString('en-US') })}
+            {fill(b.bandsTitle, { n: (latest.study_trades ?? 0).toLocaleString(intlLocale()) })}
           </span>
           <BandBars rows={latest.by_band} />
           <span className="text-[12px]" style={{ color: theme.colors.warning }}>{b.bandsNote}</span>

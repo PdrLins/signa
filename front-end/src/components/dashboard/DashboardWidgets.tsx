@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { client } from '@/lib/api'
 import { relativeTime, formatPct, formatMoney } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
@@ -141,7 +141,7 @@ export function AlertsWidget() {
           {alerts.slice(0, 3).map((a) => {
             const emoji = a.alert_type === 'GEM' ? '💎' : a.alert_type === 'WATCHLIST_SELL' ? '⚠️' : '📊'
             const time = new Date(a.created_at)
-            const timeStr = time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })
+            const timeStr = time.toLocaleTimeString(intlLocale(), { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })
             // Extract ticker from message (between — and \n or end)
             const tickerMatch = a.message?.match(/— ([A-Z0-9.\-]+)/)
             const ticker = tickerMatch?.[1] || ''

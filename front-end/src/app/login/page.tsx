@@ -7,6 +7,7 @@ import { useI18nStore } from '@/store/i18nStore'
 import { useThemeStore } from '@/store/themeStore'
 import { useAuthStore } from '@/store/authStore'
 import { authApi } from '@/lib/api'
+import { LangSwitcher } from '@/components/ui/LangSwitcher'
 import { Eye, EyeOff, Activity, Cpu, Send, ArrowLeft, Shield } from 'lucide-react'
 
 export default function LoginPage() {
@@ -159,9 +160,12 @@ export default function LoginPage() {
 
   return (
     <div
-      className="min-h-screen flex"
+      className="min-h-screen flex relative"
       style={{ backgroundColor: theme.colors.bg }}
     >
+      <div className="absolute top-4 right-4 z-10">
+        <LangSwitcher />
+      </div>
       {/* Left: branding panel — dark */}
       <div
         className="hidden lg:flex flex-col justify-between w-[520px] p-14 relative overflow-hidden"

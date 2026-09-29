@@ -794,7 +794,7 @@ export default function SettingsPage() {
           {t.settings.languageLabel}
         </p>
         <div className="flex gap-3">
-          {([['en', 'English', 'EN'], ['pt', 'Português', 'PT']] as const).map(([code, label, badge]) => {
+          {([['en', 'English (Canada)', 'EN-CA'], ['pt', 'Português (Brasil)', 'PT-BR']] as const).map(([code, label, badge]) => {
             const isActive = locale === code
             return (
               <button

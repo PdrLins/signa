@@ -4,6 +4,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { DASH, fill } from '@/lib/insights'
 import type en from '@/lib/i18n/en.json'
 import type { CheckText, LongVerdict, Rating, ScorecardItem } from '@/types/check'
+import { intlLocale } from '@/store/i18nStore'
 
 type T = typeof en
 
@@ -59,7 +60,7 @@ export function compactMoney(v: number | null | undefined, currency?: string | n
   if (abs >= 1e12) return `${sym}${(v / 1e12).toFixed(2)}T`
   if (abs >= 1e9) return `${sym}${(v / 1e9).toFixed(1)}B`
   if (abs >= 1e6) return `${sym}${(v / 1e6).toFixed(1)}M`
-  return `${sym}${v.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+  return `${sym}${v.toLocaleString(intlLocale(), { maximumFractionDigits: 0 })}`
 }
 
 /** "5y" -> localized "5y" / "5a". */

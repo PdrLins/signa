@@ -1,7 +1,7 @@
 'use client'
 
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { maskIp, DEFAULT_TIMEZONE } from '@/lib/utils'
 
 function AuditEntry({ event }: { event: Record<string, unknown> }) {
@@ -13,7 +13,7 @@ function AuditEntry({ event }: { event: Record<string, unknown> }) {
     : theme.colors.primary
 
   const meta = (event.metadata ?? {}) as Record<string, unknown>
-  const created = event.created_at ? new Date(event.created_at as string).toLocaleString('en-US', { timeZone: DEFAULT_TIMEZONE }) : ''
+  const created = event.created_at ? new Date(event.created_at as string).toLocaleString(intlLocale(), { timeZone: DEFAULT_TIMEZONE }) : ''
 
   return (
     <div className="rounded-xl px-4 py-3 space-y-1" style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}` }}>

@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
+import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { useToast } from '@/hooks/useToast'
 import { useWatchlist, useAddTicker, useRemoveTicker } from '@/hooks/useWatchlist'
 import { tickersApi, signalsApi, client } from '@/lib/api'
@@ -21,7 +21,6 @@ export default function TickerDetailPage() {
   const ticker = (params.ticker as string)?.toUpperCase() ?? ''
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
-  const locale = useI18nStore((s) => s.locale)
   const toast = useToast()
   const { data: watchlist } = useWatchlist()
   const addTicker = useAddTicker()
@@ -491,7 +490,7 @@ export default function TickerDetailPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-xs tabular-nums" style={{ color: theme.colors.textSub }}>{formatPrice(sig.price_at_signal)}</span>
                   <span className="text-[10px]" style={{ color: theme.colors.textHint }}>
-                    {new Date(sig.created_at).toLocaleDateString(locale === 'pt' ? 'pt-BR' : 'en-US', { month: 'short', day: 'numeric' })}
+                    {new Date(sig.created_at).toLocaleDateString(intlLocale(), { month: 'short', day: 'numeric' })}
                   </span>
                 </div>
               </div>
