@@ -1,6 +1,6 @@
 """Authentication routes — login, OTP verification, logout, refresh."""
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.dependencies import get_current_user
 from app.core.utils import get_client_ip
@@ -57,34 +57,34 @@ async def logout(request: Request, user: dict = Depends(get_current_user)):
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(request: Request):
-    """Refresh the JWT access token within a 4-hour grace window.
+    """Rotate the JWT access token. (Public — validated here, not by middleware)
 
-    After 4 hours of inactivity the refresh fails and the frontend
-    redirects to /login. Was 24h previously — that meant the user was
-    never kicked out because the refresh always succeeded.
+    Accepts a token that expired less than JWT_REFRESH_GRACE_HOURS ago. The
+    presented token is revoked (single use), revoked tokens are rejected, and
+    the total session is capped at JWT_MAX_SESSION_HOURS since OTP login.
     """
     from app.core.security import decode_token_allow_expired
 
     auth_header = request.headers.get("Authorization", "")
-    token = auth_header.split(" ", 1)[1] if " " in auth_header else ""
+    token = auth_header.split(" ", 1)[1].strip() if auth_header.startswith("Bearer ") else ""
 
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No token provided")
 
-    payload = decode_token_allow_expired(token, max_age_hours=4)
+    payload = decode_token_allow_expired(token)
     if not payload:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token too old for refresh")
 
-    user_id = payload.get("sub")
-    username = payload.get("username")
-    if not user_id or not username:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-
-    result = auth_service.refresh_token(
-        token=token,
-        user_id=user_id,
-        username=username,
-        ip_address=get_client_ip(request),
-        user_agent=request.headers.get("User-Agent", ""),
-    )
+    try:
+        result = auth_service.refresh_token(
+            payload=payload,
+            ip_address=get_client_ip(request),
+            user_agent=request.headers.get("User-Agent", ""),
+        )
+    except auth_service.TokenRefreshError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=e.detail,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return TokenResponse(**result)

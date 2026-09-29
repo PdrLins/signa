@@ -34,16 +34,18 @@ truth (high signal). Open positions from `virtual_trades` are in-flight
 evidence (lower signal, still real). The combined N is what we threshold.
 
 ============================================================
-THRESHOLDS
+THRESHOLDS (2026-09 reset)
 ============================================================
 
-  N < 5 (combined)             → return None (insufficient evidence)
-  N >= 5 AND combined_wr < 40% → return ⚠ PATTERN WARNING string
-  N >= 5 AND combined_wr > 65% → return ✓ PATTERN GREEN LIGHT string
-  Otherwise (40-65% dead zone) → return None (no edge to report)
+  N < 30 CLOSED trades         → return None (insufficient evidence)
+  Wilson 95% upper bound < 50% → ⚠ PATTERN WARNING
+  Wilson 95% lower bound > 50% → ✓ PATTERN GREEN LIGHT
+  Otherwise                    → None (no demonstrated edge either way)
 
-The dead zone is intentional. A 50% win rate is the brain's coin-flip
-state — there's no signal to teach Claude there.
+Only CLOSED trades count toward N and the interval — open positions are
+shown as context but can flip sign daily. The old N>=5 / 40-65% band let
+a handful of trades steer Claude's prompt, i.e. "learned" noise changed
+trading. Outcomes are direction-aware (short trades store short-side P&L).
 
 ============================================================
 PRICE FEED FAILURE HANDLING
@@ -61,6 +63,7 @@ from typing import Optional
 from loguru import logger
 
 from app.db.supabase import get_client
+from app.services.daily_learning.stats import MIN_OBSERVATIONS, expectancy, wilson_interval
 from app.services.price_cache import _fetch_prices_batch
 
 
@@ -123,12 +126,12 @@ def _compute(bucket: str, regime: str) -> Optional[str]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
         closed_rows = (
             db.table("trade_outcomes")
-            .select("pnl_pct, signal_date, symbol")
+            .select("pnl_pct, signal_date, symbol, action")
             .eq("bucket", bucket)
             .eq("market_regime", regime)
             .gte("signal_date", cutoff)
             .order("signal_date", desc=True)
-            .limit(30)
+            .limit(200)
             .execute()
         ).data or []
     except Exception as e:
@@ -142,12 +145,16 @@ def _compute(bucket: str, regime: str) -> Optional[str]:
         else 0.0
     )
 
-    # ── Live open positions matching this pattern ──
+    # Evidence gate first — no price fetch for cells that can't qualify.
+    if closed_n < MIN_OBSERVATIONS:
+        return None
+
+    # ── Live open positions matching this pattern (context only) ──
     open_rows = []
     try:
         open_rows = (
             db.table("virtual_trades")
-            .select("symbol, entry_price, bucket, market_regime")
+            .select("symbol, entry_price, bucket, market_regime, direction")
             .eq("status", "OPEN")
             .eq("source", "brain")
             .eq("bucket", bucket)
@@ -175,7 +182,8 @@ def _compute(bucket: str, regime: str) -> Optional[str]:
             now_px, _ = prices.get(sym, (None, None))
             if not now_px or not entry:
                 continue
-            live_pnl = (now_px - entry) / entry * 100
+            move = (entry - now_px) if (r.get("direction") or "LONG") == "SHORT" else (now_px - entry)
+            live_pnl = move / entry * 100
             live_pnls.append(live_pnl)
             open_symbols.append(sym)
             if live_pnl > 0:
@@ -187,16 +195,13 @@ def _compute(bucket: str, regime: str) -> Optional[str]:
         # so a transient yfinance outage doesn't flip warnings to green lights
         # or vice versa.
 
-    # ── Combined ──
-    combined_n = closed_n + open_n
-    if combined_n < 5:
+    # ── Evidence gate: closed trades only, Wilson interval ──
+    w_lo, w_hi = wilson_interval(closed_wins, closed_n)
+    if w_lo <= 0.5 <= w_hi:
         return None
-    combined_wins = closed_wins + open_winners
-    combined_wr = combined_wins / combined_n
-
-    # Dead zone: no actionable signal to teach Claude
-    if 0.40 <= combined_wr <= 0.65:
-        return None
+    combined_n = closed_n
+    combined_wr = closed_wins / closed_n
+    exp = expectancy([(r.get("pnl_pct") or 0) for r in closed_rows])
 
     # Sample symbols (up to 6 distinct, prefer currently-open + recent closed)
     sample = list(open_symbols[:3])
@@ -204,21 +209,22 @@ def _compute(bucket: str, regime: str) -> Optional[str]:
     sample_text = ", ".join(sorted(set(sample))) if sample else "(none)"
 
     breakdown = (
-        f"({closed_n} closed @ {closed_wins}/{closed_n} winners, avg "
+        f"(95% CI {w_lo:.0%}-{w_hi:.0%}, expectancy {exp:+.2f}%/trade; "
+        f"{closed_n} closed @ {closed_wins}/{closed_n} winners, avg "
         f"{closed_avg:+.1f}%; {open_n} currently open @ {open_winners}/{open_n} "
         f"in green, avg {open_avg:+.1f}%)"
     )
 
-    if combined_wr < 0.40:
+    if w_hi < 0.5:
         return (
             f"\n## Pattern Stats — Your Live Track Record on This Setup\n"
             f"⚠ **PATTERN WARNING:** This setup ({bucket} in {regime} regime) "
             f"has a {combined_wr:.0%} positive rate across {combined_n} brain "
             f"trades {breakdown}. Recent examples: {sample_text}. Be skeptical "
             f"— require a fresh catalyst or stronger conviction than the score "
-            f"alone suggests. Open positions in this pattern are bleeding."
+            f"alone suggests."
         )
-    # combined_wr > 0.65 (the green light branch)
+    # w_lo > 0.5 (the green light branch)
     return (
         f"\n## Pattern Stats — Your Live Track Record on This Setup\n"
         f"✓ **PATTERN GREEN LIGHT:** This setup ({bucket} in {regime} regime) "

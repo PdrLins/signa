@@ -32,10 +32,36 @@ class TestScoreToAction:
 
 class TestBlockers:
     def test_fraud_detected(self):
-        grok = {"summary": "SEC investigation into fraud allegations", "top_themes": []}
+        # Updated: the fraud check only trusts CITED evidence — red_flags
+        # entries carrying a url (validated against live-search citations
+        # by the sentiment client) or cited breaking news.
+        grok = {
+            "summary": "", "top_themes": [], "confidence": 70, "error": None,
+            "red_flags": [{"text": "SEC investigation into fraud allegations",
+                           "url": "https://example.com/sec-probe"}],
+        }
         blocked, reasons = check_blockers(grok, {}, {}, {})
         assert blocked is True
-        assert any("fraud" in r.lower() for r in reasons)
+        assert any("fraud" in r.lower() or "sec investigation" in r.lower() for r in reasons)
+
+    def test_fraud_keyword_in_uncited_summary_ignored(self):
+        grok = {"summary": "SEC investigation into fraud allegations", "top_themes": ["lawsuit"],
+                "confidence": 70}
+        blocked, reasons = check_blockers(grok, {}, {}, {})
+        assert blocked is False
+        assert reasons == []
+
+    def test_fraud_ignored_when_sentiment_failed(self):
+        grok = {"error": "no citations", "confidence": 0,
+                "red_flags": [{"text": "fraud", "url": "https://x.com/a"}],
+                "breaking_news": "ponzi scheme"}
+        blocked, _ = check_blockers(grok, {}, {}, {})
+        assert blocked is False
+
+    def test_cited_breaking_news_blocks(self):
+        grok = {"confidence": 60, "breaking_news": "Company hit with class-action lawsuit"}
+        blocked, reasons = check_blockers(grok, {}, {}, {})
+        assert blocked is True
 
     def test_hostile_macro(self):
         blocked, reasons = check_blockers(

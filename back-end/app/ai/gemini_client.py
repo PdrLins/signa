@@ -9,7 +9,7 @@ Gemini sits at the BOTTOM of both AI fallback chains:
   Synthesis: Claude Local → Claude API → Gemini  ← here
   Sentiment: Grok → Gemini  ← here
 
-The Gemini 2.0 Flash free tier allows 1,500 requests/day at $0 cost,
+The Gemini Flash free tier allows 1,500 requests/day at $0 cost,
 which is more than enough headroom for Signa's 60 synthesis calls/day.
 This makes Gemini a reliable last-resort that doesn't burn budget.
 
@@ -54,7 +54,6 @@ from app.ai.prompts import (
     GROK_SENTIMENT_SYSTEM,
     build_synthesis_prompt,
     clean_json_response,
-    format_sentiment,
     normalize_synthesis_result,
     synthesis_error_response,
 )
@@ -93,11 +92,16 @@ async def synthesize_signal(
     max_retries: int = 3,
 ) -> dict:
     """Call Gemini to synthesize all data into a final signal."""
+    from google.genai import types
+
     prompt = build_synthesis_prompt(
         ticker, technical_data, fundamental_data, macro_data, grok_data,
     )
+    current_price = (technical_data or {}).get("current_price")
+    config = types.GenerateContentConfig(response_mime_type="application/json")
 
     last_error = ""
+    parse_retry_used = False
     for attempt in range(1, max_retries + 1):
         try:
             async with _rate_semaphore:
@@ -107,11 +111,13 @@ async def synthesize_signal(
                     client.models.generate_content,
                     model=settings.gemini_model,
                     contents=prompt,
+                    config=config,
                 )
 
-            content = clean_json_response(response.text)
-            data = json.loads(content)
-            result = normalize_synthesis_result(data)
+            data = json.loads(clean_json_response(response.text or ""))
+            result = normalize_synthesis_result(data, current_price=current_price)
+            if result.get("error"):
+                raise ValueError(result["error"])
 
             logger.debug(
                 f"Gemini [{ticker}] → {result['signal']} "
@@ -119,10 +125,13 @@ async def synthesize_signal(
             )
             return result
 
-        except json.JSONDecodeError as e:
-            last_error = f"JSON parse error: {e}"
-            logger.error(f"Failed to parse Gemini response for {ticker}: {e}")
-            break
+        except (json.JSONDecodeError, ValueError) as e:
+            last_error = f"Bad response: {e}"
+            logger.warning(f"Unusable Gemini synthesis for {ticker}: {e}")
+            if parse_retry_used:
+                break
+            parse_retry_used = True
+            continue
         except Exception as e:
             last_error = str(e)
             is_rate_limit = "429" in last_error or "RESOURCE_EXHAUSTED" in last_error
@@ -146,6 +155,11 @@ async def synthesize_signal(
 
 
 # ─── Sentiment (replaces Grok) ─────────────────────────────────
+#
+# Gemini has no X/Twitter access. It is grounded with Google Search
+# (restricted to the same 48h window) and the result is only accepted
+# when the response carries grounding sources. `mention_count` is always
+# 0 (no X data), so the signal engine collapses the sentiment weight.
 
 def _sentiment_error(ticker: str, reason: str) -> dict:
     return {
@@ -153,17 +167,49 @@ def _sentiment_error(ticker: str, reason: str) -> dict:
         "score": 50.0,
         "label": "neutral",
         "confidence": 0.0,
+        "mention_count": 0,
         "top_themes": [],
         "breaking_news": None,
+        "breaking_news_url": None,
+        "red_flags": [],
         "notable_accounts": [],
         "summary": "",
+        "citations": [],
         "error": reason,
     }
 
 
+def _grounding_urls(response) -> list[str]:
+    urls: list[str] = []
+    for cand in getattr(response, "candidates", None) or []:
+        meta = getattr(cand, "grounding_metadata", None)
+        for chunk in getattr(meta, "grounding_chunks", None) or []:
+            web = getattr(chunk, "web", None)
+            uri = getattr(web, "uri", None)
+            if uri and uri not in urls:
+                urls.append(uri)
+    return urls
+
+
 async def analyze_sentiment(ticker: str, max_retries: int = 2) -> dict:
-    """Call Gemini to analyze sentiment for a ticker."""
-    prompt = f"{GROK_SENTIMENT_SYSTEM}\n\n{GROK_SENTIMENT_PROMPT.format(ticker=ticker)}"
+    """Call Gemini (Google Search grounded) to analyze news sentiment for a ticker."""
+    from datetime import datetime, timedelta, timezone
+
+    from google.genai import types
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(hours=settings.grok_search_window_hours)
+    prompt = (
+        f"{GROK_SENTIMENT_SYSTEM}\n\n"
+        f"{GROK_SENTIMENT_PROMPT.format(ticker=ticker, from_date=start.date().isoformat(), to_date=now.date().isoformat())}\n"
+        "You only have web search (no X access): set mention_count to 0 and "
+        "notable_accounts to []."
+    )
+    config = types.GenerateContentConfig(
+        tools=[types.Tool(google_search=types.GoogleSearch(
+            time_range_filter=types.Interval(start_time=start, end_time=now),
+        ))],
+    )
 
     last_error = ""
     for attempt in range(1, max_retries + 1):
@@ -175,33 +221,64 @@ async def analyze_sentiment(ticker: str, max_retries: int = 2) -> dict:
                     client.models.generate_content,
                     model=settings.gemini_model,
                     contents=prompt,
+                    config=config,
                 )
 
-            content = clean_json_response(response.text)
-            data = json.loads(content)
+            citations = _grounding_urls(response)
+            if not citations:
+                return _sentiment_error(ticker, "No grounding sources returned — sentiment unverified")
+            data = json.loads(clean_json_response(response.text or ""))
+            if not isinstance(data, dict):
+                raise json.JSONDecodeError("not an object", response.text or "", 0)
+
+            # Grounding URIs are redirect links, so model-provided URLs can't
+            # be matched against them. Keep cited items only when the model
+            # attached a URL, and rely on grounding presence for the rest.
+            news = data.get("breaking_news")
+            news_url = data.get("breaking_news_url")
+            if not (isinstance(news, str) and news.strip() and isinstance(news_url, str) and news_url.startswith("http")):
+                news, news_url = None, None
+            red_flags = [
+                {"text": str(f["text"])[:200], "url": f["url"]}
+                for f in (data.get("red_flags") or [])
+                if isinstance(f, dict) and f.get("text") and isinstance(f.get("url"), str) and f["url"].startswith("http")
+            ]
+            label = str(data.get("label", "neutral")).lower()
+            if label not in ("bullish", "neutral", "bearish"):
+                label = "neutral"
+
+            def _num(v, default):
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return default
 
             result = {
                 "ticker": ticker,
-                "score": max(0.0, min(100.0, float(data.get("score", 50)))),
-                "label": str(data.get("label", "neutral")).lower(),
-                "confidence": max(0.0, min(100.0, float(data.get("confidence", 0)))),
-                "top_themes": list(data.get("top_themes", []))[:3],
-                "breaking_news": data.get("breaking_news"),
-                "notable_accounts": list(data.get("notable_accounts", []))[:5],
-                "summary": str(data.get("summary", "")),
+                "score": max(0.0, min(100.0, _num(data.get("score"), 50.0))),
+                "label": label,
+                "confidence": max(0.0, min(100.0, _num(data.get("confidence"), 0.0))),
+                "mention_count": 0,
+                "top_themes": [str(t) for t in (data.get("top_themes") or [])][:3],
+                "breaking_news": news,
+                "breaking_news_url": news_url,
+                "red_flags": red_flags,
+                "notable_accounts": [],
+                "summary": str(data.get("summary") or ""),
+                "citations": citations[:20],
                 "error": None,
             }
 
             logger.debug(
                 f"Gemini sentiment [{ticker}] → {result['label']} "
-                f"score={result['score']} (attempt {attempt})"
+                f"score={result['score']} sources={len(citations)} (attempt {attempt})"
             )
             return result
 
         except json.JSONDecodeError as e:
             last_error = f"JSON parse error: {e}"
-            logger.error(f"Failed to parse Gemini sentiment for {ticker}: {e}")
-            break
+            logger.warning(f"Failed to parse Gemini sentiment for {ticker}: {e}")
+            continue
         except Exception as e:
             last_error = str(e)
             is_rate_limit = "429" in last_error or "RESOURCE_EXHAUSTED" in last_error

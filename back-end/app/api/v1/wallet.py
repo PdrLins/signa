@@ -18,6 +18,7 @@ loop stays unblocked during Supabase round trips.
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.dependencies import get_current_user
@@ -70,11 +71,17 @@ async def deposit(body: WalletAmountRequest, user: dict = Depends(get_current_us
         # Transient — the user should retry in a moment. We refuse
         # rather than silently baselining at cash-only (which would
         # misread legacy liquidations as gains going forward).
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+        logger.warning(f"Wallet deposit: legacy snapshot failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Price feed unavailable — could not snapshot holdings. Please retry shortly.",
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except RuntimeError as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        # Don't leak internal error details (DB messages etc.) to the client
+        logger.error(f"Wallet operation failed: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Wallet operation failed")
 
     # Invalidate the cached virtual_summary so the next /virtual-portfolio
     # read reflects the new balance immediately (otherwise the dashboard
@@ -99,7 +106,9 @@ async def withdraw(body: WalletAmountRequest, user: dict = Depends(get_current_u
         # user-driven errors, 400 is the right code for both.
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except RuntimeError as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        # Don't leak internal error details (DB messages etc.) to the client
+        logger.error(f"Wallet operation failed: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Wallet operation failed")
 
     _invalidate_summary_cache()
 

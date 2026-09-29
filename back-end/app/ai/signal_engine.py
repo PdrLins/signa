@@ -30,8 +30,11 @@ shaped the rules:
   • Momentum +1% to +3% is optimal. Anything > +5% is a reversal trap
     (the move has already happened).
 
-  • MACD histogram > 2.0 predicts surges. Missed surgers in the
-    backtest had average histogram 3.3 vs 1.5 for non-surgers.
+  • A strongly positive MACD histogram predicts surges. The original
+    rule used a raw `hist > 2.0`, which is in PRICE units (2.0 is huge
+    on a $20 stock and noise on a $900 one). It is now scored in ATR
+    units (hist / ATR14 > settings.macd_hist_strong_atr) so it is
+    price-invariant.
 
   • Stocks > 50% above their SMA200 have INVERTED returns
     (gravity wins). Auto-blocked.
@@ -76,8 +79,8 @@ Several adjustments fire on top of the base score:
   Sentiment weight reduction (low-mention tickers)
     If grok_data.mention_count < 100, the sentiment is unreliable. The
     sentiment weight collapses from 35% (HIGH_RISK) or 10% (SAFE_INCOME)
-    down to 5%, and the freed weight is given to technical_momentum
-    (HIGH_RISK) or macro (SAFE_INCOME).
+    down to 5%, and the freed weight is spread PROPORTIONALLY over the
+    other components (it used to all go to technical_momentum / macro).
 
   Contrarian sentiment dampening
     Extreme bullish sentiment (> 85) is dampened by -10 (bubble deflation).
@@ -105,7 +108,7 @@ BLOCKERS (auto-AVOID, override the score entirely)
 ANY of these conditions triggers an immediate AVOID, regardless of how
 high the score is:
 
-  1. Fraud / legal risk in X sentiment or breaking news
+  1. Fraud / legal risk in CITED red flags or breaking news
      (keywords: fraud, sec investigation, lawsuit, scam, ponzi,
      insider trading)
   2. Hostile macro environment (high VIX + high Fed funds + high CPI)
@@ -113,11 +116,12 @@ high the score is:
   4. Overbought RSI > 75 (backtest: 60%+ failure rate)
   5. SMA200 overextension > 50% (backtest: inverted returns)
 
-NOTE: blockers are only checked for AI-analyzed signals. Tech-only
-signals (below the top-15 by pre-score) skip this pass — but the brain
-re-checks the most critical blockers in `_eval_brain_trust_tier` for
-its tier 3 path, so it can't auto-buy a tech-only signal that would
-have been blocked.
+NOTE: blockers run for BOTH AI-analyzed and tech-only signals.
+
+Separately, `check_entry_blackout` downgrades a new BUY to HOLD when
+the next earnings report is within settings.earnings_blackout_trading_days
+trading sessions (it is not an AVOID — it must not trigger sells of
+positions already held).
 
 ============================================================
 GEM CONDITIONS (the highest-conviction signal class)
@@ -235,14 +239,19 @@ def compute_score(
     # ── Mutual exclusive earnings catalyst (Part 2) ──
     catalyst_type = None
     if fundamental_data:
-        days_since_earnings = fundamental_data.get("days_since_last_earnings", 999) or 999
+        # Populated by scan_service from signals/earnings.get_earnings_context.
+        # last_eps_surprise_pct is in PERCENT (Yahoo "Surprise(%)"), so a
+        # 3% beat is 3.0. price_change_5d is a fraction.
+        days_since_earnings = fundamental_data.get("days_since_last_earnings")
+        days_since_earnings = 999 if days_since_earnings is None else days_since_earnings
         eps_surprise = fundamental_data.get("last_eps_surprise_pct", 0) or 0
-        days_to_earnings = fundamental_data.get("days_to_next_earnings", 999) or 999
+        days_to_earnings = fundamental_data.get("days_to_next_earnings")
+        days_to_earnings = 999 if days_to_earnings is None else days_to_earnings
         price_change_5d = (technical_data or {}).get("price_change_5d", 0) or 0
 
-        if (days_since_earnings <= 3 and eps_surprise > 0.03 and price_change_5d < 0.10):
+        if (days_since_earnings <= 3 and eps_surprise > 3.0 and price_change_5d < 0.10):
             catalyst_type = "PEAD"
-        elif days_to_earnings <= 30:
+        elif 0 <= days_to_earnings <= 30:
             catalyst_type = "PRE_EARNINGS"
 
     if bucket == "SAFE_INCOME":
@@ -258,10 +267,8 @@ def compute_score(
 
         # Dynamic sentiment weight for low-mention tickers
         if grok_mention_count < 100:
-            effective_sent_w = 0.05
-            technical_boost = weights["sentiment"] - effective_sent_w
-            weights["sentiment"] = effective_sent_w
-            weights["macro"] = weights["macro"] + technical_boost
+            effective_sent_w = min(0.05, weights["sentiment"])
+            _redistribute_weight(weights, "sentiment", effective_sent_w)
         else:
             effective_sent_w = weights["sentiment"]
 
@@ -293,10 +300,8 @@ def compute_score(
 
         # Dynamic sentiment weight for low-mention tickers
         if grok_mention_count < 100:
-            effective_sent_w = 0.05
-            technical_boost = weights["sentiment"] - effective_sent_w
-            weights["sentiment"] = effective_sent_w
-            weights["technical_momentum"] = weights["technical_momentum"] + technical_boost
+            effective_sent_w = min(0.05, weights["sentiment"])
+            _redistribute_weight(weights, "sentiment", effective_sent_w)
         else:
             effective_sent_w = weights["sentiment"]
 
@@ -361,6 +366,28 @@ def compute_score(
     breakdown["grok_mention_count"] = grok_mention_count
 
     return score, breakdown
+
+
+def _redistribute_weight(weights: dict, key: str, new_value: float) -> None:
+    """Set weights[key] = new_value and spread the freed weight across the
+    OTHER components in proportion to their existing weights (in place).
+
+    Previously the whole freed sentiment weight (0.30 for HIGH_RISK) was
+    dumped onto technical_momentum, taking it from 25% to 55%. Grok never
+    returned `mention_count`, so that was the case for EVERY HIGH_RISK
+    signal: scores were >half short-term technicals, and the strongest
+    technical readings (the most extended names) saturated at 85-100 —
+    consistent with the observed inverted win rate of 85+/90+ scores.
+    Proportional redistribution keeps the documented relative weights.
+    """
+    freed = weights[key] - new_value
+    weights[key] = new_value
+    others = [k for k in weights if k != key]
+    total_other = sum(weights[k] for k in others)
+    if total_other <= 0 or freed <= 0:
+        return
+    for k in others:
+        weights[k] = weights[k] + freed * (weights[k] / total_other)
 
 
 def score_to_action(score: int, bucket: str = "") -> str:
@@ -529,8 +556,8 @@ def check_blockers(
     The 6 blockers, in order of severity:
 
       1. FRAUD / LEGAL RISK
-         Triggers if any of these keywords appear in the X sentiment
-         summary, top themes, or breaking news:
+         Triggers if any of these keywords appear in a CITED red flag
+         or in (cited-only) breaking news:
            fraud, sec investigation, lawsuit, scam, ponzi, insider trading
          Why: an earnings beat means nothing if the SEC is closing in.
 
@@ -559,11 +586,9 @@ def check_blockers(
          200-day moving average have INVERTED returns over the next
          20 days. Gravity wins. Auto-AVOID.
 
-    NOTE: This function is NOT called for tech-only signals (those that
-    were below the top-15 by pre-score and skipped AI synthesis). The
-    brain re-checks blockers 4-6 in `_eval_brain_trust_tier` for its
-    Tier 3 path so it can't auto-buy a tech-only signal that would
-    have been blocked here.
+    NOTE: called for both AI-analyzed and tech-only signals. The fraud
+    check only reads cited evidence (`red_flags` entries with a url,
+    `breaking_news`) and is skipped when sentiment errored/confidence 0.
 
     Args:
         grok_data: Sentiment dict (used for fraud keyword scan).
@@ -582,22 +607,35 @@ def check_blockers(
     """
     reasons = []
 
-    # 1. Fraud / legal risk in sentiment
-    fraud_keywords = ["fraud", "sec investigation", "lawsuit", "scam", "ponzi", "insider trading"]
-    sentiment_text = (
-        grok_data.get("summary", "") + " " + " ".join(grok_data.get("top_themes", []))
-    ).lower()
-    for keyword in fraud_keywords:
-        if keyword in sentiment_text:
-            reasons.append(f"Fraud/legal risk: '{keyword}' detected in X sentiment")
-            break
+    grok_data = grok_data or {}
+    fundamental_data = fundamental_data or {}
+    macro_data = macro_data or {}
+    technical_data = technical_data or {}
 
-    news = grok_data.get("breaking_news", "")
-    if news:
-        for keyword in fraud_keywords:
-            if keyword in news.lower():
-                reasons.append(f"Breaking news red flag: '{keyword}'")
+    # 1. Fraud / legal risk — CITED evidence only.
+    # The sentiment provider validates `red_flags` (list of {text, url},
+    # each url must be one of the live-search citations) and
+    # `breaking_news` (kept only when its url is cited). The free-text
+    # `summary` / `top_themes` are uncited LLM prose — a keyword there is
+    # as likely hallucinated or generic ("no lawsuit risk") as real, so
+    # they are ignored. A failed / uncited sentiment call (error set or
+    # confidence 0) contributes nothing.
+    sentiment_ok = not grok_data.get("error") and (grok_data.get("confidence") or 0) > 0
+    if sentiment_ok:
+        fraud_keywords = ["fraud", "sec investigation", "lawsuit", "scam", "ponzi", "insider trading"]
+        for flag in grok_data.get("red_flags") or []:
+            text = (flag.get("text") if isinstance(flag, dict) else "") or ""
+            url = flag.get("url") if isinstance(flag, dict) else None
+            hit = next((k for k in fraud_keywords if k in text.lower()), None)
+            if hit and url:
+                reasons.append(f"Fraud/legal risk: '{hit}' in cited red flag ({url})")
                 break
+
+        news = grok_data.get("breaking_news") or ""
+        if news and isinstance(news, str):
+            hit = next((k for k in fraud_keywords if k in news.lower()), None)
+            if hit:
+                reasons.append(f"Breaking news red flag: '{hit}'")
 
     # 3. Hostile macro
     if macro_data.get("environment") == "hostile":
@@ -626,6 +664,40 @@ def check_blockers(
         logger.warning(f"Signal BLOCKED: {', '.join(reasons)}")
 
     return is_blocked, reasons
+
+
+def check_entry_blackout(fundamental_data: dict) -> str | None:
+    """Return a reason string if a NEW BUY must be suppressed, else None.
+
+    Earnings blackout: no new BUY when the next earnings report is within
+    `settings.earnings_blackout_trading_days` trading sessions (0 = report
+    today). A binary gap event inside a short-term holding window is a
+    coin flip the score cannot see.
+
+    This is deliberately NOT a blocker (blockers produce AVOID, which the
+    brain and watchlist alerts treat as a sell signal for held positions).
+    Callers downgrade BUY -> HOLD.
+
+    Reads `trading_days_to_next_earnings`, set by scan_service from
+    `signals.earnings.get_earnings_context` (or the fundamentals'
+    `earnings_date` fallback). Missing data -> no blackout.
+    """
+    fundamental_data = fundamental_data or {}
+    n = settings.earnings_blackout_trading_days
+    td = fundamental_data.get("trading_days_to_next_earnings")
+    if td is None or n <= 0:
+        return None
+    try:
+        td = int(td)
+    except (TypeError, ValueError):
+        return None
+    if 0 <= td <= n:
+        return (
+            f"Earnings blackout: next report in {td} trading day(s) "
+            f"({fundamental_data.get('next_earnings_date') or fundamental_data.get('earnings_date')}), "
+            f"limit {n}"
+        )
+    return None
 
 
 # ============================================================
@@ -1084,6 +1156,18 @@ def _score_catalyst(synthesis: dict) -> float:
     return min(100, score)
 
 
+def _macd_hist_atr(technical_data: dict) -> float | None:
+    """MACD histogram in ATR units (price-invariant). None if unavailable."""
+    v = technical_data.get("macd_hist_atr")
+    if v is not None:
+        return float(v)
+    hist = technical_data.get("macd_histogram")
+    atr = technical_data.get("atr")
+    if hist is None or not atr or atr <= 0:
+        return None
+    return float(hist) / float(atr)
+
+
 def _score_technical_momentum(technical_data: dict) -> float:
     """Score technical momentum (0-100) — backtest-tuned.
 
@@ -1105,8 +1189,9 @@ def _score_technical_momentum(technical_data: dict) -> float:
 
     macd_hist = technical_data.get("macd_histogram")
     if macd_hist is not None:
-        if macd_hist > 2.0:
-            score += 15  # Strong bullish (surger signal)
+        hist_atr = _macd_hist_atr(technical_data)
+        if hist_atr is not None and hist_atr > settings.macd_hist_strong_atr:
+            score += 15  # Strong bullish (surger signal), price-invariant
         elif macd_hist > 0:
             score += 8
         else:

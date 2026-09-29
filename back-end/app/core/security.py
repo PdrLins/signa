@@ -6,30 +6,55 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import bcrypt
 from loguru import logger
-from passlib.context import CryptContext
 
 from app.core.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt only uses the first 72 bytes of input; bcrypt>=5 raises on longer
+# input. We reject over-long passwords at creation time and treat them as a
+# failed verification (never silently truncate).
+BCRYPT_MAX_BYTES = 72
+_BCRYPT_ROUNDS = 12
 
 
 def hash_password(password: str) -> str:
-    """Hash a password with bcrypt."""
-    return pwd_context.hash(password)
+    """Hash a password with bcrypt ($2b$, 12 rounds).
+
+    Raises ValueError if the password exceeds bcrypt's 72-byte limit.
+    """
+    pw = password.encode("utf-8")
+    if len(pw) > BCRYPT_MAX_BYTES:
+        raise ValueError(f"Password too long (max {BCRYPT_MAX_BYTES} bytes in UTF-8)")
+    return bcrypt.hashpw(pw, bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode("ascii")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a password against a standard bcrypt hash ($2a$/$2b$/$2y$).
+
+    Never raises: malformed hashes or over-long passwords return False.
+    """
+    try:
+        pw = plain_password.encode("utf-8")
+        if len(pw) > BCRYPT_MAX_BYTES or not hashed_password:
+            return False
+        return bcrypt.checkpw(pw, hashed_password.encode("ascii"))
+    except (ValueError, TypeError, UnicodeError):
+        logger.debug("Password verification failed (malformed input/hash)")
+        return False
 
 
 def create_access_token(
     user_id: str,
     username: str,
     expires_delta: timedelta | None = None,
+    auth_time: int | None = None,
 ) -> str:
-    """Create a JWT access token."""
+    """Create a JWT access token.
+
+    `auth_time` is the Unix time of the original OTP login; it is preserved
+    across refreshes so the total session length can be capped.
+    """
     if expires_delta is None:
         expires_delta = timedelta(minutes=settings.jwt_access_token_expire_minutes)
 
@@ -40,6 +65,7 @@ def create_access_token(
         "iat": now,
         "exp": now + expires_delta,
         "jti": str(uuid4()),
+        "auth_time": int(auth_time if auth_time is not None else now.timestamp()),
     }
 
     token = _jwt_encode(payload)
@@ -64,20 +90,22 @@ def decode_token(token: str) -> dict | None:
         return None
 
 
-def decode_token_allow_expired(token: str, max_age_hours: int = 24) -> dict | None:
+def decode_token_allow_expired(token: str, max_age_hours: int | None = None) -> dict | None:
     """Decode a JWT token even if expired, within a grace period.
 
     Used for token refresh -- allows refreshing tokens that expired
-    recently (within max_age_hours) without forcing re-login.
+    recently (within max_age_hours, default JWT_REFRESH_GRACE_HOURS)
+    without forcing re-login. Signature is always verified.
     """
     import jwt as pyjwt
-    from datetime import datetime, timezone
 
+    if max_age_hours is None:
+        max_age_hours = settings.jwt_refresh_grace_hours
     try:
         payload = pyjwt.decode(
             token, settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
-            options={"verify_exp": False},
+            options={"verify_exp": False, "require": ["exp", "sub", "jti"]},
         )
         # Check the token isn't TOO old
         exp = payload.get("exp", 0)
@@ -137,3 +165,32 @@ def create_brain_token(user_id: str, jti: str) -> str:
         "jti": jti,
     }
     return pyjwt.encode(payload, settings.brain_token_secret, algorithm=settings.jwt_algorithm)
+
+
+def supabase_key_role(key: str) -> str | None:
+    """Return the `role` claim of a Supabase API key JWT, or None.
+
+    Decodes the payload with base64 only — NO signature verification — purely
+    to tell an anon key from a service_role key at startup. Never log `key`.
+    New-style Supabase keys (sb_publishable_... / sb_secret_...) aren't JWTs;
+    they are mapped by prefix.
+    """
+    import base64
+    import json
+
+    if not key:
+        return None
+    if key.startswith("sb_publishable_"):
+        return "anon"
+    if key.startswith("sb_secret_"):
+        return "service_role"
+    parts = key.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        seg = parts[1] + "=" * (-len(parts[1]) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(seg))
+        role = claims.get("role") if isinstance(claims, dict) else None
+        return role if isinstance(role, str) else None
+    except Exception:
+        return None

@@ -3,20 +3,70 @@
 Computes RSI, MACD, Bollinger Bands, SMA crossovers, volume trends, and ATR.
 """
 
+from datetime import datetime
+
 import pandas as pd
 import pandas_ta as ta
 from loguru import logger
 
 
-def compute_indicators(df: pd.DataFrame) -> dict:
+def _bar_date(ts, exchange: str | None):
+    """Calendar date of a daily bar in the exchange's reference zone."""
+    ts = pd.Timestamp(ts)
+    if ts.tzinfo is not None:
+        tz = "UTC" if exchange == "CRYPTO" else "America/New_York"
+        ts = ts.tz_convert(tz)
+    return ts.date()
+
+
+def drop_incomplete_bar(
+    df: pd.DataFrame, exchange: str | None, now: datetime | None = None,
+) -> tuple[pd.DataFrame, bool]:
+    """Drop the still-forming daily bar, if any.
+
+    During the session yfinance's last daily row is today's partial bar:
+    its volume is a fraction of a full day (volume z-score reads as
+    "suspiciously low" every morning) and its close is a live tick that
+    moves RSI/MACD intraday. Indicators must be computed on completed
+    bars only. Crypto uses completed UTC daily bars.
+
+    Returns (df_without_partial_bar, dropped).
+    """
+    if df is None or df.empty or exchange is None:
+        return df, False
+    from app.core.market_calendar import is_daily_bar_complete
+    last_date = _bar_date(df.index[-1], exchange)
+    if is_daily_bar_complete(exchange, last_date, now):
+        return df, False
+    return df.iloc[:-1], True
+
+
+def compute_indicators(
+    df: pd.DataFrame,
+    exchange: str | None = None,
+    now: datetime | None = None,
+) -> dict:
     """Compute all technical indicators from an OHLCV DataFrame.
 
     Args:
         df: DataFrame with Open, High, Low, Close, Volume columns.
+        exchange: 'NYSE' | 'NASDAQ' | 'TSX' | 'CRYPTO'. When given, the
+            in-progress daily bar is dropped before computing indicators
+            (see `drop_incomplete_bar`). `current_price` still reports
+            the live last price; every indicator uses completed bars.
+            None keeps the legacy behaviour (use every row as-is).
+        now: Clock override for tests.
 
     Returns:
         Dict with all computed indicator values.
     """
+    if df is None or df.empty:
+        logger.warning("Not enough data for technical analysis")
+        return {}
+
+    live_price = float(df["Close"].iloc[-1])
+    df, dropped = drop_incomplete_bar(df, exchange, now)
+
     if df.empty or len(df) < 14:
         logger.warning("Not enough data for technical analysis")
         return {}
@@ -26,9 +76,14 @@ def compute_indicators(df: pd.DataFrame) -> dict:
         high = df["High"]
         low = df["Low"]
         volume = df["Volume"]
+        # Last COMPLETED close — every indicator below is anchored here.
         current_price = float(close.iloc[-1])
 
-        result = {"current_price": round(current_price, 2)}
+        result = {
+            "current_price": round(live_price, 2),
+            "last_close": round(current_price, 2),
+            "incomplete_bar_dropped": dropped,
+        }
 
         # RSI (14-period)
         rsi_series = ta.rsi(close, length=14)
@@ -37,7 +92,10 @@ def compute_indicators(df: pd.DataFrame) -> dict:
 
         # MACD (12, 26, 9)
         macd_df = ta.macd(close, fast=12, slow=26, signal=9)
+        macd_hist_raw = None
         if macd_df is not None and not macd_df.empty:
+            if pd.notna(macd_df.iloc[-1, 2]):
+                macd_hist_raw = float(macd_df.iloc[-1, 2])
             result["macd"] = round(float(macd_df.iloc[-1, 0]), 4)
             result["macd_signal"] = round(float(macd_df.iloc[-1, 1]), 4)
             result["macd_histogram"] = round(float(macd_df.iloc[-1, 2]), 4)
@@ -76,18 +134,28 @@ def compute_indicators(df: pd.DataFrame) -> dict:
                     elif prev_50 > prev_200 and result["sma_50"] < result["sma_200"]:
                         result["sma_cross"] = "death_cross"
 
-        # Volume analysis
+        # Volume analysis. z-score is the last completed bar vs the PRIOR
+        # 20 completed bars (the blocker doc's "20-day average"); the old
+        # version compared against a 1-year mean that included the bar
+        # itself.
         if not volume.empty:
             result["volume_avg"] = round(float(volume.mean()), 0)
-            if volume.std() > 0:
+            baseline = volume.iloc[-21:-1] if len(volume) >= 21 else volume.iloc[:-1]
+            if len(baseline) >= 5 and baseline.std() > 0:
                 result["volume_zscore"] = round(
-                    float((volume.iloc[-1] - volume.mean()) / volume.std()), 2
+                    float((volume.iloc[-1] - baseline.mean()) / baseline.std()), 2
                 )
 
         # ATR (14-period)
         atr_series = ta.atr(high, low, close, length=14)
         if atr_series is not None and not atr_series.empty and pd.notna(atr_series.iloc[-1]):
-            result["atr"] = round(float(atr_series.iloc[-1]), 4)
+            atr_raw = float(atr_series.iloc[-1])
+            result["atr"] = round(atr_raw, 4)
+            # Price-invariant MACD histogram (ATR units). A raw histogram
+            # of 2.0 means very different things on a $10 and a $1000 name.
+            # Uses unrounded values so sub-cent assets don't round to 0.
+            if macd_hist_raw is not None and atr_raw > 0:
+                result["macd_hist_atr"] = round(macd_hist_raw / atr_raw, 4)
 
         # ADX (14-period) — trend strength indicator
         # ADX > 25 = strong trend (favor momentum), ADX < 20 = range-bound (favor mean reversion)
@@ -105,6 +173,15 @@ def compute_indicators(df: pd.DataFrame) -> dict:
         if "sma_200" in result and result["sma_200"] > 0:
             result["vs_sma200"] = round(((current_price - result["sma_200"]) / result["sma_200"]) * 100, 2)
 
+        # 1-day return (%). When the partial bar was dropped this is the
+        # live move vs the last completed close (i.e. today's change so
+        # far); otherwise last completed close vs the one before. Display /
+        # prompt context only — not used in scoring.
+        if dropped and current_price > 0:
+            result["momentum_1d"] = round((live_price - current_price) / current_price * 100, 2)
+        elif len(close) >= 2 and float(close.iloc[-2]) > 0:
+            result["momentum_1d"] = round((current_price - float(close.iloc[-2])) / float(close.iloc[-2]) * 100, 2)
+
         # Momentum (5-day and 20-day percentage change)
         if len(close) >= 6:
             result["momentum_5d"] = round(((current_price - float(close.iloc[-6])) / float(close.iloc[-6])) * 100, 2)
@@ -118,8 +195,8 @@ def compute_indicators(df: pd.DataFrame) -> dict:
             result["momentum_6m"] = round(((current_price - float(close.iloc[-126])) / float(close.iloc[-126])) * 100, 2)
 
         # Volume ratio (current vs 20-day average)
-        if not volume.empty and len(volume) >= 20:
-            vol_avg_20 = float(volume.iloc[-20:].mean())
+        if not volume.empty and len(volume) >= 21:
+            vol_avg_20 = float(volume.iloc[-21:-1].mean())
             if vol_avg_20 > 0:
                 result["volume_ratio"] = round(float(volume.iloc[-1]) / vol_avg_20, 2)
 

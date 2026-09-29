@@ -17,7 +17,7 @@ def main():
     print("=" * 40)
     print()
 
-    username = input("Username: ").strip()
+    username = input("Username: ").strip().lower()
     if not username:
         print("Username cannot be empty")
         sys.exit(1)

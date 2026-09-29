@@ -328,6 +328,12 @@ async def run_daily_learning(
 
         # ── 2. Metrics ──────────────────────────────────────────────
         metrics = await asyncio.to_thread(compute_daily_metrics, target_date)
+        # Daily wallet reconciliation (cash + open cost == deposits + realized).
+        try:
+            from app.services.wallet import reconcile_wallet
+            metrics["wallet_reconcile"] = await asyncio.to_thread(reconcile_wallet)
+        except Exception as e:
+            logger.warning(f"daily_learning: wallet reconcile failed: {e}")
         logger.info(
             f"daily_learning: metrics computed — closes={metrics['closes']['count']} "
             f"entries={metrics['entries']['count']} "

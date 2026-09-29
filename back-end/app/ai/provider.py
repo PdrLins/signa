@@ -22,38 +22,23 @@ THE SYNTHESIS FALLBACK CHAIN
 ============================================================
 
 Configuration: `settings.synthesis_providers = ["claude", "gemini"]`
-plus `settings.claude_local: bool = True`.
+plus `settings.claude_local: bool = True`, which picks exactly ONE way
+to reach Claude — they never mix:
 
-When `claude_local=True`, the chain is:
+  claude_local=True   (running on your own machine)
+       Claude goes through the local `claude` CLI only (your
+       subscription, $0). The Anthropic API is never called, even if
+       ANTHROPIC_API_KEY is set. If the CLI fails, routine synthesis
+       falls to Gemini; the decision tier and thesis re-eval get no
+       answer (→ no auto-buy / no thesis change).
 
-  1. CLAUDE LOCAL CLI (free, $0)
-       Calls `claude -p ...` as a subprocess. Uses the user's Pro Max
-       subscription via the local CLI binary. Up to 3 retries with
-       2s/4s/8s exponential backoff for transient errors (timeout,
-       empty response, JSON parse errors).
-       Failure mode → cascade to step 2.
+  claude_local=False  (e.g. a server without the CLI)
+       Claude goes through the paid Anthropic API only, budget-checked
+       before every call. If it fails, routine synthesis falls to Gemini.
 
-  2. CLAUDE API (paid, ~$0.012/call)
-       Direct Anthropic API call. Costs real money but more reliable
-       than the CLI. Budget-checked before each call.
-       Failure mode → cascade to step 3.
-
-  3. GEMINI (free tier, $0)
-       Google Gemini 2.0 Flash. Free up to 1500 calls/day. Less
-       sophisticated than Claude but a workable last-resort.
-       Failure mode → return generic error (the brain treats this
-       as ai_status="failed" and queues the ticker for retry).
-
-When `claude_local=False`, the chain skips step 1 and goes straight
-to Claude API → Gemini.
-
-CRITICAL HISTORICAL BUG (now fixed): in an earlier version, when
-claude_local was enabled and the CLI failed, the loop's `continue`
-statement jumped straight to the NEXT iteration of the providers list
-(i.e., gemini), completely skipping the paid Claude API. This left a
-massive reliability gap. The current code lifts both Claude tiers into
-the same iteration so a Claude Local failure properly cascades to the
-Claude API in the same loop body.
+GEMINI (free tier) is the last resort for routine synthesis in both
+modes. When everything fails the router returns a generic error (the
+brain treats it as ai_status="failed" and queues the ticker for retry).
 
 ============================================================
 THE SENTIMENT FALLBACK CHAIN
@@ -61,14 +46,15 @@ THE SENTIMENT FALLBACK CHAIN
 
 Configuration: `settings.sentiment_providers = ["grok", "gemini"]`.
 
-  1. GROK (paid, ~$0.0002/call)
-       Grok-3-mini via xAI API. The ONLY provider with live X/Twitter
-       access — critical for accurate sentiment.
+  1. GROK (paid, see budget_service.COST_ESTIMATES)
+       xAI Responses API with live x_search + web_search (last 48h).
+       The ONLY provider with live X access. Results without citations
+       come back with `error` set and are skipped.
        Failure mode → cascade to step 2.
 
   2. GEMINI (free, $0)
-       Google Gemini for sentiment. Doesn't have live social media
-       access but can read recent web content. Lower quality but free.
+       Google Gemini grounded with Google Search (48h window). No X
+       access (mention_count=0); rejected when no grounding sources.
 
 If both fail, the router returns a neutral fallback (score=50,
 confidence=0) with `error="All providers failed or budget exceeded"`.
@@ -95,7 +81,36 @@ user can top up before the brain goes blind.
 
 from loguru import logger
 
+from app.core.cache import TTLCache
 from app.core.config import settings
+
+# Per-ticker AI result caches. Scans run several times a day and mostly see
+# the same candidates; re-asking about an unchanged ticker is pure cost.
+_sentiment_cache = TTLCache(max_size=500, default_ttl=3600)
+_synthesis_cache = TTLCache(max_size=500, default_ttl=3600)
+_decision_cache = TTLCache(max_size=200, default_ttl=3600)
+
+
+def clear_ai_caches() -> None:
+    _sentiment_cache.clear()
+    _synthesis_cache.clear()
+    _decision_cache.clear()
+
+
+def _cached_synthesis(cache: TTLCache, ticker: str, current_price) -> dict | None:
+    """A recent synthesis for `ticker`, unless price has since moved more
+    than synthesis_cache_max_move_pct (stale levels / changed setup)."""
+    entry = cache.get(ticker)
+    if entry is None:
+        return None
+    result, price_then = entry
+    try:
+        move_pct = abs(float(current_price) / float(price_then) - 1) * 100
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    if move_pct > settings.synthesis_cache_max_move_pct:
+        return None
+    return {**result, "_cached": True}
 
 
 async def _get_budget():
@@ -110,19 +125,49 @@ async def synthesize_signal(
     fundamental_data: dict,
     macro_data: dict,
     grok_data: dict,
+    tier: str = "routine",
 ) -> dict:
     """Route synthesis to the first available provider within budget.
 
-    Fallback chain when claude_local=True:
-        Claude Local CLI ($0)  →  Claude API (paid)  →  Gemini (free tier)
-    Fallback chain when claude_local=False:
-        Claude API (paid)  →  Gemini (free tier)
+    tier="routine" (default) uses settings.claude_model and may fall back to
+    Gemini. tier="decision" is the final BUY confirmation:
+    settings.claude_decision_model only — never Gemini — so a BUY is never
+    "confirmed" by a weaker model. Both tiers cache per ticker for
+    synthesis_cache_hours, invalidated when price moves more than
+    synthesis_cache_max_move_pct.
 
-    Previous bug: when claude_local was enabled and the CLI failed, the paid
-    Claude API was skipped entirely (the `continue` jumped to gemini). Now
-    Claude Local failure properly cascades to the paid Claude API first.
+    Fallback chain when claude_local=True:   Claude CLI ($0)  →  Gemini
+    Fallback chain when claude_local=False:  Claude API (paid) →  Gemini
+    The decision tier is Claude-only (never Gemini) in both modes.
     """
-    providers = settings.synthesis_providers
+    cache = _decision_cache if tier == "decision" else _synthesis_cache
+    current_price = (technical_data or {}).get("current_price")
+    if settings.synthesis_cache_hours > 0:
+        cached = _cached_synthesis(cache, ticker, current_price)
+        if cached is not None:
+            logger.debug(f"Synthesis cache hit for {ticker} ({tier})")
+            return cached
+
+    result = await _route_synthesis(
+        ticker, technical_data, fundamental_data, macro_data, grok_data, tier,
+    )
+    if not result.get("error") and settings.synthesis_cache_hours > 0 and current_price:
+        cache.set(ticker, (result, current_price), ttl=settings.synthesis_cache_hours * 3600)
+    return result
+
+
+async def _route_synthesis(
+    ticker: str,
+    technical_data: dict,
+    fundamental_data: dict,
+    macro_data: dict,
+    grok_data: dict,
+    tier: str,
+) -> dict:
+    decision = tier == "decision"
+    providers = ["claude"] if decision else settings.synthesis_providers
+    budget_call_type = "decision" if decision else "synthesis"
+    provider_suffix = "-decision" if decision else ""
     budget = await _get_budget()
 
     for provider in providers:
@@ -131,13 +176,15 @@ async def synthesize_signal(
             if settings.claude_local:
                 try:
                     from app.ai.claude_local_client import synthesize_signal as claude_local_synth
-                    result = await claude_local_synth(ticker, technical_data, fundamental_data, macro_data, grok_data)
+                    result = await claude_local_synth(
+                        ticker, technical_data, fundamental_data, macro_data, grok_data, tier=tier,
+                    )
                     if not result.get("error"):
-                        result["_provider"] = "claude-local"
+                        result["_provider"] = "claude-local" + provider_suffix
                         return result
                     logger.warning(
                         f"Claude Local exhausted retries for {ticker}: {result.get('error')} "
-                        f"— falling through to paid Claude API"
+                        f"— API disabled in local mode, trying next provider"
                     )
                 except (KeyError, TypeError, AttributeError, ImportError, NameError) as e:
                     # Permanent code bugs (template mismatch, missing import, etc).
@@ -147,26 +194,30 @@ async def synthesize_signal(
                     # API, burning thousands of tokens before the user noticed.
                     logger.error(
                         f"Claude Local synthesis CODE BUG for {ticker}: {type(e).__name__}: {e} "
-                        f"— this is NOT a transient error and will keep burning tokens via the paid API "
-                        f"until fixed. Check claude_local_client.py vs prompts.py."
+                        f"— this is NOT a transient error and will fail every call until fixed. "
+                        f"Check claude_local_client.py vs prompts.py."
                     )
                 except Exception as e:
-                    logger.warning(f"Claude Local synthesis error for {ticker}: {e} — falling through to paid Claude API")
+                    logger.warning(f"Claude Local synthesis error for {ticker}: {e} — trying next provider")
+                # Local mode never touches the paid API.
+                continue
 
-            # Tier 2: Paid Claude API (always tried after local fails OR when local disabled)
-            allowed, reason = await budget.can_call("claude", "synthesis")
+            # API mode (claude_local=False)
+            allowed, reason = await budget.can_call("claude", budget_call_type)
             if not allowed:
-                logger.warning(f"Budget blocked Claude API synthesis for {ticker}: {reason}")
+                logger.warning(f"Budget blocked Claude API {budget_call_type} for {ticker}: {reason}")
             elif settings.anthropic_api_key:
                 try:
                     from app.ai.claude_client import synthesize_signal as claude_synth
-                    result = await claude_synth(ticker, technical_data, fundamental_data, macro_data, grok_data)
+                    result = await claude_synth(
+                        ticker, technical_data, fundamental_data, macro_data, grok_data, tier=tier,
+                    )
                     if not result.get("error"):
-                        result["_provider"] = "claude"
-                        await budget.record_call("claude", "synthesis", ticker, success=True)
+                        result["_provider"] = "claude" + provider_suffix
+                        await budget.record_call("claude", budget_call_type, ticker, success=True)
                         return result
                     logger.warning(f"Claude API failed for {ticker}: {result.get('error')} — trying next provider")
-                    await budget.record_call("claude", "synthesis", ticker, success=False)
+                    await budget.record_call("claude", budget_call_type, ticker, success=False)
                 except Exception as e:
                     logger.warning(f"Claude API synthesis error for {ticker}: {e}")
             continue
@@ -195,6 +246,7 @@ async def synthesize_signal(
     return {
         "signal": "HOLD",
         "confidence": 0,
+        "p_win": None,
         "reasoning": "Analysis temporarily unavailable — all AI providers failed or budget exceeded",
         "risk_factors": [],
         "catalyst": None,
@@ -210,7 +262,22 @@ async def synthesize_signal(
 
 
 async def analyze_sentiment(ticker: str) -> dict:
-    """Route sentiment analysis to the first available provider within budget."""
+    """Route sentiment analysis to the first available provider within budget.
+
+    Successful results are cached per ticker for sentiment_cache_hours — the
+    search window is 48h, so re-searching X every scan buys almost nothing.
+    """
+    if settings.sentiment_cache_hours > 0:
+        cached = _sentiment_cache.get(ticker)
+        if cached is not None:
+            return {**cached, "_cached": True}
+    result = await _route_sentiment(ticker)
+    if not result.get("error") and settings.sentiment_cache_hours > 0:
+        _sentiment_cache.set(ticker, result, ttl=settings.sentiment_cache_hours * 3600)
+    return result
+
+
+async def _route_sentiment(ticker: str) -> dict:
     providers = settings.sentiment_providers
     budget = await _get_budget()
 
@@ -252,10 +319,14 @@ async def analyze_sentiment(ticker: str) -> dict:
         "score": 50.0,
         "label": "neutral",
         "confidence": 0.0,
+        "mention_count": 0,
         "top_themes": [],
         "breaking_news": None,
+        "breaking_news_url": None,
+        "red_flags": [],
         "notable_accounts": [],
         "summary": "",
+        "citations": [],
         "error": "All providers failed or budget exceeded",
         "_provider": "none",
     }
@@ -297,8 +368,13 @@ async def re_evaluate_thesis(
     treat None as "no re-eval this scan" — leave any prior thesis_last_*
     fields in place; do NOT clear them.
     """
-    import json
-    from app.ai.prompts import THESIS_REEVAL_PROMPT, clean_json_response
+    from app.ai.prompts import (
+        THESIS_REEVAL_JSON_SCHEMA,
+        THESIS_REEVAL_PROMPT,
+        UNTRUSTED_NOTICE,
+        _safe_int,
+        wrap_untrusted,
+    )
 
     def _format_conditions(d: dict) -> str:
         if not d:
@@ -332,26 +408,35 @@ async def re_evaluate_thesis(
         entry_price=entry_price,
         current_price=current_price,
         pnl_pct=pnl_pct,
-        entry_thesis=entry_thesis or "(no thesis recorded)",
-        entry_conditions=_format_conditions(entry_conditions),
-        prior_reeval_block=prior_block,
-        current_conditions=_format_conditions(current_conditions),
+        untrusted_notice=UNTRUSTED_NOTICE,
+        entry_thesis=wrap_untrusted("entry_thesis", entry_thesis or "(no thesis recorded)"),
+        entry_conditions=wrap_untrusted("entry_conditions", _format_conditions(entry_conditions)),
+        prior_reeval_block=wrap_untrusted("prior_reeval", prior_block),
+        current_conditions=wrap_untrusted("current_conditions", _format_conditions(current_conditions)),
     )
 
     budget = await _get_budget()
 
     def _valid_reeval_shape(d) -> bool:
-        """Sanity-check Claude's re-eval JSON. Must be a dict with a
-        `status` field — otherwise an `EVENT_THESIS_EVALUATED` event would
-        get logged with garbage data and downstream code would default to
-        'valid' on a hallucinated response."""
-        return isinstance(d, dict) and "status" in d
+        """Sanity-check Claude's re-eval JSON: a dict whose `status` is one
+        of valid/weakening/invalid. Normalizes status (lowercase) and
+        confidence (int 0-100, missing → 0) in place so downstream gates
+        never act on a garbage or partial parse."""
+        if not isinstance(d, dict):
+            return False
+        status = str(d.get("status") or "").strip().lower()
+        if status not in ("valid", "weakening", "invalid"):
+            return False
+        d["status"] = status
+        d["confidence"] = max(0, min(100, _safe_int(d.get("confidence"), 0)))
+        d["should_exit"] = status == "invalid"
+        return True
 
-    # ── Tier 1: Claude Local (free) ──
+    # ── Local mode: Claude CLI only ──
     if settings.claude_local:
         try:
             from app.ai.claude_local_client import call_with_prompt
-            data = await call_with_prompt(prompt)
+            data = await call_with_prompt(prompt, json_schema=THESIS_REEVAL_JSON_SCHEMA)
             if _valid_reeval_shape(data):
                 data["_provider"] = "claude-local"
                 logger.debug(
@@ -361,27 +446,22 @@ async def re_evaluate_thesis(
                 return data
             if data is not None:
                 logger.warning(
-                    f"Thesis re-eval [{symbol}] Claude Local returned invalid shape, "
-                    f"falling through to paid API: {type(data).__name__}"
+                    f"Thesis re-eval [{symbol}] Claude Local returned invalid shape "
+                    f"({type(data).__name__}) — discarding"
                 )
         except Exception as e:
             logger.debug(f"Thesis re-eval Claude Local failed for {symbol}: {e}")
+        # Local mode never touches the paid API.
+        return None
 
-    # ── Tier 2: Paid Claude API ──
+    # ── API mode (claude_local=False) ──
     allowed, _reason = await budget.can_call("claude", "synthesis")
     if not allowed or not settings.anthropic_api_key:
         logger.debug(f"Thesis re-eval skipped (no Claude API budget) for {symbol}")
         return None
     try:
-        from app.ai.claude_client import _get_client
-        client = await _get_client()
-        response = await client.messages.create(
-            model=settings.claude_model,
-            max_tokens=settings.claude_max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        content = clean_json_response(response.content[0].text)
-        data = json.loads(content)
+        from app.ai.claude_client import create_structured
+        data = await create_structured(prompt, THESIS_REEVAL_JSON_SCHEMA)
         if not _valid_reeval_shape(data):
             logger.warning(
                 f"Thesis re-eval [{symbol}] Claude API returned invalid shape "

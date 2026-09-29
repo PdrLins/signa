@@ -26,9 +26,40 @@ from app.db import queries
 from app.models.audit import AuditEvent
 from app.notifications.telegram_bot import send_otp_message
 
-# Login lockout constants
-MAX_LOGIN_ATTEMPTS = 3
-LOCKOUT_SECONDS = 600  # 10 minutes
+# Per-account lockout (secondary defence — the per-IP limit in
+# RateLimitMiddleware is the primary brute-force control). Exponential
+# backoff: after LOCKOUT_THRESHOLD consecutive failures the account is locked
+# for LOCKOUT_BASE_SECONDS, doubling on each further failure, capped at
+# LOCKOUT_MAX_SECONDS. Kept short so an attacker who knows the username
+# can't lock the owner out for long.
+LOCKOUT_THRESHOLD = 5
+LOCKOUT_BASE_SECONDS = 60
+LOCKOUT_MAX_SECONDS = 900
+# Failure counter is forgotten this long after the last lock expired.
+LOCKOUT_DECAY_SECONDS = 3600
+
+# Generic message for every credential failure: never confirm whether the
+# username exists or how many attempts remain.
+INVALID_CREDENTIALS = "Invalid credentials."
+
+# Valid bcrypt hash of a random throwaway value — used to equalise timing when
+# the username doesn't exist (so response time doesn't reveal valid usernames).
+_DUMMY_HASH = "$2b$12$6pxyrxnCXf11H1Wprx7.desTp9kmB9IIsFnnPfsi6.k3ylpbxMQCG"
+
+
+def lockout_seconds(attempts: int) -> int:
+    """Lock duration for a given consecutive-failure count (0 = no lock)."""
+    if attempts < LOCKOUT_THRESHOLD:
+        return 0
+    return min(LOCKOUT_BASE_SECONDS * (2 ** (attempts - LOCKOUT_THRESHOLD)), LOCKOUT_MAX_SECONDS)
+
+
+def _locked_error(remaining: int) -> AccountLockedError:
+    minutes = max(1, math.ceil(remaining / 60))
+    return AccountLockedError(
+        detail=f"Too many failed attempts — temporarily locked. Try again in {minutes} minute{'s' if minutes != 1 else ''}.",
+        retry_after=remaining,
+    )
 
 
 async def login(
@@ -50,14 +81,9 @@ async def login(
             lock_time = datetime.fromisoformat(locked_until)
             now = datetime.now(timezone.utc)
             if now < lock_time:
-                remaining = int((lock_time - now).total_seconds())
-                minutes = math.ceil(remaining / 60)
-                raise AccountLockedError(
-                    detail=f"Account locked. Try again in {minutes} minute{'s' if minutes != 1 else ''}.",
-                    retry_after=remaining,
-                )
-            else:
-                # Lockout expired — reset
+                raise _locked_error(int((lock_time - now).total_seconds()))
+            if (now - lock_time).total_seconds() > LOCKOUT_DECAY_SECONDS:
+                # Lock expired long ago — forget the failure streak
                 db.table("users").update({
                     "login_attempts": 0,
                     "locked_until": None,
@@ -65,50 +91,31 @@ async def login(
                 user["login_attempts"] = 0
                 user["locked_until"] = None
 
-    if user is None or not verify_password(password, user["password_hash"]):
+    if user is None:
+        verify_password(password, _DUMMY_HASH)  # constant-ish timing
+        raise AuthenticationError(INVALID_CREDENTIALS)
+
+    if not verify_password(password, user["password_hash"]):
         # ── Increment failed attempts in DB ──
-        if user:
-            attempts = (user.get("login_attempts") or 0) + 1
-            remaining_attempts = MAX_LOGIN_ATTEMPTS - attempts
+        attempts = (user.get("login_attempts") or 0) + 1
+        lock_secs = lockout_seconds(attempts)
+        update: dict = {"login_attempts": attempts}
+        if lock_secs:
+            update["locked_until"] = (datetime.now(timezone.utc) + timedelta(seconds=lock_secs)).isoformat()
+        db.table("users").update(update).eq("id", user["id"]).execute()
 
-            if remaining_attempts <= 0:
-                # Lock the account in DB
-                lock_until = datetime.now(timezone.utc) + timedelta(seconds=LOCKOUT_SECONDS)
-                db.table("users").update({
-                    "login_attempts": attempts,
-                    "locked_until": lock_until.isoformat(),
-                }).eq("id", user["id"]).execute()
-
-                queries.insert_audit_log(
-                    event_type=AuditEvent.LOGIN_LOCKED,
-                    success=False,
-                    user_id=user["id"],
-                    ip_address=ip_address,
-                    user_agent=user_agent,
-                    metadata={"username": username, "lockout_minutes": 10},
-                )
-                logger.warning(f"Account locked for user {username} after {MAX_LOGIN_ATTEMPTS} failed attempts")
-                raise AccountLockedError(
-                    detail="Account locked. Try again in 10 minutes.",
-                    retry_after=LOCKOUT_SECONDS,
-                )
-
-            # Update attempts in DB
-            db.table("users").update({"login_attempts": attempts}).eq("id", user["id"]).execute()
-
-            queries.insert_audit_log(
-                event_type=AuditEvent.LOGIN_ATTEMPT,
-                success=False,
-                user_id=user["id"],
-                ip_address=ip_address,
-                user_agent=user_agent,
-                metadata={"username": username, "attempts": attempts, "remaining": remaining_attempts},
-            )
-            raise AuthenticationError(
-                f"Invalid credentials. {remaining_attempts} attempt{'s' if remaining_attempts != 1 else ''} remaining."
-            )
-
-        raise AuthenticationError("Invalid credentials.")
+        queries.insert_audit_log(
+            event_type=AuditEvent.LOGIN_LOCKED if lock_secs else AuditEvent.LOGIN_ATTEMPT,
+            success=False,
+            user_id=user["id"],
+            ip_address=ip_address,
+            user_agent=user_agent,
+            metadata={"attempts": attempts, "lockout_seconds": lock_secs},
+        )
+        if lock_secs:
+            logger.warning(f"Account locked for {lock_secs}s after {attempts} failed attempts")
+        # Same generic error whether or not this attempt triggered a lock.
+        raise AuthenticationError(INVALID_CREDENTIALS)
 
     # ── Successful credentials — clear attempts in DB ──
     db.table("users").update({
@@ -214,8 +221,10 @@ async def verify_otp_code(
             attempts_remaining=max(0, remaining),
         )
 
-    # OTP valid — mark used
-    queries.mark_otp_used(otp_record["id"])
+    # OTP valid — mark used atomically (only succeeds if still unused, so two
+    # concurrent requests with the same OTP can't both get a token)
+    if not queries.mark_otp_used(otp_record["id"]):
+        raise AuthenticationError("Invalid or expired session token")
 
     # Get user info (excludes password_hash)
     user = queries.get_user_by_id(user_id)
@@ -275,17 +284,45 @@ def logout(token: str, user_id: str, ip_address: str, user_agent: str) -> None:
             )
 
 
-def refresh_token(token: str, user_id: str, username: str, ip_address: str, user_agent: str) -> dict:
-    """Issue a new JWT and blacklist the old one."""
-    payload = decode_token(token)
-    if payload:
-        jti = payload.get("jti")
-        exp = payload.get("exp")
-        if jti:
-            expires_at = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else datetime.now(timezone.utc)
-            queries.blacklist_token(jti, user_id, expires_at)
+class TokenRefreshError(AuthenticationError):
+    """Refresh rejected (revoked, replayed, or session too old)."""
 
-    new_token = create_access_token(user_id=user_id, username=username)
+
+def refresh_token(payload: dict, ip_address: str, user_agent: str) -> dict:
+    """Rotate a JWT: revoke the presented token's JTI and issue a new one.
+
+    `payload` must be the already signature-verified claims of the presented
+    token (it may be expired, within the grace window). Raises
+    TokenRefreshError if the token is revoked, already rotated (replay), or
+    the session exceeded the absolute maximum lifetime.
+    """
+    user_id = payload.get("sub")
+    username = payload.get("username")
+    jti = payload.get("jti")
+    if not user_id or not username or not jti:
+        raise TokenRefreshError("Invalid token")
+
+    if queries.is_token_blacklisted(jti):
+        raise TokenRefreshError("Token has been revoked")
+
+    # Absolute session cap: auth_time is carried across refreshes (falls back
+    # to iat for tokens minted before this claim existed).
+    now = datetime.now(timezone.utc)
+    auth_time = payload.get("auth_time") or payload.get("iat")
+    if not auth_time or now.timestamp() - float(auth_time) > settings.jwt_max_session_hours * 3600:
+        raise TokenRefreshError("Session expired. Please login again.")
+
+    # Revoke the presented token. token_jti is UNIQUE, so if two refreshes race
+    # with the same token only one insert succeeds; the loser is rejected.
+    exp = payload.get("exp")
+    expires_at = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else now
+    try:
+        queries.blacklist_token(jti, user_id, expires_at)
+    except Exception:
+        logger.warning("Refresh rejected: token JTI already revoked or blacklist write failed")
+        raise TokenRefreshError("Token has been revoked")
+
+    new_token = create_access_token(user_id=user_id, username=username, auth_time=int(float(auth_time)))
 
     queries.insert_audit_log(
         event_type=AuditEvent.TOKEN_REFRESHED,

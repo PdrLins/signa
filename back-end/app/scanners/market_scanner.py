@@ -20,7 +20,7 @@ try:
 except Exception:
     pass
 
-# Per-ticker bulk-screening cache. The 5d OHLCV that bulk_screening returns
+# Per-ticker bulk-screening cache. The 1y-derived features bulk_screening returns
 # doesn't materially change minute-to-minute, so we cache across scans and
 # only re-fetch on misses. First scan of the day pays full price; later
 # scans skip most of the ~100s yfinance screening cost.
@@ -40,7 +40,7 @@ def _bulk_screen_ttl() -> int:
 
     Outside the regular session (overnight, weekends, holidays) prices
     don't move and we can safely reuse results for hours — we cap at 1 hr
-    anyway because the trading day rolls and the bulk_screening 5d window
+    anyway because the trading day rolls and the bulk_screening window
     shifts when a new session closes.
     """
     now_et = datetime.now(ZoneInfo("America/New_York"))
@@ -107,6 +107,83 @@ def _normalize_pct(value) -> float | None:
         return v
     except (ValueError, TypeError):
         return None
+
+
+def _fraction(value) -> float | None:
+    """Coerce a yfinance value that is ALREADY a fraction (payoutRatio,
+    shortPercentOfFloat, trailingAnnualDividendYield, ETF `yield`).
+
+    Unlike `_normalize_pct` this never divides by 100 based on magnitude:
+    a payout ratio of 1.5 (150%) is real and must stay 1.5.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _dividend_yield_fraction(info: dict) -> float | None:
+    """Dividend yield as a FRACTION (0.04 = 4%), robust to yfinance units.
+
+    Why not `_normalize_pct(info["dividendYield"])`: since early 2025
+    Yahoo reports `dividendYield` in PERCENT (AAPL 0.44 means 0.44%).
+    The magnitude heuristic ("> 1 means percent") misread every sub-1%
+    yield as a fraction — 0.44 became 44%, which `_cap_dividend_yield`
+    then discarded as garbage, so low-yield names showed NO dividend.
+
+    Resolution order (first that is present wins):
+      1. dividendRate / price   — both unambiguous (USD per share / USD)
+      2. dividendYield / 100    — percent units in yfinance >= 0.2.54
+      3. trailingAnnualDividendYield — fraction
+      4. yield                  — fraction (ETFs)
+    """
+    rate = info.get("dividendRate")
+    price = (
+        info.get("regularMarketPrice") or info.get("currentPrice")
+        or info.get("previousClose")
+    )
+    try:
+        if rate is not None and price and float(price) > 0:
+            return float(rate) / float(price)
+    except (TypeError, ValueError):
+        pass
+    dy = info.get("dividendYield")
+    if dy is not None:
+        try:
+            return float(dy) / 100.0
+        except (TypeError, ValueError):
+            pass
+    for key in ("trailingAnnualDividendYield", "yield"):
+        v = _fraction(info.get(key))
+        if v is not None:
+            return v
+    return None
+
+
+def _next_earnings_date_from_info(info: dict) -> str | None:
+    """Next earnings date (ISO) from the real yfinance `.info` keys.
+
+    `.info` has no "earningsDate" key (that lives in Ticker.calendar, a
+    different quoteSummary module), so the old parser always produced
+    None. The v7 quote payload merged into `.info` carries
+    `earningsTimestampStart` / `earningsTimestamp` / `earningsTimestampEnd`
+    (epoch seconds). Pick the earliest one that is today or later.
+    """
+    today = date.today()
+    candidates = []
+    for key in ("earningsTimestampStart", "earningsTimestamp", "earningsTimestampEnd"):
+        ts = info.get(key)
+        if not ts:
+            continue
+        try:
+            d = datetime.fromtimestamp(float(ts), tz=ZoneInfo("America/New_York")).date()
+        except (ValueError, TypeError, OSError, OverflowError):
+            continue
+        if d >= today:
+            candidates.append(d)
+    return min(candidates).isoformat() if candidates else None
 
 
 def _cap_dividend_yield(value: float | None) -> float | None:
@@ -208,17 +285,8 @@ async def get_fundamentals(ticker: str) -> dict:
 
         info = await asyncio.to_thread(_fetch)
 
-        # Parse earnings date
-        earnings_date = None
-        if "earningsDate" in info and info["earningsDate"]:
-            try:
-                ed = info["earningsDate"]
-                if isinstance(ed, list) and len(ed) > 0:
-                    earnings_date = date.fromtimestamp(ed[0]).isoformat()
-                elif isinstance(ed, (int, float)):
-                    earnings_date = date.fromtimestamp(ed).isoformat()
-            except (ValueError, TypeError, OSError, OverflowError):
-                pass
+        # Next earnings date from the real .info keys (see helper).
+        earnings_date = _next_earnings_date_from_info(info)
 
         result = {
             "company_name": info.get("longName") or info.get("shortName"),
@@ -227,11 +295,12 @@ async def get_fundamentals(ticker: str) -> dict:
             "forward_pe": info.get("forwardPE"),
             "eps": info.get("trailingEps"),
             "eps_growth": info.get("earningsGrowth"),
-            "dividend_yield": _cap_dividend_yield(_normalize_pct(info.get("dividendYield"))),
-            "payout_ratio": _normalize_pct(info.get("payoutRatio")),
+            "dividend_yield": _cap_dividend_yield(_dividend_yield_fraction(info)),
+            "payout_ratio": _fraction(info.get("payoutRatio")),
             "debt_to_equity": info.get("debtToEquity"),
             "market_cap": info.get("marketCap"),
             "sector": info.get("sector"),
+            "quote_type": info.get("quoteType"),
             "industry": info.get("industry"),
             "earnings_date": earnings_date,
             "beta": info.get("beta"),
@@ -250,7 +319,7 @@ async def get_fundamentals(ticker: str) -> dict:
             "pre_market_price": info.get("preMarketPrice"),
             "pre_market_change": info.get("preMarketChange"),
             "pre_market_change_pct": info.get("preMarketChangePercent"),
-            "short_percent_of_float": _normalize_pct(info.get("shortPercentOfFloat")),
+            "short_percent_of_float": _fraction(info.get("shortPercentOfFloat")),
         }
         price_cache.set(cache_key, result, ttl=300)
         return result
@@ -287,6 +356,55 @@ async def get_period_changes(ticker: str) -> dict:
         return {}
 
 
+def _screening_features(df: pd.DataFrame) -> dict:
+    """Cheap per-ticker features for the pre-filter, from ~1y daily bars.
+
+    Besides price/volume/day_change (kept for display and back-compat),
+    computes the TREND-QUALITY inputs the pre-filter now ranks on:
+      vs_sma50 / vs_sma200   — % distance of price from the SMAs
+      sma50_above_sma200     — long-term uptrend structure
+      ret_3m_ex_1w           — ~3-month return EXCLUDING the last week
+                               (classic momentum skips the most recent
+                               period to avoid short-term reversal)
+      rsi14                  — to avoid overbought / broken names
+    """
+    close = df["Close"].astype(float)
+    volume = df["Volume"].astype(float).fillna(0)
+    last_close = float(close.iloc[-1])
+    prev_close = float(close.iloc[-2])
+    day_change = (last_close - prev_close) / prev_close if prev_close else 0.0
+    # 20-session average volume (prior bars) — robust to a partial today.
+    vol_window = volume.iloc[-21:-1] if len(volume) >= 21 else volume
+    feats: dict = {
+        "price": last_close,
+        "volume": float(volume.iloc[-1]),
+        "avg_volume": float(vol_window.mean()),
+        "day_change": float(day_change),
+    }
+    n = len(close)
+    if n >= 50:
+        sma50 = float(close.iloc[-50:].mean())
+        if sma50 > 0:
+            feats["vs_sma50"] = (last_close - sma50) / sma50
+    if n >= 200:
+        sma200 = float(close.iloc[-200:].mean())
+        if sma200 > 0:
+            feats["vs_sma200"] = (last_close - sma200) / sma200
+        if n >= 50 and sma200 > 0:
+            feats["sma50_above_sma200"] = float(close.iloc[-50:].mean()) > sma200
+    if n >= 69:
+        start, end = float(close.iloc[-69]), float(close.iloc[-6])
+        if start > 0:
+            feats["ret_3m_ex_1w"] = (end - start) / start
+    if n >= 15:
+        delta = close.diff()
+        gain = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
+        loss = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
+        g, l = float(gain.iloc[-1]), float(loss.iloc[-1])
+        feats["rsi14"] = 100.0 if l == 0 else 100 - 100 / (1 + g / l)
+    return feats
+
+
 def _parse_bulk_batch(batch: list[str], data) -> dict[str, dict]:
     """Parse a single yf.download() result frame into a per-ticker dict."""
     out: dict[str, dict] = {}
@@ -297,21 +415,14 @@ def _parse_bulk_batch(batch: list[str], data) -> dict[str, dict]:
             else:
                 df = data[ticker] if ticker in data.columns.get_level_values(0) else pd.DataFrame()
 
+            # Multi-ticker downloads align on a union index; crypto rows
+            # (7 days/week) leave NaN weekend rows on equities. Drop them.
+            if not df.empty:
+                df = df.dropna(subset=["Close"])
             if df.empty or len(df) < 2:
                 continue
 
-            last_close = df["Close"].iloc[-1]
-            prev_close = df["Close"].iloc[-2]
-            day_change = (last_close - prev_close) / prev_close if prev_close else 0
-            avg_volume = df["Volume"].mean()
-            last_volume = df["Volume"].iloc[-1]
-
-            out[ticker] = {
-                "price": float(last_close),
-                "volume": float(last_volume),
-                "avg_volume": float(avg_volume),
-                "day_change": float(day_change),
-            }
+            out[ticker] = _screening_features(df)
         except Exception:
             continue
     return out
@@ -321,7 +432,7 @@ def _download_one_batch(batch: list[str]) -> dict[str, dict]:
     """Synchronously download + parse one batch of tickers. Runs in a thread."""
     try:
         data = yf.download(
-            " ".join(batch), period="5d", group_by="ticker",
+            " ".join(batch), period="1y", group_by="ticker",
             progress=False, threads=False,
         )
         return _parse_bulk_batch(batch, data)

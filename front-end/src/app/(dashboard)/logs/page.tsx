@@ -5,6 +5,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { useToast } from '@/hooks/useToast'
 import { useI18nStore } from '@/store/i18nStore'
 import { useBrainStore } from '@/store/brainStore'
+import { useAuthStore } from '@/store/authStore'
 import { useBrainChallenge, useBrainVerify } from '@/hooks/useBrain'
 import { client } from '@/lib/api'
 import { maskIp } from '@/lib/utils'
@@ -62,6 +63,7 @@ function LogViewer() {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const brainToken = useBrainStore((s) => s.brainToken)
+  const authToken = useAuthStore((s) => s.token)
   const lock = useBrainStore((s) => s.lock)
   const remaining = useBrainStore((s) => s.getRemainingSeconds)
 
@@ -95,11 +97,15 @@ function LogViewer() {
 
   // WebSocket connection
   useEffect(() => {
-    if (!brainToken) return
+    if (!brainToken || !authToken) return
 
     const wsUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1')
       .replace('http', 'ws')
-    const ws = new WebSocket(`${wsUrl}/logs/stream`, [`brain-token.${brainToken}`])
+    const ws = new WebSocket(`${wsUrl}/logs/stream`, [
+      'signa.logs',
+      `jwt.${authToken}`,
+      `brain-token.${brainToken}`,
+    ])
     wsRef.current = ws
 
     ws.onopen = () => setConnected(true)
@@ -117,7 +123,7 @@ function LogViewer() {
       ws.close()
       wsRef.current = null
     }
-  }, [brainToken, paused])
+  }, [brainToken, authToken, paused])
 
   // Auto-scroll
   useEffect(() => {

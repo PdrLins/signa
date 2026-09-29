@@ -67,10 +67,16 @@ COST ESTIMATES
 
 Estimated per-call costs (validated against real usage):
 
-  Claude synthesis (Sonnet 4):  $0.012  (1200 in + 800 out tokens)
-  Gemini synthesis (2.0-flash): $0.000  (free tier)
-  Grok sentiment (grok-3-mini): $0.0002 (400 in + 600 out tokens)
-  Gemini sentiment (2.0-flash): $0.000  (free tier)
+  Claude routine synthesis (Sonnet 5.5, effort=medium):
+                                ~$0.025 (~4K in @ $2/M + ~1.5K out @ $10/M)
+  Claude decision (Opus 5.5, effort=high, only on routine BUYs):
+                                ~$0.08  (~4K in @ $4/M + ~3K out @ $20/M)
+  Gemini synthesis (Flash):     $0.000  (free tier)
+  Grok sentiment (grok-4.7 + live x_search/web_search):
+                                ~$0.15  (search-inflated input tokens +
+                                ~$5 per 1K X posts fetched) — UNVALIDATED,
+                                re-check against the first xAI invoice
+  Gemini sentiment (Flash + Google Search grounding): $0.000 (free tier)
 
 If actual usage diverges from these, update COST_ESTIMATES at the
 top of this file. The dashboard's "AI Cost Today" reflects these
@@ -92,14 +98,19 @@ from app.core.config import settings
 # Sentiment: ~400 input tokens + ~600 output tokens
 COST_ESTIMATES: dict[str, dict[str, float]] = {
     "claude": {
-        "synthesis": 0.012,   # Sonnet 4: $3/M in + $15/M out → ~$0.012/call (validated: $0.99 for ~85 calls)
+        # Routine tier — Sonnet 5.5 ($2/M in, $10/M out) at effort medium:
+        # ~4K in + ~1.5K out incl. thinking → ~$0.025. Also thesis re-evals.
+        "synthesis": 0.025,
+        # Decision tier — Opus 5.5 ($4/M in, $20/M out) at effort high:
+        # ~4K in + ~3K out incl. thinking → ~$0.08. Only for routine BUYs.
+        "decision": 0.08,
     },
     "gemini": {
-        "synthesis": 0.0,     # Free tier (2.0-flash, 1500 req/day)
+        "synthesis": 0.0,     # Free tier (Gemini Flash)
         "sentiment": 0.0,     # Free tier
     },
     "grok": {
-        "sentiment": 0.0002,  # Grok-3-mini: ~$0.0002/call (validated: $0.0045 for ~30 calls)
+        "sentiment": 0.15,    # grok-4.7 + x_search/web_search tool fees → ~$0.15/call (estimate)
     },
 }
 
@@ -204,7 +215,9 @@ class BudgetService:
     async def can_call(self, provider: str, call_type: str = "synthesis") -> tuple[bool, str]:
         """Check if a provider call is within budget. Thread-safe."""
         async with self._data_lock:
-            daily_limit = settings.budget_daily_limit_usd
+            daily_limit = getattr(
+                settings, f"budget_{provider}_daily_usd", settings.budget_daily_limit_usd
+            )
             monthly_limit = settings.budget_monthly_limit_usd
 
             # Per-provider monthly limit (0 = unlimited, e.g. Gemini free tier)

@@ -1,3 +1,6 @@
 venv/
 __pycache__/
 .env
+
+# Brain reset archives (raw DB exports) — keep a copy outside git
+docs/archive/

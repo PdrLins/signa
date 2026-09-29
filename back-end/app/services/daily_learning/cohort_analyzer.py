@@ -7,10 +7,11 @@ WHAT THIS MODULE COMPUTES
 `detect_cohort_drift(target_date)` returns a list of `CohortFinding`s,
 one per cell that crossed the flag threshold:
 
-    n_30d >= 5  (single-dim) or >= 5 (cross-tab — same bar)
+    n_30d >= 20  (single-dim and cross-tab)
     AND (wr_30d < 0.40 OR wr_30d > 0.70)
     AND abs(wr_30d - wr_90d) >= 0.15
-    AND n_90d >= 5    # baseline must be meaningful
+    AND n_90d >= 20   # baseline must be meaningful
+    AND the 30d Wilson 95% interval excludes wr_90d
 
 Cells that don't cross all four conditions are silent — the goal is
 high-signal output, not exhaustive per-cell reporting.
@@ -69,13 +70,17 @@ from zoneinfo import ZoneInfo
 from loguru import logger
 
 from app.db.supabase import get_client
+from app.services.daily_learning.stats import wilson_interval
 
 ET = ZoneInfo("America/New_York")
 
 # Thresholds — these are documented inline so a future reader sees the
 # rationale without grepping back to the plan file.
-MIN_N_FOR_FLAG = 5         # at least 5 closes in the 30d window
-MIN_N_BASELINE = 5         # baseline must have at least 5 closes too
+# 2026-09 reset: n=5 cells were flagging noise (a 1/5 win rate has a 95%
+# Wilson interval of ~[4%, 62%]). Both windows now need 20+ closes AND the
+# 30d Wilson interval must exclude the baseline win rate.
+MIN_N_FOR_FLAG = 20        # at least 20 closes in the 30d window
+MIN_N_BASELINE = 20        # baseline must have at least 20 closes too
 WR_LOW = 0.40              # below this is a "cohort underperforming" flag
 WR_HIGH = 0.70             # above this is a "cohort overperforming" flag
 DRIFT_THRESHOLD = 0.15     # 15pp drift between 30d and baseline
@@ -92,6 +97,7 @@ DRIFT_THRESHOLD = 0.15     # 15pp drift between 30d and baseline
 EXTREME_TAIL_LOW = 0.30
 EXTREME_TAIL_HIGH = 0.80
 EXTREME_TAIL_NEUTRAL_BASELINE = 0.50
+EXTREME_TAIL_MIN_N = 30    # sparse-baseline path needs a real sample on its own
 
 # Score bands. Tied to the BRAIN_MIN_SCORE=75 floor + the SCORE_BUY=65
 # threshold. Bands above 90 are rare (score ceiling at 90 forces HOLD).
@@ -165,6 +171,12 @@ def _aggregate_cell(rows: list[dict]) -> tuple[int, float, float]:
     wins = sum(1 for r in rows if (r.get("pnl_amount") or 0) > 0)
     net = sum(r.get("pnl_amount") or 0 for r in rows)
     return n, wins / n, float(net)
+
+
+def _significant_vs(wr_30: float, n_30: int, reference: float) -> bool:
+    """True when the 30d Wilson 95% interval excludes `reference`."""
+    lo, hi = wilson_interval(round(wr_30 * n_30), n_30)
+    return reference < lo or reference > hi
 
 
 def _classify_severity(drift: float, wr_30d: float) -> str:
@@ -308,6 +320,8 @@ def detect_cohort_drift(target_date: date) -> list[CohortFinding]:
                 # — punt to INFO via the explicit_patterns / hypothesis
                 # path. Don't flag unless win rate is also extreme.
                 continue
+            if not _significant_vs(wr_30, n_30, wr_90):
+                continue
             direction = "under" if wr_30 < WR_LOW else "over"
             findings.append(
                 CohortFinding(
@@ -360,10 +374,13 @@ def detect_cohort_drift(target_date: date) -> list[CohortFinding]:
                 n_90 >= MIN_N_BASELINE
                 and abs(wr_30 - wr_90) >= DRIFT_THRESHOLD
                 and not (WR_LOW <= wr_30 <= WR_HIGH)
+                and _significant_vs(wr_30, n_30, wr_90)
             )
             extreme_path = (
                 n_90 < MIN_N_BASELINE
+                and n_30 >= EXTREME_TAIL_MIN_N
                 and (wr_30 <= EXTREME_TAIL_LOW or wr_30 >= EXTREME_TAIL_HIGH)
+                and _significant_vs(wr_30, n_30, EXTREME_TAIL_NEUTRAL_BASELINE)
             )
             if not (standard_path or extreme_path):
                 continue

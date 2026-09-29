@@ -177,6 +177,42 @@ _ETF_TICKERS = {
 }
 
 
+# Leveraged / inverse products. These decay daily and are pure trading
+# vehicles — they must NEVER land in SAFE_INCOME (TQQQ/SQQQ used to,
+# because they are in _ETF_TICKERS and the classifier treated every
+# known ETF as safe).
+LEVERAGED_INVERSE_ETFS = frozenset({
+    "TQQQ", "SQQQ", "QLD", "QID", "PSQ", "SSO", "SDS", "UPRO", "SPXU",
+    "SPXL", "SPXS", "SH", "SDOW", "UDOW", "DOG", "DXD", "DDM", "TNA",
+    "TZA", "SOXL", "SOXS", "TECL", "TECS", "FAS", "FAZ", "LABU", "LABD",
+    "NUGT", "DUST", "JNUG", "JDST", "FNGU", "FNGD", "UVXY", "SVXY",
+    "UVIX", "SVIX", "VXX", "TMF", "TMV", "TBT", "UBT", "BOIL", "KOLD",
+    "UCO", "SCO", "YINN", "YANG", "BITX", "BITI", "NVDL", "NVDS", "TSLL",
+    "TSLQ", "TSLS", "MSTU", "MSTX", "CONL", "ETHU", "SBIT", "UPW",
+    "HQU.TO", "HQD.TO", "HXU.TO", "HXD.TO", "HSU.TO", "HSD.TO",
+    "HOU.TO", "HOD.TO", "HNU.TO", "HND.TO", "HGU.TO", "HGD.TO",
+})
+
+_LEVERAGED_NAME_PATTERNS = (
+    r"\b[2-5]x\b", r"-[1-5]x\b", r"\bultrapro\b", r"\bultrashort\b",
+    r"\bultra\b", r"\bleveraged\b", r"\binverse\b", r"\bdaily bear\b",
+    r"\bdaily bull\b", r"\bbetapro\b", r"\bproshares short\b",
+)
+
+
+def is_leveraged_or_inverse(ticker: str, fundamentals: dict | None = None) -> bool:
+    """True for leveraged/inverse ETFs, by known symbol or fund name."""
+    import re
+    if ticker in LEVERAGED_INVERSE_ETFS:
+        return True
+    fundamentals = fundamentals or {}
+    qt = (fundamentals.get("quote_type") or "").upper()
+    name = (fundamentals.get("company_name") or "").lower()
+    if qt == "ETF" and name:
+        return any(re.search(p, name) for p in _LEVERAGED_NAME_PATTERNS)
+    return False
+
+
 def get_asset_class(ticker: str) -> str:
     """Classify a ticker as ETF, CRYPTO, or STOCK."""
     if ticker.endswith("-USD"):
@@ -194,28 +230,32 @@ def get_ticker_count() -> int:
 def discover_tickers() -> list[str]:
     """Discover new tickers from Yahoo Finance screeners.
 
-    Queries most_actives, day_gainers, undervalued_large_caps, and
-    growth_technology_stocks. Returns tickers NOT already in the core
-    universe -- these are potential gems the brain hasn't seen before.
+    Queries undervalued_large_caps and growth_technology_stocks (plus
+    most_actives only when settings.discovery_include_most_actives).
+    Returns tickers NOT already in the core universe.
+
+    `day_gainers` was removed: injecting today's top gainers into every
+    scan fed the pipeline names whose move had already happened
+    (move-chasing). `most_actives` has the same bias and is opt-in.
     """
     import yfinance as yf
     from loguru import logger
+    from app.core.config import settings
 
     core = set(get_all_tickers())
     discovered = set()
 
     queries = [
-        "most_actives",
-        "day_gainers",
         "undervalued_large_caps",
         "growth_technology_stocks",
     ]
+    if settings.discovery_include_most_actives:
+        queries.insert(0, "most_actives")
 
     for query in queries:
         try:
             result = yf.screen(query)
             quotes = result.get("quotes", []) if isinstance(result, dict) else []
-            from app.core.config import settings
             for q in quotes:
                 symbol = q.get("symbol", "")
                 # Skip OTC, warrants, preferred shares, non-US/CA

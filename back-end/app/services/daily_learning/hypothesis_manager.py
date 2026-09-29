@@ -17,28 +17,30 @@ Two distinct flows, both invoked by the daily orchestrator:
       Every INSERT logs `thinking_created` to knowledge_events.
 
   evaluate_active_hypotheses()
-      For each active signal_thinking row where the supporting +
-      contradicting counters total >= graduation_threshold:
-        - If supporting/total > 0.70: graduate. INSERT a signal_knowledge
-          row (source_type='learned_from_thinking'), UPDATE thinking
-          status='graduated', log `thinking_graduated`.
-        - If contradicting/total > 0.70: reject. UPDATE thinking
-          status='rejected', log `thinking_rejected`.
-        - Otherwise leave active. The threshold may be met but the
-          ratio is inconclusive; another N observations may resolve it.
+      For each active signal_thinking row, collect the P&L of every trade
+      that matched it (from knowledge_events observation payloads) and
+      run `stats.evidence_verdict`:
+        - n < MIN_OBSERVATIONS_TO_DECIDE (30) → stay active, no verdict.
+        - 'supported' (bootstrap CI of expectancy entirely on the
+          predicted side of 0 AND Wilson lower bound of the predicted
+          outcome rate > 50%) → graduate to signal_knowledge.
+        - 'refuted' (expectancy CI entirely on the other side) → reject.
+        - otherwise stay active.
 
 ============================================================
-WHY 0.70 AS THE GRADUATION/REJECTION RATIO?
+2026-09 RESET — WHY NOT 0.70 AT n=5 ANY MORE
 ============================================================
 
-A 70/30 supporting/contradicting split at n=5 means 3.5 supporting
-observations. In practice that's 4/1 — strong but not unanimous. A
-higher bar (e.g. 0.85) wouldn't graduate hypotheses with 5 supporting
-and 1 contradicting, which is exactly the win-rate-shift evidence
-pattern we want to graduate. Lower bars (0.60) graduate noise.
+The old rule graduated on a >70% supporting ratio after 5 observations.
+The 95% Wilson interval for 4/5 is ~[0.38, 0.96] — indistinguishable from
+a coin flip. Win/loss counts also ignore payoff size. Graduation now
+needs n >= 30 AND an expectancy interval that excludes zero.
 
-If the ratio is between 0.30 and 0.70, the hypothesis stays active.
-The next day's observation accumulates and re-evaluation re-checks.
+Graduated knowledge and every hypothesis are SUGGESTIONS for a human: the
+learning loop never edits trading rules or config. Hypotheses whose
+pattern_match describes a trade OUTCOME (exit_reason*) or uses keys the
+brain can't check (window_days, count_threshold, new_cohorts, ...) are not
+created — they would match nothing (strict matching) or be circular.
 
 ============================================================
 THE JSONB CONTAINMENT TRICK FOR DEDUPE
@@ -68,6 +70,7 @@ from uuid import UUID
 from loguru import logger
 
 from app.db.supabase import get_client
+from app.services.daily_learning.stats import MIN_OBSERVATIONS, evidence_verdict
 from app.services.knowledge_events import (
     EVENT_THINKING_CREATED,
     EVENT_THINKING_GRADUATED,
@@ -77,10 +80,27 @@ from app.services.knowledge_events import (
     log_event,
 )
 
-# Match the existing 0.70 ratio used elsewhere. Tunable via config later
-# if we observe a sustained mismatch with manual graduation calls.
-GRADUATION_RATIO = 0.70
-REJECTION_RATIO = 0.70
+# Evidence bar for a verdict (see module docstring). The old 0.70 ratio
+# constants are gone: a point-estimate ratio is not evidence at small n.
+MIN_OBSERVATIONS_TO_DECIDE = MIN_OBSERVATIONS
+GRADUATION_THRESHOLD_DEFAULT = MIN_OBSERVATIONS
+
+
+def _is_trade_predictive(pattern_match: dict | None) -> bool:
+    """True when every key is an ENTRY-time attribute the brain can check.
+
+    Outcome keys (exit_reason*) are circular; unknown keys never match.
+    """
+    from app.services.virtual_portfolio import OUTCOME_PATTERN_KEYS, PATTERN_MATCHERS
+
+    if not pattern_match or not isinstance(pattern_match, dict):
+        return False
+    return all(k in PATTERN_MATCHERS and k not in OUTCOME_PATTERN_KEYS for k in pattern_match)
+
+
+def _expected_direction(finding) -> str:
+    """'win' for over-performing cohorts, 'loss' otherwise."""
+    return "win" if getattr(finding, "direction", None) == "over" else "loss"
 
 
 def _payload_equal(a: dict | None, b: dict | None) -> bool:
@@ -135,17 +155,20 @@ def _generate_hypothesis_text(finding) -> tuple[str, str, dict]:
 
     code_or_dim = getattr(finding, "code", None) or getattr(finding, "dimension", "auto")
 
+    expected = _expected_direction(finding)
     hypothesis = (
         f"[auto] {headline_text} suggests the pattern_match cohort has shifted "
         f"vs prior baseline."
     )
     prediction = (
-        f"Future trades matching {pm} will continue the observed direction (under/over-performance) "
-        f"unless invalidated."
+        f"Future trades matching {pm} will "
+        + ("OVER-perform (positive expectancy)" if expected == "win"
+           else "UNDER-perform (negative expectancy)")
+        + " unless invalidated."
     )
     invalidation = {
         "any_of": [
-            {"description": "Next 5 matching trades produce a win-rate within 10pp of the historical baseline."},
+            {"description": "After >= 30 matching trades the expectancy CI includes 0 or sits on the other side."},
             {"description": "Cohort net P&L flips from current direction over a 30-day window."},
         ],
         "rationale": (
@@ -175,6 +198,9 @@ def auto_create_hypotheses(findings: Sequence[Any]) -> dict[str, Any]:
     for finding in findings:
         pm = getattr(finding, "pattern_match", None)
         if not pm:
+            continue
+        if not _is_trade_predictive(pm):
+            # Reported + suggested, but not a hypothesis the brain can test.
             continue
         existing = _find_existing_for_pattern(pm)
         if existing:
@@ -208,7 +234,8 @@ def auto_create_hypotheses(findings: Sequence[Any]) -> dict[str, Any]:
             "invalidation_conditions": invalidation,
             "created_by": "auto_analyzer",
             "status": "active",
-            "graduation_threshold": 5,
+            "graduation_threshold": GRADUATION_THRESHOLD_DEFAULT,
+            "expected_direction": _expected_direction(finding),
         }
         try:
             result = db.table("signal_thinking").insert(row).execute()
@@ -238,9 +265,11 @@ def auto_create_hypotheses(findings: Sequence[Any]) -> dict[str, Any]:
 
 
 def evaluate_active_hypotheses() -> dict[str, Any]:
-    """Iterate active signal_thinking rows; graduate or reject those whose
-    observation counters cross the graduation_threshold AND the ratio is
-    decisive (>70% one direction).
+    """Iterate active signal_thinking rows; graduate or reject only when
+    n >= 30 matched trades AND `stats.evidence_verdict` is decisive
+    (expectancy CI excludes 0; Wilson bound on the predicted outcome rate).
+    Graduation writes a signal_knowledge row for human review — it never
+    changes trading rules.
 
     Returns a summary dict:
         {
@@ -267,15 +296,17 @@ def evaluate_active_hypotheses() -> dict[str, Any]:
     for r in rows:
         sup = r.get("observations_supporting") or 0
         con = r.get("observations_contradicting") or 0
-        threshold = r.get("graduation_threshold") or 5
-        total = sup + con
-        if total < threshold:
-            continue
-        ratio_sup = sup / total if total else 0
-        ratio_con = con / total if total else 0
+        threshold = max(int(r.get("graduation_threshold") or 0), MIN_OBSERVATIONS_TO_DECIDE)
         thinking_id = r["id"]
+        pnls = _observation_pnls(thinking_id)
+        expected = (r.get("expected_direction") or "").lower() or _infer_expected(r)
+        verdict = evidence_verdict(pnls, expected, min_n=threshold)
+        if verdict["verdict"] == "insufficient":
+            continue
+        ratio_sup = verdict.get("hit_rate", 0.0)
+        ratio_con = 1 - ratio_sup
 
-        if ratio_sup > GRADUATION_RATIO:
+        if verdict["verdict"] == "supported":
             # Graduate: insert into signal_knowledge, mark thinking graduated.
             # Build a stable, unique key_concept for signal_knowledge.
             key_concept = f"learned:{thinking_id[:8]}"
@@ -284,8 +315,10 @@ def evaluate_active_hypotheses() -> dict[str, Any]:
                 "key_concept": key_concept,
                 "explanation": (
                     f"Graduated from hypothesis '{r.get('hypothesis','')[:200]}'. "
-                    f"Supporting evidence: {sup}, contradicting: {con} "
-                    f"(threshold {threshold})."
+                    f"n={verdict['n']}, expectancy {verdict['expectancy']:+.2f}%/trade, "
+                    f"95% CI {verdict['expectancy_ci'][0]:+.2f}..{verdict['expectancy_ci'][1]:+.2f}, "
+                    f"hit-rate Wilson {verdict['wilson'][0]:.0%}..{verdict['wilson'][1]:.0%}. "
+                    f"SUGGESTION ONLY — not applied to trading."
                 ),
                 "is_active": True,
                 "source_type": "learned_from_thinking",
@@ -330,7 +363,7 @@ def evaluate_active_hypotheses() -> dict[str, Any]:
                 {"id": thinking_id, "key_concept": key_concept,
                  "supporting": sup, "contradicting": con, "knowledge_id": k_id}
             )
-        elif ratio_con > REJECTION_RATIO:
+        elif verdict["verdict"] == "refuted":
             try:
                 db.table("signal_thinking").update(
                     {"status": "rejected", "last_evaluated_at": now_iso, "updated_at": now_iso}
@@ -355,3 +388,33 @@ def evaluate_active_hypotheses() -> dict[str, Any]:
         f"rejected={len(rejected)} inconclusive={len(inconclusive)}"
     )
     return {"graduated": graduated, "rejected": rejected, "inconclusive": inconclusive}
+
+
+def _infer_expected(row: dict) -> str:
+    from app.services.virtual_portfolio import _infer_expected_direction
+    return _infer_expected_direction(row.get("prediction") or "")
+
+
+def _observation_pnls(thinking_id: str) -> list[float]:
+    """pnl_pct of every trade that matched this hypothesis (from the
+    append-only knowledge_events log written by the close hook)."""
+    try:
+        rows = (
+            get_client().table("knowledge_events")
+            .select("payload")
+            .eq("thinking_id", thinking_id)
+            .eq("event_type", EVENT_THINKING_OBSERVATION_ADDED)
+            .execute()
+        ).data or []
+    except Exception as e:
+        logger.warning(f"hypothesis_manager: observation read failed for {thinking_id}: {e}")
+        return []
+    out: list[float] = []
+    for r in rows:
+        payload = r.get("payload") or {}
+        if payload.get("resurfaced"):
+            continue
+        v = payload.get("pnl_pct")
+        if isinstance(v, (int, float)):
+            out.append(float(v))
+    return out

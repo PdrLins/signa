@@ -106,7 +106,7 @@ async def _telegram_worker() -> None:
             logger.info("Telegram worker shutting down")
             break
         except Exception as e:
-            logger.error(f"Telegram worker error: {e}")
+            logger.error(f"Telegram worker error: {type(e).__name__}")
             await asyncio.sleep(1)
 
 
@@ -185,10 +185,14 @@ async def send_message(chat_id: str, text: str, parse_mode: str = "HTML", urgent
             _telegram_url("sendMessage"),
             json={"chat_id": chat_id, "text": text, "parse_mode": parse_mode},
         )
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            # Never log the exception/URL: httpx errors embed the request URL,
+            # which contains the bot token (api.telegram.org/bot<TOKEN>/...).
+            logger.error(f"Telegram send failed: HTTP {resp.status_code}")
+            return False
         return True
     except Exception as e:
-        logger.error(f"Telegram send failed: {e}")
+        logger.error(f"Telegram send failed: {type(e).__name__}")
         return False
 
 

@@ -34,7 +34,7 @@ day = 60 calls/day. At Claude API rates (~$0.012/call) that's
 ~$22/month. Using Claude Local takes that to $0.
 
 Claude Local is the DEFAULT (`settings.claude_local: bool = True`) and
-the paid API is the FALLBACK. This module produces the same response
+the paid API is never used in local mode. This module produces the same response
 schema as `claude_client.py` so they're interchangeable from the
 router's perspective.
 
@@ -55,61 +55,112 @@ NOT retried (fail-fast):
 
 import asyncio
 import json
+import tempfile
 
 from loguru import logger
 
 from app.ai.prompts import (
+    SYNTHESIS_JSON_SCHEMA,
     build_synthesis_prompt,
     clean_json_response,
     normalize_synthesis_result,
     synthesis_error_response,
 )
+from app.core.config import settings
+
+# Replaces Claude Code's default agent system prompt: these calls are pure
+# analysis requests, not coding sessions.
+_CLI_SYSTEM_PROMPT = (
+    "You are a financial analysis engine. Answer only from the data in the "
+    "user message and return exactly one JSON object matching the requested schema."
+)
+
+
+def build_cli_args(json_schema: dict | None = None, tier: str = "routine") -> list[str]:
+    """Build the `claude -p` argv: pinned model, JSON envelope, no tools/MCP.
+
+    The prompt itself is NOT in argv (it is written to stdin) so untrusted
+    text never reaches the process table / shell parsing, and all built-in
+    tools are disabled so prompt-injected instructions cannot read files
+    (e.g. .env) or fetch URLs.
+    """
+    args = [
+        "claude", "-p",
+        "--model", settings.claude_decision_model if tier == "decision" else settings.claude_model,
+        "--output-format", "json",
+        "--tools", "",              # disable all built-in tools
+        "--strict-mcp-config",      # no MCP servers
+        "--no-session-persistence",
+        "--system-prompt", _CLI_SYSTEM_PROMPT,
+    ]
+    if json_schema is not None:
+        args += ["--json-schema", json.dumps(json_schema)]
+    return args
+
+
+def parse_cli_output(raw: str) -> dict:
+    """Parse `--output-format json` stdout into the model's JSON object.
+
+    The CLI prints an envelope: {"type":"result","is_error":bool,
+    "result":"<text>","structured_output":{...}|absent,...}. Prefers
+    `structured_output` (validated against --json-schema), else extracts
+    the first JSON object from `result`. Raises ValueError on CLI-level
+    errors and json.JSONDecodeError on unparseable output.
+    """
+    envelope = json.loads(raw)
+    if isinstance(envelope, dict) and envelope.get("type") == "result":
+        if envelope.get("is_error"):
+            raise ValueError(f"CLI result error: {str(envelope.get('result'))[:200]}")
+        structured = envelope.get("structured_output")
+        if isinstance(structured, dict):
+            return structured
+        text = envelope.get("result") or ""
+        data = json.loads(clean_json_response(text))
+    else:
+        data = envelope
+    if not isinstance(data, dict):
+        raise json.JSONDecodeError("not a JSON object", raw, 0)
+    return data
 
 
 async def _run_claude_cli(
     prompt: str,
     max_retries: int = 3,
-    timeout: int = 120,
+    timeout: int | None = None,
     log_context: str = "",
+    json_schema: dict | None = None,
+    tier: str = "routine",
 ) -> dict | None:
     """Run a prompt through the local Claude CLI and return the parsed JSON.
 
-    This is the SHARED subprocess-shell used by BOTH `synthesize_signal`
-    and `call_with_prompt`. Handles the retry loop, exponential backoff,
-    subprocess lifecycle, stdout decoding, and JSON parsing. Returns a
-    parsed dict on success or None on hard failure — callers layer their
-    own field normalization / error responses on top.
-
-    Args:
-        prompt: The full prompt to send to `claude -p`.
-        max_retries: Retry budget for transient failures. Use 3 for
-            first-class synthesis calls and 2 for "extra" calls.
-        timeout: Per-attempt timeout in seconds.
-        log_context: A short tag (e.g. ticker symbol) to include in log
-            lines so multi-call failures can be correlated back to the
-            caller. Empty string for generic calls.
-
-    Returns:
-        Parsed JSON dict on success. None on:
-            - FileNotFoundError (binary missing — doesn't retry)
-            - Retry budget exhausted after all transient failures
+    Shared subprocess shell for `synthesize_signal` and `call_with_prompt`.
+    The CLI runs with a pinned `--model`, `--output-format json`, all tools
+    disabled, and cwd set to an empty temp dir so no project CLAUDE.md /
+    settings leak into trading prompts. Returns None on hard failure.
     """
     tag = f"[{log_context}] " if log_context else ""
+    timeout = timeout or settings.claude_local_timeout_s
+    args = build_cli_args(json_schema, tier=tier)
+    prompt_bytes = prompt.encode("utf-8")
     last_error = ""
     for attempt in range(1, max_retries + 1):
+        process = None
         try:
-            process = await asyncio.create_subprocess_exec(
-                "claude", "-p", prompt,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=timeout,
-            )
+            with tempfile.TemporaryDirectory(prefix="signa-claude-") as workdir:
+                process = await asyncio.create_subprocess_exec(
+                    *args,
+                    cwd=workdir,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(input=prompt_bytes),
+                    timeout=timeout,
+                )
             if process.returncode != 0:
                 err = stderr.decode().strip() if stderr else f"exit {process.returncode}"
-                last_error = f"CLI error: {err}"
+                last_error = f"CLI error: {err[:300]}"
                 logger.warning(
                     f"Claude Local {tag}{last_error} "
                     f"(attempt {attempt}/{max_retries})"
@@ -127,8 +178,13 @@ async def _run_claude_cli(
                 if attempt < max_retries:
                     await asyncio.sleep(2 ** attempt)
                 continue
-            return json.loads(clean_json_response(raw))
+            return parse_cli_output(raw)
         except asyncio.TimeoutError:
+            if process is not None and process.returncode is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
             last_error = f"CLI timeout ({timeout}s)"
             logger.warning(
                 f"Claude Local {tag}{last_error} (attempt {attempt}/{max_retries})"
@@ -136,8 +192,8 @@ async def _run_claude_cli(
             if attempt < max_retries:
                 await asyncio.sleep(2 ** attempt)
             continue
-        except json.JSONDecodeError as e:
-            last_error = f"JSON parse error: {e}"
+        except (json.JSONDecodeError, ValueError) as e:
+            last_error = f"Bad CLI output: {e}"
             logger.warning(
                 f"Claude Local {tag}{last_error} (attempt {attempt}/{max_retries})"
             )
@@ -164,20 +220,18 @@ async def _run_claude_cli(
     return None
 
 
-async def call_with_prompt(prompt: str, max_retries: int = 2) -> dict | None:
+async def call_with_prompt(
+    prompt: str,
+    max_retries: int = 2,
+    json_schema: dict | None = None,
+) -> dict | None:
     """Run an arbitrary prompt through the local Claude CLI and return parsed JSON.
 
-    Used by features beyond `synthesize_signal` that need a one-off Claude
-    call without the synthesis prompt boilerplate (e.g., thesis re-evaluation
-    in Stage 6, future post-mortem analyses). Returns None on hard failure —
-    callers must treat None as "Claude Local unavailable" and decide whether
-    to fall back.
-
-    Lower default retry count (2) than `synthesize_signal` because the
-    callers of this function are typically lower-priority "extra" calls
-    that we don't want to spend much time retrying.
+    Used by features beyond `synthesize_signal` (e.g. thesis re-evaluation).
+    Returns None on hard failure — callers treat None as "Claude Local
+    unavailable". Pass `json_schema` to get CLI-validated structured output.
     """
-    return await _run_claude_cli(prompt, max_retries=max_retries)
+    return await _run_claude_cli(prompt, max_retries=max_retries, json_schema=json_schema)
 
 
 async def synthesize_signal(
@@ -187,29 +241,37 @@ async def synthesize_signal(
     macro_data: dict,
     grok_data: dict,
     max_retries: int = 3,
+    tier: str = "routine",
 ) -> dict:
     """Call Claude via local CLI to synthesize all data into a final signal.
 
-    Delegates the subprocess + retry + JSON parse shell to `_run_claude_cli`,
-    then layers on the synthesis-specific field normalization (action whitelist,
-    confidence/sentiment_weight int coercion, `error: None` on success).
-
-    Retries on transient failures (timeout, empty response, JSON parse error,
-    CLI exit error). Does NOT retry FileNotFoundError since the binary missing
-    won't fix itself. Backoff: 2^attempt seconds between attempts.
+    Structured output is enforced with `--json-schema`; the result is then
+    normalized (signal whitelist, confidence default 0, level validation +
+    R:R computed in code). A response without a valid signal is retried
+    once before failing.
     """
     logger.info(f"Claude Local [{ticker}] — calling CLI (up to {max_retries} attempts)...")
 
     prompt = build_synthesis_prompt(
         ticker, technical_data, fundamental_data, macro_data, grok_data,
     )
-    data = await _run_claude_cli(prompt, max_retries=max_retries, log_context=ticker)
-    if data is None:
-        return synthesis_error_response(f"Claude Local failed after {max_retries} retries")
+    current_price = (technical_data or {}).get("current_price")
+    result = synthesis_error_response(f"Claude Local failed after {max_retries} retries")
+    for _ in range(2):  # one extra try when the JSON parses but is invalid
+        data = await _run_claude_cli(
+            prompt, max_retries=max_retries, log_context=ticker,
+            json_schema=SYNTHESIS_JSON_SCHEMA, tier=tier,
+        )
+        if data is None:
+            return synthesis_error_response(f"Claude Local failed after {max_retries} retries")
+        result = normalize_synthesis_result(data, current_price=current_price)
+        if not result.get("error"):
+            break
+        logger.warning(f"Claude Local [{ticker}] invalid synthesis: {result['error']}")
 
-    result = normalize_synthesis_result(data)
     logger.debug(
         f"Claude Local [{ticker}] → {result['signal']} "
-        f"confidence={result['confidence']} rr={result['risk_reward_ratio']}"
+        f"confidence={result['confidence']} p_win={result.get('p_win')} "
+        f"rr={result['risk_reward_ratio']} err={result.get('error')}"
     )
     return result

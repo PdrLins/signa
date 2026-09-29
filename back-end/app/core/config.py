@@ -4,6 +4,41 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
+MIN_SECRET_LENGTH = 32
+
+# Placeholder / example values that must never be accepted as real secrets.
+_PLACEHOLDER_SECRETS = {
+    "",
+    "change-me-in-production",
+    "generate-with-openssl-rand-hex-32",
+    "changeme",
+    "change-me",
+    "secret",
+    "your-secret-key",
+}
+
+
+def _check_secret(name: str, value: str) -> None:
+    """Reject empty, placeholder, or short signing secrets."""
+    v = (value or "").strip()
+    lowered = v.lower()
+    if (
+        lowered in _PLACEHOLDER_SECRETS
+        or "generate-with" in lowered
+        or "change-me" in lowered
+        or len(set(v)) < 8  # e.g. "aaaa...": trivially guessable
+    ):
+        raise ValueError(
+            f"{name} is unset or a placeholder. "
+            "Generate one with: openssl rand -hex 32"
+        )
+    if len(v) < MIN_SECRET_LENGTH:
+        raise ValueError(
+            f"{name} must be at least {MIN_SECRET_LENGTH} characters. "
+            "Generate one with: openssl rand -hex 32"
+        )
+
+
 class Settings(BaseSettings):
     """All configuration for Signa backend."""
 
@@ -17,10 +52,12 @@ class Settings(BaseSettings):
     fred_api_key: str = ""
 
     # --- Auth ---
-    auth_enabled: bool = True
+    # Auth is always enforced (AuthMiddleware). There is no AUTH_ENABLED switch.
     jwt_secret_key: str  # No default — forces env var
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60  # 1 hour (refresh for longer sessions)
+    jwt_refresh_grace_hours: int = 4   # an expired token can be refreshed for this long
+    jwt_max_session_hours: int = 24    # absolute cap since OTP login, across refreshes
     otp_expire_seconds: int = 30  # 30 seconds
     session_token_expire_seconds: int = 180
 
@@ -39,17 +76,32 @@ class Settings(BaseSettings):
     trusted_proxies: list[str] = ["127.0.0.1", "::1"]
 
     # --- Claude ---
-    claude_local: bool = True  # True = use local Claude CLI (no API tokens)
-    claude_model: str = "claude-sonnet-4-20250514"
-    claude_max_tokens: int = 1024
+    # True  = local machine: Claude only via the `claude` CLI (subscription);
+    #         the Anthropic API is never called, even with ANTHROPIC_API_KEY set.
+    # False = Claude only via the paid Anthropic API (budget-capped).
+    claude_local: bool = True
+    # Two tiers (API and local CLI alike):
+    #   routine  — every candidate synthesis + daily thesis re-evaluation
+    #   decision — confirms a routine BUY before it can become "validated"
+    claude_model: str = "claude-sonnet-5-5"
+    claude_effort: str = "medium"  # low | medium | high | xhigh | max
+    claude_decision_model: str = "claude-opus-5-5"
+    claude_decision_effort: str = "high"
+    ai_decision_escalation: bool = True  # False = routine model's BUY is final
+    # Both models always think; thinking tokens count against max_tokens.
+    claude_max_tokens: int = 16000
+    claude_local_timeout_s: int = 180
 
-    # --- Grok ---
+    # --- Grok (xAI Responses API with live x_search + web_search) ---
     grok_base_url: str = "https://api.x.ai/v1"
-    grok_model: str = "grok-3-mini"
+    grok_model: str = "grok-4.7"
+    grok_search_window_hours: int = 48
+    grok_max_turns: int = 4  # cap on server-side search tool turns per request
+    grok_timeout_s: int = 90
 
     # --- Gemini ---
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.8-flash"
 
     # --- AI Provider Preferences ---
     # Ordered list of providers to try for each task. First available wins.
@@ -92,10 +144,23 @@ class Settings(BaseSettings):
     min_abs_change: float = 0.01
     max_candidates: int = 50
     discovery_min_market_cap: int = 5_000_000_000  # $5B minimum for discovered tickers
+    # Yahoo "most_actives" screener adds whatever traded heavily today —
+    # a move-chasing source. Off by default; day_gainers was removed.
+    discovery_include_most_actives: bool = False
 
     # --- Two-Pass Scanning ---
     ai_candidate_limit: int = 15  # Top N candidates get AI analysis
     ai_enabled: bool = True       # False = tech-only mode (zero AI cost)
+
+    # --- Decision quality gates (scan pipeline) ---
+    # ai_status="validated" requires Claude's synthesis signal == BUY AND
+    # confidence >= this value.
+    ai_validated_min_confidence: int = 60
+    # MACD histogram is scored in ATR units (hist / ATR14) so the
+    # threshold is price-invariant. "Strong" bullish above this.
+    macd_hist_strong_atr: float = 0.25
+    # No new BUY when the next earnings report is within N trading days.
+    earnings_blackout_trading_days: int = 3
 
     # --- Scheduler ---
     timezone: str = "America/New_York"
@@ -112,72 +177,73 @@ class Settings(BaseSettings):
     virtual_trade_max_days: int = 30  # Auto-close virtual trades after N days
     brain_max_open: int = 20          # Max simultaneous brain positions
 
-    # --- Wallet (Day 15 ship) ---
-    # Brain virtual portfolio is wallet-based. Positions are sized as a %
-    # of wallet balance; shorts reserve 100% of position value as collateral.
-    # Legacy pre-launch positions (is_wallet_trade=False) keep their per-share
-    # math and don't touch the wallet when they close.
+    # --- Wallet ---
+    # Brain virtual portfolio is wallet-based (base currency USD). Every
+    # brain trade debits cash on entry and credits proceeds on exit.
     wallet_enabled: bool = True
-    wallet_starting_balance: float = 10000.0     # default first-deposit amount
-    # Day 37 (May 19): goal revised upward to 20% monthly (~0.91%/day).
-    # At previous 10% Tier 1 sizing, current $5.24/day = 0.10%/day.
-    # Need ~9x improvement. First-phase amplification: bump sizing 1.5x
-    # AND raise per-day cap 1.33x = ~2x daily output target ($10-12/day).
-    # Subsequent phases (options trading, leverage, multi-strategy) close
-    # the remaining gap. Safety: drawdown circuit breaker reverts to 10%
-    # if cumulative falls below +$50 (see wallet_auto_revert_pnl_floor).
-    wallet_position_pct_tier1: float = 15.0      # Tier 1 (full trust) — was 10.0, Day 37 bump
-    wallet_position_pct_tier2_3: float = 5.0     # Tier 2/3 (half trust) = 5% of balance
-    wallet_max_position_pct: float = 20.0        # hard cap — was 15.0, room for Tier 1 + buffer
-    wallet_min_balance_for_trade: float = 100.0  # below this, skip new entries
+    wallet_starting_balance: float = 10000.0     # starting capital (reset_brain.py re-seeds with this)
+    wallet_min_balance_for_trade: float = 100.0  # smallest allocation worth opening (USD)
 
-    # Day 37: drawdown circuit breaker. When cumulative wallet-era
-    # realized P&L drops below this floor, all sizing reverts to the
-    # conservative pre-Day-37 defaults (10% / 5% / cap 3). This bounds
-    # the experiment's downside while letting us test 2x amplification
-    # on the proven edge. Set to a very negative number to disable.
-    # Mechanism: process_virtual_trades reads cumulative pnl from
-    # virtual_trades at the start of each scan; if below floor, the
-    # effective sizing constants are clamped before entries are sized.
-    wallet_auto_revert_pnl_floor: float = 50.0
+    # --- Brain decision policy (2026-09 decision-quality reset) ---
+    # Entry: only an AI BUY (ai_status == "validated" AND ai_signal == "BUY")
+    # may auto-buy. Tech-only / low_confidence / failed signals never do.
+    brain_require_ai_buy: bool = True
+    brain_min_rr: float = 2.0                   # reward:risk computed in code from final levels
+    # Risk-based sizing: size so (entry - stop) * shares = risk_pct of equity,
+    # then cap the position at max_position_pct of equity.
+    brain_risk_per_trade_pct: float = 1.0
+    brain_max_position_pct: float = 10.0
+    brain_max_open_positions: int = 8           # all brain positions (long + short)
+    brain_max_per_sector: int = 2
+    brain_max_crypto_pct: float = 25.0          # max % of equity (cost basis) in crypto
+    # Default levels when Claude's are absent: stop = entry - k*ATR,
+    # target = entry + R_mult * (entry - stop).
+    brain_stop_atr_mult: float = 2.0
+    brain_target_r_mult: float = 2.0
+    brain_min_stop_atr_mult: float = 1.0        # Claude stop tighter than this*ATR -> use ATR stop
+    # Trailing stop: once price has moved +activate_r R in our favor, the
+    # stop ratchets to (peak - trail_atr_mult * ATR). Never loosens.
+    brain_trail_atr_mult: float = 2.5
+    brain_trail_activate_r: float = 1.0
+    brain_catastrophic_stop_pct: float = 15.0   # safety net only when a row has no stop_loss
+    # Shorts add risk without measured evidence -> disabled by default.
+    brain_short_entries_enabled: bool = False
+    # Execution costs (applied on BOTH sides of every brain fill).
+    brain_slippage_bps_stock: float = 10.0
+    brain_slippage_bps_crypto: float = 20.0
+    brain_commission_usd: float = 0.0           # per fill
+    # Drawdown breaker: halt NEW entries when equity is this % below its peak.
+    brain_max_drawdown_pct: float = 10.0
+    # Same-symbol re-entry cooldown after ANY exit, in trading days.
+    brain_reentry_cooldown_days: int = 3
+    # Time stop for brain positions (calendar days).
+    brain_max_hold_days: int = 30
+    # Legacy admission gates fit on tiny samples (n=1..17). All OFF after
+    # the reset; flip on only with a documented n>=30 backtest.
+    brain_filter_d_sectors_enabled: bool = False      # Fin/Industrials sector block (Day 20)
+    brain_long_horizon_suspended: bool = False        # LONG-horizon entry suspension (Day 20)
+    brain_portfolio_heat_enabled: bool = False        # heat score incl. VIX<16 floor (Day 8)
+    brain_trend_downsize_enabled: bool = False        # below-SMA50 / BB>95% half-size (Week 1)
+    brain_quality_prune_enabled: bool = False         # QUALITY_PRUNE exit (Day 17)
+    brain_stagnation_prune_enabled: bool = False      # STAGNATION_PRUNE exit (Day 14)
+
+    # Legacy sizing knobs — no longer read by the brain (risk-based sizing
+    # above replaced them). Kept so old .env files still parse.
+    wallet_position_pct_tier1: float = 10.0
+    wallet_position_pct_tier2_3: float = 5.0
+    wallet_max_position_pct: float = 10.0
+    wallet_auto_revert_pnl_floor: float | None = None  # replaced by brain_max_drawdown_pct
 
     # --- Day-0 grace period ---
-    # New brain positions are immune to thesis-driven exits
-    # (THESIS_INVALIDATED, QUALITY_PRUNE) for the first N hours after
-    # entry. Reason: Claude's thesis re-eval has flagged fresh entries
-    # as "weakening"/"invalid" within hours of opening (IONQ Apr 23 →
-    # weakening same day; BCE.TO Apr 27 → invalidated 90 min after
-    # entry). The conservative bias re-reads fresh data more cautiously
-    # before price has a chance to confirm or refute. Price-based exits
-    # (STOP_HIT, TARGET_HIT, TRAILING_STOP, TIME_EXPIRED) still fire;
-    # the -8% catastrophic stop also still applies.
-    new_position_grace_hours: float = 24.0
+    # Hours after entry during which THESIS_INVALIDATED exits are ignored.
+    # 0 after the reset: thesis_tracker now needs two consecutive
+    # high-confidence "invalid" calls, which already filters noise.
+    new_position_grace_hours: float = 0.0
 
-    # --- Per-day entry cap (Day 19 learning) ---
-    # Apr 28 the brain opened 7 wallet positions in a single day,
-    # producing 4 visible losses within 24h (FN, CCO.TO, ONDS, etc).
-    # Win rate stayed at 43% (matches historical 42%) — the issue was
-    # variance from concurrent fresh-position risk, not entry quality.
-    # Capping daily entries reduces variance without changing win rate.
-    # Highest-score signals win the cap slots (pre-sorted by score
-    # before the BUY loop). Counts BOTH wallet LONG BUYs and SHORT_OPENs
-    # — both deploy capital, both should be rate-limited.
-    # Set to 0 to disable.
-    # Day 37: bumped 3 → 4 to support 20%/month goal. Combined with the
-    # 1.5x sizing increase, daily peak deployment goes from 30% → 60% of
-    # pocket. Circuit breaker (wallet_auto_revert_pnl_floor) clamps back
-    # to 3 if cumulative P&L falls below the floor.
-    wallet_max_entries_per_day: int = 4
-
-    # Day 21: per-symbol per-day cap. SEZL hit Filter D 3 times in one
-    # day (May 1) — the brain repeatedly tried the same Fin name on
-    # consecutive scans. Without this gate, the per-day cap (3) above
-    # could be entirely consumed by a single symbol, concentrating
-    # ~$1.2k of capital on one name. The per-day cap clips by score
-    # ranking; this cap clips by symbol ranking. Both apply.
-    # Counts BOTH wallet LONG BUYs and SHORT_OPENs.
-    # Set to 0 to disable.
-    wallet_max_entries_per_symbol_per_day: int = 1
+    # --- Entry-rate caps (Day 19 / Day 21). 0 = disabled. ---
+    # Superseded by max open positions + risk sizing + re-entry cooldown.
+    wallet_max_entries_per_day: int = 0
+    wallet_max_entries_per_symbol_per_day: int = 0
 
     # --- Brain Thesis Tracking (Stage 6) ---
     # When enabled, every scan re-evaluates the thesis on every open brain
@@ -188,7 +254,11 @@ class Settings(BaseSettings):
     # as noise. EXCEPTION: catastrophic stops (pnl_pct <= -8%) ALWAYS fire,
     # bypassing the thesis gate, so a wrong thesis call can never blow us up.
     # Set to False to revert to pre-Stage-6 behavior (no thesis checks).
-    brain_thesis_gate_enabled: bool = True
+    brain_thesis_gate_enabled: bool = True   # runs thesis re-eval (thesis_tracker reads this)
+    # 2026-09 reset: a 'valid' thesis may NOT suppress exits by default. Even
+    # when enabled it can only hold a WINNING position past TARGET/TIME/SIGNAL;
+    # STOP_HIT / TRAILING_STOP are always hard and losers are never held.
+    brain_thesis_suppresses_exits: bool = False
     brain_thesis_hard_stop_pct: float = -8.0  # catastrophic stop carve-out
     # Re-buy cooldown after a THESIS_INVALIDATED exit. The brain otherwise
     # would re-open the same symbol on the next scan if Claude flips back
@@ -196,7 +266,7 @@ class Settings(BaseSettings):
     # 2026-04-09: WING #1 invalidated in 17s, WING #2 opened 54min later
     # at +$2.95 from the close, currently bleeding. The Day 4 journal
     # explicitly named this fix. Set to 0 to disable.
-    brain_thesis_rebuy_cooldown_minutes: int = 60
+    brain_thesis_rebuy_cooldown_minutes: int = 0  # 2026-09 reset: superseded by brain_reentry_cooldown_days
 
     # Day 26: post-WATCHDOG_EXIT cooldown. When the watchdog closes a
     # position via the bearish-sentiment + slight-loss path (WATCHDOG_EXIT),
@@ -208,7 +278,7 @@ class Settings(BaseSettings):
     # in the current regime, not just that one entry was poorly timed.
     # Default 168h = 7 days = one full trading week, matching the watchdog
     # / STAGNATION_PRUNE timeframe. Set to 0 to disable.
-    brain_watchdog_exit_cooldown_hours: int = 168
+    brain_watchdog_exit_cooldown_hours: int = 0  # 2026-09 reset: OFF (n=2); see brain_reentry_cooldown_days
 
     # Day 37: post-WINNER cooldown. After a wallet trade closes positive
     # via THESIS_INVALIDATED / TARGET_HIT / TRAILING_STOP / SIGNAL /
@@ -222,7 +292,7 @@ class Settings(BaseSettings):
     # 3-5 days. Gap-from-winner ranged 1-10 days, so the cooldown needs
     # to be at least 14 days to catch all observed cases.
     # Default 336h = 14 days. Set to 0 to disable.
-    brain_post_winner_cooldown_hours: int = 336
+    brain_post_winner_cooldown_hours: int = 0  # 2026-09 reset: OFF (n=3)
 
     # Day 47 (Jun 4): post-LOSING-close cooldown. After a wallet trade closes
     # negative (any exit_reason), block re-entry of the same symbol for N
@@ -240,7 +310,7 @@ class Settings(BaseSettings):
     # Invalidation: if a same-symbol re-entry < 24h after a losing close
     # WOULD have been profitable in the next 30 days, revisit.
     # Default 24h. Set to 0 to disable.
-    brain_post_loss_cooldown_hours: int = 24
+    brain_post_loss_cooldown_hours: int = 0  # 2026-09 reset: OFF (n=1)
 
     # Day 47 (Jun 4): MOMENTUM tier-1 size cap. Backtest n=17 closed wallet
     # trades that entered as tier-1 MOMENTUM:
@@ -261,7 +331,7 @@ class Settings(BaseSettings):
     # foregone upside. Invalidation: if the next 10 MOMENTUM entries at
     # tier-2 produce >=6 wins AND positive net P&L, revisit.
     # Default True. Set False to revert.
-    brain_momentum_force_tier2: bool = True
+    brain_momentum_force_tier2: bool = False  # 2026-09 reset: OFF (n=17); sizing is risk-based now
 
     # Day 55 (Jun 15): NEUTRAL ≥85 tier cap. Mirrors the Day-47 MOMENTUM cap
     # but for the NEUTRAL cohort, discovered during the Pedro-away week:
@@ -288,7 +358,7 @@ class Settings(BaseSettings):
     # >=3 wins AND positive net P&L, revisit. Same shape as the MOMENTUM
     # invalidation criterion.
     # Default True. Set False to revert.
-    brain_neutral_high_score_force_tier2: bool = True
+    brain_neutral_high_score_force_tier2: bool = False  # 2026-09 reset: OFF (n=8)
     brain_neutral_high_score_threshold: int = 85
 
     # --- Trade Horizon (SHORT vs LONG) ---
@@ -306,7 +376,7 @@ class Settings(BaseSettings):
     # (prevents single-signal shake-outs like CCO.TO Day 14: opened 19h prior,
     # closed on one MORNING AVOID at +1.49% while the trend was intact).
     # Set to 1 to revert to immediate-exit (pre-Day 14 behavior).
-    brain_long_signal_exit_threshold: int = 2
+    brain_long_signal_exit_threshold: int = 1  # 2026-09 reset: OFF (n=1 CCO.TO); 1 = exit on first AI SELL
 
     # QUALITY_PRUNE magnitude floor (Day 17 learning): the prune rule
     # used to fire on any pnl < 0, but with the wallet active a 1-2%
@@ -357,7 +427,7 @@ class Settings(BaseSettings):
     # dropped before hitting the Telegram API. `urgent=True` sends (e.g. OTP)
     # still bypass this filter.
     notify_scans_disabled: str = "PRE_MARKET"
-    watchdog_weekend_crypto: bool = False     # Run watchdog on weekends for crypto positions
+    watchdog_weekend_crypto: bool = True      # Run watchdog on weekends for crypto positions (crypto trades 24/7)
     allow_weekend_scans: bool = True          # Allow manual scan triggers on weekends
 
     # --- Brain Editor ---
@@ -368,11 +438,26 @@ class Settings(BaseSettings):
     brain_max_otp_attempts: int = 3
 
     # --- AI Budget Limits ---
-    budget_daily_limit_usd: float = 1.00     # Max spend per provider per day
+    # ~$50/month total. Daily caps ≈ monthly / 21 trading days so one bad
+    # day can't burn the month; a capped provider falls through to Gemini.
+    budget_daily_limit_usd: float = 1.20     # Default daily cap per provider
     budget_monthly_limit_usd: float = 5.00   # Default monthly cap per provider
-    budget_claude_monthly_usd: float = 5.00  # Claude monthly cap
-    budget_grok_monthly_usd: float = 5.00    # Grok monthly cap
-    budget_gemini_monthly_usd: float = 0.00  # Gemini = free tier (0 = unlimited)
+    budget_claude_monthly_usd: float = 25.00
+    budget_claude_daily_usd: float = 1.20
+    budget_grok_monthly_usd: float = 20.00
+    budget_grok_daily_usd: float = 0.95
+    budget_gemini_monthly_usd: float = 5.00
+    budget_gemini_daily_usd: float = 0.25
+
+    # --- AI call caching (cuts repeat calls across the day's scans) ---
+    sentiment_cache_hours: int = 24     # X/news sentiment reused per ticker
+    synthesis_cache_hours: int = 3      # routine synthesis reused per ticker...
+    synthesis_cache_max_move_pct: float = 2.0  # ...unless price moved more than this
+
+    # --- Learning → prompt ---
+    # Hypotheses are shown to Claude only once they have this many observed
+    # trades; below it they're noise that can still sway a live decision.
+    hypothesis_prompt_min_observations: int = 30
 
     # --- Language ---
     language: str = "en"  # "en" or "pt"
@@ -381,19 +466,17 @@ class Settings(BaseSettings):
     app_name: str = "Signa"
     debug: bool = False
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # extra="ignore": tolerate retired keys (e.g. AUTH_ENABLED) left in old .env files
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
     @model_validator(mode="after")
     def validate_security(self):
-        if self.jwt_secret_key in ("change-me-in-production", ""):
+        _check_secret("JWT_SECRET_KEY", self.jwt_secret_key)
+        _check_secret("BRAIN_TOKEN_SECRET", self.brain_token_secret)
+        if self.jwt_secret_key == self.brain_token_secret:
             raise ValueError(
-                "JWT_SECRET_KEY must be set to a secure random value. "
-                "Generate one with: openssl rand -hex 32"
-            )
-        if self.auth_enabled and self.brain_token_secret in ("", "generate-with-openssl-rand-hex-32"):
-            raise ValueError(
-                "BRAIN_TOKEN_SECRET must be set to a secure random value. "
-                "Generate one with: openssl rand -hex 32"
+                "JWT_SECRET_KEY and BRAIN_TOKEN_SECRET must be different values. "
+                "Generate each with: openssl rand -hex 32"
             )
         if not self.debug and "*" in self.cors_origins:
             raise ValueError(

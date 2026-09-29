@@ -1,229 +1,92 @@
-"""Virtual Portfolio — the brain (Signa's autonomous trading engine).
+"""Virtual Portfolio — the brain (Signa's autonomous paper-trading engine).
 
 ============================================================
 WHAT THIS MODULE IS
 ============================================================
 
-The "brain" is an autonomous decision engine that opens and closes virtual
-positions based on the signals produced by `scan_service`. It operates with
-no human input — every buy and sell is evaluated against strict rules and
-recorded to the `virtual_trades` table for later performance analysis.
+The "brain" opens and closes virtual positions from the signals produced
+by `scan_service`, with no human input, and records every trade in
+`virtual_trades` backed by a USD cash wallet (`wallet.py`). No real money
+is at stake; the point is to MEASURE whether the signal model has an edge,
+so every rule below is chosen to make the measurement honest:
 
-There is no real money at stake. The brain's purpose is to:
-
-  1. Validate the signal scoring model with real trade outcomes (win rate,
-     P&L, time-to-target).
-  2. Surface high-conviction opportunities to the user via Telegram alerts
-     (so they can mirror the brain's decisions in their real broker if they
-     choose to).
-  3. Provide a self-learning feedback loop: the brain's wins and losses
-     feed back into the signal scoring rules over time.
-
-The brain is intentionally CONSERVATIVE. It refuses to act on incomplete
-data, refuses to act outside market hours, refuses to act on signals where
-the AI failed, and refuses to act on positions that have lost the AI's
-confirmation. False negatives (missed opportunities) are preferable to
-false positives (bad trades).
+  * realistic fills (slippage + commission on both sides, CAD→USD FX),
+  * hard stops that nothing can suppress,
+  * fixed-fractional risk per trade so outcomes are comparable,
+  * one exit policy shared by the scan and the watchdog,
+  * a `brain_decisions` row for every candidate so we can audit WHY the
+    brain did or didn't trade.
 
 ============================================================
-THE TWO TRACKS
+2026-09 DECISION-QUALITY RESET — THE RULES
 ============================================================
 
-Each scan can produce two parallel sets of virtual trades:
+ENTRY (all must pass, see `_evaluate_brain_entry`)
+  1. AI BUY: ai_status == "validated" AND ai_signal == "BUY" AND
+     score >= BRAIN_MIN_SCORE. Tech-only / low_confidence / failed
+     signals NEVER auto-buy (`_eval_brain_trust_tier`).
+  2. Not already held (either track), not in the same-symbol re-entry
+     cooldown (`brain_reentry_cooldown_days` trading days after any exit).
+  3. Drawdown breaker not tripped: equity > peak × (1 − brain_max_drawdown_pct).
+  4. Exchange open today (holiday filter) and market hours for equities.
+  5. Levels: Claude's stop/target when valid, otherwise ATR fallback
+     (stop = entry − brain_stop_atr_mult × ATR, target = entry +
+     brain_target_r_mult × risk). R:R is computed IN CODE from the fill
+     price and must be >= brain_min_rr (`compute_entry_levels`).
+  6. Size = risk-based (`wallet.calc_risk_position_size`): lose
+     brain_risk_per_trade_pct of equity at the stop, capped at
+     brain_max_position_pct of equity.
+  7. Portfolio limits (`check_portfolio_limits`): brain_max_open_positions,
+     brain_max_per_sector, brain_max_crypto_pct. No rotation — when full,
+     new candidates simply wait.
+  8. CAD listings need a USDCAD rate; without one the entry is skipped.
 
-  WATCHLIST TRACK (`source = "watchlist"`)
-  ----------------------------------------
-  Tracks what would happen if you bought every BUY signal on a ticker you
-  added to your watchlist. The brain doesn't pick the tickers — you do —
-  but the brain executes the trades on your behalf in the virtual ledger.
-  This is your "what-if-I-had-followed-my-own-list" experiment.
+EXIT (`evaluate_exit`, used by check_virtual_exits AND the watchdog)
+  STOP_HIT       price through stop — always hard, never thesis-gated.
+  TRAILING_STOP  after +brain_trail_activate_r R, stop ratchets to
+                 peak − brain_trail_atr_mult × ATR (never loosens).
+  TARGET_HIT     price through target.
+  TIME_EXPIRED   held >= brain_max_hold_days.
+  SIGNAL         (scan only) the fresh AI call is SELL/AVOID
+                 (`signal_exit_reason`) or the user forced a sell.
+  THESIS_INVALIDATED is executed by thesis_tracker; it can only close a
+  position early — a "valid" thesis never keeps a losing position open
+  (`_exit_is_thesis_protected`, off by default).
 
-  BRAIN TRACK (`source = "brain"`)
-  --------------------------------
-  Fully autonomous. The brain picks its own tickers from the scan results
-  using the tiered trust model below. It can hold up to `brain_max_open`
-  positions at once and rotates the weakest position out when a stronger
-  signal arrives.
+SHORTS are disabled by default (`brain_short_entries_enabled`). The code
+path remains direction-aware (P&L, learning outcomes, stops).
 
-After 1-2 weeks of running both tracks, you can compare them via the
-`get_virtual_summary()` and `get_brain_tier_breakdown()` reports to see
-which approach performs better.
-
-============================================================
-THE TIERED TRUST MODEL  (the brain's auto-buy gate)
-============================================================
-
-The brain only auto-buys signals that meet ONE of these tiers:
-
-  TIER 1 — full position size  (trust_multiplier = 1.0)
-  -----------------------------------------------------
-    Requires:
-      • ai_status == "validated" (AI synthesis succeeded with confidence ≥ 50)
-      • score >= 75  (BRAIN_MIN_SCORE)
-    Rationale: This is the high-conviction default. The AI ran cleanly,
-    blockers were checked, the composite score is strong. Buy at full Kelly.
-
-  TIER 2 — half position size  (trust_multiplier = 0.5)
-  -----------------------------------------------------
-    Requires:
-      • ai_status == "low_confidence" (AI ran, but confidence < 50)
-      • score >= 80  (BRAIN_TIER2_MIN_SCORE)
-      • implicit: blockers passed (otherwise action would be AVOID, which
-        is caught by the SELL/AVOID branch before tier evaluation)
-    Rationale: AI is uncertain but the rest of the signal (tech, fundamentals,
-    macro) all agree at score ≥ 80. The higher score bar compensates for
-    AI uncertainty. Half-size to manage risk.
-
-  TIER 3 — half position size  (trust_multiplier = 0.5)
-  -----------------------------------------------------
-    Requires:
-      • ai_status == "skipped" (tech-only signal, AI never ran because the
-        ticker was below the top-15 by pre-score)
-      • score >= 82  (BRAIN_TIER3_MIN_SCORE)
-      • At least 3 of 4 technical confirmations:
-          - RSI in sweet spot (50-65)
-          - MACD histogram positive
-          - Volume z-score in [1.0, 2.5]
-          - Within 30% of SMA200
-      • Macro environment != "hostile" (re-checked here because tech-only
-        signals skip the regular blocker pass)
-    Rationale: AI never validated this signal, so we substitute pristine
-    technicals + a macro check + a higher score bar. Strict criteria let
-    the brain catch real opportunities the AI quota missed without taking
-    on noise.
-
-  TIER 0 — never auto-buy
-  -----------------------
-    • ai_status == "failed" (AI tried but errored — added to retry queue
-      and re-attempted on the next scan, never auto-bought directly)
-    • Any signal that doesn't meet a tier above
-
-The tier evaluation runs INDEPENDENTLY of the user-facing `action` field.
-Tier 2 and Tier 3 signals will already have been downgraded from BUY to
-HOLD by the AI quality guard in `scan_service` (because their AI status
-isn't "validated"). The brain bypasses that downgrade and applies its
-own stricter criteria — the user-facing UI stays conservative, the brain
-is allowed to act with its tier-aware position sizing.
-
-============================================================
-FILTER D ADMISSION GATES (Day 20, Apr 30)
-============================================================
-
-Independent of the tier model above, every brain entry (long or short)
-must clear two structural admission gates derived from the historical
-backtest (`scripts/backtest_filters.py`, see `docs/Day-19-overnight-analysis.md`):
-
-  1. Sector exclusion: signals where fundamental_data.sector ∈
-     {"Financial Services", "Industrials"} are rejected at the tier
-     evaluator. See `FILTER_D_BLOCKED_SECTORS` for the rationale and
-     invalidation criteria.
-
-  2. LONG-horizon suspension: BUY signals whose computed trade_horizon
-     would be "LONG" (i.e., not crypto, not HIGH_RISK bucket, no near-term
-     catalyst within 7 days) are rejected at the BUY entry path AFTER
-     horizon computation. Every LONG trade in 52-trade history was
-     SAFE_INCOME bucket and the cohort was -14.9% total. See the inline
-     comment in `process_virtual_trades` for invalidation criteria.
-
-Both gates are TEMPORARY safety rails, not eternal vetoes. They live in
-code (rather than in Claude's dossier) because the dossier path doesn't
-yet carry "trades like this have lost us 5/9 times" to Claude's prompt.
-When pattern-stats injection (Stage 4) makes Claude aware of these
-cohorts, the gates become redundant and should be removed. Until then,
-re-run the backtest weekly and remove a gate when its underlying cohort
-recovers — see each constant's docstring for the precise threshold.
+Legacy gates fit on tiny samples (Filter D sectors, LONG-horizon
+suspension, portfolio heat / VIX floor, MOMENTUM & NEUTRAL tier caps,
+post-win / post-loss / watchdog cooldowns, per-day caps, quality and
+stagnation prunes) are still in the code but OFF via config flags.
 
 ============================================================
 MARKET HOURS DISCIPLINE
 ============================================================
 
-The brain only buys/sells equities during the US regular session:
-  Monday-Friday, 9:30am - 4:00pm ET.
-
-Outside these hours:
-  • New BUY signals on equities are SKIPPED (the trade wouldn't fill).
-  • SELL signals on held equities are FLAGGED FOR REVIEW (see below)
-    instead of being executed.
-  • The watchdog skips equity positions and only monitors crypto.
-
-Crypto is exempt and trades 24/7.
-
-This makes virtual trades realistic — you can compare brain P&L to what
-you'd actually achieve in your broker because every fill price is a real
-in-hours price.
+Equities are only bought/sold during the US regular session (Mon-Fri
+9:30-16:00 ET) on days their exchange is open. Crypto trades 24/7.
+Pre-market SELL signals on held equities are FLAGGED FOR REVIEW and
+re-checked by `process_pending_reviews` at the first in-hours scan; the
+user can force a sell from Telegram (/forcesell → FORCE_SELL sentinel).
 
 ============================================================
-PRE-MARKET REVIEW SYSTEM
+CONCURRENCY / STATE
 ============================================================
 
-Pre-market scans (e.g. the 6am scan) can produce SELL signals on positions
-the brain holds. We can't actually sell at 6am, so:
-
-  1. The position is FLAGGED with `pending_review_at`, `pending_review_action`
-     (SELL or AVOID), `pending_review_score`, `pending_review_reason`.
-  2. An immediate Telegram alert fires: "⚠ Brain Flagged for Review".
-  3. At the first scan after market open (9:30am+ ET), `process_pending_reviews`
-     re-evaluates each flagged position against the FRESH signal:
-       • Still SELL/AVOID → execute the sell, send "Brain SELL" alert.
-       • Recovered to BUY/HOLD → clear the flag, send "Review Cleared" alert.
-       • No fresh signal yet → leave the flag, retry next scan.
-
-The user can also override from Telegram with /forcesell, /keep, /review.
-A /forcesell sets `pending_review_action = "FORCE_SELL"` (a sentinel value)
-which makes the next in-hours scan execute the sell unconditionally,
-bypassing the score-drop guard.
-
-============================================================
-SCORE-DROP GUARD
-============================================================
-
-If a held position's score drops 25+ points to below 50 in a single scan,
-the brain REFUSES to auto-sell. This usually means the AI failed to
-analyze the ticker on this scan (tech-only fallback) rather than a real
-deterioration. The watchdog will catch genuine danger within 15 minutes.
-
-Exception: a user-forced sell from /forcesell bypasses this guard since
-the user has explicitly accepted the risk.
-
-============================================================
-CONCURRENCY MODEL
-============================================================
-
-The brain notification queue is SCAN-LOCAL. Each scan creates a fresh
-`BrainNotificationQueue` via `new_notification_queue()` and threads it
-through every brain function in this module. There is NO module-level
-notification state, so concurrent scans (manual + scheduled overlap)
-cannot mix notifications between scans.
-
-The flow is:
-
-  1. scan_service.run_scan creates `brain_notifications = new_notification_queue()`
-  2. process_pending_reviews(signals, brain_notifications)
-  3. process_virtual_trades(signals, watchlist_symbols, brain_notifications)
-  4. check_virtual_exits(brain_notifications)
-  5. await flush_brain_notifications(brain_notifications)  # drains the queue
-
-Step 5 is the only place that sends Telegram messages — it batches all
-brain alerts at the end of the scan.
-
-============================================================
-STATE OWNERSHIP
-============================================================
-
-  Database (Supabase, source of truth):
-    • virtual_trades — open + closed positions
-    • virtual_snapshots — daily equity curve
-
-  In-memory (per-scan, ephemeral):
-    • BrainNotificationQueue — Telegram alerts queued for the end of scan
-    • _vp_cache — TTL cache for the dashboard summary endpoints (5 min)
-
-There is no in-memory state that survives process restarts. The brain
-fully recovers its state from `virtual_trades` on every scan.
+Brain Telegram notifications are queued in a scan-local list
+(`new_notification_queue`) and drained once by
+`flush_brain_notifications`. The DB (virtual_trades, brain_wallet,
+wallet_transactions) is the only source of truth; every close is guarded
+by `.eq("status", "OPEN")` so scan / watchdog / thesis tracker can race
+safely (see close_virtual_trade for the wallet ordering).
 """
 
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -240,110 +103,24 @@ from app.services.knowledge_events import (
     OUTCOME_SUPPORTING,
     log_event,
 )
-from app.services.price_cache import _fetch_prices_batch
+from app.services.price_cache import _fetch_prices_batch, fx_to_usd, native_currency
 
 
 # ============================================================
-# CONSTANTS — brain auto-pick score thresholds
+# CONSTANTS
 # ============================================================
-#
-# These three constants define the score floor for each brain trust tier.
-# See the file header for the full tier model. Tuned from the backtest
-# (Oct 2024 - Apr 2025) — raising any of these reduces buy frequency but
-# increases per-trade win rate. Lowering them does the reverse.
 
 BRAIN_MIN_SCORE = 75
-"""Tier 1 floor — validated AI signals must clear this score to be bought.
-
-Day 13 (Apr 21): raised 72 → 75 after every losing rotation/churn over
-Days 11-13 came from score 72-74 entries (JD, REI-UN.TO, CAR-UN.TO,
-HR-UN.TO). Patience over slot-filling.
-
-Day 19 (Apr 29): raised 75 → 80 after the bucketing fix shifted the
-universe HIGH_RISK-heavy. The Day-19 reasoning was based on 4 wallet-era
-trades at score 75-79 all closing losses. That sample was too small.
-
-Day 20 (Apr 30): rolled back 80 → 75 as part of the Filter D ship.
-The full 52-trade backtest (`scripts/backtest_filters.py`) showed:
-  - Score 75-79 across all history: 8W / 11L, 42.1% win rate, -9.7% total
-  - Score 80+ across all history: 7W / 10L, 41.2% win rate, +1.7% total
-The 80-only rule cuts trade volume in half (36 → 17) for a marginal
-+0.6pp/trade gain. Filter D (75 + SHORT-horizon + drop Fin/Industrials)
-delivers +5.4% historical with n=23 — the same number of trades survive
-as score 80 + sector add-on, with a stronger win rate (47.8% vs 46.2%).
-Score is a quality FILTER, not a quality RANKER (Day-19 lesson from
-ONDS at 91 being the biggest loser). The discriminating axes are
-horizon and sector, not score.
-
-Invalidation: revert to 80 if next monthly backtest shows the 75-79
-band has a win rate < 35% across n >= 15 wallet-era trades."""
-
-BRAIN_TIER2_MIN_SCORE = 80
-"""Tier 2 floor — low-confidence AI signals need a higher score bar (80+)
-to compensate for the AI's uncertainty. The 8-point premium over Tier 1
-is what makes the brain comfortable acting at half-size despite low AI
-conviction."""
-
-BRAIN_TIER3_MIN_SCORE = 82
-"""Tier 3 floor — tech-only signals (AI never ran) need an even higher
-score bar (82+) AND must pass technical confirmation checks AND must not
-be in a hostile macro regime. The 10-point premium over Tier 1 reflects
-the absence of any AI validation."""
-
-
-# ============================================================
-# CONSTANTS — Filter D admission gates (Day 20)
-# ============================================================
-#
-# Filter D is the historical winner from the 52-trade backtest
-# (`scripts/backtest_filters.py`). Two structurally independent recipes
-# (D and G) collapse to the same 23-trade subset and produce the same
-# +5.4% total historical P&L (47.8% win rate) vs the unfiltered baseline
-# of -17.6% / 40.4% — a +23.1pp improvement.
-#
-# The two gates below implement the structural pieces of Filter D:
-#   1. FILTER_D_BLOCKED_SECTORS — the sector exclusion
-#   2. The LONG-horizon suspension — implemented inline at the BUY path
-#      (horizon is computed there, not on the signal)
-#
-# These are NOT meant to be permanent vetoes. Per the "Knowledge is
-# Conditional" principle, every gate carries explicit invalidation
-# criteria. Re-run `scripts/backtest_filters.py` weekly and remove the
-# gate when its underlying cohort recovers.
+"""Score floor for an AI-BUY entry. Score is a quality FILTER, not a
+ranker; the decisive gate is Claude's BUY call + computed R:R."""
 
 FILTER_D_BLOCKED_SECTORS: frozenset[str] = frozenset({
     "Financial Services",
     "Industrials",
 })
-"""Sectors blocked from brain entry as of Day 20 (Apr 30).
-
-Backtest evidence (52 closed brain trades):
-  - "Drop Financial Services + Industrials" alone: n=43 surviving,
-    46.5% win rate, +0.2% total (vs baseline 40.4% / -17.6%).
-  - +17.8pp improvement from a 9-trade exclusion → those 9 trades
-    averaged ~ -2% per trade. Structurally negative-EV in our sample.
-
-Why these two specifically: they are the two highest-frequency,
-lowest-EV sector cohorts in the data. Financial Services is dominated
-by Canadian REITs and bank stocks that have been bleeding through the
-sample period; Industrials is dominated by cyclical names that the
-brain has been catching at the wrong end of their cycles.
-
-Why this is OK as a gate (and not a violation of "AI is the Decider"):
-the AI does not currently see "trades like this have lost us 5/9 times"
-in its dossier. Until pattern-stats injection (Stage 4) carries this
-signal to Claude's prompt, this gate is a temporary capacity rail
-analogous to the per-day entry cap, not a quality veto.
-
-Invalidation criteria: remove a sector from this set if the next
-monthly backtest shows that sector's cohort has:
-  - win rate >= 45% AND
-  - n >= 10 trades in the rolling 30-day window AND
-  - sum_pct >= 0% (not a net loser)
-
-Audit cadence: weekly via `scripts/backtest_filters.py`. Log every
-block via the tier_reason `"filter_d_sector_excluded_<sector>"` so
-the cost of being wrong is visible in the database."""
+"""Day-20 sector exclusion (n=9 trades). Only applied when
+`settings.brain_filter_d_sectors_enabled` is True (default False since
+the 2026-09 reset — the evidence was far too small to keep as a veto)."""
 
 
 # ============================================================
@@ -351,317 +128,297 @@ the cost of being wrong is visible in the database."""
 # ============================================================
 
 BrainNotificationQueue = list[tuple[str, dict]]
-"""A scan-local queue of brain Telegram notifications.
-
-Format: list of (template_key, kwargs_dict) tuples.
-
-Each scan creates a fresh queue via `new_notification_queue()` and threads
-it through every brain function for that scan run. `flush_brain_notifications()`
-drains it at the end of the scan and sends each entry as a Telegram message.
-
-We DO NOT use a module-level singleton for this state because:
-  1. Concurrent scans (manual + scheduled overlap) would mix notifications
-     between scans, causing duplicates, lost messages, or wrong-ticker alerts.
-  2. Explicit queue passing makes the data flow visible from the function
-     signature instead of relying on hidden global state.
-  3. It makes the brain functions independently testable.
-"""
+"""A scan-local queue of brain Telegram notifications: (template_key, kwargs)."""
 
 
 def new_notification_queue() -> BrainNotificationQueue:
-    """Create a fresh brain notification queue for a single scan run.
-
-    Called once per scan by `scan_service.run_scan` BEFORE any other brain
-    function. The same queue is then passed to `process_pending_reviews`,
-    `process_virtual_trades`, `check_virtual_exits`, and finally drained
-    by `flush_brain_notifications` at the end of the scan.
-
-    Returns an empty list. The functions append `(template_key, kwargs)`
-    tuples; the flush coroutine sends each one via Telegram.
-    """
+    """Create a fresh brain notification queue for a single scan run."""
     return []
 
 
 def _is_us_market_open() -> bool:
-    """Return True if the US equity regular session is currently open.
+    """True during the US regular session (Mon-Fri 9:30-16:00 ET).
 
-    Regular session: Monday-Friday, 9:30am-4:00pm ET (no holidays check —
-    a closed-on-holiday scan would just generate no fills, which is
-    correct behavior anyway since real markets would also reject the order).
-
-    The brain uses this to gate equity buy/sell decisions:
-      • Outside hours: equity BUYs are skipped, equity SELLs are flagged
-        for review at the next open.
-      • Crypto is exempt (24/7 market) and ignores this check.
-
-    The watchdog also calls this to skip equity monitoring outside hours.
+    Exchange holidays are handled separately via
+    `app.core.market_calendar.is_market_open` (see `_is_tradable_now`).
     """
     now_et = datetime.now(ZoneInfo("America/New_York"))
-    if now_et.weekday() >= 5:  # 5=Saturday, 6=Sunday
+    if now_et.weekday() >= 5:
         return False
     minutes = now_et.hour * 60 + now_et.minute
-    # 9:30am = 9*60 + 30 = 570; 4:00pm = 16*60 = 960
     return 570 <= minutes < 960
 
 
+def _is_crypto_symbol(symbol: str | None, sig: dict | None = None) -> bool:
+    return (sig or {}).get("asset_type") == "CRYPTO" or (symbol or "").endswith("-USD")
+
+
+def _is_tradable_now(symbol: str, market_open: bool | None = None) -> bool:
+    """Can an order on `symbol` fill right now? Crypto: always. Equities:
+    US regular session AND the listing exchange is open today."""
+    if _is_crypto_symbol(symbol):
+        return True
+    if market_open is None:
+        market_open = _is_us_market_open()
+    if not market_open:
+        return False
+    try:
+        from app.core.market_calendar import is_market_open
+        from app.scanners.universe import get_exchange
+        today_et = datetime.now(ZoneInfo("America/New_York")).date()
+        return bool(is_market_open(get_exchange(symbol), today_et))
+    except Exception as e:  # calendar failure must not block risk exits
+        logger.debug(f"market calendar check failed for {symbol}: {e}")
+        return True
+
+
+# ============================================================
+# EXECUTION COSTS
+# ============================================================
+
+def slippage_bps(symbol: str | None) -> float:
+    return (
+        settings.brain_slippage_bps_crypto if _is_crypto_symbol(symbol)
+        else settings.brain_slippage_bps_stock
+    )
+
+
+def apply_slippage(price: float, side: str, symbol: str | None) -> float:
+    """Fill price for a market order. side='BUY' pays up, 'SELL' receives less.
+
+    Applied to every brain fill on BOTH sides: LONG entry = BUY, LONG exit =
+    SELL, SHORT entry = SELL, SHORT cover = BUY.
+    """
+    bps = slippage_bps(symbol) / 10_000.0
+    if side == "BUY":
+        return float(price) * (1.0 + bps)
+    return float(price) * (1.0 - bps)
+
+
+# ============================================================
+# ENTRY GATE
+# ============================================================
+
+def is_ai_buy(sig: dict) -> bool:
+    """Claude actually called BUY (and the scan validated it)."""
+    if sig.get("ai_status") != "validated":
+        return False
+    if not settings.brain_require_ai_buy:
+        return True
+    return (sig.get("ai_signal") or "").upper() == "BUY"
+
+
 def _eval_brain_trust_tier(sig: dict, portfolio_heat: int = 0) -> tuple[int, float, str]:
-    """Decide which brain trust tier (if any) a signal qualifies for.
+    """Decide whether a signal may be auto-bought.
 
-    This is the brain's GATE. Every brain auto-buy goes through this function.
-    See the file header for the full tier model and rationale.
-
-    Args:
-        sig: A signal dict from the current scan (the same dict shape that
-            `scan_service` builds for `signals` table inserts). The fields
-            we read are: `score`, `ai_status`, `technical_data`, `macro_data`.
-
-    Returns:
-        (tier, trust_multiplier, reason)
-
-        tier: 0, 1, 2, or 3. Tier 0 means "do not auto-buy".
-        trust_multiplier: Position size scaling. 1.0 for tier 1, 0.5 for
-            tiers 2/3, 0.0 for tier 0. Recorded on the virtual_trade so
-            you can analyze per-tier returns later.
-        reason: A short human-readable string explaining the decision.
-            Logged with every brain buy and stored for diagnostics.
-
-    Why this is called BEFORE the user-facing action check:
-        Tier 2 and 3 signals will have already been downgraded from BUY to
-        HOLD by the AI quality guard in `scan_service._process_candidate`
-        (because their `ai_status` is not "validated"). The brain bypasses
-        that downgrade because its tier model has stricter criteria that
-        compensate. The user-facing UI stays conservative (HOLD), the
-        brain is allowed to act (with reduced position size).
-
-    Implicit blocker protection:
-        Tier 1 + Tier 2: protected by `check_blockers` from `signal_engine`,
-            because the AI path runs that check and sets action="AVOID" if
-            anything fires. AVOID is caught earlier in `process_virtual_trades`
-            (the SELL/AVOID branch), so it never reaches this function.
-
-        Tier 3: NOT protected by `check_blockers`, because the tech-only
-            signal path in `scan_service` skips that check entirely. We
-            re-check the most critical blockers here:
-                • Hostile macro environment (explicit check below)
-                • Overbought RSI (excluded by the RSI 50-65 sweet-spot filter)
-                • Low volume (excluded by the volume z-score 1.0-2.5 filter)
-                • SMA200 overextension (excluded by the < 30% filter)
-            Fraud blockers don't apply because tech-only signals have empty
-            grok_data, so there's no sentiment text to scan for fraud keywords.
+    Returns (tier, trust_multiplier, reason). tier 0 = do not buy. After the
+    2026-09 reset there is ONE admissible tier: an AI BUY (see `is_ai_buy`)
+    with score >= BRAIN_MIN_SCORE. Low-confidence, tech-only ("skipped") and
+    failed-AI signals never auto-buy. trust_multiplier scales the per-trade
+    RISK budget; it is 1.0 unless one of the legacy downsizing flags is on.
     """
     score = sig.get("score", 0) or 0
     ai_status = sig.get("ai_status", "skipped")
     technical_data = sig.get("technical_data") or {}
 
-    # Failed AI is never auto-bought — it's a transient failure that should retry
     if ai_status == "failed":
         return 0, 0.0, "ai_failed"
+    if not is_ai_buy(sig):
+        ai_sig = (sig.get("ai_signal") or "none").lower()
+        return 0, 0.0, f"not_ai_buy_{ai_status}_{ai_sig}"
 
-    # ── Filter D: sector exclusion (Day 20) ──
-    # Backtest evidence: Financial Services + Industrials cohorts together
-    # account for the largest concentrated source of loss in the 52-trade
-    # history. Block at the gate. See FILTER_D_BLOCKED_SECTORS for the
-    # invalidation criteria — re-run scripts/backtest_filters.py weekly.
-    fund = sig.get("fundamental_data") or {}
-    sector = (fund.get("sector") or "").strip()
-    if sector in FILTER_D_BLOCKED_SECTORS:
-        return 0, 0.0, f"filter_d_sector_excluded_{sector.lower().replace(' ', '_')}"
+    if settings.brain_filter_d_sectors_enabled:
+        sector = ((sig.get("fundamental_data") or {}).get("sector") or "").strip()
+        if sector in FILTER_D_BLOCKED_SECTORS:
+            return 0, 0.0, f"filter_d_sector_excluded_{sector.lower().replace(' ', '_')}"
 
-    # ── Portfolio heat gating ──
-    # heat=3 (locked): no new entries at all — protect existing gains
-    if portfolio_heat >= 3:
-        return 0, 0.0, "portfolio_locked"
+    if settings.brain_portfolio_heat_enabled:
+        if portfolio_heat >= 3:
+            return 0, 0.0, "portfolio_locked"
+        if portfolio_heat >= 2 and score < 80:
+            return 0, 0.0, f"portfolio_defensive_score{score}"
+        if portfolio_heat >= 1 and score < 76:
+            return 0, 0.0, f"portfolio_cautious_score{score}"
 
-    # heat=2 (defensive): only score 80+ at half size
-    if portfolio_heat >= 2 and score < 80:
-        return 0, 0.0, f"portfolio_defensive_score{score}"
+    if score < BRAIN_MIN_SCORE:
+        return 0, 0.0, f"score_below_min_{score}"
 
-    # heat=1 (cautious): only score 76+
-    if portfolio_heat >= 1 and score < 76:
-        return 0, 0.0, f"portfolio_cautious_score{score}"
+    if settings.brain_trend_downsize_enabled:
+        vs_sma50 = technical_data.get("vs_sma50")
+        if vs_sma50 is not None and vs_sma50 < 0:
+            return 2, 0.5, "ai_buy_below_sma50"
+        bb, macd = technical_data.get("bb_position"), technical_data.get("macd_histogram")
+        if bb is not None and bb > 0.95 and macd is not None and macd < 0:
+            return 2, 0.5, "ai_buy_overextended_bb"
+    if settings.brain_portfolio_heat_enabled and portfolio_heat >= 2:
+        return 2, 0.5, "ai_buy_heat_defensive"
+    if settings.brain_momentum_force_tier2 and sig.get("signal_style") == "MOMENTUM":
+        return 2, 0.5, "ai_buy_momentum_capped"
+    if (settings.brain_neutral_high_score_force_tier2
+            and sig.get("signal_style") == "NEUTRAL"
+            and score >= settings.brain_neutral_high_score_threshold):
+        return 2, 0.5, "ai_buy_neutral_high_score_capped"
+    return 1, 1.0, "ai_buy"
 
-    # ── SMA50 trend filter ──
-    # Week 1 data (Apr 8-13) showed a clean pattern: ALL winners
-    # (PBR-A +4.47%, AVGO +3.01%, ASML +1.30%, RRX +2.47%) were above
-    # SMA50 at entry. ALL counter-trend losers (VZ -5.2% 5d, LB -5.5%
-    # 5d, TPL -7.3% 5d) were below SMA50 at entry. "Cheap and falling"
-    # is not "cheap and recovering."
-    #
-    # When price is below SMA50, the short-term trend is DOWN regardless
-    # of fundamentals. The brain still enters (fundamentals might be
-    # right) but at REDUCED SIZE — Tier 1 is downgraded to Tier 2 (50%
-    # size) to limit exposure to counter-trend entries.
-    vs_sma50 = technical_data.get("vs_sma50")
-    below_sma50 = vs_sma50 is not None and vs_sma50 < 0
-
-    # ── Bollinger Band ceiling + MACD divergence filter ──
-    # Week 1-2 data: entries at BB > 95% with negative MACD had a 45%
-    # win rate vs 69% overall. Price at the Bollinger ceiling with fading
-    # momentum is a "buying the top" pattern — not bad enough to block
-    # (AVGO +3.29% and ASML +2.52% entered this way) but risky enough
-    # to halve the position size. Same principle as the SMA50 filter:
-    # reduce, don't block.
-    #
-    # Real cases: VSEC -3.18%, BF-B -2.29%, LTM -1.24%, BLK -1.40%
-    # all entered at BB=1.00 with negative MACD.
-    bb_position = technical_data.get("bb_position")
-    macd_hist = technical_data.get("macd_histogram")
-    overextended = (
-        bb_position is not None and bb_position > 0.95
-        and macd_hist is not None and macd_hist < 0
-    )
-
-    # Heat=2 forces half size on all entries that pass the score gate
-    heat_halve = portfolio_heat >= 2
-
-    # Tier 1: validated AI + standard score threshold
-    if ai_status == "validated" and score >= BRAIN_MIN_SCORE:
-        if below_sma50:
-            return 2, 0.5, "validated_below_sma50"
-        if overextended:
-            return 2, 0.5, "validated_overextended_bb"
-        if heat_halve:
-            return 2, 0.5, "validated_heat_defensive"
-        # Day 47: MOMENTUM-cohort tier cap. See config.brain_momentum_force_tier2
-        # for the full backtest rationale. Short version: tier-1 MOMENTUM
-        # produced 29% win rate / net -$60 / 5 WATCHDOG_FORCE_SELLs across
-        # n=17. Cap at tier-2 sizing to reduce the asymmetric downside.
-        if settings.brain_momentum_force_tier2 and sig.get("signal_style") == "MOMENTUM":
-            return 2, 0.5, "validated_momentum_capped"
-        # Day 55: NEUTRAL ≥85 tier cap. See config.brain_neutral_high_score_force_tier2
-        # for the full backtest rationale. Short version: NEUTRAL tier-1 ≥85
-        # produced 25% win rate / net -$97 / 4 WATCHDOG_FORCE_SELLs across
-        # n=8. Cap at tier-2 sizing for the same mechanism as the MOMENTUM
-        # rule — high-conviction extension at amplified sizing reverses.
-        if (settings.brain_neutral_high_score_force_tier2
-                and sig.get("signal_style") == "NEUTRAL"
-                and score >= settings.brain_neutral_high_score_threshold):
-            return 2, 0.5, "validated_neutral_high_score_capped"
-        return 1, 1.0, "validated"
-
-    # Tier 2: low confidence AI + higher score bar
-    # The AI ran (so we know it didn't blow up on red flags) but isn't sure.
-    # Score >= 80 means tech/fund/macro all agree, compensating for low AI conviction.
-    if ai_status == "low_confidence" and score >= BRAIN_TIER2_MIN_SCORE:
-        return 2, 0.5, "low_confidence_high_score"
-
-    # Tier 3: tech-only signal + very high score + technical confirmation
-    # AI was never run (below top 15), so we require pristine technicals as a
-    # substitute AND re-check the macro blocker (which the tech-only path
-    # skips). Other blockers (RSI overbought, low volume, SMA overextension)
-    # are implicitly enforced by the technical confirmation thresholds below.
-    if ai_status == "skipped" and score >= BRAIN_TIER3_MIN_SCORE:
-        # Hostile macro is a hard blocker — never auto-buy in a bad regime,
-        # regardless of how good the technicals look on the individual ticker.
-        macro_data = sig.get("macro_data") or {}
-        if macro_data.get("environment") == "hostile":
-            return 0, 0.0, "tier3_blocked_hostile_macro"
-
-        rsi = technical_data.get("rsi")
-        macd_hist = technical_data.get("macd_histogram")
-        volume_zscore = technical_data.get("volume_zscore")
-        vs_sma200 = technical_data.get("vs_sma200")
-        sma_cross = technical_data.get("sma_cross")
-
-        # Required technical confirmation:
-        # 1. RSI in sweet spot (50-65) — not overbought, not falling
-        # 2. MACD histogram positive — momentum building
-        # 3. Volume confirmation (z-score 1.0-2.5) — real participation, not panic
-        # 4. Not extremely overextended above SMA200 (< 30% gap)
-        rsi_ok = rsi is not None and 50 <= rsi <= 65
-        macd_ok = macd_hist is not None and macd_hist > 0
-        volume_ok = volume_zscore is not None and 1.0 <= volume_zscore <= 2.5
-        sma_ok = vs_sma200 is not None and vs_sma200 < 30
-        # Bonus: golden cross within window (not strictly required but boosts confidence)
-
-        confirmations = sum([rsi_ok, macd_ok, volume_ok, sma_ok])
-        if confirmations >= 3:
-            reason = f"tech_only_confirmed_{confirmations}of4"
-            if sma_cross == "golden_cross":
-                reason += "_goldencross"
-            return 3, 0.5, reason
-
-    return 0, 0.0, f"no_tier_{ai_status}_score{score}"
-
-
-# ============================================================
-# LEARNING LOOP — record outcomes + update hypothesis evidence
-# ============================================================
-#
-# Every brain trade close MUST flow through `_record_brain_outcome` so that:
-#   1. `trade_outcomes` gets a row (feeds Stage 4 pattern stats and the
-#      existing weekly Claude analysis in `learning_service.run_weekly_analysis`)
-#   2. Active hypotheses in `signal_thinking` whose `pattern_match` matches
-#      the closed trade get their evidence counters incremented and the
-#      mutation is logged to `knowledge_events`
-#
-# Failures NEVER block the close path. Audit/learning is best-effort.
-# Watchlist trades are recorded too (under `record_outcome`'s existing
-# track) but only BRAIN trades drive hypothesis evidence — watchlist is
-# the user's exploratory list, not the brain's autonomous decisions.
 
 def _eval_brain_short_tier(sig: dict) -> tuple[int, float, str]:
-    """Decide whether a signal qualifies as a SHORT (sell) entry.
+    """Decide whether a signal qualifies as a SHORT entry.
 
-    Only AI-validated bearish signals with score <= brain_short_max_score
-    qualify. No tech-only shorts — too risky without AI confirmation.
-
-    Returns (tier, trust_multiplier, reason). tier=0 means rejected.
+    Shorts are OFF unless `brain_short_entries_enabled`. When on, only an
+    explicit AI SELL/AVOID call (not a tech-only or blocker AVOID) with
+    score <= brain_short_max_score and correctly ordered levels qualifies.
     """
+    if not settings.brain_short_entries_enabled:
+        return 0, 0.0, "shorts_disabled"
     score = sig.get("score", 100) or 100
     ai_status = sig.get("ai_status", "skipped")
-    action = sig.get("action")
-
-    # Must be AI-validated AVOID with low score
-    if ai_status != "validated":
-        return 0, 0.0, "short_requires_validated_ai"
-    if action != "AVOID":
+    if ai_status in ("failed", "skipped") or (sig.get("ai_signal") or "").upper() not in ("SELL", "AVOID"):
+        return 0, 0.0, "short_requires_ai_sell"
+    if sig.get("action") != "AVOID":
         return 0, 0.0, "short_requires_avoid_action"
     if score > settings.brain_short_max_score:
         return 0, 0.0, f"short_score_too_high_{score}"
-
-    # Filter D: sector exclusion (Day 20) — same rationale as the long
-    # path. The backtest didn't cleanly separate long-vs-short for these
-    # sectors, but the structural drag was symmetric enough to warrant
-    # blocking at both gates. See FILTER_D_BLOCKED_SECTORS for invalidation.
-    fund = sig.get("fundamental_data") or {}
-    sector = (fund.get("sector") or "").strip()
-    if sector in FILTER_D_BLOCKED_SECTORS:
-        return 0, 0.0, f"short_filter_d_sector_excluded_{sector.lower().replace(' ', '_')}"
-
-    # Must have target and stop defined
-    price = float(sig.get("price_at_signal") or 0)
-    target_p = sig.get("target_price")
-    stop_p = sig.get("stop_loss")
-    if not target_p or not stop_p or not price:
-        return 0, 0.0, "short_missing_levels"
-
-    target_p = float(target_p)
-    stop_p = float(stop_p)
-
-    # For a valid short: target < current price < stop
-    # (target is lower = where we take profit, stop is higher = where we cut loss)
-    if not (target_p < price < stop_p):
-        return 0, 0.0, f"short_levels_wrong_direction"
-
-    # Check bearish sentiment if available (Grok only runs for HIGH_RISK)
+    if settings.brain_filter_d_sectors_enabled:
+        sector = ((sig.get("fundamental_data") or {}).get("sector") or "").strip()
+        if sector in FILTER_D_BLOCKED_SECTORS:
+            return 0, 0.0, f"short_filter_d_sector_excluded_{sector.lower().replace(' ', '_')}"
     gd = sig.get("grok_data") or {}
-    if isinstance(gd, dict) and gd.get("score") is not None:
-        if gd["score"] > 40:  # not bearish enough
-            return 0, 0.0, f"short_sentiment_not_bearish_{gd['score']}"
+    if isinstance(gd, dict) and gd.get("score") is not None and gd["score"] > 40:
+        return 0, 0.0, f"short_sentiment_not_bearish_{gd['score']}"
+    return 1, 1.0, "short_ai_bearish"
 
-    return 1, 1.0, "short_validated_bearish"
+
+def compute_entry_levels(sig: dict, entry_price: float, direction: str = "LONG") -> dict:
+    """Final stop / target / R:R for a new position, computed in code.
+
+    Claude's stop/target are used when present and on the right side of the
+    FILL price. A Claude stop tighter than brain_min_stop_atr_mult × ATR is
+    replaced by the ATR stop (noise stops are not risk control). Missing
+    levels fall back to ATR: stop = entry ∓ brain_stop_atr_mult × ATR and
+    target = entry ± brain_target_r_mult × risk. R:R = reward / risk from
+    the fill price; the caller rejects when rr < brain_min_rr.
+
+    Returns {"stop", "target", "rr", "atr", "source", "reason"}; a non-None
+    "reason" means the entry must be skipped.
+    """
+    short = direction == "SHORT"
+    entry = float(entry_price)
+    td = sig.get("technical_data") or {}
+    try:
+        atr = float(td.get("atr")) if td.get("atr") else None
+    except (TypeError, ValueError):
+        atr = None
+    if atr is not None and atr <= 0:
+        atr = None
+
+    def _num(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    stop, target = _num(sig.get("stop_loss")), _num(sig.get("target_price"))
+    source = "ai"
+    stop_ok = stop is not None and ((stop > entry) if short else (0 < stop < entry))
+    if stop_ok and atr and abs(entry - stop) < settings.brain_min_stop_atr_mult * atr:
+        stop_ok = False
+        source = "ai_stop_too_tight"
+    if not stop_ok:
+        if not atr:
+            return {"stop": None, "target": None, "rr": None, "atr": None,
+                    "source": source, "reason": "no_valid_stop_and_no_atr"}
+        k = settings.brain_stop_atr_mult * atr
+        stop = entry + k if short else entry - k
+        source = "atr" if source == "ai" else f"{source}->atr"
+    risk = abs(entry - stop)
+    target_ok = target is not None and ((0 < target < entry) if short else (target > entry))
+    if not target_ok:
+        reward = settings.brain_target_r_mult * risk
+        target = entry - reward if short else entry + reward
+        source += "+r_target"
+    if target <= 0 or risk <= 0:
+        return {"stop": stop, "target": target, "rr": None, "atr": atr,
+                "source": source, "reason": "invalid_levels"}
+    rr = abs(target - entry) / risk
+    reason = None
+    if rr + 1e-9 < settings.brain_min_rr:
+        reason = f"rr_below_min_{rr:.2f}"
+    return {"stop": round(stop, 6), "target": round(target, 6), "rr": round(rr, 3),
+            "atr": atr, "source": source, "reason": reason}
+
+
+def check_portfolio_limits(
+    *,
+    symbol: str,
+    sector: str | None,
+    is_crypto: bool,
+    alloc_usd: float,
+    equity_usd: float,
+    open_book: list[dict],
+) -> tuple[float, str | None]:
+    """Apply portfolio-level limits to a proposed allocation.
+
+    `open_book` = current brain positions, each {"symbol", "sector",
+    "is_crypto", "cost_usd"}. Returns (allowed_alloc_usd, reject_reason);
+    the crypto cap may SHRINK the allocation instead of rejecting.
+    """
+    if len(open_book) >= settings.brain_max_open_positions:
+        return 0.0, f"max_open_positions_{settings.brain_max_open_positions}"
+    if any(p.get("symbol") == symbol for p in open_book):
+        return 0.0, "already_held"
+    if sector and settings.brain_max_per_sector > 0:
+        same = sum(1 for p in open_book if (p.get("sector") or "") == sector)
+        if same >= settings.brain_max_per_sector:
+            return 0.0, f"sector_cap_{sector.lower().replace(' ', '_')}"
+    if is_crypto:
+        crypto_cost = sum(float(p.get("cost_usd") or 0) for p in open_book if p.get("is_crypto"))
+        room = equity_usd * settings.brain_max_crypto_pct / 100.0 - crypto_cost
+        if room < settings.wallet_min_balance_for_trade:
+            return 0.0, "crypto_cap"
+        alloc_usd = min(alloc_usd, room)
+    return alloc_usd, None
+
+
+def drawdown_breaker_tripped(equity_usd: float, peak_equity_usd: float,
+                             max_drawdown_pct: float | None = None) -> bool:
+    """Peak-to-trough breaker: True when equity is >= max_drawdown_pct below peak."""
+    pct = settings.brain_max_drawdown_pct if max_drawdown_pct is None else max_drawdown_pct
+    if pct is None or pct <= 0 or peak_equity_usd <= 0:
+        return False
+    return equity_usd <= peak_equity_usd * (1.0 - pct / 100.0)
+
+
+def trading_days_between(start: date, end: date) -> int:
+    """Weekdays strictly after `start` up to and including `end` (holidays ignored)."""
+    if end <= start:
+        return 0
+    n, d = 0, start
+    while d < end:
+        d += timedelta(days=1)
+        if d.weekday() < 5:
+            n += 1
+    return n
+
+
+def signal_exit_reason(sig: dict) -> str | None:
+    """Should a fresh signal close an open LONG? One rule for every path.
+
+    Exit only on an explicit AI SELL/AVOID call or a user /forcesell. A
+    tech-only or blocker-driven AVOID (no AI SELL) is NOT an exit — the
+    hard stop manages that risk. (Replaces the old score-drop guard.)
+    """
+    if sig.get("_review_forced"):
+        return "user_forced"
+    if sig.get("action") not in ("SELL", "AVOID"):
+        return None
+    ai_sig = (sig.get("ai_signal") or "").upper()
+    if ai_sig in ("SELL", "AVOID"):
+        return f"ai_{ai_sig.lower()}"
+    return None
 
 
 def _extract_thesis_keywords(sig: dict) -> dict:
-    """Snapshot the structured conditions that justified an entry.
-
-    The keywords are the *machine-checkable* parts of the thesis (numbers
-    and labels), captured at insert time so the thesis re-evaluator can
-    diff entry vs current state. Claude's free-text reasoning is captured
-    separately in `entry_thesis`. The re-eval prompt uses both: keywords
-    for fast field-by-field diff, prose for the WHY behind the entry.
-    """
+    """Snapshot the machine-checkable entry conditions for the thesis re-eval."""
     td = sig.get("technical_data") or {}
     md = sig.get("macro_data") or {}
     gd = sig.get("grok_data") or {}
@@ -676,55 +433,131 @@ def _extract_thesis_keywords(sig: dict) -> dict:
         "catalyst": sig.get("catalyst"),
         "catalyst_type": sig.get("catalyst_type"),
         "fear_greed": md.get("fear_greed"),
+        "ai_signal": sig.get("ai_signal"),
+        "p_win": sig.get("p_win"),
     }
 
 
-def _exit_is_thesis_protected(pos: dict, exit_reason: str, pnl_pct: float) -> bool:
-    """Return True when an existing exit path should be SUPPRESSED because
-    the thesis re-evaluator says the position is still valid.
+# ============================================================
+# EXIT POLICY (shared by check_virtual_exits and the watchdog)
+# ============================================================
 
-    Catastrophic exits ALWAYS fire — we never let an "intact thesis" call
-    blow us up beyond `settings.brain_thesis_hard_stop_pct`. The thesis
-    check is for noise filtering, not for overriding hard risk limits.
+HARD_EXIT_REASONS = frozenset({"STOP_HIT", "TRAILING_STOP", "THESIS_INVALIDATED",
+                               "WATCHDOG_FORCE_SELL", "WATCHDOG_EXIT"})
 
-    The 6 existing exit paths gate themselves through this function:
-      • SIGNAL/AVOID flip → suppress if thesis still valid (HUM Day-1 fix)
-      • STOP_HIT → suppress if thesis still valid AND not catastrophic
-      • TARGET_HIT → suppress if thesis still valid (let it run)
-      • PROFIT_TAKE → suppress if thesis still valid (let it run)
-      • TIME_EXPIRED → suppress if thesis still valid (extend the window)
-      • ROTATION → NEVER suppressed (rotation is a relative comparison
-        between competing signals, doesn't depend on the absolute thesis)
-      • THESIS_INVALIDATED → N/A (this IS the thesis-driven exit)
+
+def _exit_is_thesis_protected(pos: dict, exit_reason: str, pnl_pct: float | None) -> bool:
+    """May a 'valid' thesis suppress this exit? Almost never.
+
+    Only when `brain_thesis_suppresses_exits` is on, only for soft exits
+    (TARGET_HIT / TIME_EXPIRED / SIGNAL), and only for a position that is
+    currently WINNING. Stops are always hard and a losing position is never
+    held open because of a thesis opinion.
     """
-    if not settings.brain_thesis_gate_enabled:
+    if not settings.brain_thesis_suppresses_exits:
         return False
-    # Defensive None guard — a null pnl_pct shouldn't happen (all call sites
-    # compute from non-null floats) but if it ever does, fail-open so the
-    # exit fires rather than crashing the scan.
-    if pnl_pct is None:
+    if exit_reason in HARD_EXIT_REASONS:
         return False
-    # Catastrophic carve-out: always exit, regardless of thesis. A wrong
-    # Claude call must never blow up the position past the hard limit.
-    # Direction-aware threshold: shorts use brain_short_hard_stop_pct
-    # (semantically identical to long at -8.0 today, but configurable).
-    direction = pos.get("direction") or "LONG"
-    hard_stop_threshold = (
-        settings.brain_short_hard_stop_pct if direction == "SHORT"
-        else settings.brain_thesis_hard_stop_pct
-    )
-    if pnl_pct <= hard_stop_threshold:
+    if pnl_pct is None or pnl_pct <= 0:
         return False
-    if exit_reason == "ROTATION":
-        return False
-    if exit_reason == "THESIS_INVALIDATED":
-        return False
-    if exit_reason == "TRAILING_STOP":
-        return False  # trailing stop protects gains — never suppress it
-    if exit_reason == "QUALITY_PRUNE":
-        return False  # pruning dead weight — the thesis IS the reason we're selling
     return (pos.get("thesis_last_status") or "").lower() == "valid"
 
+
+@dataclass
+class ExitDecision:
+    reason: str | None          # None = hold
+    stop: float | None          # effective stop after any trailing ratchet
+    peak: float | None
+    trough: float | None
+    changed: bool               # stop/peak/trough moved → persist
+    detail: str = ""
+
+
+def evaluate_exit(
+    pos: dict,
+    price: float,
+    *,
+    now: datetime | None = None,
+    latest_signal: dict | None = None,
+) -> ExitDecision:
+    """THE exit policy. Pure: no DB, no network.
+
+    Priority: STOP_HIT / TRAILING_STOP > TARGET_HIT > TIME_EXPIRED > SIGNAL.
+    The trailing ratchet is applied BEFORE the stop test so a gap through a
+    freshly-raised trail exits the same tick.
+    """
+    now = now or datetime.now(timezone.utc)
+    direction = pos.get("direction") or "LONG"
+    short = direction == "SHORT"
+    entry = float(pos.get("entry_price") or 0)
+    price = float(price)
+    if entry <= 0:
+        return ExitDecision(None, None, None, None, False, "no_entry_price")
+
+    def _f(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    cat = settings.brain_catastrophic_stop_pct / 100.0
+    stop = _f(pos.get("stop_loss"))
+    if stop is None:
+        stop = entry * (1 + cat) if short else entry * (1 - cat)
+    initial = _f(pos.get("initial_stop")) or stop
+    target = _f(pos.get("target_price"))
+    atr = _f(pos.get("entry_atr"))
+    risk = (initial - entry) if short else (entry - initial)
+
+    old_stop = stop
+    old_peak, old_trough = _f(pos.get("peak_price")), _f(pos.get("trough_price"))
+    peak = max(old_peak or entry, price)
+    trough = min(old_trough or entry, price)
+
+    if atr and risk > 0:
+        act = settings.brain_trail_activate_r * risk
+        trail_dist = settings.brain_trail_atr_mult * atr
+        if short and trough <= entry - act:
+            stop = min(stop, trough + trail_dist)
+        elif not short and peak >= entry + act:
+            stop = max(stop, peak - trail_dist)
+
+    changed = (
+        abs(stop - old_stop) > 1e-9
+        or (not short and (old_peak is None or peak > old_peak))
+        or (short and (old_trough is None or trough < old_trough))
+    )
+    pnl_pct = ((entry - price) if short else (price - entry)) / entry * 100
+    trailed = (stop < initial - 1e-9) if short else (stop > initial + 1e-9)
+
+    reason, detail = None, ""
+    stop_hit = price >= stop if short else price <= stop
+    if stop_hit:
+        reason = "TRAILING_STOP" if trailed else "STOP_HIT"
+        detail = f"price {price:.4f} through stop {stop:.4f}"
+    elif target is not None and (price <= target if short else price >= target):
+        reason, detail = "TARGET_HIT", f"price {price:.4f} through target {target:.4f}"
+    else:
+        max_days = (settings.brain_max_hold_days if pos.get("source") == "brain"
+                    else settings.virtual_trade_max_days)
+        held = days_since(pos.get("entry_date"), now=now)
+        if max_days and held >= max_days:
+            reason, detail = "TIME_EXPIRED", f"held {held}d >= {max_days}d"
+        elif latest_signal is not None and not short:
+            why = signal_exit_reason(latest_signal)
+            if why:
+                reason, detail = "SIGNAL", why
+
+    if reason and _exit_is_thesis_protected(pos, reason, pnl_pct):
+        detail = f"{reason} suppressed by valid thesis (winner {pnl_pct:+.1f}%)"
+        reason = None
+    return ExitDecision(reason, stop, peak if not short else old_peak,
+                        trough if short else old_trough, changed, detail)
+
+
+# ============================================================
+# LEARNING LOOP — record outcomes + update hypothesis evidence
+# ============================================================
 
 def _record_brain_outcome(
     closed_trade: dict,
@@ -733,47 +566,27 @@ def _record_brain_outcome(
     exit_reason: str,
     pnl_pct: float,
 ) -> None:
-    """Forward a closed virtual trade to learning_service.record_outcome().
-
-    Called from EVERY close path (SIGNAL, ROTATION, STOP_HIT, TARGET_HIT,
-    PROFIT_TAKE, TIME_EXPIRED, watchdog). Failures are caught and logged,
-    never raised — recording outcomes must NEVER block a real exit.
-
-    For brain trades, also runs `_match_thinking_observations` which checks
-    every active hypothesis and increments the supporting/contradicting
-    counter on any whose `pattern_match` matches this closed trade.
-    """
+    """Forward a closed BRAIN trade to learning_service.record_outcome() and
+    update matching hypotheses. Direction-aware (shorts record action
+    'SHORT' with short-side P&L). Best-effort: never raises."""
     if closed_trade.get("source") != "brain":
-        # We could record watchlist outcomes too, but for v1 the learning
-        # loop only studies the brain track — the user's watchlist picks
-        # are exploratory and shouldn't shape the brain's learned patterns.
         return
-    # Defensive guard: a brain trade without an entry_date shouldn't exist,
-    # but if it ever does, skip learning rather than stamping the outcome
-    # with today's date. That fallback would pollute pattern_stats's 90-day
-    # rolling window (trade from 6 months ago counted as "today").
     entry_date_raw = closed_trade.get("entry_date")
     if not entry_date_raw:
-        logger.warning(
-            f"Skipping brain outcome for {closed_trade.get('symbol')}: "
-            f"entry_date is null (pre-Stage-3 trade or data corruption)"
-        )
+        logger.warning(f"Skipping brain outcome for {closed_trade.get('symbol')}: entry_date is null")
         return
+    direction = closed_trade.get("direction") or "LONG"
     try:
         from app.services import learning_service
         entry_dt = parse_iso_utc(entry_date_raw)
         if entry_dt is None:
-            logger.warning(
-                f"Skipping brain outcome for {closed_trade.get('symbol')}: "
-                f"unparseable entry_date {entry_date_raw!r}"
-            )
+            logger.warning(f"Skipping brain outcome for {closed_trade.get('symbol')}: bad entry_date")
             return
-        exit_dt = datetime.now(timezone.utc)
-        days_held = max(0, (exit_dt - entry_dt).days)
+        days_held = max(0, (datetime.now(timezone.utc) - entry_dt).days)
         learning_service.record_outcome(
-            signal_id=None,  # virtual trades aren't tied to one specific signal_id
+            signal_id=None,
             symbol=closed_trade["symbol"],
-            action="BUY",  # all brain entries are BUYs
+            action="SHORT" if direction == "SHORT" else "BUY",
             score=int(closed_trade.get("entry_score") or 0),
             bucket=closed_trade.get("bucket") or "UNKNOWN",
             signal_date=entry_date_raw,
@@ -783,27 +596,18 @@ def _record_brain_outcome(
             target_price=closed_trade.get("target_price"),
             stop_loss=closed_trade.get("stop_loss"),
             market_regime=closed_trade.get("market_regime"),
-            catalyst_type=None,  # not snapshotted yet (Stage 6 entry_thesis_keywords will carry it)
+            catalyst_type=None,
             notes=exit_reason,
+            pnl_pct_override=pnl_pct,
         )
     except Exception as e:
-        logger.warning(
-            f"Failed to record brain outcome for {closed_trade.get('symbol')}: {e}"
-        )
+        logger.warning(f"Failed to record brain outcome for {closed_trade.get('symbol')}: {e}")
 
-    # Hypothesis evidence update — separate try so a failure here doesn't
-    # cancel the record_outcome above. Both are best-effort.
     try:
         _match_thinking_observations(closed_trade, exit_reason, pnl_pct)
     except Exception as e:
-        logger.warning(
-            f"Failed to update hypothesis observations for {closed_trade.get('symbol')}: {e}"
-        )
+        logger.warning(f"Failed to update hypothesis observations for {closed_trade.get('symbol')}: {e}")
 
-    # Bust the Track Record by Score cache so the dashboard reflects the
-    # new close immediately. Without this, the closed trade is in the DB
-    # but the Track Record table shows stale data until the 15-min TTL
-    # expires (the bug Pedro caught after WING closed at 13:06).
     try:
         from app.services.signal_service import invalidate_track_record_cache
         invalidate_track_record_cache()
@@ -811,141 +615,146 @@ def _record_brain_outcome(
         logger.debug(f"Track record cache invalidation skipped: {e}")
 
 
-def _trade_matches_pattern(trade: dict, pattern_match: dict) -> bool:
-    """Best-effort match of a closed trade against a hypothesis pattern_match.
+def _num_or_none(v):
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
-    Today we can only check (bucket, regime, score band) because that's all
-    we snapshot on virtual_trades. Other pattern keys (e.g., macd_histogram_lt)
-    are silently ignored — they'll become checkable once entry_thesis_keywords
-    starts carrying technicals.
 
-    Returns False if any CHECKABLE key fails, True otherwise. An empty
-    pattern_match returns False (refuse to match against everything — a
-    hypothesis with no pattern is unverifiable and would otherwise grab
-    every closed trade).
+def _match_score(bound: str):
+    def _m(trade: dict, expected, _exit_reason) -> bool:
+        exp = _num_or_none(expected)
+        score = _num_or_none(trade.get("entry_score"))
+        if exp is None or score is None:
+            return False
+        if bound == "min":
+            return score >= exp
+        if bound == "max":
+            return score <= exp
+        return score == exp
+    return _m
 
-    Score-band semantics:
-        score_min and score_max are INCLUSIVE bounds.
-        Non-integer/None values for score_min/score_max are silently
-        skipped rather than crashing — this guards against bad data in
-        pattern_match JSONB without raising on every closed trade.
+
+def _match_exit_reason(trade: dict, expected, exit_reason) -> bool:
+    actual = exit_reason or trade.get("exit_reason")
+    return bool(actual) and actual == expected
+
+
+def _match_exit_family(trade: dict, expected, exit_reason) -> bool:
+    actual = exit_reason or trade.get("exit_reason") or ""
+    return bool(expected) and isinstance(expected, str) and actual.startswith(expected)
+
+
+def _match_entry_tier(trade: dict, expected, _exit_reason) -> bool:
+    try:
+        return trade.get("entry_tier") is not None and int(trade["entry_tier"]) == int(expected)
+    except (TypeError, ValueError):
+        return False
+
+
+# Every key a hypothesis pattern_match may use. A key NOT in this map makes
+# the pattern non-matching (strict): an uncheckable condition must never
+# silently widen the cohort to "every trade".
+PATTERN_MATCHERS = {
+    "bucket": lambda t, v, _r: t.get("bucket") == v,
+    "regime": lambda t, v, _r: t.get("market_regime") == v,
+    "market_regime": lambda t, v, _r: t.get("market_regime") == v,
+    "signal_style": lambda t, v, _r: (t.get("signal_style") or "UNCLASSIFIED") == v,
+    "entry_tier": _match_entry_tier,
+    "direction": lambda t, v, _r: (t.get("direction") or "LONG") == v,
+    "sector": lambda t, v, _r: bool(t.get("sector")) and t.get("sector") == v,
+    "symbol": lambda t, v, _r: t.get("symbol") == v,
+    "symbols": lambda t, v, _r: isinstance(v, (list, tuple)) and t.get("symbol") in v,
+    "score_min": _match_score("min"),
+    "score_max": _match_score("max"),
+    "score_eq": _match_score("eq"),
+    "entry_score_min": _match_score("min"),
+    "entry_score_max": _match_score("max"),
+    "exit_reason": _match_exit_reason,
+    "exit_reason_family": _match_exit_family,
+}
+
+# Keys describing the OUTCOME of a trade. Hypotheses keyed on them are
+# circular ("stopped-out trades lose"), so the daily loop doesn't create
+# them — but they still match strictly if a human writes one.
+OUTCOME_PATTERN_KEYS = frozenset({"exit_reason", "exit_reason_family"})
+
+
+def _trade_matches_pattern(trade: dict, pattern_match: dict, exit_reason: str | None = None) -> bool:
+    """Strict match of a closed trade against a hypothesis pattern_match.
+
+    EVERY key must be a known key (see PATTERN_MATCHERS) AND match. Unknown
+    keys (e.g. window_days, count_threshold, new_cohorts) → no match. An
+    empty or non-dict pattern → no match.
     """
-    if not pattern_match:
+    if not pattern_match or not isinstance(pattern_match, dict):
         return False
-    # Defensive type check — pattern_match comes from JSONB and could
-    # theoretically be a list/string if a bad insert sneaks through.
-    # A non-dict here would crash .get() and kill ALL hypothesis updates
-    # for this close (the outer try/except catches it but loses the good
-    # hypotheses too). Return False for the bad entry, continue processing.
-    if not isinstance(pattern_match, dict):
-        return False
-    bucket = pattern_match.get("bucket")
-    if bucket and trade.get("bucket") != bucket:
-        return False
-    regime = pattern_match.get("regime")
-    if regime and trade.get("market_regime") != regime:
-        return False
-    score = trade.get("entry_score") or 0
-    score_min = pattern_match.get("score_min")
-    if isinstance(score_min, (int, float)) and score < score_min:
-        return False
-    score_max = pattern_match.get("score_max")
-    if isinstance(score_max, (int, float)) and score > score_max:
-        return False
-    score_eq = pattern_match.get("score_eq")
-    if isinstance(score_eq, (int, float)) and score != score_eq:
-        return False
+    for key, expected in pattern_match.items():
+        matcher = PATTERN_MATCHERS.get(key)
+        if matcher is None:
+            return False
+        try:
+            if not matcher(trade, expected, exit_reason):
+                return False
+        except Exception:
+            return False
     return True
 
 
-def _classify_observation(prediction: str, pnl_pct: float) -> str:
-    """Decide whether a closed trade SUPPORTS or CONTRADICTS a hypothesis.
+_WIN_WORDS = ("over-perform", "overperform", "outperform", "will win", "will gain", "favorable", "favors")
 
-    ⚠ V1 LIMITATION — READ BEFORE ADDING NEW HYPOTHESIS TYPES ⚠
 
-    This function assumes EVERY hypothesis predicts a NEGATIVE outcome (a
-    loss). The PYPL/META hypothesis from Stage 1 predicts losses, so a
-    losing trade is "supporting" and a winning trade is "contradicting."
-    This is correct for warning-style hypotheses but **inverted** for
-    bullish hypotheses like "post-earnings-drift winners" or "momentum
-    setups in TRENDING regime tend to win."
+def _infer_expected_direction(prediction: str) -> str:
+    text = (prediction or "").lower()
+    if any(w in text for w in _WIN_WORDS) and "under" not in text:
+        return "win"
+    return "loss"
 
-    If you add a hypothesis that predicts WINS instead of losses, this
-    function will silently mis-classify every observation — winning trades
-    will increment `observations_contradicting` (wrong) and losers will
-    increment `observations_supporting` (also wrong). The brain's
-    graduation logic would then learn the opposite of reality.
 
-    The fix when needed: parse `prediction` text for keywords ("will gain",
-    "will win", "favors") OR add a structured `expected_direction` column
-    to `signal_thinking` ('loss' | 'win' | 'either') and switch on it here.
-    Until that fix lands, ONLY add hypotheses that predict losses to
-    `signal_thinking`.
+def _classify_observation(prediction: str, pnl_pct: float, expected_direction: str | None = None) -> str:
+    """Does a closed trade SUPPORT or CONTRADICT a hypothesis?
 
-    The 1% deadband around zero filters out trades that closed near
-    breakeven — those don't really confirm or disprove a directional
-    prediction in either direction.
+    `expected_direction` ('win' | 'loss', stored on signal_thinking since
+    migration 006) says what the hypothesis predicts. When missing it is
+    inferred from the prediction text (over-/out-perform → 'win', else
+    'loss'). Trades within ±1% are NEUTRAL.
     """
     if -1.0 < pnl_pct < 1.0:
         return OUTCOME_NEUTRAL
-    # V1: hypothesis predicts a LOSS. Loss confirms it; win disproves it.
-    if pnl_pct < 0:
-        return OUTCOME_SUPPORTING
-    return OUTCOME_CONTRADICTING
+    expected = (expected_direction or "").lower() or _infer_expected_direction(prediction)
+    won = pnl_pct > 0
+    if expected == "win":
+        return OUTCOME_SUPPORTING if won else OUTCOME_CONTRADICTING
+    return OUTCOME_CONTRADICTING if won else OUTCOME_SUPPORTING
 
 
-def _match_thinking_observations(
-    closed_trade: dict,
-    exit_reason: str,
-    pnl_pct: float,
-) -> None:
-    """For every active hypothesis whose pattern matches this closed trade,
-    increment the relevant evidence counter and log a knowledge_event.
-
-    Best-effort matching — see `_trade_matches_pattern` for the limits of
-    what we can check today vs what becomes checkable when entry_thesis_keywords
-    carries the technical fields.
-
-    PERF NOTE: this loads active hypotheses on every call. With ~5 closes/scan
-    that's ~5 small queries (~50ms total). Acceptable today; if the brain
-    starts closing many trades per scan, batch-load active hypotheses once
-    in `process_virtual_trades` and pass them in.
-
-    RACE CONDITION (acceptable for v1):
-    The increment is read-modify-write, which is non-atomic. If a SCAN and
-    a WATCHDOG TICK both close trades matching the same hypothesis at
-    almost the same instant, both will read counter=N, both will write N+1,
-    and one increment will be lost. The scan_service has a concurrency
-    guard (rejects scans while another is RUNNING/QUEUED), so two SCANS
-    can't race. But the watchdog runs on its own APScheduler timer and
-    CAN overlap a long-running scan. Fix when needed: switch to a Postgres
-    atomic increment via raw SQL, OR add an updated_at-based optimistic
-    concurrency check. Until then, expect to lose ~1 counter increment per
-    year — irrelevant for graduation thresholds in single digits.
-    """
+def _match_thinking_observations(closed_trade: dict, exit_reason: str, pnl_pct: float) -> None:
+    """For every active hypothesis whose pattern strictly matches this closed
+    trade, increment the evidence counter and log a knowledge_event carrying
+    pnl_pct (the graduation step computes expectancy from those events)."""
     db = get_client()
     active = (
         db.table("signal_thinking")
-        .select("id, hypothesis, prediction, pattern_match, "
-                "observations_supporting, observations_contradicting, observations_neutral")
+        .select("*")
         .eq("status", "active")
         .execute()
     ).data or []
-    if not active:
-        return
-
     for hypothesis in active:
         pattern = hypothesis.get("pattern_match") or {}
-        if not _trade_matches_pattern(closed_trade, pattern):
+        if not _trade_matches_pattern(closed_trade, pattern, exit_reason):
             continue
-        outcome = _classify_observation(hypothesis.get("prediction") or "", pnl_pct)
-        # Map the outcome to the column we increment
-        if outcome == OUTCOME_SUPPORTING:
-            field = "observations_supporting"
-        elif outcome == OUTCOME_CONTRADICTING:
-            field = "observations_contradicting"
-        else:
-            field = "observations_neutral"
+        outcome = _classify_observation(
+            hypothesis.get("prediction") or "", pnl_pct, hypothesis.get("expected_direction"),
+        )
+        field = {
+            OUTCOME_SUPPORTING: "observations_supporting",
+            OUTCOME_CONTRADICTING: "observations_contradicting",
+        }.get(outcome, "observations_neutral")
         before = hypothesis.get(field) or 0
         after = before + 1
         try:
@@ -954,11 +763,8 @@ def _match_thinking_observations(
                 "last_evaluated_at": datetime.now(timezone.utc).isoformat(),
             }).eq("id", hypothesis["id"]).execute()
         except Exception as e:
-            logger.warning(
-                f"Failed to bump {field} on hypothesis {hypothesis['id']}: {e}"
-            )
+            logger.warning(f"Failed to bump {field} on hypothesis {hypothesis['id']}: {e}")
             continue
-        # Append an audit event for the increment
         log_event(
             EVENT_THINKING_OBSERVATION_ADDED,
             triggered_by="brain_close_hook",
@@ -970,16 +776,16 @@ def _match_thinking_observations(
                 "bucket": closed_trade.get("bucket"),
                 "market_regime": closed_trade.get("market_regime"),
                 "entry_score": closed_trade.get("entry_score"),
-                "pnl_pct": round(pnl_pct, 2),
+                "direction": closed_trade.get("direction") or "LONG",
+                "pnl_pct": round(pnl_pct, 4),
                 "exit_reason": exit_reason,
                 "counter_field": field,
                 "counter_before": before,
                 "counter_after": after,
             },
             reason=(
-                f"Trade {closed_trade.get('symbol')} closed {pnl_pct:+.2f}% "
-                f"({exit_reason}) — matches pattern_match for hypothesis "
-                f"\"{(hypothesis.get('hypothesis') or '')[:60]}...\" — "
+                f"Trade {closed_trade.get('symbol')} closed {pnl_pct:+.2f}% ({exit_reason}) — "
+                f"matches hypothesis \"{(hypothesis.get('hypothesis') or '')[:60]}\" — "
                 f"{field}: {before} → {after}"
             ),
         )
@@ -1198,1100 +1004,598 @@ def process_pending_reviews(
     return {"cleared": cleared, "confirmed": confirmed}
 
 
+@dataclass
+class BrainEntryContext:
+    """Live book state threaded through one scan's entry decisions.
+
+    Slots are always recounted from `open_book` (which is mutated as this
+    scan closes and opens positions) — never from a stale counter.
+    """
+    uid: str | None
+    equity: float
+    cash: float
+    peak_equity: float
+    breaker_tripped: bool
+    open_book: list[dict]                 # brain positions: symbol, sector, is_crypto, cost_usd, direction, id
+    cooldown: dict[str, str]              # symbol -> reason
+    open_watchlist: set[str]
+    market_open: bool
+    portfolio_heat: int = 0
+
+
+def _book_entry(row: dict) -> dict:
+    return {
+        "id": row.get("id"),
+        "symbol": row.get("symbol"),
+        "sector": row.get("sector"),
+        "is_crypto": _is_crypto_symbol(row.get("symbol")),
+        "cost_usd": float(row.get("position_size_usd") or 0),
+        "direction": row.get("direction") or "LONG",
+    }
+
+
+def _estimate_equity(wallet_row: dict | None, open_rows: list[dict], price_by_symbol: dict[str, float]) -> float:
+    """Wallet equity in USD without a network call.
+
+    cash + collateral + Σ open LONG value (+ Σ SHORT unrealized). Open rows
+    are marked at this scan's signal price when available, else at cost.
+    """
+    if not wallet_row:
+        return 0.0
+    equity = float(wallet_row.get("balance") or 0) + float(wallet_row.get("collateral_reserved") or 0)
+    for r in open_rows:
+        if r.get("source") != "brain" or not r.get("is_wallet_trade"):
+            continue
+        shares = float(r.get("shares") or 0)
+        fx = float(r.get("fx_to_usd_entry") or 1.0)
+        px = price_by_symbol.get(r.get("symbol"))
+        if (r.get("direction") or "LONG") == "SHORT":
+            if px:
+                equity += (float(r.get("entry_price") or 0) - px) * shares * fx
+        else:
+            equity += (px * shares * fx) if px else float(r.get("position_size_usd") or 0)
+    return equity
+
+
+def _reentry_cooldown_symbols(db) -> dict[str, str]:
+    """Symbols blocked from brain entry: same-symbol re-entry cooldown
+    (brain_reentry_cooldown_days trading days after ANY exit) plus any legacy
+    cooldowns whose config is still > 0 (all 0 by default)."""
+    out: dict[str, str] = {}
+    now = datetime.now(timezone.utc)
+    n_days = settings.brain_reentry_cooldown_days
+    if n_days > 0:
+        cutoff = (now - timedelta(days=n_days * 2 + 4)).isoformat()
+        try:
+            rows = (
+                db.table("virtual_trades")
+                .select("symbol, exit_date")
+                .eq("source", "brain")
+                .eq("status", "CLOSED")
+                .gte("exit_date", cutoff)
+                .execute()
+            ).data or []
+        except Exception as e:
+            logger.warning(f"re-entry cooldown query failed: {e}")
+            rows = []
+        today = now.date()
+        for r in rows:
+            ex = parse_iso_utc(r.get("exit_date"))
+            if r.get("symbol") and ex and trading_days_between(ex.date(), today) < n_days:
+                out[r["symbol"]] = f"reentry_cooldown_{n_days}d"
+
+    legacy = [
+        ("thesis_rebuy", settings.brain_thesis_rebuy_cooldown_minutes / 60.0,
+         {"in_": ("exit_reason", ["THESIS_INVALIDATED", "TARGET_HIT"])}),
+        ("watchdog_exit", settings.brain_watchdog_exit_cooldown_hours,
+         {"in_": ("exit_reason", ["WATCHDOG_EXIT", "WATCHDOG_FORCE_SELL"])}),
+        ("post_winner", settings.brain_post_winner_cooldown_hours, {"gt": ("pnl_amount", 0)}),
+        ("post_loss", settings.brain_post_loss_cooldown_hours, {"lt": ("pnl_amount", 0)}),
+    ]
+    for name, hours, flt in legacy:
+        if not hours or hours <= 0:
+            continue
+        try:
+            q = (
+                db.table("virtual_trades").select("symbol")
+                .eq("source", "brain").eq("status", "CLOSED")
+                .gte("exit_date", (now - timedelta(hours=hours)).isoformat())
+            )
+            for op, (col, val) in flt.items():
+                q = getattr(q, op)(col, val)
+            for r in (q.execute().data or []):
+                if r.get("symbol"):
+                    out.setdefault(r["symbol"], f"{name}_cooldown")
+        except Exception as e:
+            logger.warning(f"{name} cooldown query failed: {e}")
+    return out
+
+
+def _portfolio_heat(n_open: int, signals: list[dict]) -> int:
+    """Legacy heat score (Day 8). Only computed when brain_portfolio_heat_enabled."""
+    if not settings.brain_portfolio_heat_enabled:
+        return 0
+    heat = int(n_open >= 8) + int(n_open > 12)
+    macro = next((s["macro_data"] for s in signals if s.get("macro_data")), None)
+    if macro and macro.get("vix") is not None and macro["vix"] < 16:
+        heat += 1
+    return heat
+
+
+def _classify_horizon(sig: dict, symbol: str) -> str:
+    catalyst_days = sig.get("catalyst_days") or 999
+    if _is_crypto_symbol(symbol, sig) or (sig.get("bucket") or "") == "HIGH_RISK" or catalyst_days <= 7:
+        return "SHORT"
+    return "LONG"
+
+
+def _evaluate_brain_entry(sig: dict, ctx: BrainEntryContext, direction: str = "LONG") -> tuple[str | None, dict]:
+    """Run every entry gate for one candidate. Returns (skip_reason, plan).
+
+    skip_reason None → `plan` holds everything needed to open the trade.
+    Otherwise `plan` carries whatever was computed (for brain_decisions).
+    """
+    symbol = sig.get("symbol")
+    plan: dict = {"direction": direction}
+    ref_price = float(sig.get("price_at_signal") or 0)
+    if ref_price <= 0:
+        return "no_price", plan
+
+    if direction == "SHORT":
+        tier, trust, tier_reason = _eval_brain_short_tier(sig)
+    else:
+        tier, trust, tier_reason = _eval_brain_trust_tier(sig, ctx.portfolio_heat)
+    plan.update({"tier": tier, "trust": trust, "tier_reason": tier_reason})
+    if tier <= 0:
+        return tier_reason, plan
+    if not settings.wallet_enabled:
+        return "wallet_disabled", plan
+
+    if any(p["symbol"] == symbol for p in ctx.open_book) or symbol in ctx.open_watchlist:
+        return "already_held", plan
+    if symbol in ctx.cooldown:
+        return ctx.cooldown[symbol], plan
+    if ctx.breaker_tripped:
+        return (f"drawdown_breaker_equity_{ctx.equity:.0f}_peak_{ctx.peak_equity:.0f}"), plan
+    if not _is_tradable_now(symbol, ctx.market_open):
+        return "market_closed", plan
+
+    horizon = _classify_horizon(sig, symbol)
+    plan["horizon"] = horizon
+    if settings.brain_long_horizon_suspended and horizon == "LONG" and direction == "LONG":
+        return "filter_d_long_horizon_suspended", plan
+
+    fx = fx_to_usd(symbol)
+    if not fx:
+        return f"fx_unavailable_{native_currency(symbol)}", plan
+    plan["fx"] = fx
+    plan["currency"] = native_currency(symbol)
+
+    fill = apply_slippage(ref_price, "SELL" if direction == "SHORT" else "BUY", symbol)
+    levels = compute_entry_levels(sig, fill, direction)
+    plan.update({"ref_price": ref_price, "fill": fill, "levels": levels})
+    if levels["reason"]:
+        return levels["reason"], plan
+
+    risk_per_share_usd = abs(fill - levels["stop"]) * fx
+    from app.services import wallet as wallet_svc
+    shares, alloc = wallet_svc.calc_risk_position_size(
+        ctx.equity, ctx.cash, fill * fx, fill * fx - risk_per_share_usd,
+        trust_multiplier=trust,
+    )
+    if shares <= 0:
+        return "size_below_minimum", plan
+
+    sector = ((sig.get("fundamental_data") or {}).get("sector") or "").strip() or None
+    is_crypto = _is_crypto_symbol(symbol, sig)
+    alloc2, limit_reason = check_portfolio_limits(
+        symbol=symbol, sector=sector, is_crypto=is_crypto,
+        alloc_usd=alloc, equity_usd=ctx.equity, open_book=ctx.open_book,
+    )
+    if limit_reason:
+        return limit_reason, plan
+    if alloc2 < alloc:
+        alloc = round(alloc2, 2)
+        shares = round(alloc / (fill * fx), 6)
+    plan.update({
+        "shares": shares, "alloc_usd": alloc, "sector": sector, "is_crypto": is_crypto,
+        "risk_usd": round(shares * risk_per_share_usd, 2),
+    })
+    return None, plan
+
+
+def _open_brain_position(db, sig: dict, plan: dict, ctx: BrainEntryContext, now_iso: str) -> str | None:
+    """Open a planned brain position with wallet-safe ordering.
+
+    1. debit the wallet (raises → abort, nothing written)
+    2. INSERT the trade row with a pre-generated id (fails → refund)
+    3. append the ledger row (best-effort, references the trade id)
+    """
+    from app.services import wallet as wallet_svc
+
+    symbol = sig["symbol"]
+    short = plan["direction"] == "SHORT"
+    commission = settings.brain_commission_usd
+    alloc = float(plan["alloc_usd"])
+    levels = plan["levels"]
+    trade_id = str(uuid4())
+    # LONG: cash out = alloc + entry commission (the whole debit is cost basis).
+    # SHORT: alloc moves balance → collateral; both commissions settle at cover.
+    cost_basis = round(alloc + (0.0 if short else commission), 4)
+    try:
+        if short:
+            bal, coll = wallet_svc.adjust_balance(ctx.uid, -alloc, +alloc, symbol=symbol)
+        else:
+            bal, coll = wallet_svc.adjust_balance(ctx.uid, -cost_basis, 0.0, symbol=symbol)
+    except wallet_svc.WalletError as e:
+        logger.warning(f"Brain entry {symbol} aborted — wallet debit failed: {e}")
+        return None
+
+    row = {
+        "id": trade_id,
+        "user_id": ctx.uid,
+        "symbol": symbol,
+        "action": "SHORT_SELL" if short else "BUY",
+        "direction": plan["direction"],
+        "entry_price": round(plan["fill"], 6),
+        "entry_ref_price": plan["ref_price"],
+        "entry_date": now_iso,
+        "entry_score": sig.get("score"),
+        "status": "OPEN",
+        "bucket": sig.get("bucket"),
+        "signal_style": sig.get("signal_style"),
+        "sector": plan.get("sector"),
+        "source": "brain",
+        "target_price": levels["target"],
+        "stop_loss": levels["stop"],
+        "initial_stop": levels["stop"],
+        "entry_atr": levels["atr"],
+        "entry_rr": levels["rr"],
+        "entry_p_win": sig.get("p_win"),
+        "entry_ai_signal": sig.get("ai_signal"),
+        "entry_tier": plan["tier"],
+        "trust_multiplier": plan["trust"],
+        "tier_reason": f"{plan['tier_reason']}|levels={levels['source']}",
+        "trade_horizon": plan.get("horizon") or "SHORT",
+        "peak_price": None if short else round(plan["fill"], 6),
+        "trough_price": round(plan["fill"], 6) if short else None,
+        "market_regime": sig.get("market_regime"),
+        "entry_thesis": (sig.get("reasoning") or "")[:500],
+        "entry_thesis_keywords": _extract_thesis_keywords(sig),
+        "shares": plan["shares"],
+        "position_size_usd": round(alloc if short else cost_basis, 2),
+        "is_wallet_trade": True,
+        "currency": plan.get("currency") or "USD",
+        "fx_to_usd_entry": plan["fx"],
+        "fees_usd": 0.0 if short else commission,
+    }
+    try:
+        db.table("virtual_trades").insert(row).execute()
+    except Exception as e:
+        logger.error(f"Brain entry {symbol}: trade INSERT failed ({e}) — refunding wallet")
+        try:
+            if short:
+                wallet_svc.adjust_balance(ctx.uid, +alloc, -alloc, symbol=symbol, allow_overdraft=True)
+            else:
+                wallet_svc.adjust_balance(ctx.uid, +cost_basis, 0.0, symbol=symbol, allow_overdraft=True)
+        except Exception as e2:
+            logger.error(f"Brain entry {symbol}: REFUND FAILED ({e2}) — run reconcile_wallet")
+        return None
+
+    wallet_svc.record_transaction(
+        ctx.uid,
+        wallet_svc.TxnType.SHORT_OPEN if short else wallet_svc.TxnType.BUY,
+        -alloc if short else -cost_basis,
+        bal, coll,
+        trade_id=trade_id, symbol=symbol, shares=plan["shares"], price=plan["fill"],
+        description=(
+            f"{'SHORT_OPEN' if short else 'BUY'} {plan['shares']:.4f} {symbol} @ {plan['fill']:.4f} "
+            f"{plan.get('currency', 'USD')} (ref {plan['ref_price']:.4f}, fx {plan['fx']:.4f}, "
+            f"stop {levels['stop']:.4f}, target {levels['target']:.4f}, R:R {levels['rr']})"
+        ),
+    )
+    ctx.cash = bal
+    ctx.open_book.append({
+        "id": trade_id, "symbol": symbol, "sector": plan.get("sector"),
+        "is_crypto": plan.get("is_crypto", False), "cost_usd": alloc, "direction": plan["direction"],
+    })
+    return trade_id
+
+
+def _decision_row(scan_id, sig: dict, decision: str, reason: str, plan: dict | None, now_iso: str) -> dict:
+    plan = plan or {}
+    levels = plan.get("levels") or {}
+    details = {
+        "direction": plan.get("direction"),
+        "tier": plan.get("tier"),
+        "tier_reason": plan.get("tier_reason"),
+        "action": sig.get("action"),
+        "p_win": sig.get("p_win"),
+        "ai_provider": sig.get("ai_provider"),
+        "ref_price": plan.get("ref_price"),
+        "fill": plan.get("fill"),
+        "stop": levels.get("stop"),
+        "target": levels.get("target"),
+        "rr": levels.get("rr"),
+        "levels_source": levels.get("source"),
+        "shares": plan.get("shares"),
+        "alloc_usd": plan.get("alloc_usd"),
+        "risk_usd": plan.get("risk_usd"),
+        "sector": plan.get("sector"),
+        "trade_id": plan.get("trade_id"),
+    }
+    return {
+        "scan_id": scan_id or sig.get("scan_id"),
+        "symbol": sig.get("symbol"),
+        "decided_at": now_iso,
+        "decision": decision,
+        "reason": (reason or "")[:200],
+        "score": sig.get("score"),
+        "ai_status": sig.get("ai_status"),
+        "ai_signal": sig.get("ai_signal"),
+        "details": {k: v for k, v in details.items() if v is not None},
+    }
+
+
 def process_virtual_trades(
     signals: list[dict],
     watchlist_symbols: set[str],
     notifications: BrainNotificationQueue,
+    scan_id: str | None = None,
 ) -> dict:
     """Run the brain's buy/sell decision loop over a scan's fresh signals.
 
-    This is the heart of the brain. For every signal in `signals`, this
-    function decides:
-      • Should we close any existing positions for this symbol? (SELL/AVOID)
-      • Should we open a new watchlist-track position? (action == BUY +
-        symbol on watchlist + score >= 62)
-      • Should we open a new brain-track position? (tier evaluator returns
-        tier > 0; the brain bypasses the user-facing action field)
-      • If the brain wants to open a new position but is at max capacity,
-        should we rotate out the weakest existing brain position?
+    Per signal (highest score first):
+      1. SELL/AVOID → close held LONGs when `signal_exit_reason` says so
+         (AI SELL/AVOID or user-forced); equities outside hours are flagged
+         for review instead.
+      2. AI BUY on a held SHORT → cover.
+      3. Watchlist track (unchanged exploratory ledger, no wallet).
+      4. Brain entry via `_evaluate_brain_entry` → `_open_brain_position`.
+    Then (only if enabled) brain SHORT entries. Every signal produces one
+    `brain_decisions` row (ENTER or SKIP + reason).
 
-    The decision rules are documented in the file header. The most
-    important constraints:
-
-      MARKET HOURS GATE
-        • Equity BUYs and SELLs are skipped/flagged when market is closed.
-        • Crypto BUYs and SELLs proceed regardless (24/7 markets).
-
-      SCORE-DROP GUARD
-        • If a held position's score drops 25+ points to below 50 in a
-          single scan, refuse to auto-sell. Likely AI methodology change,
-          not real deterioration. The watchdog will catch genuine danger.
-        • A user-forced sell (via /forcesell, marked with `_review_forced`
-          on the signal) bypasses this guard.
-
-      BRAIN ROTATION
-        • If `brain_open_count >= settings.brain_max_open` and a stronger
-          signal arrives, the weakest existing brain position is closed
-          to make room IF the new signal is at least 5 points better.
-        • Below the 5-point margin, no rotation happens (avoids churn
-          on small score differences).
-
-      TIER-AWARE BUYS
-        • Tier 1 (validated AI, score >= 72): full position size.
-        • Tier 2 (low_confidence AI, score >= 80): half position size.
-        • Tier 3 (skipped AI tech-only, score >= 82, technical confirmation,
-          non-hostile macro): half position size.
-        • Tier and trust_multiplier are recorded on the virtual_trade row
-          for per-tier performance analysis.
-
-    Args:
-        signals: Fresh signals from the current scan. The signal dicts may
-            have been mutated by `process_pending_reviews` (e.g. forced
-            sells). Read-only otherwise.
-        watchlist_symbols: Symbols currently on the user's watchlist. Used
-            to gate the watchlist track (only symbols here are considered
-            for watchlist-source positions).
-        notifications: Scan-local queue. Brain BUY/SELL events append
-            entries here that `flush_brain_notifications` later sends.
-
-    Returns:
-        Dict with two counters:
-            buys: number of positions opened this scan (sum of watchlist + brain).
-            sells: number of positions closed this scan (signal-driven SELLs;
-                rotations and watchdog closes are NOT counted here).
-
-    Side effects:
-        • DB inserts/updates to virtual_trades.
-        • Appends to the notifications queue.
-        • Auto-upserts discovered tickers to the tickers table when the
-          brain buys a ticker that's not in the universe (so it keeps
-          getting scanned in future runs).
+    Returns {"buys", "sells", "shorts", "skipped"}.
     """
     db = get_client()
-    buys = 0
-    sells = 0
+    buys = sells = shorts_opened = 0
+    now = datetime.now(timezone.utc).isoformat()
+    market_open = _is_us_market_open()
 
-    # ──────────────────────────────────────────────────────────
-    # PHASE 1 — Snapshot current open positions
-    # ──────────────────────────────────────────────────────────
-    # We load all open virtual_trades ONCE and iterate against the in-memory
-    # snapshot. This avoids N+1 queries inside the per-signal loop. The
-    # snapshot is read-only for lookups; mutations to the DB happen via
-    # targeted updates by row id.
-    # process_virtual_trades also needs pending_review_at (pre-market
-    # review flow) and consecutive_avoid_count (Day-14 LONG exit delay),
-    # so we extend the shared close-field list.
-    open_result = (
+    all_open = (
         db.table("virtual_trades")
         .select(VIRTUAL_TRADES_CLOSE_FIELDS + ", pending_review_at, consecutive_avoid_count")
         .eq("status", "OPEN")
         .execute()
+    ).data or []
+
+    open_watchlist = {r["symbol"] for r in all_open if r.get("source") != "brain"}
+    brain_rows = [r for r in all_open if r.get("source") == "brain"]
+    open_brain_short = {r["symbol"] for r in brain_rows if r.get("direction") == "SHORT"}
+
+    brain_user_id = queries.get_brain_user_id()
+    from app.services import wallet as wallet_svc
+    wallet_row = wallet_svc.get_wallet(brain_user_id) if settings.wallet_enabled else None
+
+    price_by_symbol = {
+        s["symbol"]: float(s["price_at_signal"])
+        for s in signals if s.get("symbol") and s.get("price_at_signal")
+    }
+    equity = _estimate_equity(wallet_row, brain_rows, price_by_symbol)
+    net_deposits = (
+        float((wallet_row or {}).get("total_deposited") or 0)
+        - float((wallet_row or {}).get("total_withdrawn") or 0)
     )
-    all_open = open_result.data or []
-
-    # Two parallel sets keep O(1) "is this symbol already held?" checks for
-    # both tracks. The rotation block recomputes the weakest brain position
-    # JUST IN TIME from `open_brain` (rather than caching it upfront), so a
-    # SELL or rotation earlier in the same scan can't leave us with a stale
-    # reference pointing at an already-closed row. The previous design
-    # cached `weakest_brain` here and tried to keep it in sync — that's the
-    # bug that allowed the rotation logic to overwrite already-closed rows
-    # with new is_win values computed from a fresh live price.
-    open_watchlist: set[str] = set()
-    open_brain: set[str] = set()         # all brain (long + short)
-    open_brain_long: set[str] = set()    # brain LONG positions only
-    open_brain_short: set[str] = set()   # brain SHORT positions only
-    brain_open_count = 0
-    brain_long_count = 0
-    brain_short_count = 0
-    brain_entry_prices: list[float] = []
-    for r in all_open:
-        if r.get("source") == "brain":
-            open_brain.add(r["symbol"])
-            brain_open_count += 1
-            brain_entry_prices.append(float(r.get("entry_price", 0)))
-            if r.get("direction") == "SHORT":
-                open_brain_short.add(r["symbol"])
-                brain_short_count += 1
-            else:
-                open_brain_long.add(r["symbol"])
-                brain_long_count += 1
-        else:
-            open_watchlist.add(r["symbol"])
-
-    # ── Portfolio heat score ──
-    # Computed once per scan. Controls how aggressively the brain adds
-    # new positions. The goal: PROTECT existing gains. When the portfolio
-    # is fat (high unrealized P&L), concentrated (many positions), or the
-    # market is complacent (low VIX), the brain gets more selective.
-    #
-    # Pedro's principle (Day 8): "we cannot lose whatever we make. if so
-    # what is the point?" Making money and then losing it is worse than
-    # never making it. The heat score ensures the brain shifts from
-    # "grow" to "protect" as profits accumulate.
-    #
-    # heat=0: normal (score >= 72, full size)
-    # heat=1: cautious (score >= 76, full size)
-    # heat=2: defensive (score >= 80, half size)
-    # heat=3: locked (no new entries, let existing positions ride)
-    portfolio_heat = 0
-
-    # Factor 1: Portfolio size as a proxy for unrealized gains.
-    # Position-count heuristic — a mid-scan live-price fetch over all
-    # brain positions caused DNS thread exhaustion against the scan's own
-    # yfinance calls, so we use count instead: 8+ positions usually means
-    # meaningful gains to protect (the brain only buys winners).
-    if brain_open_count >= 8:
-        portfolio_heat += 1
-
-    # Factor 2: Concentration (too many open positions)
-    if brain_open_count > 12:
-        portfolio_heat += 1
-
-    # Factor 3: Market complacency (VIX too low = shock risk)
-    # Use the macro_data from the first signal if available
-    first_macro = None
-    for sig_item in signals:
-        if sig_item.get("macro_data"):
-            first_macro = sig_item["macro_data"]
-            break
-    if first_macro:
-        vix = first_macro.get("vix")
-        if vix is not None and vix < 16:
-            portfolio_heat += 1
-
-    if portfolio_heat > 0:
-        heat_labels = {1: "cautious", 2: "defensive", 3: "locked"}
-        logger.info(
-            f"Portfolio heat: {portfolio_heat} ({heat_labels.get(portfolio_heat, 'max')}) — "
-            f"positions={brain_open_count}, "
-            f"vix={first_macro.get('vix') if first_macro else '?'}"
+    peak = wallet_svc.update_peak_equity(brain_user_id, equity) if wallet_row else None
+    peak = max(peak or 0.0, net_deposits, equity)
+    breaker = drawdown_breaker_tripped(equity, peak)
+    if breaker:
+        logger.warning(
+            f"Drawdown breaker TRIPPED: equity ${equity:,.2f} is "
+            f"{(1 - equity / peak) * 100:.1f}% below peak ${peak:,.2f} "
+            f"(limit {settings.brain_max_drawdown_pct}%) — no new entries this scan"
         )
 
-    # Re-buy cooldown snapshot: any brain symbol recently closed via
-    # THESIS_INVALIDATED or TARGET_HIT is blocked from re-entry this scan.
-    #
-    # THESIS_INVALIDATED: prevents the buy → invalidate → re-buy loop
-    # caused by Claude's non-determinism. Real case (2026-04-09): WING #1
-    # closed at 17:06:04, WING #2 opened 54 min later and bled -0.95%.
-    #
-    # TARGET_HIT: prevents selling at target then immediately re-buying
-    # at the same price. Real case (2026-04-10): ASML #1 sold at $1489
-    # (target hit, +5.09%), ASML #2 re-entered same day at $1480.96 with
-    # a bearish entry thesis. The sell + re-buy creates a taxable event
-    # in Canada with no strategic benefit. Better to wait for a pullback
-    # before re-entering.
-    cooldown_minutes = settings.brain_thesis_rebuy_cooldown_minutes
-    cooldown_brain_symbols: set[str] = set()
-    if cooldown_minutes > 0:
-        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=cooldown_minutes)).isoformat()
-        cooldown_rows = (
-            db.table("virtual_trades")
-            .select("symbol, exit_date")
-            .eq("source", "brain")
-            .eq("status", "CLOSED")
-            .in_("exit_reason", ["THESIS_INVALIDATED", "TARGET_HIT"])
-            .gte("exit_date", cutoff)
-            .execute()
-        ).data or []
-        cooldown_brain_symbols = {r["symbol"] for r in cooldown_rows if r.get("symbol")}
-        if cooldown_brain_symbols:
-            logger.info(
-                f"Brain re-buy cooldown active on {len(cooldown_brain_symbols)} symbols "
-                f"({cooldown_minutes}min): {sorted(cooldown_brain_symbols)}"
-            )
+    ctx = BrainEntryContext(
+        uid=brain_user_id,
+        equity=equity,
+        cash=float((wallet_row or {}).get("balance") or 0),
+        peak_equity=peak,
+        breaker_tripped=breaker,
+        open_book=[_book_entry(r) for r in brain_rows],
+        cooldown=_reentry_cooldown_symbols(db),
+        open_watchlist=open_watchlist,
+        market_open=market_open,
+        portfolio_heat=_portfolio_heat(len(brain_rows), signals),
+    )
 
-    # Day 26: WATCHDOG_EXIT cooldown. Separate from the thesis-rebuy
-    # cooldown above because the mechanism and timeframe are different:
-    # - thesis-rebuy = AI changed its mind quickly, wait 60min for
-    #   conviction to settle. Short window because it's about thrash.
-    # - watchdog-exit = the name is bleeding in the current regime,
-    #   re-buying within a week historically loses 100% (n=2). Long
-    #   window because the issue is name-specific behavior, not AI noise.
-    # Two sets are merged at the entry gate; either one excludes a symbol.
-    we_cooldown_hours = settings.brain_watchdog_exit_cooldown_hours
-    watchdog_cooldown_symbols: set[str] = set()
-    if we_cooldown_hours > 0:
-        we_cutoff = (datetime.now(timezone.utc) - timedelta(hours=we_cooldown_hours)).isoformat()
-        we_rows = (
-            db.table("virtual_trades")
-            .select("symbol, exit_date")
-            .eq("source", "brain")
-            .eq("status", "CLOSED")
-            .in_("exit_reason", ["WATCHDOG_EXIT", "WATCHDOG_FORCE_SELL"])
-            .gte("exit_date", we_cutoff)
-            .execute()
-        ).data or []
-        watchdog_cooldown_symbols = {r["symbol"] for r in we_rows if r.get("symbol")}
-        if watchdog_cooldown_symbols:
-            logger.info(
-                f"Watchdog re-buy cooldown active on {len(watchdog_cooldown_symbols)} symbols "
-                f"({we_cooldown_hours}h): {sorted(watchdog_cooldown_symbols)}"
-            )
+    decisions: dict[str, dict] = {}
 
-    # Day 37: post-WINNER cooldown. Mirrors the watchdog cooldown above,
-    # but for the OPPOSITE failure mode — re-buying a name shortly after
-    # it CLOSED PROFITABLY. Backtest: 3 of 3 chase-winner re-entries lost
-    # (-$67 total: SOUN-2 -$22, IONQ-2 -$41, ARM-2 -$4). Mechanism: a name
-    # that just produced a winning thesis-exit (or trailing-stop) has
-    # likely played out its catalyst; the brain re-buying is "chasing"
-    # without a fresh reason. Wallet trades only — legacy 1-share trades
-    # are pre-wallet and shouldn't gate post-wallet re-entries.
-    pw_cooldown_hours = settings.brain_post_winner_cooldown_hours
-    post_winner_cooldown_symbols: set[str] = set()
-    if pw_cooldown_hours > 0:
-        pw_cutoff = (datetime.now(timezone.utc) - timedelta(hours=pw_cooldown_hours)).isoformat()
-        pw_rows = (
-            db.table("virtual_trades")
-            .select("symbol, exit_date, pnl_amount, exit_reason")
-            .eq("source", "brain")
-            .eq("status", "CLOSED")
-            .eq("is_wallet_trade", True)
-            .in_("exit_reason", ["THESIS_INVALIDATED", "TARGET_HIT", "TRAILING_STOP", "SIGNAL", "ROTATION"])
-            .gt("pnl_amount", 0)
-            .gte("exit_date", pw_cutoff)
-            .execute()
-        ).data or []
-        post_winner_cooldown_symbols = {r["symbol"] for r in pw_rows if r.get("symbol")}
-        if post_winner_cooldown_symbols:
-            logger.info(
-                f"Post-winner re-buy cooldown active on {len(post_winner_cooldown_symbols)} symbols "
-                f"({pw_cooldown_hours}h): {sorted(post_winner_cooldown_symbols)}"
-            )
+    def _decide(sig: dict, decision: str, reason: str, plan: dict | None = None) -> None:
+        sym = sig.get("symbol")
+        if sym and (sym not in decisions or decision == "ENTER"):
+            decisions[sym] = _decision_row(scan_id, sig, decision, reason, plan, now)
 
-    # Day 47: post-LOSING-close cooldown. Different from the three above:
-    # - thesis-rebuy fires on THESIS_INVALIDATED (any P&L) within 60min
-    # - watchdog-exit fires on WATCHDOG_EXIT (any P&L) within 168h
-    # - post-winner fires on PROFITABLE soft exits within 336h
-    # This one fires on ANY LOSING close (any exit_reason) within 24h —
-    # the narrow "don't immediately re-enter a losing name" guard. The
-    # observed case (OSCR May 28 -> OSCR May 28 3h later -> lost again)
-    # is the entire historical cohort, but the mechanism is sound: a
-    # loss-then-immediate-rebuy hasn't been given fresh information.
-    pl_cooldown_hours = settings.brain_post_loss_cooldown_hours
-    post_loss_cooldown_symbols: set[str] = set()
-    if pl_cooldown_hours > 0:
-        pl_cutoff = (datetime.now(timezone.utc) - timedelta(hours=pl_cooldown_hours)).isoformat()
-        pl_rows = (
-            db.table("virtual_trades")
-            .select("symbol, exit_date, pnl_amount, exit_reason")
-            .eq("source", "brain")
-            .eq("status", "CLOSED")
-            .eq("is_wallet_trade", True)
-            .lt("pnl_amount", 0)
-            .gte("exit_date", pl_cutoff)
-            .execute()
-        ).data or []
-        post_loss_cooldown_symbols = {r["symbol"] for r in pl_rows if r.get("symbol")}
-        if post_loss_cooldown_symbols:
-            logger.info(
-                f"Post-loss re-buy cooldown active on {len(post_loss_cooldown_symbols)} symbols "
-                f"({pl_cooldown_hours}h): {sorted(post_loss_cooldown_symbols)}"
-            )
+    def _drop_from_book(trade_id) -> None:
+        ctx.open_book[:] = [p for p in ctx.open_book if p.get("id") != trade_id]
 
-    # Resolve once: brain runs single-tenant, every insert is stamped with
-    # this user_id so the rows are correctly attributed and queryable.
-    brain_user_id = queries.get_brain_user_id()
-
-    # Load wallet once; `running_balance` tracks decrements locally so a
-    # second BUY in the same scan sizes off the post-first-BUY balance.
-    # `get_wallet` lazy-creates a zeroed row on first access — until the
-    # user deposits, running_balance is 0 and every entry is skipped.
-    from app.services import wallet as wallet_svc
-    _wlt_initial = wallet_svc.get_wallet(brain_user_id) if settings.wallet_enabled else None
-    running_balance: float = float(_wlt_initial["balance"]) if _wlt_initial else 0.0
-
-    # Day 37: drawdown circuit breaker. Read cumulative wallet-era
-    # realized P&L; if below the floor, clamp sizing back to the pre-
-    # Day-37 conservative defaults. This bounds the experiment's downside
-    # while letting us test 2x amplification on the proven edge.
-    # When tripped, the brain effectively runs in "safe mode" until
-    # cumulative climbs back above the floor and the next scan rolls.
-    _drawdown_breaker_tripped = False
-    if settings.wallet_auto_revert_pnl_floor is not None:
-        try:
-            cum_rows = (
-                db.table("virtual_trades")
-                .select("pnl_amount")
-                .eq("source", "brain")
-                .eq("status", "CLOSED")
-                .eq("is_wallet_trade", True)
-                .execute()
-            ).data or []
-            cum_pnl = sum((r.get("pnl_amount") or 0) for r in cum_rows)
-            if cum_pnl < settings.wallet_auto_revert_pnl_floor:
-                _drawdown_breaker_tripped = True
-                logger.warning(
-                    f"Drawdown circuit breaker TRIPPED: cumulative wallet-era P&L "
-                    f"${cum_pnl:+.2f} < floor ${settings.wallet_auto_revert_pnl_floor:.2f}. "
-                    f"Reverting Tier 1 sizing to 10% and per-day cap to 3 for this scan."
-                )
-        except Exception as e:
-            logger.warning(f"Couldn't read cumulative P&L for circuit breaker: {e}")
-
-    # Effective sizing constants for this scan — clamped if the breaker tripped.
-    _eff_tier1_pct = 10.0 if _drawdown_breaker_tripped else settings.wallet_position_pct_tier1
-    _eff_max_pct = 15.0 if _drawdown_breaker_tripped else settings.wallet_max_position_pct
-    _eff_max_per_day = 3 if _drawdown_breaker_tripped else settings.wallet_max_entries_per_day
-
-    # Per-day entry cap (Day 19 learning). Count today's already-opened
-    # wallet entries from the audit ledger so the cap is enforced
-    # *across* scans, not just within one scan. Counts BUY + SHORT_OPEN
-    # (both deploy capital). Tracking variable below increments locally
-    # as we open new ones during this scan.
-    wallet_entries_today = 0
-    # Day 21: per-SYMBOL per-day cap. SEZL hit Filter D 3 times in one
-    # day (May 1) — the same name re-appearing across consecutive scans.
-    # Without a per-symbol gate, the per-day cap (3) could be entirely
-    # consumed by one ticker and concentrate ~$1.2k there. Build a
-    # Counter of today's wallet-entry symbols so we can clip on the
-    # second attempt of the same name.
-    wallet_entries_by_symbol_today: Counter = Counter()
-    if settings.wallet_max_entries_per_day > 0 or settings.wallet_max_entries_per_symbol_per_day > 0:
-        try:
-            today_utc_start = datetime.now(timezone.utc).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            ).isoformat()
-            day_count_result = (
-                db.table("wallet_transactions")
-                .select("symbol", count="exact")
-                .gte("created_at", today_utc_start)
-                .in_("transaction_type", ["BUY", "SHORT_OPEN"])
-                .execute()
-            )
-            wallet_entries_today = int(day_count_result.count or 0)
-            for row in (day_count_result.data or []):
-                _sym = row.get("symbol")
-                if _sym:
-                    wallet_entries_by_symbol_today[_sym] += 1
-        except Exception as e:
-            logger.warning(f"Couldn't count today's wallet entries: {e}")
-    wallet_entries_this_scan = 0
-
-    now = datetime.now(timezone.utc).isoformat()
-    market_open = _is_us_market_open()
-
-    # Pre-sort signals by score DESC so when we hit the daily cap the
-    # surviving slots go to the highest-conviction signals, not whatever
-    # happened to come first in the iteration order. SELL/AVOID logic
-    # is symbol-keyed (matches by `pos["symbol"] == sig["symbol"]`) so
-    # the order doesn't matter for closes. Only entries benefit.
     signals = sorted(signals, key=lambda s: -(s.get("score") or 0))
-
-    # ──────────────────────────────────────────────────────────
-    # PHASE 2 — Per-signal decision loop
-    # ──────────────────────────────────────────────────────────
-    # For each fresh signal we decide:
-    #   1. SELL/AVOID branch: close held positions for this symbol
-    #      (or flag for review if equity + market closed).
-    #   2. BUY branch (watchlist track): open if explicit BUY + watchlisted.
-    #   3. BUY branch (brain track): open if tier evaluator returns tier > 0.
-    # Each branch is gated by independent rules (market hours, score-drop
-    # guard, tier eval) — see the file header for the full rule set.
 
     for sig in signals:
         symbol = sig.get("symbol")
         action = sig.get("action")
         price = sig.get("price_at_signal")
         score = sig.get("score", 0)
-
-        if not price:
+        if not symbol or not price:
             continue
         price = float(price)
+        is_crypto = _is_crypto_symbol(symbol, sig)
 
-        is_watchlisted = symbol in watchlist_symbols
-        is_crypto = sig.get("asset_type") == "CRYPTO" or (symbol or "").endswith("-USD")
-
-        # Reset consecutive_avoid_count on any open LONG position for this
-        # symbol when the fresh signal is NOT AVOID/SELL. This prevents a
-        # stale counter from 2 days ago from triggering an immediate close
-        # on the next AVOID.
         if action not in ("SELL", "AVOID"):
             for pos in all_open:
-                if (
-                    pos["symbol"] == symbol
-                    and pos.get("source") == "brain"
-                    and int(pos.get("consecutive_avoid_count") or 0) > 0
-                ):
-                    db.table("virtual_trades").update(
-                        {"consecutive_avoid_count": 0}
-                    ).eq("id", pos["id"]).eq("status", "OPEN").execute()
+                if (pos["symbol"] == symbol and pos.get("source") == "brain"
+                        and int(pos.get("consecutive_avoid_count") or 0) > 0):
+                    db.table("virtual_trades").update({"consecutive_avoid_count": 0}) \
+                        .eq("id", pos["id"]).eq("status", "OPEN").execute()
                     pos["consecutive_avoid_count"] = 0
-                    logger.info(
-                        f"Virtual AVOID counter RESET for {symbol} — "
-                        f"fresh signal is {action}, trend intact"
-                    )
 
-        # ── SELL: close all open positions for this symbol ──
+        # ── 1. SELL / AVOID: close held LONG positions ──
         if action in ("SELL", "AVOID"):
-            # Pre-market SELLs on equities can't fill — flag the position for
-            # review at market open instead. The first scan after 9:30am ET
-            # re-checks: still bad → execute, recovered → clear flag.
-            if not is_crypto and not market_open:
-                _flag_positions_for_review(
-                    db, all_open, symbol, action, score,
-                    sig.get("reasoning") or f"Pre-market signal turned {action}",
-                    now, notifications,
-                )
+            held = [p for p in all_open if p["symbol"] == symbol and (p.get("direction") or "LONG") != "SHORT"]
+            if held and not is_crypto and not market_open:
+                if signal_exit_reason(sig):
+                    _flag_positions_for_review(
+                        db, held, symbol, action, score,
+                        sig.get("reasoning") or f"Pre-market signal turned {action}",
+                        now, notifications,
+                    )
+                _decide(sig, "SKIP", f"action_{action.lower()}_market_closed")
                 continue
-            for pos in all_open:
-                if pos["symbol"] != symbol:
-                    continue
-
-                entry_score = pos.get("entry_score", 0) or 0
-                score_drop = entry_score - score
-
-                # Guard: if score dropped 25+ points, don't auto-close.
-                # This usually means the ticker lost AI analysis (tech-only fallback)
-                # rather than a real deterioration. Wait for next scan to confirm.
-                # Exception: user-forced sells from /forcesell bypass this guard
-                # since the user has explicitly accepted the risk.
-                if score_drop >= 25 and score < 50 and not sig.get("_review_forced"):
-                    source = pos.get("source", "watchlist")
-                    logger.warning(
-                        f"Virtual SELL BLOCKED [{source}]: {symbol} score dropped "
-                        f"{entry_score} -> {score} (-{score_drop}pts). "
-                        f"Likely methodology change, not real signal. Waiting for confirmation."
-                    )
-                    continue
-                if sig.get("_review_forced"):
-                    logger.warning(
-                        f"Virtual SELL [user-forced]: {symbol} bypassing score-drop guard "
-                        f"({entry_score} -> {score}, -{score_drop}pts)"
-                    )
-
-                entry_price = float(pos["entry_price"])
-                # Direction-aware P&L (Day 14 audit fix): a SHORT position
-                # hit by a BUY→AVOID signal (which means the short signal
-                # got stronger) uses inverted P&L. Hardcoding long-side
-                # logic inverts learning-loop + notification P&L for shorts.
-                _pos_dir = pos.get("direction") or "LONG"
-                pnl_pct = _calc_pnl_pct(entry_price, price, _pos_dir)
-                pnl_amount = _calc_pnl_amount(entry_price, price, _pos_dir)
-                is_win = pnl_pct > 0
+            why = signal_exit_reason(sig)
+            for pos in held:
                 source = pos.get("source", "watchlist")
-
-                # Stage 6 gate: if the thesis is still valid, this SIGNAL
-                # flip is treated as noise and the position is held. The
-                # HUM Day-1 incident: HUM hit a SELL signal but the thesis
-                # was still intact (just an AI-quality issue), and we sold
-                # at +0.77% leaving 15% on the table. The thesis gate
-                # fixes that class of false-positive sell.
-                if source == "brain" and _exit_is_thesis_protected(pos, "SIGNAL", pnl_pct):
+                if source == "brain" and not why:
                     logger.info(
-                        f"Virtual SIGNAL exit SUPPRESSED for {symbol} — thesis still valid "
-                        f"(P&L {pnl_pct:+.1f}%, action was {action}, holding through)"
+                        f"Virtual SIGNAL exit NOT taken for {symbol}: action={action} but no AI "
+                        f"SELL call (ai_signal={sig.get('ai_signal')}); stop manages risk"
                     )
                     continue
-
-                # LONG/LONG exit-delay gate (Day 14 fix): a LONG-direction
-                # position with LONG trade_horizon needs N consecutive
-                # AVOID/SELL signals before closing. This prevents
-                # single-signal shake-outs where Claude's "AVOID" on one
-                # scan is just noise (morning volume lull, one-off RSI
-                # print) and the trend is actually intact. CCO.TO on
-                # Day 14 opened at PRE_CLOSE, closed on next MORNING at
-                # +1.49% — a win, but the trend had room to run.
-                pos_direction = pos.get("direction") or "LONG"
-                pos_horizon = pos.get("trade_horizon") or "SHORT"
-                if (
-                    source == "brain"
-                    and pos_direction == "LONG"
-                    and pos_horizon == "LONG"
-                    and not sig.get("_review_forced")
-                ):
+                entry_price = float(pos["entry_price"])
+                pnl_now = _calc_pnl_pct(entry_price, price, "LONG")
+                if source == "brain" and _exit_is_thesis_protected(pos, "SIGNAL", pnl_now):
+                    logger.info(f"Virtual SIGNAL exit suppressed for {symbol} — valid thesis on a winner")
+                    continue
+                if (source == "brain" and (pos.get("trade_horizon") or "SHORT") == "LONG"
+                        and not sig.get("_review_forced")):
                     new_count = int(pos.get("consecutive_avoid_count") or 0) + 1
                     threshold = settings.brain_long_signal_exit_threshold
                     if new_count < threshold:
-                        db.table("virtual_trades").update(
-                            {"consecutive_avoid_count": new_count}
-                        ).eq("id", pos["id"]).eq("status", "OPEN").execute()
-                        logger.info(
-                            f"Virtual SIGNAL exit DELAYED for {symbol} (LONG) — "
-                            f"avoid count {new_count}/{threshold}, P&L {pnl_pct:+.1f}%. "
-                            f"Holding through first flip, waiting for confirmation."
-                        )
+                        db.table("virtual_trades").update({"consecutive_avoid_count": new_count}) \
+                            .eq("id", pos["id"]).eq("status", "OPEN").execute()
                         continue
-                    # count reached threshold — close normally, counter doesn't matter after close
-                    logger.info(
-                        f"Virtual SIGNAL exit CONFIRMED for {symbol} (LONG) — "
-                        f"{threshold} consecutive AVOIDs, closing at P&L {pnl_pct:+.1f}%"
-                    )
-
-                # Route through close_virtual_trade so wallet settlement +
-                # learning loop fire for every close, and the pnl math is
-                # computed once regardless of which path triggered the exit.
-                # If another path (watchdog / earlier scan) already closed
-                # this row, the helper returns skipped=True so we don't
-                # double-count or send a duplicate Telegram alert.
-                close_res = close_virtual_trade(
-                    pos, price, "SIGNAL", score,
-                    exit_action=action, exit_date_iso=now,
-                )
+                close_res = close_virtual_trade(pos, price, "SIGNAL", score, exit_action=action, exit_date_iso=now)
                 if close_res.get("skipped"):
                     continue
                 sells += 1
-
-                # Refresh in-memory state so the rotation block later in this
-                # scan doesn't pick this just-closed position as a rotation
-                # target. Without this, `weakest_brain` (now recomputed lazily)
-                # would still see the row in `open_brain` and could re-update
-                # the closed row.
+                pos["_closed"] = True
                 if source == "brain":
-                    open_brain.discard(symbol)
-                    brain_open_count = max(0, brain_open_count - 1)
-                else:
-                    open_watchlist.discard(symbol)
-
-                emoji = "✅" if is_win else "❌"
-                logger.info(
-                    f"Virtual SELL [{source}]: {emoji} {symbol} @ ${price:.2f} "
-                    f"(entry ${entry_price:.2f}, P&L {pnl_pct:+.1f}%, score {entry_score}->{score})"
-                )
-
-                # Queue Telegram notification for brain sells
-                if source == "brain":
-                    verdict = f"{emoji} {'Win' if is_win else 'Loss'} -- brain learning from this outcome."
+                    _drop_from_book(pos.get("id"))
+                    if settings.brain_reentry_cooldown_days > 0:
+                        ctx.cooldown[symbol] = f"reentry_cooldown_{settings.brain_reentry_cooldown_days}d"
+                    is_win = close_res["pnl_pct"] > 0
                     notifications.append(("brain_sell", {
                         "symbol": symbol, "price": f"{price:.2f}",
-                        "pnl": f"{pnl_pct:+.1f}", "reason": f"Signal changed to {action}",
-                        "entry_score": str(entry_score), "exit_score": str(score),
-                        "verdict": verdict,
+                        "pnl": f"{close_res['pnl_pct']:+.1f}",
+                        "reason": f"AI call turned {action} ({why})",
+                        "entry_score": str(pos.get("entry_score", 0)), "exit_score": str(score),
+                        "verdict": f"{'✅ Win' if is_win else '❌ Loss'} — logged for learning.",
                     }))
+                else:
+                    open_watchlist.discard(symbol)
+            all_open = [p for p in all_open if not (p["symbol"] == symbol and p.get("_closed"))]
+            if action == "AVOID" and settings.brain_short_entries_enabled:
+                continue  # evaluated by the SHORT pass below
+            _decide(sig, "SKIP", f"action_{action.lower()}")
             continue
 
-        # ── COVER: close SHORT positions when signal turns bullish ──
-        # If we're short a stock and the signal flips to BUY (or strong HOLD
-        # with score >= 65), the bearish thesis is dead — cover the short.
-        if action == "BUY" and symbol in open_brain_short:
-            for pos in all_open:
-                if pos["symbol"] != symbol or pos.get("direction") != "SHORT":
-                    continue
-                entry_price_pos = float(pos["entry_price"])
-                cover_pnl_pct = _calc_pnl_pct(entry_price_pos, price, "SHORT")
-                close_res = close_virtual_trade(
-                    pos, price, "SIGNAL", score,
-                    exit_action=action, exit_date_iso=now,
-                )
+        # ── 2. Cover a SHORT when Claude now calls BUY ──
+        if symbol in open_brain_short and is_ai_buy(sig) and (is_crypto or market_open):
+            for pos in [p for p in all_open if p["symbol"] == symbol and p.get("direction") == "SHORT"]:
+                close_res = close_virtual_trade(pos, price, "SIGNAL", score, exit_action=action, exit_date_iso=now)
                 if close_res.get("skipped"):
                     continue
                 sells += 1
-                brain_short_count = max(0, brain_short_count - 1)
-                brain_open_count = max(0, brain_open_count - 1)
                 open_brain_short.discard(symbol)
-                open_brain.discard(symbol)
-                logger.info(
-                    f"Virtual COVER [brain]: {symbol} @ ${price:.2f} "
-                    f"(signal flipped to BUY, P&L {cover_pnl_pct:+.1f}%)"
-                )
-                notifications.append(("brain_sell", {
-                    "symbol": symbol, "price": f"{price:.2f}",
-                    "pnl": f"{cover_pnl_pct:+.1f}",
-                    "reason": f"SHORT covered — signal flipped to BUY (score {score})",
-                    "entry_score": str(pos.get("entry_score", 0)),
-                    "exit_score": str(score),
-                    "verdict": f"Bearish thesis invalidated by bullish signal.",
-                }))
+                _drop_from_book(pos.get("id"))
+                ctx.cooldown[symbol] = "reentry_cooldown_after_cover"
 
-        # By here, action is not SELL/AVOID (handled above with continue).
-        # It can be BUY, HOLD, or anything else. Brain will evaluate via tier logic.
-
-        # Skip BUYs on equities when US market is closed — the trade wouldn't
-        # actually fill at the scan price (e.g. 6am pre-market scan). Crypto
-        # trades 24/7 so it's always allowed.
         if not is_crypto and not market_open:
-            logger.debug(f"Virtual BUY skipped for {symbol}: US market closed")
+            _decide(sig, "SKIP", "market_closed")
             continue
 
-        # Track 1: Watchlist picks (score 62+) — only on explicit BUY action.
-        # Dedup against BOTH tracks so a symbol opened by either track in a
-        # previous scan (or earlier in this scan) blocks the other from also
-        # opening it. Previously the two tracks were independent, which is
-        # why PNC and SLF.TO ended up with two rows each (watchlist + brain)
-        # on the same Apr 6 scan.
-        if (
-            action == "BUY"
-            and is_watchlisted
-            and score >= 62
-            and symbol not in open_watchlist
-            and symbol not in open_brain
-        ):
+        # ── 3. Watchlist track (exploratory, no wallet) ──
+        if (action == "BUY" and symbol in watchlist_symbols and score >= 62
+                and symbol not in open_watchlist
+                and not any(p["symbol"] == symbol for p in ctx.open_book)):
             db.table("virtual_trades").insert({
-                "user_id": brain_user_id,
-                "symbol": symbol,
-                "action": "BUY",
-                "entry_price": price,
-                "entry_date": now,
-                "entry_score": score,
-                "status": "OPEN",
-                "bucket": sig.get("bucket"),
-                "signal_style": sig.get("signal_style"),
-                "source": "watchlist",
-                "target_price": sig.get("target_price"),
-                "stop_loss": sig.get("stop_loss"),
-                # Snapshot for the learning loop — see _record_brain_outcome
-                "market_regime": sig.get("market_regime"),
+                "user_id": brain_user_id, "symbol": symbol, "action": "BUY",
+                "entry_price": price, "entry_date": now, "entry_score": score, "status": "OPEN",
+                "bucket": sig.get("bucket"), "signal_style": sig.get("signal_style"),
+                "source": "watchlist", "target_price": sig.get("target_price"),
+                "stop_loss": sig.get("stop_loss"), "market_regime": sig.get("market_regime"),
+                "is_wallet_trade": False,
             }).execute()
             buys += 1
-            open_watchlist.add(symbol)  # block any further inserts this scan
-            logger.info(f"Virtual BUY [watchlist]: {symbol} @ ${price:.2f} (score {score})")
+            open_watchlist.add(symbol)
 
-        # ── Track 2: Brain auto-picks via the tiered trust model ──
-        # The brain evaluates the signal INDEPENDENTLY of the user-facing
-        # `action` field. Tier 2/3 signals were downgraded BUY → HOLD by
-        # the AI quality guard in scan_service, but the brain bypasses
-        # that downgrade because its tier model has stricter criteria
-        # (higher score bar + technical confirmation + macro check) that
-        # compensate for the AI uncertainty.
-        #
-        # See `_eval_brain_trust_tier` and the file header for the rules.
-
-        # Day 37: holiday filter. If the ticker's exchange is CLOSED
-        # today, skip — Yahoo returns stale Friday-close prices on those
-        # days, so any "entry" is a fiction. LUN.TO on Victoria Day
-        # (2026-05-18) is the case that proved this matters: -$19.66
-        # WATCHDOG_FORCE_SELL the day after entry on a holiday.
-        from app.core.market_calendar import is_market_open
-        from app.scanners.universe import get_exchange as _get_exchange
-        from zoneinfo import ZoneInfo
-        _today_et = datetime.now(ZoneInfo("America/New_York")).date()
-        _exchange = _get_exchange(symbol)
-        if not is_market_open(_exchange, _today_et):
-            logger.info(
-                f"Virtual BUY skipped for {symbol} (score {score}): "
-                f"{_exchange} closed today ({_today_et}). Holiday filter."
-            )
+        # ── 4. Brain entry ──
+        reason, plan = _evaluate_brain_entry(sig, ctx, "LONG")
+        if reason:
+            _decide(sig, "SKIP", reason, plan)
+            logger.debug(f"Brain SKIP {symbol} (score {score}): {reason}")
             continue
-
-        brain_tier, trust_multiplier, tier_reason = _eval_brain_trust_tier(sig, portfolio_heat)
-        if (
-            brain_tier > 0
-            and symbol not in open_brain
-            and symbol not in open_watchlist  # dedup with watchlist track
-            and symbol not in cooldown_brain_symbols  # post-THESIS_INVALIDATED cooldown
-            and symbol not in watchdog_cooldown_symbols  # Day 26: post-WATCHDOG_EXIT cooldown
-            and symbol not in post_winner_cooldown_symbols  # Day 37: post-WINNER cooldown
-            and symbol not in post_loss_cooldown_symbols  # Day 47: post-LOSING-close cooldown
-        ):
-            # ── Rotation: brain at max capacity, only rotate if the new
-            # ── signal is meaningfully better (+5 points) than the weakest
-            # ── currently-held brain position.
-            #
-            # The +5 margin avoids constant churn on small score differences.
-            # We use entry_score as the tie-breaker; higher entry_score
-            # implied a more confident initial decision.
-            if brain_long_count >= settings.brain_max_open_long:
-                # Recompute the weakest brain position from the LIVE state
-                # of `open_brain` (which reflects any SELLs and rotations
-                # that happened earlier in this scan). The previous design
-                # cached `weakest_brain` upfront and tried to keep it in
-                # sync, which was bug-prone — a SELL flow earlier in the
-                # scan could leave a stale reference pointing at a
-                # just-closed row, and the rotation would then overwrite
-                # the closed row's pnl/is_win with new values.
-                weakest = None
-                weakest_score = 999
-                for r in all_open:
-                    if r.get("source") != "brain":
-                        continue
-                    if r.get("symbol") not in open_brain:
-                        continue  # already closed earlier this scan
-                    es = r.get("entry_score", 0) or 0
-                    if es < weakest_score:
-                        weakest_score = es
-                        weakest = r
-
-                if weakest and score >= weakest_score + 5:
-                    w_symbol = weakest["symbol"]
-                    w_entry = float(weakest["entry_price"])
-                    # Use the LIVE price for the rotated-out position so the
-                    # recorded P&L is realistic. Fall back to the new signal's
-                    # price only if the live fetch fails (rare).
-                    w_prices = _fetch_prices_batch([w_symbol])
-                    w_current, _ = w_prices.get(w_symbol, (None, None))
-                    w_exit_price = w_current if w_current else price
-                    # Direction-aware P&L for the rotated-out position (kept
-                    # as a local for the logger + notification below; the
-                    # close helper computes the stored version itself).
-                    w_direction = weakest.get("direction") or "LONG"
-                    w_pnl = _calc_pnl_pct(w_entry, w_exit_price, w_direction) if w_entry > 0 else 0
-                    close_res = close_virtual_trade(
-                        weakest, w_exit_price, "ROTATION", score,
-                        exit_date_iso=now,
-                    )
-                    if close_res.get("skipped"):
-                        # Another path (watchdog/parallel scan) already closed
-                        # the weakest. Our local counters are now stale and
-                        # capacity may or may not be free. Skip inserting the
-                        # new position this round — next scan will reassess.
-                        continue
-                    open_brain.discard(w_symbol)
-                    brain_open_count -= 1
-                    logger.info(
-                        f"Virtual ROTATION: closed {w_symbol} (score {weakest_score}, P&L {w_pnl:+.1f}%) "
-                        f"to make room for {symbol} (score {score})"
-                    )
-                    notifications.append(("brain_sell", {
-                        "symbol": w_symbol, "price": f"{w_exit_price:.2f}",
-                        "pnl": f"{w_pnl:+.1f}", "reason": f"Rotated out for {symbol} (score {score})",
-                        "entry_score": str(weakest_score), "exit_score": str(score),
-                        "verdict": f"Replaced by stronger pick {symbol}.",
-                    }))
-                else:
-                    continue  # No room and new signal isn't strong enough
-            # ── Compute target & stop for the new position ──
-            # AI-validated signals (Tier 1, sometimes Tier 2) come with
-            # AI-generated target_price and stop_loss from the synthesis.
-            # Tier 3 (tech-only) signals don't — synthesize the levels from
-            # the ATR (Average True Range) instead. ATR-based levels give
-            # a 1.33 R/R ratio (target = price + 2 ATR, stop = price - 1.5 ATR)
-            # which is conservative but workable.
-            target = sig.get("target_price")
-            stop = sig.get("stop_loss")
-            if not target or not stop:
-                atr = (sig.get("technical_data") or {}).get("atr")
-                if atr and price:
-                    target = round(price + 2 * float(atr), 2)
-                    stop = round(price - 1.5 * float(atr), 2)
-
-            if target and stop:
-                # Crypto risk cap: floor the stop at -8% from entry. Without
-                # this, an AI-generated stop could be far wider than is safe
-                # for crypto's volatility, leading to catastrophic losses
-                # before the stop triggers.
-                if sig.get("asset_type") == "CRYPTO" or symbol.endswith("-USD"):
-                    max_crypto_stop = price * 0.92  # 8% max drawdown
-                    if float(stop) < max_crypto_stop:
-                        stop = round(max_crypto_stop, 2)
-
-                # Classify trade horizon. LONG positions get daily thesis
-                # re-eval (AFTER_CLOSE only), wider trailing stop (8%), and
-                # 60-day expiry — letting winners compound instead of being
-                # killed by 5x/day conservative thesis re-evals.
-                # SHORT: crypto (24/7 volatile), HIGH_RISK (momentum), or
-                # near-term catalyst <= 7 days.
-                _is_crypto = sig.get("asset_type") == "CRYPTO" or symbol.endswith("-USD")
-                _catalyst_days = sig.get("catalyst_days") or 999
-                _bucket = sig.get("bucket") or ""
-                if _is_crypto or _bucket == "HIGH_RISK" or _catalyst_days <= 7:
-                    _horizon = "SHORT"
-                else:
-                    _horizon = "LONG"
-
-                # Filter D: LONG-horizon suspension (Day 20).
-                # Backtest evidence: every LONG-horizon trade in the 52-trade
-                # history was bucket=SAFE_INCOME (zero HIGH_RISK × LONG ever
-                # existed). The cohort: n=15, 33.3% win rate, -14.9% total —
-                # the single worst slice of the data. Block here, after the
-                # horizon has been computed, so the log is informative.
-                #
-                # Invalidation: re-enable when the next monthly backtest shows
-                # the LONG cohort has win rate >= 50% across n >= 10 trades
-                # in the rolling 30-day window OR a HIGH_RISK × LONG entry
-                # appears in the data with a positive outcome. Until then,
-                # SAFE_INCOME with no near-term catalyst is structurally
-                # negative-EV in our sample.
-                if _horizon == "LONG":
-                    logger.info(
-                        f"Virtual BUY skipped for {symbol} (score {score}): "
-                        f"filter_d_long_horizon_suspended (bucket={_bucket}, "
-                        f"catalyst_days={_catalyst_days}). Historical LONG "
-                        f"cohort: 33% win rate, -14.9% total over n=15."
-                    )
-                    continue
-
-                # Per-symbol per-day cap (Day 21): block re-entry of a
-                # name we already entered today. Without this gate, a
-                # repeatedly-flagged ticker (May 1: SEZL hit Filter D
-                # 3 times in one day) could consume the per-day cap
-                # entirely on a single name. Sector exclusion catches
-                # this for Fin/Industrials but a Tech name in the same
-                # situation would still concentrate.
-                sym_cap = settings.wallet_max_entries_per_symbol_per_day
-                if sym_cap > 0 and wallet_entries_by_symbol_today[symbol] >= sym_cap:
-                    logger.info(
-                        f"Virtual BUY skipped for {symbol} (score {score}): per-symbol "
-                        f"cap reached ({wallet_entries_by_symbol_today[symbol]}/{sym_cap}). "
-                        f"Brain already entered this name today; preventing concentration."
-                    )
-                    continue
-
-                # Per-day cap (Day 19): if we've already opened the
-                # configured max number of wallet entries today (across
-                # all scans), skip. Highest-score signals are processed
-                # first because we sorted at function entry, so the cap
-                # naturally clips marginal entries.
-                # Day 37: use effective cap (clamped by drawdown breaker)
-                cap = _eff_max_per_day
-                if cap > 0 and (wallet_entries_today + wallet_entries_this_scan) >= cap:
-                    logger.info(
-                        f"Virtual BUY skipped for {symbol} (score {score}): daily entry cap "
-                        f"reached ({wallet_entries_today + wallet_entries_this_scan}/{cap}). "
-                        f"Conserving capital for higher-conviction signals tomorrow."
-                    )
-                    continue
-
-                sizing = _compute_wallet_fields(
-                    running_balance, brain_tier, trust_multiplier, price, symbol, kind="BUY",
-                    tier1_pct_override=_eff_tier1_pct,
-                    max_pct_override=_eff_max_pct,
-                )
-                if sizing is None:
-                    continue
-                allocation_usd, shares, wallet_fields = sizing
-
-                ins_result = db.table("virtual_trades").insert({
-                    "user_id": brain_user_id,
-                    "symbol": symbol,
-                    "action": "BUY",
-                    "entry_price": price,
-                    "entry_date": now,
-                    "entry_score": score,
-                    "status": "OPEN",
-                    "bucket": sig.get("bucket"),
-                    "signal_style": sig.get("signal_style"),
-                    "source": "brain",
-                    "target_price": target,
-                    "stop_loss": stop,
-                    "entry_tier": brain_tier,
-                    "trust_multiplier": trust_multiplier,
-                    "tier_reason": tier_reason,
-                    "trade_horizon": _horizon,
-                    # Snapshot for the learning loop — see _record_brain_outcome.
-                    # We snapshot at insert because the regime can shift between
-                    # entry and close, and pattern_stats matches on the regime
-                    # we ENTERED in (the conditions that justified the trade),
-                    # not the one we exited in.
-                    "market_regime": sig.get("market_regime"),
-                    # Stage 6: capture the THESIS for this entry. The thesis
-                    # tracker re-evaluates this every scan and triggers
-                    # THESIS_INVALIDATED exits when the reason is gone.
-                    "entry_thesis": (sig.get("reasoning") or "")[:500],
-                    "entry_thesis_keywords": _extract_thesis_keywords(sig),
-                    **wallet_fields,
-                }).execute()
-
-                new_trade_id = ins_result.data[0]["id"] if ins_result.data else None
-                # Settle the wallet AFTER insert — we need the trade_id on
-                # the audit ledger row. Only runs when the wallet is enabled
-                # AND allocation is positive (disabled path skips wallet math
-                # entirely). If this fails after the insert succeeded, the
-                # error log names the orphan so it can be reconciled; we do
-                # NOT roll back the trade because the brain's autonomy
-                # depends on the trade being open even if wallet errored.
-                if settings.wallet_enabled and allocation_usd > 0:
-                    try:
-                        wallet_svc.debit_for_long_buy(
-                            user_id=brain_user_id,
-                            allocation_usd=allocation_usd,
-                            trade_id=new_trade_id,
-                            symbol=symbol,
-                            shares=shares,
-                            price=price,
-                        )
-                        running_balance = max(0.0, running_balance - allocation_usd)
-                    except Exception as e:
-                        logger.error(
-                            f"Wallet debit FAILED for {symbol} (trade {new_trade_id}, "
-                            f"allocation ${allocation_usd:.2f}): {e}. Trade row exists; "
-                            f"wallet balance is NOT deducted — reconcile manually."
-                        )
-
-                buys += 1
-                brain_open_count += 1
-                brain_long_count += 1
-                wallet_entries_this_scan += 1
-                wallet_entries_by_symbol_today[symbol] += 1
-                open_brain.add(symbol)
-                open_brain_long.add(symbol)
-                logger.info(
-                    f"Virtual BUY [brain] T{brain_tier}: {symbol} @ ${price:.2f} "
-                    f"(score {score}, tier={tier_reason}, trust={trust_multiplier:.0%})"
-                )
-
-                # Queue Telegram notification (sent after function returns)
-                rr = round(float(target - price) / float(price - stop), 1) if stop and price > stop else 0
-                notifications.append(("brain_buy", {
-                    "symbol": symbol, "score": str(score),
-                    "bucket": sig.get("bucket", ""),
-                    "price": f"{price:.2f}", "target": f"{float(target):.2f}",
-                    "stop": f"{float(stop):.2f}", "rr": f"{rr}",
-                    "tier": str(brain_tier),
-                    "trust": f"{int(trust_multiplier * 100)}",
-                }))
-
-                # Auto-add discovered tickers to the tickers table
-                # so they keep getting scanned in future scans
-                from app.db import queries as db_queries
-                from app.scanners.universe import get_exchange
-                try:
-                    db_queries.upsert_ticker(
-                        symbol,
-                        name=sig.get("company_name", ""),
-                        exchange=get_exchange(symbol),
-                        bucket=sig.get("bucket"),
-                    )
-                except Exception:
-                    pass
-
-    # ── Track 3: Brain SHORT entries (bearish bets) ──────────────
-    # Evaluate AVOID signals as potential short positions. This runs
-    # AFTER the BUY track so we never short a symbol we just bought,
-    # and AFTER the SELL track so symbols that flipped to AVOID are
-    # already closed on the long side before we consider shorting.
-    shorts_opened = 0
-    for sig in signals:
-        symbol = sig.get("symbol")
-        action = sig.get("action")
-        score = sig.get("score", 100) or 100
-        price = sig.get("price_at_signal")
-
-        if not symbol or not price or action != "AVOID":
+        trade_id = _open_brain_position(db, sig, plan, ctx, now)
+        if not trade_id:
+            _decide(sig, "SKIP", "open_failed", plan)
             continue
-        # Don't short something we hold long, or already short
-        if symbol in open_brain_long or symbol in open_brain_short:
-            continue
-        if brain_short_count >= settings.brain_max_open_short:
-            continue
-
-        # Day 37: holiday filter on SHORT path too.
-        from app.core.market_calendar import is_market_open as _is_open
-        from app.scanners.universe import get_exchange as _get_ex
-        from zoneinfo import ZoneInfo as _ZI
-        _td_et = datetime.now(_ZI("America/New_York")).date()
-        _exch = _get_ex(symbol)
-        if not _is_open(_exch, _td_et):
-            logger.info(
-                f"Virtual SHORT skipped for {symbol} (score {score}): "
-                f"{_exch} closed today ({_td_et}). Holiday filter."
-            )
-            continue
-
-        # Day 37: post-WINNER cooldown also blocks SHORT entries — a name
-        # that just produced a winning thesis-exit shouldn't be re-targeted
-        # in either direction within the cooldown window.
-        if symbol in post_winner_cooldown_symbols:
-            continue
-
-        # Day 47: post-LOSING-close cooldown — mirror the post-winner block
-        # on the SHORT path. A name that just lost in either direction
-        # shouldn't be re-entered (long or short) within 24h without fresh
-        # information.
-        if symbol in post_loss_cooldown_symbols:
-            continue
-
-        short_tier, short_mult, short_reason = _eval_brain_short_tier(sig)
-        if short_tier == 0:
-            continue
-
-        target = sig.get("target_price")
-        stop = sig.get("stop_loss")
-        if not target or not stop:
-            continue
-
-        # Per-symbol per-day cap (Day 21) — same gate as the BUY path,
-        # applied to SHORT entries. Prevents the brain from re-shorting
-        # the same name across consecutive scans.
-        sym_cap = settings.wallet_max_entries_per_symbol_per_day
-        if sym_cap > 0 and wallet_entries_by_symbol_today[symbol] >= sym_cap:
-            logger.info(
-                f"Virtual SHORT skipped for {symbol} (score {score}): per-symbol "
-                f"cap reached ({wallet_entries_by_symbol_today[symbol]}/{sym_cap})."
-            )
-            continue
-
-        # Per-day cap (Day 19) — applies to SHORTs too. Both wallet
-        # entries deploy capital; rate-limit them together.
-        # Day 37: use effective cap (clamped by drawdown breaker)
-        cap = _eff_max_per_day
-        if cap > 0 and (wallet_entries_today + wallet_entries_this_scan) >= cap:
-            logger.info(
-                f"Virtual SHORT skipped for {symbol} (score {score}): daily entry cap "
-                f"reached ({wallet_entries_today + wallet_entries_this_scan}/{cap})."
-            )
-            continue
-
-        # Horizon for shorts: default SHORT (momentum), but stable
-        # bearish thesis could be LONG (held up to 14 days either way).
-        _horizon = "SHORT"
-
-        # Shorts use Tier-1 sizing (15% of balance Day 37+, was 10%) scaled
-        # by short_mult; 100% of the allocation gets reserved as collateral
-        # when reserve_for_short_open runs below.
-        sizing = _compute_wallet_fields(
-            running_balance, 1, short_mult, float(price), symbol, kind="SHORT",
-            tier1_pct_override=_eff_tier1_pct,
-            max_pct_override=_eff_max_pct,
-        )
-        if sizing is None:
-            continue
-        short_allocation_usd, short_shares, short_wallet_fields = sizing
-
-        ins_result = db.table("virtual_trades").insert({
-            "user_id": brain_user_id,
-            "symbol": symbol,
-            "action": "SHORT_SELL",
-            "entry_price": float(price),
-            "entry_date": now,
-            "entry_score": score,
-            "status": "OPEN",
-            "bucket": sig.get("bucket"),
-            "signal_style": sig.get("signal_style"),
-            "source": "brain",
-            "target_price": float(target),
-            "stop_loss": float(stop),
-            "entry_tier": 1,
-            "trust_multiplier": short_mult,
-            "tier_reason": short_reason,
-            "trade_horizon": _horizon,
-            "direction": "SHORT",
-            "trough_price": float(price),  # initial trough = entry price
-            "market_regime": sig.get("market_regime"),
-            "entry_thesis": (sig.get("reasoning") or "")[:500],
-            "entry_thesis_keywords": _extract_thesis_keywords(sig),
-            **short_wallet_fields,
-        }).execute()
-
-        new_short_id = ins_result.data[0]["id"] if ins_result.data else None
-        if settings.wallet_enabled and short_allocation_usd > 0:
-            try:
-                wallet_svc.reserve_for_short_open(
-                    user_id=brain_user_id,
-                    allocation_usd=short_allocation_usd,
-                    trade_id=new_short_id,
-                    symbol=symbol,
-                    shares=short_shares,
-                    price=float(price),
-                )
-                running_balance = max(0.0, running_balance - short_allocation_usd)
-            except Exception as e:
-                logger.error(
-                    f"Wallet reserve FAILED for SHORT {symbol} (trade {new_short_id}, "
-                    f"allocation ${short_allocation_usd:.2f}): {e}. Trade row exists; "
-                    f"collateral NOT reserved — reconcile manually."
-                )
-
-        shorts_opened += 1
-        brain_short_count += 1
-        brain_open_count += 1
-        wallet_entries_this_scan += 1
-        wallet_entries_by_symbol_today[symbol] += 1
-        open_brain_short.add(symbol)
-        open_brain.add(symbol)
+        plan["trade_id"] = trade_id
+        _decide(sig, "ENTER", plan["tier_reason"], plan)
+        buys += 1
+        levels = plan["levels"]
         logger.info(
-            f"Virtual SHORT [brain]: {symbol} @ ${float(price):.2f} "
-            f"(score {score}, target ${float(target):.2f}, stop ${float(stop):.2f})"
+            f"Virtual BUY [brain]: {symbol} {plan['shares']:.4f} @ {plan['fill']:.4f} "
+            f"(ref {plan['ref_price']:.4f}, score {score}, stop {levels['stop']:.4f}, "
+            f"target {levels['target']:.4f}, R:R {levels['rr']}, ${plan['alloc_usd']:.2f}, "
+            f"risk ${plan['risk_usd']:.2f})"
         )
-        notifications.append(("brain_sell", {
-            "symbol": symbol, "score": str(score),
-            "price": f"{float(price):.2f}",
-            "pnl": "0.0",
-            "reason": f"SHORT entry — bearish signal (score {score})",
-            "entry_score": str(score), "exit_score": str(score),
-            "verdict": f"Brain opened SHORT bet against {symbol}.",
+        notifications.append(("brain_buy", {
+            "symbol": symbol, "score": str(score), "bucket": sig.get("bucket", ""),
+            "price": f"{plan['fill']:.2f}", "target": f"{levels['target']:.2f}",
+            "stop": f"{levels['stop']:.2f}", "rr": f"{levels['rr']:.1f}",
+            "tier": str(plan["tier"]), "trust": f"{int(plan['trust'] * 100)}",
         }))
+        try:
+            from app.scanners.universe import get_exchange
+            queries.upsert_ticker(symbol, name=sig.get("company_name", ""),
+                                  exchange=get_exchange(symbol), bucket=sig.get("bucket"))
+        except Exception:
+            pass
 
-    return {"buys": buys, "sells": sells, "shorts": shorts_opened}
+    # ── 5. Brain SHORT entries (off by default) ──
+    if settings.brain_short_entries_enabled:
+        for sig in signals:
+            symbol = sig.get("symbol")
+            if not symbol or sig.get("action") != "AVOID" or not sig.get("price_at_signal"):
+                continue
+            reason, plan = _evaluate_brain_entry(sig, ctx, "SHORT")
+            if reason:
+                _decide(sig, "SKIP", f"short:{reason}", plan)
+                continue
+            trade_id = _open_brain_position(db, sig, plan, ctx, now)
+            if not trade_id:
+                _decide(sig, "SKIP", "short:open_failed", plan)
+                continue
+            plan["trade_id"] = trade_id
+            _decide(sig, "ENTER", f"short:{plan['tier_reason']}", plan)
+            shorts_opened += 1
+            open_brain_short.add(symbol)
+
+    # ── 6. Decision funnel log ──
+    if decisions:
+        try:
+            queries.insert_brain_decisions(list(decisions.values()))
+        except Exception as e:
+            logger.warning(f"brain_decisions insert failed ({len(decisions)} rows): {e}")
+        funnel = Counter(
+            (d["decision"] if d["decision"] == "ENTER" else d["reason"].split("_")[0])
+            for d in decisions.values()
+        )
+        logger.info(f"Brain funnel: {dict(funnel)}")
+
+    return {
+        "buys": buys, "sells": sells, "shorts": shorts_opened,
+        "skipped": sum(1 for d in decisions.values() if d["decision"] == "SKIP"),
+    }
 
 
 async def flush_brain_notifications(notifications: BrainNotificationQueue) -> int:
@@ -2354,68 +1658,15 @@ def _calc_pnl_amount(entry_price: float, current_price: float, direction: str) -
     return current_price - entry_price
 
 
-# Column list for any SELECT that feeds `close_virtual_trade`. If the
-# helper ever needs another field, add it here in one place instead of
-# updating each caller — missing a SELECT is the class of bug that
-# silently skips wallet settlement or recomputes per-share math wrong.
+# Column list for any SELECT that feeds `close_virtual_trade` / `evaluate_exit`.
+# Requires migration 006 (initial_stop, entry_atr, sector, currency, fx_to_usd_entry, fees_usd).
 VIRTUAL_TRADES_CLOSE_FIELDS = (
     "id, user_id, symbol, entry_price, entry_date, entry_score, source, "
-    "bucket, market_regime, target_price, stop_loss, direction, trade_horizon, "
+    "bucket, signal_style, entry_tier, sector, market_regime, target_price, stop_loss, "
+    "initial_stop, entry_atr, direction, trade_horizon, "
     "thesis_last_status, peak_price, trough_price, "
-    "shares, position_size_usd, is_wallet_trade"
+    "shares, position_size_usd, is_wallet_trade, currency, fx_to_usd_entry, fees_usd"
 )
-
-
-def _compute_wallet_fields(
-    running_balance: float,
-    tier: int,
-    trust_multiplier: float,
-    price: float,
-    symbol: str,
-    *,
-    kind: str,
-    tier1_pct_override: float | None = None,
-    max_pct_override: float | None = None,
-) -> tuple[float, float, dict] | None:
-    """Size a new brain entry and produce the extra virtual_trades fields.
-
-    Returns (allocation_usd, shares, wallet_fields_dict) on success, or
-    None when the entry should be skipped (wallet below the floor).
-    Logs the skip reason internally so both BUY and SHORT call sites
-    stay symmetric — `kind` just flavors the log line.
-
-    When `settings.wallet_enabled` is False the trade inserts as legacy
-    (is_wallet_trade=False, no shares/position_size) — matches pre-Day-15
-    behavior and lets ops disable the wallet without orphaning rows.
-    """
-    from app.services import wallet as wallet_svc
-
-    if not settings.wallet_enabled:
-        return 0.0, 0.0, {"is_wallet_trade": False}
-
-    allocation_usd = wallet_svc.calc_position_size_usd(
-        running_balance, tier, trust_multiplier,
-        tier1_pct_override=tier1_pct_override,
-        max_pct_override=max_pct_override,
-    )
-    if allocation_usd <= 0:
-        floor_reason = (
-            "balance below minimum"
-            if running_balance < settings.wallet_min_balance_for_trade
-            else f"allocation at tier {tier} is < ${settings.wallet_min_balance_for_trade:.0f}"
-        )
-        logger.info(
-            f"Virtual {kind} skipped for {symbol}: {floor_reason} "
-            f"(balance=${running_balance:.2f}, tier={tier})"
-        )
-        return None
-
-    shares = allocation_usd / price if price else 0.0
-    return allocation_usd, shares, {
-        "shares": round(shares, 6),
-        "position_size_usd": round(allocation_usd, 2),
-        "is_wallet_trade": True,
-    }
 
 
 def _mark_to_market_one(
@@ -2425,26 +1676,25 @@ def _mark_to_market_one(
     direction: str,
     is_wallet_trade: bool,
     shares: float,
+    fx: float = 1.0,
 ) -> float:
-    """What is one open brain position worth in dollars right now?
+    """USD value one open brain position contributes to wallet equity.
 
-    Four cases — wallet vs legacy × LONG vs SHORT — each with different
-    cash semantics:
-      • Wallet LONG : shares × current_price
-      • Wallet SHORT: (entry − current) × shares — just the unrealized
-                      P&L; the collateral lives in wallet.collateral_reserved
-      • Legacy LONG : 1 × current_price (1-share implicit)
-      • Legacy SHORT: entry − current (per-share P&L, no collateral)
+      • Wallet LONG : shares × current_price × fx
+      • Wallet SHORT: (entry − current) × shares × fx (collateral lives in the wallet)
+      • Non-wallet  : 0 (watchlist / legacy rows are not wallet money)
     """
-    is_short = (direction or "LONG").upper() == "SHORT"
-    if is_wallet_trade:
-        if is_short:
-            return (entry_price - current_price) * shares
-        return current_price * shares
-    # Legacy 1-share implicit
-    if is_short:
-        return entry_price - current_price
-    return current_price
+    if not is_wallet_trade:
+        return 0.0
+    if (direction or "LONG").upper() == "SHORT":
+        return (entry_price - current_price) * shares * fx
+    return current_price * shares * fx
+
+
+def _row_fx(row: dict) -> float:
+    """Current native→USD rate for a row (falls back to the entry rate)."""
+    fx = fx_to_usd(row.get("symbol")) if native_currency(row.get("symbol")) != "USD" else 1.0
+    return float(fx or row.get("fx_to_usd_entry") or 1.0)
 
 
 def calculate_brain_holdings_value(
@@ -2453,60 +1703,45 @@ def calculate_brain_holdings_value(
     legacy_only: bool = False,
     strict: bool = False,
 ) -> float:
-    """Sum the mark-to-market value of open brain positions for the user.
+    """Sum the USD mark-to-market value of open brain WALLET positions.
 
-    Covers wallet LONG + wallet SHORT P&L + legacy LONG + legacy SHORT P&L.
-    Lives here (not in wallet.py) because this function owns virtual_trades
-    schema knowledge and the price fetch.
-
-    Args:
-        legacy_only: restrict to pre-wallet 1-share positions. Used once
-            per user on the FIRST deposit to snapshot the ROI baseline.
-        strict: raise `LegacySnapshotFailed` if any position has no price.
-            Only meaningful when legacy_only=True: we must never silently
-            baseline at cash-only when legacy positions exist.
+    `legacy_only` / `strict` are kept for wallet.deposit's first-deposit
+    snapshot; after the 2026-09 reset there are no legacy rows, so a
+    legacy_only call returns 0.
     """
     from app.services.wallet import _resolve_user_id, LegacySnapshotFailed
 
+    if legacy_only:
+        return 0.0
     uid = _resolve_user_id(user_id)
     if not uid:
         return 0.0
     try:
-        db = get_client()
-        query = (
-            db.table("virtual_trades")
-            .select("symbol, shares, entry_price, direction, is_wallet_trade")
-            .eq("user_id", uid)
-            .eq("status", "OPEN")
-            .eq("source", "brain")
-        )
-        if legacy_only:
-            query = query.eq("is_wallet_trade", False)
-        rows = query.execute().data or []
+        rows = (
+            get_client().table("virtual_trades")
+            .select("symbol, shares, entry_price, direction, is_wallet_trade, position_size_usd, fx_to_usd_entry")
+            .eq("user_id", uid).eq("status", "OPEN").eq("source", "brain")
+            .execute()
+        ).data or []
         if not rows:
             return 0.0
-        symbols = list({r["symbol"] for r in rows if r.get("symbol")})
-        price_map = _fetch_prices_batch(symbols)
+        price_map = _fetch_prices_batch(list({r["symbol"] for r in rows if r.get("symbol")}))
         total = 0.0
         missing: list[str] = []
         for r in rows:
-            price_tuple = price_map.get(r["symbol"])
-            price = price_tuple[0] if price_tuple else None
-            if not price:
+            px = (price_map.get(r["symbol"]) or (None, None))[0]
+            if not px:
                 missing.append(r["symbol"])
+                if (r.get("direction") or "LONG") != "SHORT" and r.get("is_wallet_trade"):
+                    total += float(r.get("position_size_usd") or 0)  # mark at cost
                 continue
             total += _mark_to_market_one(
-                entry_price=float(r.get("entry_price") or 0),
-                current_price=float(price),
-                direction=r.get("direction") or "LONG",
-                is_wallet_trade=bool(r.get("is_wallet_trade")),
-                shares=float(r.get("shares") or 0),
+                entry_price=float(r.get("entry_price") or 0), current_price=float(px),
+                direction=r.get("direction") or "LONG", is_wallet_trade=bool(r.get("is_wallet_trade")),
+                shares=float(r.get("shares") or 0), fx=_row_fx(r),
             )
         if missing and strict:
-            raise LegacySnapshotFailed(
-                f"Could not price {len(missing)} position(s): {', '.join(missing)}. "
-                f"Refusing to baseline ROI at cash-only — retry when the price feed recovers."
-            )
+            raise LegacySnapshotFailed(f"Could not price: {', '.join(missing)}")
         return total
     except LegacySnapshotFailed:
         raise
@@ -2518,29 +1753,65 @@ def calculate_brain_holdings_value(
 
 
 def _sum_holdings_from_enriched(enriched_open: list[dict]) -> float:
-    """Sum holdings from rows that already went through `_enrich_open_trade`.
-
-    Used by `get_virtual_summary` so we don't re-SELECT virtual_trades or
-    re-fetch prices for a value we just computed row-by-row. Enriched
-    rows already carry `current_price`, `entry_price`, `direction`,
-    `is_wallet_trade`, and (for wallet trades) `shares` +
-    `current_position_value` — so we can reuse `_mark_to_market_one`.
-    """
+    """Sum USD holdings from rows already enriched by get_virtual_summary."""
     total = 0.0
     for t in enriched_open:
-        if t.get("source") != "brain":
+        if t.get("source") != "brain" or not t.get("is_wallet_trade"):
             continue
-        current_price = t.get("current_price")
-        if current_price is None:
+        if t.get("current_price") is None:
+            if (t.get("direction") or "LONG") != "SHORT":
+                total += float(t.get("position_size_usd") or 0)
             continue
         total += _mark_to_market_one(
             entry_price=float(t.get("entry_price") or 0),
-            current_price=float(current_price),
+            current_price=float(t["current_price"]),
             direction=t.get("direction") or "LONG",
-            is_wallet_trade=bool(t.get("is_wallet_trade")),
+            is_wallet_trade=True,
             shares=float(t.get("shares") or 0),
+            fx=float(t.get("fx_to_usd") or 1.0),
         )
     return total
+
+
+def compute_close_amounts(trade: dict, exit_ref_price: float, fx_exit: float | None = None) -> dict:
+    """Pure P&L math for closing `trade` at quoted price `exit_ref_price`.
+
+    Applies exit slippage (+ commission for wallet trades) and FX. Returns
+    {"fill", "pnl_pct", "pnl_usd", "balance_delta", "collateral_delta",
+     "fees_usd", "fx"}. For non-wallet rows pnl_usd is per-share and the
+    wallet deltas are 0.
+    """
+    symbol = trade.get("symbol")
+    direction = trade.get("direction") or "LONG"
+    short = direction == "SHORT"
+    entry = float(trade["entry_price"])
+    fill = apply_slippage(exit_ref_price, "BUY" if short else "SELL", symbol)
+    is_wallet = bool(trade.get("is_wallet_trade"))
+    shares = float(trade.get("shares") or 0)
+    fx = float(fx_exit or trade.get("fx_to_usd_entry") or 1.0)
+    if not (is_wallet and shares > 0):
+        return {
+            "fill": fill, "pnl_pct": _calc_pnl_pct(entry, fill, direction),
+            "pnl_usd": _calc_pnl_amount(entry, fill, direction),
+            "balance_delta": 0.0, "collateral_delta": 0.0, "fees_usd": 0.0, "fx": fx,
+        }
+    commission = settings.brain_commission_usd
+    cost = float(trade.get("position_size_usd") or 0)
+    if short:
+        fees = 2 * commission
+        pnl_usd = (entry - fill) * shares * fx - fees
+        balance_delta, collateral_delta = cost + pnl_usd, -cost
+    else:
+        fees = commission
+        proceeds = shares * fill * fx - commission
+        pnl_usd = proceeds - cost
+        balance_delta, collateral_delta = proceeds, 0.0
+    pnl_pct = (pnl_usd / cost * 100) if cost > 0 else _calc_pnl_pct(entry, fill, direction)
+    return {
+        "fill": fill, "pnl_pct": pnl_pct, "pnl_usd": pnl_usd,
+        "balance_delta": balance_delta, "collateral_delta": collateral_delta,
+        "fees_usd": fees + float(trade.get("fees_usd") or 0), "fx": fx,
+    }
 
 
 def close_virtual_trade(
@@ -2551,603 +1822,208 @@ def close_virtual_trade(
     exit_action: str | None = None,
     exit_date_iso: str | None = None,
 ) -> dict:
-    """The one true close path: pnl math, DB UPDATE, wallet settlement, learning loop.
+    """The one close path: costs + FX, wallet settlement, DB update, learning.
 
-    Every exit site in this module and in watchdog_service funnels through
-    here so the math is computed one way. Three things happen:
+    Wallet-safe ordering (see wallet.py ATOMICITY):
+      1. credit the wallet (fails → abort; the row stays OPEN and the next
+         pass retries),
+      2. UPDATE the row to CLOSED guarded by status='OPEN' (0 rows → another
+         path already closed it → reverse the credit; error → reverse),
+      3. ledger row, 4. learning loop.
 
-      1. Compute pnl_pct + direction-aware per-share dollar P&L. For wallet
-         trades (is_wallet_trade=True), store TOTAL-dollar P&L (shares ×
-         per-share). For legacy trades (pre-wallet), store per-share — that
-         matches the historical pnl_amount semantics so existing closed
-         rows remain consistent.
-
-      2. UPDATE virtual_trades with status='CLOSED' + the close fields,
-         guarded by .eq("status", "OPEN") to prevent race-condition
-         overwrites (scan + watchdog running in parallel).
-
-      3. If is_wallet_trade, settle the wallet: credit proceeds on LONG
-         close, release collateral + P&L on SHORT close. The wallet layer
-         writes its own audit ledger entry.
-
-      4. Forward to the learning loop via _record_brain_outcome (best-effort).
-
-    Args:
-        trade: The loaded virtual_trades row. Must include at minimum id,
-            symbol, entry_price, direction, source, and (for wallet trades)
-            shares, position_size_usd, is_wallet_trade, user_id.
-        exit_price: Price at which the trade is being closed.
-        exit_reason: STOP_HIT, TARGET_HIT, TRAILING_STOP, SIGNAL, etc.
-        exit_score: Latest signal score at close time (for telemetry).
-        exit_action: Signal action that triggered this close (set only for
-            SIGNAL exits — SELL, AVOID). None for price-driven closes.
-        exit_date_iso: ISO timestamp to write. Defaults to now(UTC).
-
-    Returns:
-        dict with keys pnl_pct, pnl_amount_stored, is_win — so callers can
-        log / notify without recomputing. Returns {"skipped": True, ...}
-        when the close was suppressed (race-guard or Day-0 grace period).
+    `exit_price` is the QUOTED price; the stored exit_price is the fill after
+    slippage. pnl_amount = USD P&L net of slippage/fees/FX for wallet trades.
+    Returns {"pnl_pct", "pnl_amount_stored", "is_win"} (+ "skipped": True
+    when nothing was closed).
     """
-    # Day-0 grace period: thesis-driven exits (THESIS_INVALIDATED,
-    # QUALITY_PRUNE) on a position less than 24h old are suppressed.
-    # Two real cases drove this: IONQ entered Apr 23 score 79 validated,
-    # thesis flipped "weakening" within hours; BCE.TO entered Apr 27
-    # score 77, thesis flipped to "invalid" 90 minutes later. Both were
-    # closed at small losses despite Claude validating them at entry —
-    # the conservative bias re-reads fresh data through a more cautious
-    # lens before the position has had a chance to develop. Price-based
-    # exits (STOP, TARGET, TRAILING, TIME_EXPIRED) still fire; the
-    # catastrophic stop in `_exit_is_thesis_protected` already bypasses
-    # any thesis gating at -8% pnl, so a fresh entry that craters fast
-    # still gets cut.
-    THESIS_GATED = {"THESIS_INVALIDATED", "QUALITY_PRUNE"}
     grace_hours = settings.new_position_grace_hours
-    if exit_reason in THESIS_GATED and grace_hours > 0:
-        entry_dt_str = trade.get("entry_date")
-        if entry_dt_str:
-            try:
-                entry_dt = parse_iso_utc(entry_dt_str)
-                if entry_dt is not None:
-                    age_hours = (datetime.now(timezone.utc) - entry_dt).total_seconds() / 3600
-                    if age_hours < grace_hours:
-                        logger.info(
-                            f"Day-0 grace: {exit_reason} suppressed for "
-                            f"{trade.get('symbol')} (age {age_hours:.1f}h < {grace_hours:.0f}h). "
-                            f"Letting the fresh thesis develop."
-                        )
-                        return {"pnl_pct": 0, "pnl_amount_stored": 0, "is_win": False, "skipped": True}
-            except Exception:
-                pass
+    if exit_reason in ("THESIS_INVALIDATED", "QUALITY_PRUNE") and grace_hours > 0:
+        entry_dt = parse_iso_utc(trade.get("entry_date"))
+        if entry_dt is not None:
+            age_h = (datetime.now(timezone.utc) - entry_dt).total_seconds() / 3600
+            if age_h < grace_hours:
+                logger.info(f"Day-0 grace: {exit_reason} suppressed for {trade.get('symbol')} ({age_h:.1f}h)")
+                return {"pnl_pct": 0, "pnl_amount_stored": 0, "is_win": False, "skipped": True}
+
+    from app.services import wallet as wallet_svc
 
     db = get_client()
-    entry_price = float(trade["entry_price"])
+    sym = trade["symbol"]
     direction = trade.get("direction") or "LONG"
-    pnl_pct = _calc_pnl_pct(entry_price, exit_price, direction)
-    per_share_pnl = _calc_pnl_amount(entry_price, exit_price, direction)
-    is_win = pnl_pct > 0
+    is_wallet = bool(trade.get("is_wallet_trade")) and float(trade.get("shares") or 0) > 0
+    fx_exit = _row_fx(trade) if is_wallet else None
+    amounts = compute_close_amounts(trade, float(exit_price), fx_exit)
+    pnl_pct, pnl_usd = amounts["pnl_pct"], amounts["pnl_usd"]
+    is_win = pnl_usd > 0
+    user_id = trade.get("user_id")
 
-    is_wallet = bool(trade.get("is_wallet_trade"))
-    shares = float(trade.get("shares") or 0)
-    position_size_usd = float(trade.get("position_size_usd") or 0)
+    # 1. credit first
+    new_bal = new_coll = None
+    if is_wallet:
+        try:
+            new_bal, new_coll = wallet_svc.adjust_balance(
+                user_id, amounts["balance_delta"], amounts["collateral_delta"],
+                symbol=sym, allow_overdraft=True,
+            )
+        except wallet_svc.WalletError as e:
+            logger.error(f"close_virtual_trade {sym} ({exit_reason}) aborted — wallet credit failed: {e}")
+            return {"pnl_pct": pnl_pct, "pnl_amount_stored": pnl_usd, "is_win": is_win,
+                    "skipped": True, "error": str(e)}
 
-    if is_wallet and shares > 0:
-        # Wallet trades store TOTAL-dollar P&L so the field is meaningful
-        # without needing `shares` re-joined at summary time.
-        pnl_amount_stored = per_share_pnl * shares
-    else:
-        # Legacy 1-share trades keep per-share semantics (historical compat).
-        pnl_amount_stored = per_share_pnl
+    def _reverse() -> None:
+        if not is_wallet:
+            return
+        try:
+            wallet_svc.adjust_balance(user_id, -amounts["balance_delta"], -amounts["collateral_delta"],
+                                      symbol=sym, allow_overdraft=True)
+        except Exception as e:
+            logger.error(f"close_virtual_trade {sym}: credit REVERSAL failed ({e}) — run reconcile_wallet")
 
     now_iso = exit_date_iso or datetime.now(timezone.utc).isoformat()
-
     patch: dict = {
         "status": "CLOSED",
-        "exit_price": exit_price,
+        "exit_price": round(amounts["fill"], 6),
+        "exit_ref_price": float(exit_price),
         "exit_date": now_iso,
         "exit_score": exit_score,
-        "pnl_pct": round(pnl_pct, 2),
-        "pnl_amount": round(pnl_amount_stored, 2),
+        "pnl_pct": round(pnl_pct, 4),
+        "pnl_amount": round(pnl_usd, 4),
         "is_win": is_win,
         "exit_reason": exit_reason,
+        "fees_usd": round(amounts["fees_usd"], 4),
     }
+    if is_wallet:
+        patch["fx_to_usd_exit"] = amounts["fx"]
     if exit_action is not None:
         patch["exit_action"] = exit_action
 
-    # Status guard: the .eq("status", "OPEN") here prevents this UPDATE from
-    # overwriting a row that another parallel path (watchdog / rotation)
-    # already closed. Belt-and-braces — without this, a race between the
-    # scan SIGNAL close and a concurrent watchdog close could double-write
-    # the pnl fields. Inspect the result: if no rows matched (the row was
-    # already closed by another path), skip wallet settlement so we don't
-    # double-credit the wallet for the same trade.
-    update_result = (
-        db.table("virtual_trades")
-        .update(patch)
-        .eq("id", trade["id"])
-        .eq("status", "OPEN")
-        .execute()
-    )
+    # 2. guarded close
+    try:
+        update_result = (
+            db.table("virtual_trades").update(patch)
+            .eq("id", trade["id"]).eq("status", "OPEN").execute()
+        )
+    except Exception as e:
+        logger.error(f"close_virtual_trade {sym}: UPDATE failed ({e}) — reversing wallet credit")
+        _reverse()
+        return {"pnl_pct": pnl_pct, "pnl_amount_stored": pnl_usd, "is_win": is_win,
+                "skipped": True, "error": str(e)}
     if not (update_result.data or []):
-        logger.info(
-            f"close_virtual_trade: {trade.get('symbol')} already closed "
-            f"by another path ({exit_reason}) — skipping wallet + learning."
-        )
-        return {
-            "pnl_pct": pnl_pct,
-            "pnl_amount_stored": pnl_amount_stored,
-            "is_win": is_win,
-            "skipped": True,
-        }
+        logger.info(f"close_virtual_trade: {sym} already closed by another path ({exit_reason})")
+        _reverse()
+        return {"pnl_pct": pnl_pct, "pnl_amount_stored": pnl_usd, "is_win": is_win, "skipped": True}
 
-    # Wallet settlement routing:
-    #   wallet + shares>0 → full settle (BUY/SELL/SHORT_OPEN/SHORT_COVER)
-    #   brain legacy      → 1-share liquidation (LEGACY_SELL / LEGACY_COVER)
-    #   watchlist         → no wallet touch
-    source = trade.get("source", "")
-    sym = trade["symbol"]
-    user_id = trade.get("user_id")
-    try:
-        from app.services import wallet as wallet_svc
-        if is_wallet and shares > 0:
-            pnl_usd_total = per_share_pnl * shares
-            if direction == "SHORT":
-                wallet_svc.release_for_short_cover(
-                    user_id=user_id, original_allocation_usd=position_size_usd,
-                    pnl_usd=pnl_usd_total, trade_id=trade["id"], symbol=sym,
-                    shares=shares, price=exit_price, exit_reason=exit_reason,
-                )
-            else:
-                wallet_svc.credit_for_long_sell(
-                    user_id=user_id, proceeds_usd=shares * exit_price,
-                    pnl_usd=pnl_usd_total, trade_id=trade["id"], symbol=sym,
-                    shares=shares, price=exit_price, exit_reason=exit_reason,
-                )
-        elif not is_wallet and source == "brain":
-            # per_share_pnl IS the full cash event for a 1-share legacy.
-            if direction == "SHORT":
-                wallet_svc.credit_for_legacy_cover(
-                    user_id=user_id, pnl_usd=per_share_pnl,
-                    trade_id=trade["id"], symbol=sym, exit_reason=exit_reason,
-                )
-            else:
-                wallet_svc.credit_for_legacy_sell(
-                    user_id=user_id, exit_price=exit_price,
-                    trade_id=trade["id"], symbol=sym, exit_reason=exit_reason,
-                    pnl_usd=per_share_pnl,
-                )
-    except Exception as e:
-        logger.error(
-            f"Wallet settlement FAILED for {sym} ({exit_reason}, "
-            f"direction={direction}, is_wallet={is_wallet}): {e}. "
-            f"Row is closed; reconstruct from wallet_transactions if needed."
+    # 3. ledger
+    if is_wallet:
+        short = direction == "SHORT"
+        wallet_svc.record_transaction(
+            user_id,
+            wallet_svc.TxnType.SHORT_COVER if short else wallet_svc.TxnType.SELL,
+            amounts["balance_delta"], new_bal, new_coll,
+            trade_id=trade["id"], symbol=sym, shares=float(trade.get("shares") or 0),
+            price=amounts["fill"],
+            description=(
+                f"{'SHORT_COVER' if short else 'SELL'} {float(trade.get('shares') or 0):.4f} {sym} "
+                f"@ {amounts['fill']:.4f} (ref {float(exit_price):.4f}, fx {amounts['fx']:.4f}) "
+                f"P&L ${pnl_usd:+.2f}, {exit_reason}"
+            ),
         )
 
-    # Learning loop. Best-effort: the close must NEVER fail because the
-    # learner had a hiccup. _record_brain_outcome is already defensive
-    # about watchlist trades (no-op for non-brain).
+    # 4. learning
     try:
-        _record_brain_outcome(trade, exit_price, exit_score, exit_reason, pnl_pct)
+        _record_brain_outcome({**trade, "exit_reason": exit_reason}, amounts["fill"],
+                              exit_score, exit_reason, pnl_pct)
     except Exception as e:
-        logger.warning(f"Failed to record outcome for {trade.get('symbol')}: {e}")
+        logger.warning(f"Failed to record outcome for {sym}: {e}")
 
-    return {
-        "pnl_pct": pnl_pct,
-        "pnl_amount_stored": pnl_amount_stored,
-        "is_win": is_win,
-    }
+    return {"pnl_pct": pnl_pct, "pnl_amount_stored": pnl_usd, "is_win": is_win}
 
 
 def _is_stop_hit(current_price: float, stop_loss: float, direction: str) -> bool:
-    """Check if stop loss is hit (direction-aware).
-
-    LONG:  stop fires when price drops BELOW stop
-    SHORT: stop fires when price rises ABOVE stop
-    """
     if direction == "SHORT":
         return current_price >= stop_loss
     return current_price <= stop_loss
 
 
 def _is_target_hit(current_price: float, target_price: float, direction: str) -> bool:
-    """Check if target is hit (direction-aware).
-
-    LONG:  target fires when price rises ABOVE target
-    SHORT: target fires when price drops BELOW target
-    """
     if direction == "SHORT":
         return current_price <= target_price
     return current_price >= target_price
 
 
+def persist_exit_state(db, trade: dict, decision: ExitDecision) -> None:
+    """Write a ratcheted stop / new peak / new trough back to the OPEN row."""
+    if not decision.changed:
+        return
+    patch: dict = {"stop_loss": round(decision.stop, 6)} if decision.stop is not None else {}
+    if decision.peak is not None:
+        patch["peak_price"] = round(decision.peak, 6)
+    if decision.trough is not None:
+        patch["trough_price"] = round(decision.trough, 6)
+    if not patch:
+        return
+    try:
+        db.table("virtual_trades").update(patch).eq("id", trade["id"]).eq("status", "OPEN").execute()
+        trade.update(patch)
+    except Exception as e:
+        logger.warning(f"persist_exit_state failed for {trade.get('symbol')}: {e}")
+
+
 def check_virtual_exits(notifications: BrainNotificationQueue) -> dict:
-    """Close open virtual trades whose stop/target/profit-take/age conditions hit.
+    """Apply the shared exit policy (`evaluate_exit`) to every open trade.
 
-    This is the brain's RISK MANAGEMENT pass. It runs after `process_virtual_trades`
-    on every scan. Where `process_virtual_trades` reacts to fresh SIGNALS,
-    this function reacts to fresh PRICES — a position can hit its stop loss
-    even if the signal hasn't changed.
-
-    Exit conditions, checked in priority order (first match wins):
-
-      1. STOP_HIT      — current_price <= stop_loss
-                         Hard exit. The signal's reasoning is irrelevant —
-                         risk management trumps thesis.
-
-      2. TARGET_HIT    — current_price >= target_price
-                         Take-profit at the planned level. Locks in the
-                         signal's projected gain.
-
-      3. PROFIT_TAKE   — pnl_pct >= 3.0% AND days_held >= 2
-                         A "let it run for a couple days, then lock gains"
-                         heuristic. Prevents giving back gains on signals
-                         that hit a brief +3% spike before reversing.
-                         Only fires if neither stop nor target tripped.
-
-      4. TIME_EXPIRED  — days_held >= virtual_trade_max_days (config)
-                         Closes positions that have been open too long
-                         without hitting their target. Prevents capital
-                         from sitting in stale ideas. P&L is whatever
-                         it is at the time of forced exit.
-
-    Market hours guard:
-      • Equity exits are SKIPPED when the market is closed — the trade
-        wouldn't fill at the cached price (which would be stale anyway).
-        The next in-hours scan picks them up.
-      • Crypto exits proceed regardless (24/7 markets).
-
-    Args:
-        notifications: Scan-local queue. PROFIT_TAKE exits queue a
-            "brain_sell" notification. STOP_HIT, TARGET_HIT, and
-            TIME_EXPIRED exits don't notify here — they log only,
-            because the user has already been warned by the watchdog
-            for stops and the target_hit is implied by the original
-            BUY notification.
-
-    Returns:
-        Dict with counters: stops_hit, targets_hit, profit_takes, expired.
+    Price-driven: STOP_HIT / TRAILING_STOP / TARGET_HIT / TIME_EXPIRED.
+    Equities are only processed when they can fill (session + exchange
+    open); crypto always. Runs every scan (even with no new signals) and
+    uses the same function as the watchdog, so the two never disagree.
     """
     db = get_client()
-    max_days = settings.virtual_trade_max_days
-
-    open_result = (
-        db.table("virtual_trades")
-        .select(VIRTUAL_TRADES_CLOSE_FIELDS)
-        .eq("status", "OPEN")
-        .execute()
-    )
-    open_trades = open_result.data or []
+    open_trades = (
+        db.table("virtual_trades").select(VIRTUAL_TRADES_CLOSE_FIELDS).eq("status", "OPEN").execute()
+    ).data or []
+    counters = {"stops_hit": 0, "targets_hit": 0, "profit_takes": 0, "expired": 0}
     if not open_trades:
-        return {"stops_hit": 0, "targets_hit": 0, "profit_takes": 0, "expired": 0}
+        return counters
 
-    # Batch-fetch current prices
-    symbols = list({t["symbol"] for t in open_trades})
-    prices = _fetch_prices_batch(symbols)
-
-    # Batch-fetch latest score + action for every open symbol (1 query
-    # instead of N). QUALITY_PRUNE reads `action` to gate on "Claude
-    # still wants this position"; score feeds the rollback telemetry.
-    current_scores: dict[str, int] = {}
-    current_actions: dict[str, str] = {}
-    sig_result = (
-        db.table("signals")
-        .select("symbol, score, action")
-        .in_("symbol", symbols)
-        .order("created_at", desc=True)
-        .execute()
-    )
-    for row in (sig_result.data or []):
-        sym = row.get("symbol")
-        if sym and sym not in current_scores:
-            current_scores[sym] = row.get("score", 0)
-            current_actions[sym] = row.get("action")
-
+    market_open = _is_us_market_open()
+    tradable = [t for t in open_trades if _is_tradable_now(t["symbol"], market_open)]
+    if not tradable:
+        return counters
+    prices = _fetch_prices_batch(list({t["symbol"] for t in tradable}))
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
-    market_open = _is_us_market_open()
-    stops_hit = 0
-    targets_hit = 0
-    expired = 0
-    profit_takes = 0
+    bucket = {"STOP_HIT": "stops_hit", "TARGET_HIT": "targets_hit",
+              "TRAILING_STOP": "profit_takes", "TIME_EXPIRED": "expired"}
 
-    def _rollback_counter(reason: str) -> None:
-        """Undo whichever counter was pre-incremented for this exit_reason.
-        Trailing stops increment `profit_takes` in the detection block
-        below — keep the two in sync or the summary log miscounts.
-        Defined once here rather than per-iteration inside the loop."""
-        nonlocal stops_hit, targets_hit, profit_takes, expired
-        if reason == "STOP_HIT": stops_hit -= 1
-        elif reason == "TARGET_HIT": targets_hit -= 1
-        elif reason == "TRAILING_STOP": profit_takes -= 1
-        elif reason == "TIME_EXPIRED": expired -= 1
-
-    for trade in open_trades:
+    for trade in tradable:
         symbol = trade["symbol"]
-        entry_price = float(trade["entry_price"])
         current_price, _ = prices.get(symbol, (None, None))
-
-        if current_price is None:
+        if not current_price:
             continue
-
-        # Equity exits (stop/target/profit-take) can't fill when market is
-        # closed, and the cached price would be stale. Skip non-crypto exits
-        # entirely outside market hours — the next in-hours exit check will
-        # catch them. Crypto continues normally (24/7 markets).
-        is_crypto = symbol.endswith("-USD")
-        if not is_crypto and not market_open:
+        decision = evaluate_exit(trade, current_price, now=now)
+        persist_exit_state(db, trade, decision)
+        if not decision.reason:
             continue
-
-        target = float(trade["target_price"]) if trade.get("target_price") else None
-        stop = float(trade["stop_loss"]) if trade.get("stop_loss") else None
-        direction = trade.get("direction") or "LONG"
-        horizon = trade.get("trade_horizon") or "SHORT"
-        pnl_pct = _calc_pnl_pct(entry_price, current_price, direction)
-
-        # Parse entry_date for age check
-        days_held = days_since(trade.get("entry_date"), now=now)
-
-        # ── Peak / trough tracking for trailing stop ──
-        # LONG positions track peak (highest), SHORT positions track trough (lowest).
-        # Updated every scan so the trailing stop ratchets in the winning direction.
-        if direction == "SHORT":
-            # SHORT: track lowest price (trough). Trail fires when price RISES above trough + X%.
-            trough = float(trade.get("trough_price") or entry_price)
-            if current_price < trough:
-                trough = current_price
-                try:
-                    db.table("virtual_trades").update(
-                        {"trough_price": trough}
-                    ).eq("id", trade["id"]).execute()
-                except Exception:
-                    pass
-            peak = entry_price  # not used for SHORT trail calc
-            # SHORT trailing: active when position has been 3%+ profitable (price dropped 3%+ from entry)
-            trailing_active = trough <= entry_price * 0.97
-            trail_pct = settings.brain_short_trail_pct / 100
-            # For shorts: trail is ABOVE trough (price rising back toward us = danger)
-            soft_trail = trough * (1 + trail_pct * 0.6) if trailing_active else None
-            hard_trail = trough * (1 + trail_pct) if trailing_active else None
-        else:
-            # LONG: track highest price (peak). Trail fires when price DROPS below peak - X%.
-            peak = float(trade.get("peak_price") or entry_price)
-            if current_price > peak:
-                peak = current_price
-                try:
-                    db.table("virtual_trades").update(
-                        {"peak_price": peak}
-                    ).eq("id", trade["id"]).execute()
-                except Exception:
-                    pass
-            trough = entry_price  # not used for LONG trail calc
-            trailing_active = peak >= entry_price * 1.03
-            if horizon == "LONG":
-                soft_pct = 1.0 - settings.horizon_long_trail_pct / 100 * 0.6
-                hard_pct = 1.0 - settings.horizon_long_trail_pct / 100
-            else:
-                soft_pct = 0.97
-                hard_pct = 0.95
-            # Floor at entry_price — once up 3%+, worst exit is breakeven (RRX Day 9 fix).
-            soft_trail = max(peak * soft_pct, entry_price) if trailing_active else None
-            hard_trail = max(peak * hard_pct, entry_price) if trailing_active else None
-
-        thesis_status = (trade.get("thesis_last_status") or "").lower()
-
-        # Determine exit reason (priority: stop > hard_trail > soft_trail > target > time)
-        # Uses direction-aware helpers for stop/target checks.
-        exit_reason = None
-        if stop and _is_stop_hit(current_price, stop, direction):
-            exit_reason = "STOP_HIT"
-            stops_hit += 1
-        elif trailing_active and direction == "SHORT" and current_price >= hard_trail:
-            # SHORT hard trailing stop — price bounced back above trough + trail_pct
-            exit_reason = "TRAILING_STOP"
-            profit_takes += 1
-            logger.info(
-                f"Virtual TRAILING STOP (hard, SHORT): {symbol} at {pnl_pct:+.1f}% "
-                f"(trough ${trough:.2f}, hard trail ${hard_trail:.2f}, now ${current_price:.2f})"
-            )
-            notifications.append(("brain_sell", {
-                "symbol": symbol, "price": f"{current_price:.2f}",
-                "pnl": f"{pnl_pct:+.1f}",
-                "reason": f"Short trailing stop (trough ${trough:.2f}, bounced {trail_pct*100:.0f}%)",
-                "entry_score": str(trade.get("entry_score", 0)),
-                "exit_score": str(current_scores.get(symbol, 0)),
-                "verdict": "Short trailing stop — price bouncing back, locking in gains.",
-            }))
-        elif trailing_active and direction != "SHORT" and current_price <= hard_trail:
-            # Hard trailing stop — always fires, no thesis check.
-            # 5% from peak means something real is happening.
-            exit_reason = "TRAILING_STOP"
-            profit_takes += 1
-            logger.info(
-                f"Virtual TRAILING STOP (hard): {symbol} at {pnl_pct:+.1f}% "
-                f"(peak ${peak:.2f}, hard trail ${hard_trail:.2f}, now ${current_price:.2f})"
-            )
-            notifications.append(("brain_sell", {
-                "symbol": symbol, "price": f"{current_price:.2f}",
-                "pnl": f"{pnl_pct:+.1f}",
-                "reason": f"Trailing stop (peak ${peak:.2f}, dropped 5% — hard exit)",
-                "entry_score": str(trade.get("entry_score", 0)),
-                "exit_score": str(current_scores.get(symbol, 0)),
-                "verdict": "Hard trailing stop fired — 5% drop from peak.",
-            }))
-        elif trailing_active and soft_trail is not None and (
-            (direction == "SHORT" and current_price >= soft_trail)
-            or (direction != "SHORT" and current_price <= soft_trail)
-        ):
-            # Soft trailing stop — thesis-gated.
-            # If thesis is valid, this is just noise. Hold.
-            # If thesis is weakening/invalid, price confirms — exit.
-            ref_label = f"trough ${trough:.2f}" if direction == "SHORT" else f"peak ${peak:.2f}"
-            if thesis_status == "valid":
-                logger.info(
-                    f"Virtual TRAILING STOP suppressed for {symbol} — thesis still valid "
-                    f"({ref_label}, soft trail ${soft_trail:.2f}, now ${current_price:.2f}, "
-                    f"P&L {pnl_pct:+.1f}%). Holding through noise."
-                )
-            else:
-                exit_reason = "TRAILING_STOP"
-                profit_takes += 1
-                logger.info(
-                    f"Virtual TRAILING STOP (soft, thesis={thesis_status}): {symbol} at {pnl_pct:+.1f}% "
-                    f"({ref_label}, soft trail ${soft_trail:.2f}, now ${current_price:.2f})"
-                )
-                notifications.append(("brain_sell", {
-                    "symbol": symbol, "price": f"{current_price:.2f}",
-                    "pnl": f"{pnl_pct:+.1f}",
-                    "reason": f"Trailing stop ({ref_label}, thesis {thesis_status})",
-                    "entry_score": str(trade.get("entry_score", 0)),
-                    "exit_score": str(current_scores.get(symbol, 0)),
-                    "verdict": f"Thesis was {thesis_status}, price move confirmed — locked in gains.",
-                }))
-        elif target and _is_target_hit(current_price, target, direction):
-            # Suppress TARGET_HIT for young, winning positions — let the
-            # trailing stop manage the exit instead. After 7 days, the
-            # fixed target fires to close the trade.
-            if days_held < 7 and pnl_pct > 3.0 and trailing_active:
-                logger.info(
-                    f"Virtual TARGET_HIT suppressed for {symbol} — "
-                    f"held {days_held}d, P&L {pnl_pct:+.1f}%, trailing stop active "
-                    f"(letting winner run, trail at ${soft_trail:.2f})"
-                )
-                continue  # skip this exit, trailing stop will manage
-            exit_reason = "TARGET_HIT"
-            targets_hit += 1
-        elif days_held >= (
-            settings.brain_short_expiry_days if direction == "SHORT"
-            else settings.horizon_long_expiry_days if (trade.get("trade_horizon") or "SHORT") == "LONG"
-            else settings.horizon_short_expiry_days
-        ):
-            exit_reason = "TIME_EXPIRED"
-            expired += 1
-
-        # ── Quality prune: cut bad entries early ──
-        # If no price-based exit triggered, check if this position is
-        # dead weight that should be freed up. A portfolio manager
-        # wouldn't hold a losing position with a deteriorating thesis
-        # for 30 days waiting for the stop — they'd cut it early and
-        # redeploy the slot.
-        #
-        # Conditions (ALL must be true):
-        #   • No other exit triggered (stop/trail/target didn't fire)
-        #   • Position is DOWN from entry (pnl < 0)
-        #   • Held 2-7 days (give it a chance, but don't wait forever)
-        #   • Claude's latest signal is NOT BUY (the AI doesn't want it)
-        #   • Thesis is weakening or invalid (the reason is degrading)
-        #
-        # This catches: BLK -1.40% (day 1, Claude=HOLD, bearish),
-        # VZ -1.80% (day 1, Claude=HOLD, falling knife). It does NOT
-        # catch positions with valid thesis or positions Claude still
-        # likes — those deserve time to play out.
-        # LONG positions skip quality prune — they're held for the trend,
-        # not for short-term score confirmation. Only thesis=invalid or
-        # the hard stop closes a LONG position early.
-        if not exit_reason and trade.get("source") == "brain" and horizon != "LONG":
-            latest_action = current_actions.get(symbol)
-
-            # Magnitude gate: only prune when the loss is meaningful.
-            # Without this, the rule fires on −0.5% drawdowns that would
-            # likely recover, locking in trivial losses + churning slots.
-            # Threshold mirrors the trailing-stop activation (3% from
-            # entry) — symmetric: positions up 3% start ratcheting trails,
-            # positions down 3% start being pruned. See
-            # `brain_quality_prune_min_loss_pct` in config.
-            if (
-                pnl_pct < -settings.brain_quality_prune_min_loss_pct
-                and 2 <= days_held <= 7
-                and thesis_status in ("weakening", "invalid", "")
-                and latest_action in ("HOLD", "AVOID", "SELL", None)
-            ):
-                exit_reason = "QUALITY_PRUNE"
-                logger.info(
-                    f"Virtual QUALITY PRUNE: {symbol} at {pnl_pct:+.1f}% "
-                    f"(held {days_held}d, thesis={thesis_status or 'none'}, "
-                    f"latest_action={latest_action}) — freeing slot for better pick"
-                )
-                notifications.append(("brain_sell", {
-                    "symbol": symbol, "price": f"{current_price:.2f}",
-                    "pnl": f"{pnl_pct:+.1f}",
-                    "reason": f"Quality prune (thesis {thesis_status or 'none'}, {days_held}d held)",
-                    "entry_score": str(trade.get("entry_score", 0)),
-                    "exit_score": str(current_scores.get(symbol, 0)),
-                    "verdict": "Position underperforming with deteriorating thesis — slot freed for stronger pick.",
-                }))
-
-        # ── STAGNATION_PRUNE: LONG/LONG dead-capital detection (Day 14) ──
-        # Targets REGN-type holds: week+ with no meaningful movement and the
-        # thesis drifting weakening/invalid. Distinct from QUALITY_PRUNE
-        # (which needs pnl < 0 and days 2-7) — this catches the flat dead
-        # trades that sit in a slot producing ~0% for weeks. Preserves real
-        # LONG winners by requiring |pnl| < 2% (winners up 3%+ don't match).
-        if (
-            not exit_reason
-            and trade.get("source") == "brain"
-            and direction == "LONG"
-            and horizon == "LONG"
-            and days_held >= settings.brain_stagnation_min_days
-            and abs(pnl_pct) < settings.brain_stagnation_pnl_range_pct
-            and thesis_status in ("weakening", "invalid")
-        ):
-            exit_reason = "STAGNATION_PRUNE"
-            logger.info(
-                f"Virtual STAGNATION PRUNE: {symbol} at {pnl_pct:+.2f}% "
-                f"(held {days_held}d, thesis={thesis_status}, "
-                f"|pnl| < {settings.brain_stagnation_pnl_range_pct}% for a week+) — "
-                f"dead capital, freeing slot"
-            )
-            notifications.append(("brain_sell", {
-                "symbol": symbol, "price": f"{current_price:.2f}",
-                "pnl": f"{pnl_pct:+.2f}",
-                "reason": f"Stagnation prune (held {days_held}d, thesis {thesis_status}, no meaningful movement)",
-                "entry_score": str(trade.get("entry_score", 0)),
-                "exit_score": str(current_scores.get(symbol, 0)),
-                "verdict": "Position has gone nowhere for a week+ with deteriorating thesis — freeing slot for something that moves.",
-            }))
-
-        if not exit_reason:
-            continue
-
-        # Stage 6 gate: if the thesis is still valid, suppress this
-        # price-based exit as noise. The catastrophic carve-out at
-        # settings.brain_thesis_hard_stop_pct still fires unconditionally.
-        # Only applied to brain trades (watchlist track is exploratory
-        # and doesn't carry a thesis).
-        if trade.get("source") == "brain" and _exit_is_thesis_protected(trade, exit_reason, pnl_pct):
-            logger.info(
-                f"Virtual {exit_reason} SUPPRESSED for {symbol} — thesis still valid "
-                f"(P&L {pnl_pct:+.1f}%, holding through the noise)"
-            )
-            _rollback_counter(exit_reason)
-            continue
-
-        is_win = pnl_pct > 0
-        source = trade.get("source", "watchlist")
-        exit_score = current_scores.get(symbol)
-
-        # Route through close_virtual_trade — wallet settlement, learning
-        # loop, and DB update all happen in one place. The pnl_pct used
-        # above for thesis gating is the same per-share % the helper
-        # computes internally. If the row was closed by another path
-        # between our SELECT and the UPDATE, the helper returns
-        # skipped=True and we roll back the counter we pre-incremented.
-        close_res = close_virtual_trade(
-            trade, current_price, exit_reason, exit_score,
-            exit_date_iso=now_iso,
-        )
+        close_res = close_virtual_trade(trade, float(current_price), decision.reason, None, exit_date_iso=now_iso)
         if close_res.get("skipped"):
-            _rollback_counter(exit_reason)
             continue
-
-        emoji = "✅" if is_win else "❌"
+        counters[bucket.get(decision.reason, "expired")] += 1
         logger.info(
-            f"Virtual EXIT [{source}]: {emoji} {symbol} @ ${current_price:.2f} "
-            f"(entry ${entry_price:.2f}, P&L {pnl_pct:+.1f}%, reason={exit_reason}, exit_score={exit_score})"
+            f"Virtual EXIT [{trade.get('source')}]: {symbol} {decision.reason} @ {current_price:.4f} "
+            f"(P&L {close_res['pnl_pct']:+.2f}%, ${close_res['pnl_amount_stored']:+.2f}; {decision.detail})"
         )
+        if trade.get("source") == "brain":
+            notifications.append(("brain_sell", {
+                "symbol": symbol, "price": f"{current_price:.2f}",
+                "pnl": f"{close_res['pnl_pct']:+.1f}",
+                "reason": f"{decision.reason}: {decision.detail}",
+                "entry_score": str(trade.get("entry_score", 0)), "exit_score": "-",
+                "verdict": f"{'✅ Win' if close_res['is_win'] else '❌ Loss'} — logged for learning.",
+            }))
 
-    total = stops_hit + targets_hit + profit_takes + expired
-    if total:
-        logger.info(f"Virtual exits: {stops_hit} stops, {targets_hit} targets, {profit_takes} profit takes, {expired} expired")
-
-    return {"stops_hit": stops_hit, "targets_hit": targets_hit, "profit_takes": profit_takes, "expired": expired}
+    if any(counters.values()):
+        logger.info(f"Virtual exits: {counters}")
+    return counters
 
 
 _vp_cache = TTLCache(max_size=2, default_ttl=300)
@@ -3273,8 +2149,8 @@ def get_virtual_summary() -> dict:
         db.table("virtual_trades")
         .select("symbol, entry_price, entry_date, entry_score, bucket, signal_style, source, "
                 "target_price, stop_loss, thesis_last_status, tier_reason, trade_horizon, "
-                "direction, consecutive_avoid_count, "
-                "shares, position_size_usd, is_wallet_trade")
+                "direction, consecutive_avoid_count, initial_stop, entry_rr, sector, "
+                "shares, position_size_usd, is_wallet_trade, currency, fx_to_usd_entry")
         .eq("status", "OPEN")
         .order("entry_date", desc=True)
         .execute()
@@ -3345,7 +2221,7 @@ def get_virtual_summary() -> dict:
             snippet = thesis_reason[:120].strip()
             return f"Watchdog: bearish sentiment + price drop" + (f". {snippet}" if snippet else "")
         if reason == "TIME_EXPIRED":
-            return "Held maximum 30 days without hitting target or stop"
+            return f"Held the maximum {settings.brain_max_hold_days} days without hitting target or stop"
         if reason == "QUALITY_PRUNE":
             thesis = t.get("thesis_last_status") or "none"
             return f"Pruned: losing position with {thesis} thesis — slot freed for a stronger pick"
@@ -3442,6 +2318,11 @@ def get_virtual_summary() -> dict:
             "is_wallet_trade": is_wallet,
             "shares": round(shares_open, 6) if shares_open else None,
             "position_size_usd": round(position_size_usd, 2) if position_size_usd else None,
+            "initial_stop": t.get("initial_stop"),
+            "entry_rr": t.get("entry_rr"),
+            "sector": t.get("sector"),
+            "currency": t.get("currency") or native_currency(symbol),
+            "fx_to_usd": _row_fx(t) if is_wallet else 1.0,
         }
 
         if current:
@@ -3454,8 +2335,16 @@ def get_virtual_summary() -> dict:
             # the UI can show "+$42.15" without re-deriving shares. For
             # legacy trades it stays per-share (1 implicit share).
             if is_wallet and shares_open > 0:
-                enriched["unrealized_pnl_amount"] = round(per_share_pnl * shares_open, 2)
-                enriched["current_position_value"] = round(current * shares_open, 2)
+                fx_now = enriched["fx_to_usd"]
+                value_usd = _mark_to_market_one(
+                    entry_price=entry_price, current_price=current, direction=_d,
+                    is_wallet_trade=True, shares=shares_open, fx=fx_now,
+                )
+                if _d == "SHORT":
+                    enriched["unrealized_pnl_amount"] = round(value_usd, 2)
+                else:
+                    enriched["unrealized_pnl_amount"] = round(value_usd - position_size_usd, 2)
+                    enriched["current_position_value"] = round(value_usd, 2)
             else:
                 enriched["unrealized_pnl_amount"] = round(per_share_pnl, 2)
 
@@ -3740,6 +2629,19 @@ def snapshot_virtual_portfolio() -> dict:
     spy_data = _fetch_prices_batch(["SPY"])
     spy_price, _ = spy_data.get("SPY", (None, None))
 
+    # Wallet equity (USD, mark-to-market), peak ratchet and the daily
+    # reconciliation (cash + open cost basis == deposits + realized P&L).
+    brain_equity = None
+    try:
+        from app.services import wallet as wallet_svc
+        wallet_info = summary.get("wallet") or {}
+        if wallet_info.get("total_value") is not None:
+            brain_equity = float(wallet_info["total_value"])
+            wallet_svc.update_peak_equity(None, brain_equity)
+        wallet_svc.reconcile_wallet()
+    except Exception as e:
+        logger.warning(f"Snapshot equity/reconcile step failed: {e}")
+
     snapshot = {
         "snapshot_date": today,
         "brain_open": summary.get("brain", {}).get("open_count", 0),
@@ -3751,8 +2653,17 @@ def snapshot_virtual_portfolio() -> dict:
         "spy_price": spy_price,
     }
 
-    # Upsert by snapshot_date
-    db.table("virtual_snapshots").upsert(snapshot, on_conflict="snapshot_date").execute()
+    # Upsert by snapshot_date (brain_equity column added in migration 006)
+    if brain_equity is not None:
+        snapshot["brain_equity"] = round(brain_equity, 2)
+    try:
+        db.table("virtual_snapshots").upsert(snapshot, on_conflict="snapshot_date").execute()
+    except Exception as e:
+        if "brain_equity" not in snapshot:
+            raise
+        logger.warning(f"Snapshot upsert with brain_equity failed ({e}); retrying without it")
+        snapshot.pop("brain_equity", None)
+        db.table("virtual_snapshots").upsert(snapshot, on_conflict="snapshot_date").execute()
     logger.info(f"Virtual snapshot saved for {today}: brain_cum={brain_cum:+.1f}%, watchlist_cum={watchlist_cum:+.1f}%")
 
     return snapshot

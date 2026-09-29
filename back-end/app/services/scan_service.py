@@ -31,14 +31,16 @@ reported to the scans table for the frontend's progress bar.
     • Load ~270 hardcoded tickers from `universe.get_all_tickers()`.
     • Add brain-discovered tickers from the DB (positions the brain
       bought that aren't in the core universe).
-    • Add discovered trending tickers via `universe.discover_tickers()`
-      (Yahoo Finance screeners — most active, day gainers, etc.)
-      ONLY for PRE_MARKET / MANUAL scans (rate limit).
+    • Add discovered tickers via `universe.discover_tickers()`
+      (Yahoo screeners: undervalued_large_caps, growth_technology_stocks;
+      most_actives only behind settings.discovery_include_most_actives;
+      day_gainers removed — it chased moves).
     • Bulk-fetch screening data via `market_scanner.get_bulk_screening`
-      (price, volume, day_change for all tickers in one call).
-    • Filter to top 50 candidates via `prefilter_candidates` based on
-      volume >= 200K, price >= $1, |day_change| >= 1%. Crypto gets
-      5 reserved slots so equities don't crowd them out.
+      (1y daily bars -> price, volume, trend features).
+    • Filter to top 50 candidates via `prefilter_candidates`: volume
+      >= 200K and price >= $1, ranked by TREND QUALITY (price vs
+      SMA50/200, 3-month return ex-last-week, RSI) — not by today's
+      move. Crypto gets 5 reserved slots.
 
   PHASE 2 — Macro snapshot  (15-20%)
   -----------------------------------
@@ -92,13 +94,15 @@ reported to the scans table for the frontend's progress bar.
       • Fetch Barchart options flow (free, all candidates).
       • Run AI synthesis via `provider.synthesize_signal` (Claude Local
         → Claude API → Gemini fallback chain).
-      • Classify ai_status: validated / low_confidence / failed.
+      • Classify ai_status: validated (AI said BUY, conf >= 60) /
+        low_confidence / rejected (AI not BUY) / failed.
       • Update AI retry queue (clear on success, add on failure).
       • Compute final score with all components.
       • Run blockers check.
-      • Detect contrarian signal style.
+      • Detect contrarian signal style (descriptive only — no BUY bypass).
       • Determine action (BUY/HOLD/SELL/AVOID), with low-confidence /
-        failed-AI BUY auto-downgraded to HOLD.
+        rejected / failed-AI BUY auto-downgraded to HOLD, and BUY ->
+        HOLD inside the earnings blackout.
       • Check GEM conditions.
       • Determine status vs previous signal.
       • Build the signal_data dict.
@@ -161,12 +165,14 @@ DATA FLOW SUMMARY
 import asyncio
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
 from app.ai import provider as ai_provider
 from app.ai.signal_engine import (
     check_blockers,
+    check_entry_blackout,
     check_gem,
     compute_factor_labels,
     compute_probability_vs_spy,
@@ -179,6 +185,7 @@ from app.db import queries
 from app.notifications.telegram_bot import send_gem_alert, send_scan_digest, send_watchlist_sell_alert
 from app.scanners import barchart_scanner, indicators, macro_scanner, market_scanner
 from app.scanners.prefilter import prefilter_candidates
+from app.signals.earnings import get_earnings_context
 
 # Ticker universe — hardcoded for now, could move to DB
 from app.scanners.universe import get_all_tickers, get_asset_class, get_exchange
@@ -419,29 +426,53 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 ticker,
             )
             try:
-                bucket = _classify_bucket(ticker, screening_data.get(ticker, {}))
-                if market_regime == "CRISIS" and bucket == "HIGH_RISK":
+                # Cheap early exit: names we already KNOW are HIGH_RISK
+                # (crypto, leveraged ETFs, stored/hardcoded buckets) are
+                # skipped in CRISIS before any fetch.
+                known = _known_bucket(ticker)
+                if market_regime == "CRISIS" and known == "HIGH_RISK":
                     return None
 
+                exchange = get_exchange(ticker)
+                fetch_earnings = get_asset_class(ticker) == "STOCK"
                 async with yfinance_sem:
-                    price_df, fundamental_data = await asyncio.gather(
+                    coros = [
                         market_scanner.get_price_history(ticker, "1y"),
                         market_scanner.get_fundamentals(ticker),
-                    )
+                    ]
+                    if fetch_earnings:
+                        coros.append(get_earnings_context(ticker))
+                    fetched = await asyncio.gather(*coros)
+                price_df, fundamental_data = fetched[0], fetched[1]
+                earnings_ctx = fetched[2] if fetch_earnings else None
 
-                technical_data = indicators.compute_indicators(price_df)
+                # Copy: get_fundamentals returns the cached dict object.
+                fundamental_data = dict(fundamental_data or {})
+                # Bucket from REAL fundamentals (sector / dividend / mcap).
+                bucket = _classify_bucket(ticker, fundamental_data)
+                if market_regime == "CRISIS" and bucket == "HIGH_RISK":
+                    return None
+                asset_class = _asset_class(ticker, fundamental_data)
+                if asset_class == "STOCK":
+                    _merge_earnings(fundamental_data, earnings_ctx, exchange)
+
+                # Indicators on COMPLETED bars only (drops today's
+                # in-progress bar while the session is open).
+                technical_data = indicators.compute_indicators(price_df, exchange=exchange)
                 # Quick score: technicals + fundamentals + macro only, no AI
                 quick_score, _ = compute_score(
-                    technical_data, fundamental_data or {}, macro_data,
-                    {}, {}, bucket, market_regime,
+                    technical_data, fundamental_data, macro_data,
+                    {}, {}, bucket, market_regime, asset_class,
                 )
                 # Stash for PASS 2 reuse
                 prescore_cache[ticker] = {
                     "price_df": price_df,
-                    "fundamental_data": fundamental_data or {},
+                    "fundamental_data": fundamental_data,
                     "technical_data": technical_data,
+                    "bucket": bucket,
+                    "asset_class": asset_class,
                 }
-                return (ticker, quick_score, bucket, technical_data, fundamental_data or {})
+                return (ticker, quick_score, bucket, technical_data, fundamental_data)
             except Exception as e:
                 logger.debug(f"Pre-score failed {ticker}: {e}")
                 return None
@@ -621,22 +652,32 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         # ── Generate tech-only signals for skipped candidates ──
         _update_progress(80, "saving", "Building tech-only signals...")
         for ticker, quick_score, bucket, technical_data, fundamental_data in skip_candidates:
-            from app.scanners.universe import get_exchange
             exchange = get_exchange(ticker)
-            action = score_to_action(quick_score, bucket)
+            action, tech_block_reasons = _tech_only_action(
+                quick_score, bucket, technical_data, fundamental_data, macro_data,
+            )
+            if tech_block_reasons:
+                logger.info(f"{ticker} (tech-only): {action} — {'; '.join(tech_block_reasons)}")
             prev = previous_signals.get(ticker)
             status = determine_status(action, quick_score, prev)
+            _cached = prescore_cache.get(ticker) or {}
 
             signal_data = {
                 "scan_id": scan_id,
                 "symbol": ticker,
-                "asset_type": get_asset_class(ticker),
+                "asset_type": _cached.get("asset_class") or get_asset_class(ticker),
                 "exchange": exchange,
                 "action": action,
                 "status": status,
                 "score": quick_score,
                 "confidence": 0,
+                # Tech-only signals are NEVER "validated": AI never ran.
+                # The brain must not auto-buy on "skipped".
                 "ai_status": "skipped",
+                "ai_signal": None,
+                "ai_provider": None,
+                "p_win": None,
+                "sentiment_citations": 0,
                 "is_gem": False,
                 "bucket": bucket,
                 "price_at_signal": technical_data.get("current_price"),
@@ -645,7 +686,10 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 "risk_reward": None,
                 "catalyst": None,
                 "sentiment_score": 50,
-                "reasoning": "Technical + fundamental analysis only (AI skipped — below pre-score threshold)",
+                "reasoning": (
+                    "Technical + fundamental analysis only (AI skipped — below pre-score threshold)"
+                    + (f". {'; '.join(tech_block_reasons)}" if tech_block_reasons else "")
+                ),
                 "technical_data": technical_data,
                 "fundamental_data": fundamental_data,
                 "macro_data": macro_data,
@@ -704,22 +748,28 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             })
 
         # Phase 7: Virtual portfolio tracking
+        #
+        # Exit checks (stop / target / time) must run on EVERY scan — they
+        # used to sit inside `if valid_signals:`, so a scan that produced
+        # no signals (AI outage, empty pre-filter) never checked stops.
+        # Signal-driven steps (pending reviews, new trades, thesis re-eval)
+        # still need signals and stay gated.
+        from app.services.virtual_portfolio import (
+            check_virtual_exits,
+            flush_brain_notifications,
+            new_notification_queue,
+            process_pending_reviews,
+            process_virtual_trades,
+        )
+
+        # Create a scan-local brain notification queue. All virtual_portfolio
+        # functions in this scan append into this queue, and flush drains it
+        # at the end. This is per-scan state — concurrent scans get
+        # independent queues, so notifications can never be mixed between
+        # scans, lost, or duplicated across runs.
+        brain_notifications = new_notification_queue()
+
         if valid_signals:
-            from app.services.virtual_portfolio import (
-                check_virtual_exits,
-                flush_brain_notifications,
-                new_notification_queue,
-                process_pending_reviews,
-                process_virtual_trades,
-            )
-
-            # Create a scan-local brain notification queue. All virtual_portfolio
-            # functions in this scan append into this queue, and flush drains it
-            # at the end. This is per-scan state — concurrent scans get
-            # independent queues, so notifications can never be mixed between
-            # scans, lost, or duplicated across runs.
-            brain_notifications = new_notification_queue()
-
             # First: process any positions flagged for review during prior
             # pre-market scans. If their fresh signal is still SELL/AVOID, the
             # flag is cleared so the SELL flow below can execute. If recovered,
@@ -741,11 +791,6 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             # price-based stops/targets/profit-takes/time). This ordering
             # matters: thesis_invalidated closes set status='CLOSED' so the
             # subsequent stop/target sweep skips them via the OPEN guard.
-            #
-            # The thesis re-eval also persists thesis_last_status on every
-            # OPEN row, which check_virtual_exits then reads via
-            # _exit_is_thesis_protected to suppress noise exits when the
-            # thesis is still valid (catastrophic carve-out at hard_stop_pct).
             try:
                 from app.services import thesis_tracker
                 thesis_results = await thesis_tracker.reevaluate_open_theses(
@@ -764,18 +809,18 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             except Exception as e:
                 logger.warning(f"Thesis tracker failed (scan continues): {e}")
 
-            # Check stop/target/time exits on all open virtual trades.
-            # These now read pos.thesis_last_status (set above) and
-            # suppress themselves when the thesis is still valid, except
-            # for the catastrophic stop carve-out at hard_stop_pct.
+        # Check stop/target/time exits on all open virtual trades — ALWAYS.
+        try:
             vt_exits = check_virtual_exits(brain_notifications)
             if any(vt_exits.values()):
                 logger.info(f"Virtual exits: {vt_exits}")
+        except Exception as e:
+            logger.error(f"check_virtual_exits failed (scan continues): {e}")
 
-            # Send all queued brain Telegram notifications for this scan
-            sent_count = await flush_brain_notifications(brain_notifications)
-            if sent_count:
-                logger.info(f"Brain: sent {sent_count} Telegram notifications")
+        # Send all queued brain Telegram notifications for this scan
+        sent_count = await flush_brain_notifications(brain_notifications)
+        if sent_count:
+            logger.info(f"Brain: sent {sent_count} Telegram notifications")
 
         # Phase 8: Monitor positions (95-100%)
         _update_progress(95, "monitoring", "Checking positions...")
@@ -849,9 +894,9 @@ async def _process_candidate(
 
     This is what fires for every ticker that made the top-15 cut for AI
     analysis. Tech-only signals (the 35 below the cut) take a much
-    cheaper path inline in `run_scan` — they don't go through this
-    function and skip AI synthesis, blockers check, and contrarian
-    detection entirely.
+    cheaper path inline in `run_scan` — they skip AI synthesis and
+    contrarian detection, but DO run blockers + the earnings blackout
+    (`_tech_only_action`) and are never ai_status="validated".
 
     Concurrency model:
 
@@ -923,7 +968,14 @@ async def _process_candidate(
     """
     logger.debug(f"Processing {ticker}...")
 
-    bucket = _classify_bucket(ticker, screening_data.get(ticker, {}))
+    exchange = get_exchange(ticker)
+    if prescore_data is not None and prescore_data.get("bucket"):
+        bucket = prescore_data["bucket"]
+    else:
+        # Without PASS 1 data we need fundamentals before classifying.
+        async with yfinance_sem:
+            _fund = await market_scanner.get_fundamentals(ticker)
+        bucket = _classify_bucket(ticker, dict(_fund or {}))
 
     # ── Fetch market data (yfinance, sentiment, options) ──
     # Reuse PASS 1's price/fundamentals when available — skips ~2 yfinance
@@ -957,13 +1009,15 @@ async def _process_candidate(
                 ai_provider.analyze_sentiment(ticker),
                 barchart_scanner.get_options_flow(ticker),
             )
-        fundamental_data = fundamental_data or {}
+        fundamental_data = dict(fundamental_data or {})
+        if _asset_class(ticker, fundamental_data) == "STOCK":
+            _merge_earnings(fundamental_data, await get_earnings_context(ticker), exchange)
 
     # Compute technicals (CPU-only, no I/O). Reuse PASS 1's result if present.
     if prescore_data is not None:
         technical_data = prescore_data["technical_data"]
     else:
-        technical_data = indicators.compute_indicators(price_df)
+        technical_data = indicators.compute_indicators(price_df, exchange=exchange)
 
     # Inject regime context + brain knowledge into grok_data for AI prompt
     if isinstance(grok_data, dict):
@@ -1006,18 +1060,15 @@ async def _process_candidate(
         synthesis = await ai_provider.synthesize_signal(
             ticker, technical_data, fundamental_data, macro_data, grok_data,
         )
+        synthesis = await _confirm_buy_with_decision_model(
+            ticker, synthesis, technical_data, fundamental_data, macro_data, grok_data,
+        )
 
-    # Classify AI status — honest data instead of inferring from confidence==0
-    # validated     = AI ran, confidence >= 50
-    # low_confidence = AI ran, confidence < 50 (but > 0)
-    # failed        = AI tried, all providers errored or over budget
-    synthesis_confidence = synthesis.get("confidence", 0) or 0
-    if synthesis.get("error"):
-        ai_status = "failed"
-    elif synthesis_confidence >= 50:
-        ai_status = "validated"
-    else:
-        ai_status = "low_confidence"
+    # Classify AI status — see `_classify_ai_status` for the rules.
+    # "validated" now REQUIRES Claude to have said BUY with enough
+    # confidence; previously any confidence >= 50 counted, so a confident
+    # HOLD/AVOID from Claude still validated a score-driven BUY.
+    ai_status = _classify_ai_status(synthesis)
 
     # Update AI retry queue based on synthesis result
     from app.services import ai_retry_queue
@@ -1028,7 +1079,7 @@ async def _process_candidate(
         ai_retry_queue.clear_success(ticker)
 
     # Score (with regime context)
-    asset_class = get_asset_class(ticker)
+    asset_class = (prescore_data or {}).get("asset_class") or _asset_class(ticker, fundamental_data)
     score, breakdown = compute_score(
         technical_data, fundamental_data, macro_data,
         grok_data, synthesis, bucket, market_regime, asset_class,
@@ -1044,12 +1095,14 @@ async def _process_candidate(
     contrarian = detect_contrarian(technical_data, bucket)
     signal_style = contrarian["signal_style"]
 
-    # Determine action — contrarian signals can generate BUY even at lower scores
+    # Determine action. The old contrarian override turned any 3/4
+    # contrarian setup into a BUY at score >= 55, bypassing the bucket
+    # thresholds (62/65). Removed: contrarian is now descriptive
+    # (signal_style / contrarian_score) and must pass the same thresholds
+    # and AI validation as everything else.
     confidence = synthesis.get("confidence", 0) or 0
     if is_blocked:
         action = "AVOID"
-    elif contrarian["is_contrarian"] and contrarian["contrarian_score"] >= 60:
-        action = "BUY" if score >= 55 else "HOLD"
     else:
         action = score_to_action(score, bucket)
 
@@ -1073,6 +1126,12 @@ async def _process_candidate(
     if action == "BUY":
         if ai_status == "failed":
             logger.warning(f"{ticker}: BUY downgraded to HOLD (AI synthesis failed — all providers errored)")
+            action = "HOLD"
+        elif ai_status == "rejected":
+            logger.info(
+                f"{ticker}: BUY downgraded to HOLD (AI said {synthesis.get('signal')!r}, "
+                f"confidence {confidence}%)"
+            )
             action = "HOLD"
         elif ai_status == "low_confidence":
             logger.info(f"{ticker}: BUY downgraded to HOLD (low AI confidence {confidence}%)")
@@ -1133,16 +1192,36 @@ async def _process_candidate(
                 )
                 action = "HOLD"
 
+    # Earnings blackout: no NEW BUY right before a scheduled report.
+    # HOLD, not AVOID — held positions must not be sold because of it.
+    blackout_reason = check_entry_blackout(fundamental_data) if action == "BUY" else None
+    if blackout_reason:
+        logger.info(f"{ticker}: BUY downgraded to HOLD — {blackout_reason}")
+        action = "HOLD"
+
+    current_price = technical_data.get("current_price")
+
+    # Trade levels: Claude's target/stop are validated upstream and may be
+    # null. Fill missing ones from ATR and recompute R:R from the FINAL
+    # levels so Kelly, GEM and the brain all see one consistent set.
+    target_price, stop_loss, risk_reward, levels_source = _resolve_trade_levels(
+        current_price, technical_data.get("atr"),
+        synthesis.get("target_price"), synthesis.get("stop_loss"),
+        synthesis.get("risk_reward_ratio"),
+    )
+    if isinstance(grok_data, dict):
+        grok_data["_levels_source"] = levels_source
+
     # Check GEM (blocked signals can't be GEMs)
-    is_gem, gem_conditions = check_gem(score, grok_data, synthesis)
-    if is_blocked:
+    is_gem, gem_conditions = check_gem(
+        score, grok_data, {**synthesis, "risk_reward_ratio": risk_reward},
+    )
+    if is_blocked or blackout_reason or ai_status != "validated":
         is_gem = False
 
     # Determine status vs previous signal
     prev = previous_signals.get(ticker)
     status = determine_status(action, score, prev)
-
-    current_price = technical_data.get("current_price")
 
     # Persist Claude's raw signal + self_check alongside the rest of
     # grok_data so post-hoc audits can answer:
@@ -1161,27 +1240,37 @@ async def _process_candidate(
             grok_data["_self_check"] = synthesis["self_check"]
 
     # Build signal record
-    from app.scanners.universe import get_exchange
-    exchange = get_exchange(ticker)
     signal_data = {
         "scan_id": scan_id,
         "symbol": ticker,
-        "asset_type": get_asset_class(ticker),
+        "asset_type": asset_class,
         "exchange": exchange,
         "action": action,
         "status": status,
         "score": score,
         "confidence": synthesis.get("confidence", 0),
         "ai_status": ai_status,
+        # Claude's own verdict + which provider produced it + its win
+        # probability, as first-class columns (migration 005) so the
+        # brain can gate on them without digging into grok_data.
+        "ai_signal": (synthesis.get("signal") or None),
+        "ai_provider": synthesis.get("_provider"),
+        "p_win": _clean_p_win(synthesis.get("p_win")),
+        "sentiment_citations": (
+            len(grok_data.get("citations") or []) if isinstance(grok_data, dict) else 0
+        ),
         "is_gem": is_gem,
         "bucket": bucket,
         "price_at_signal": current_price,
-        "target_price": synthesis.get("target_price"),
-        "stop_loss": synthesis.get("stop_loss"),
-        "risk_reward": synthesis.get("risk_reward_ratio"),
+        "target_price": target_price,
+        "stop_loss": stop_loss,
+        "risk_reward": risk_reward,
         "catalyst": synthesis.get("catalyst"),
         "sentiment_score": int(grok_data.get("score", 50)),
-        "reasoning": synthesis.get("reasoning", ""),
+        "reasoning": (
+            (synthesis.get("reasoning") or "")
+            + (f"\n[Earnings blackout] {blackout_reason}" if blackout_reason else "")
+        ),
         "technical_data": technical_data,
         "fundamental_data": fundamental_data,
         "macro_data": macro_data,
@@ -1197,8 +1286,8 @@ async def _process_candidate(
         "factor_labels": compute_factor_labels(breakdown, bucket, asset_class),
     }
 
-    # Kelly position sizing (if actionable)
-    rr = synthesis.get("risk_reward_ratio")
+    # Kelly position sizing (if actionable) — uses the final R:R.
+    rr = risk_reward
     if action == "BUY" and rr and float(rr) > 0:
         from app.signals.kelly import calculate_kelly
         kelly = calculate_kelly(risk_reward=float(rr), score=score, regime=market_regime)
@@ -1212,94 +1301,318 @@ async def _process_candidate(
     return signal_data
 
 
-def _classify_bucket(ticker: str, screening: dict) -> str:
-    """Classify a ticker into SAFE_INCOME or HIGH_RISK.
+async def _confirm_buy_with_decision_model(
+    ticker: str,
+    synthesis: dict,
+    technical_data: dict,
+    fundamental_data: dict,
+    macro_data: dict,
+    grok_data: dict,
+) -> dict:
+    """Escalate a would-be-validated routine BUY to the decision model.
 
-    Priority: 1) stored bucket from tickers table (stable across scans),
-    2) hardcoded lists, 3) heuristic fallback.
+    The routine model (Sonnet) screens every candidate cheaply; only its BUYs
+    reach the decision model (Opus), whose answer replaces the routine one.
+    If the decision call fails, the BUY is kept but capped to low_confidence
+    so it can't auto-buy on an unconfirmed opinion.
     """
-    # 1. Check cached bucket map first (loaded once per scan, not per ticker)
-    if ticker in _bucket_cache:
-        return _bucket_cache[ticker]
+    if not settings.ai_decision_escalation or _classify_ai_status(synthesis) != "validated":
+        return synthesis
+    decision = await ai_provider.synthesize_signal(
+        ticker, technical_data, fundamental_data, macro_data, grok_data, tier="decision",
+    )
+    if decision.get("error"):
+        logger.warning(f"Decision model unavailable for {ticker}: {decision.get('error')} — BUY left unconfirmed")
+        return {
+            **synthesis,
+            "confidence": min(
+                float(synthesis.get("confidence") or 0),
+                settings.ai_validated_min_confidence - 1,
+            ),
+            "_decision": "unavailable",
+        }
+    logger.info(
+        f"Decision model [{ticker}]: routine BUY → {decision.get('signal')} "
+        f"confidence={decision.get('confidence')}"
+    )
+    return {**decision, "_routine_signal": synthesis.get("signal"), "_decision": "confirmed"}
 
-    # 2. Hardcoded classifications
+
+def _classify_ai_status(synthesis: dict) -> str:
+    """Classify the AI synthesis outcome for the brain's trust gate.
+
+      failed         — provider error, or confidence <= 0 (the synthesis
+                       layer defaults confidence to 0 on unparseable output)
+      rejected       — AI ran fine but its signal is not BUY. A confident
+                       HOLD/AVOID must never validate a score-driven BUY.
+      low_confidence — AI said BUY but confidence < ai_validated_min_confidence
+      validated      — AI said BUY with confidence >= ai_validated_min_confidence
+    """
+    synthesis = synthesis or {}
+    if synthesis.get("error"):
+        return "failed"
+    try:
+        confidence = float(synthesis.get("confidence") or 0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence <= 0:
+        return "failed"
+    signal = str(synthesis.get("signal") or "").strip().upper()
+    if signal != "BUY":
+        return "rejected"
+    if confidence < settings.ai_validated_min_confidence:
+        return "low_confidence"
+    return "validated"
+
+
+ATR_STOP_MULTIPLE = 2.0
+ATR_FALLBACK_RR = 2.0
+
+
+def _resolve_trade_levels(price, atr, target, stop, ai_rr):
+    """Final (target, stop, risk_reward, source) for a signal.
+
+    Keeps Claude's validated levels when present. Missing ones are filled
+    from ATR: stop = price - 2.0*ATR, target = price + 2*(price - stop).
+    R:R is always recomputed from the final levels, so it can't disagree
+    with them. Returns (None, None, None, "none") when unusable.
+    """
+    def _f(v):
+        try:
+            v = float(v)
+            return v if v > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    price, atr, target, stop = _f(price), _f(atr), _f(target), _f(stop)
+    if price is None:
+        return target, stop, _f(ai_rr), "ai" if (target and stop) else "none"
+    # Discard levels on the wrong side of price.
+    if stop is not None and stop >= price:
+        stop = None
+    if target is not None and target <= price:
+        target = None
+    source = "ai"
+    if stop is None and atr is not None and price - ATR_STOP_MULTIPLE * atr > 0:
+        stop = price - ATR_STOP_MULTIPLE * atr
+        source = "atr_fallback"
+    if target is None and stop is not None:
+        target = price + ATR_FALLBACK_RR * (price - stop)
+        source = "atr_fallback"
+    if target is None or stop is None:
+        return None, None, None, "none"
+    rr = round((target - price) / (price - stop), 2)
+    return round(target, 4), round(stop, 4), rr, source
+
+
+def _clean_p_win(value) -> float | None:
+    """p_win as a probability in [0, 1] (accepts 0-100 too), else None."""
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if 1.0 < v <= 100.0:
+        v = v / 100.0
+    if not (0.0 <= v <= 1.0):
+        return None
+    return round(v, 4)
+
+
+def _tech_only_action(
+    score: int,
+    bucket: str,
+    technical_data: dict,
+    fundamental_data: dict,
+    macro_data: dict,
+) -> tuple[str, list[str]]:
+    """Action for a tech-only (no AI) signal, with blockers applied.
+
+    Tech-only signals used to skip `check_blockers` entirely yet could
+    still be BUY. Now: blockers -> AVOID; earnings blackout -> BUY
+    becomes HOLD. (ai_status stays "skipped" — never "validated".)
+    """
+    is_blocked, reasons = check_blockers({}, fundamental_data or {}, macro_data or {}, technical_data or {})
+    if is_blocked:
+        return "AVOID", reasons
+    action = score_to_action(score, bucket)
+    if action == "BUY":
+        blackout = check_entry_blackout(fundamental_data or {})
+        if blackout:
+            return "HOLD", [blackout]
+    return action, []
+
+
+def _merge_earnings(
+    fundamental_data: dict,
+    ctx: dict | None,
+    exchange: str,
+    today=None,
+) -> dict:
+    """Write earnings context into fundamental_data (in place).
+
+    Sets the keys `compute_score` (PEAD / PRE_EARNINGS) and
+    `check_entry_blackout` read:
+      next_earnings_date, earnings_date, days_to_next_earnings,
+      trading_days_to_next_earnings, days_since_last_earnings,
+      last_eps_surprise_pct (PERCENT), earnings_drift_signal.
+    Falls back to the `.info`-derived `earnings_date` from
+    get_fundamentals when the earnings context has no next date.
+    """
+    from datetime import date as _date
+    from app.core.market_calendar import trading_days_until
+
+    ctx = ctx or {}
+    today = today or datetime.now(ZoneInfo("America/New_York")).date()
+    next_iso = ctx.get("next_earnings_date") or fundamental_data.get("earnings_date")
+    if next_iso:
+        try:
+            nd = _date.fromisoformat(str(next_iso)[:10])
+        except ValueError:
+            nd = None
+        if nd is not None and nd >= today:
+            fundamental_data["next_earnings_date"] = nd.isoformat()
+            fundamental_data["earnings_date"] = nd.isoformat()
+            fundamental_data["days_to_next_earnings"] = (nd - today).days
+            fundamental_data["trading_days_to_next_earnings"] = trading_days_until(exchange, nd, today)
+    if ctx.get("days_since_earnings") is not None:
+        fundamental_data["days_since_last_earnings"] = ctx["days_since_earnings"]
+    if ctx.get("earnings_surprise_pct") is not None:
+        fundamental_data["last_eps_surprise_pct"] = ctx["earnings_surprise_pct"]
+    if ctx.get("drift_signal"):
+        fundamental_data["earnings_drift_signal"] = ctx["drift_signal"]
+    return fundamental_data
+
+
+def _asset_class(ticker: str, fundamentals: dict | None) -> str:
+    """ETF / CRYPTO / STOCK — also recognises ETFs outside the hardcoded
+    list (discovered tickers) via Yahoo's quoteType."""
+    base = get_asset_class(ticker)
+    if base == "STOCK" and ((fundamentals or {}).get("quote_type") or "").upper() == "ETF":
+        return "ETF"
+    return base
+
+
+_ENERGY_TICKERS = {"CNQ.TO", "SU.TO", "CVE.TO", "ARX.TO", "IMO.TO", "BTE.TO",
+                   "WCP.TO", "TVE.TO", "ERF.TO",
+                   "XOM", "COP", "EOG", "SLB", "MPC", "OXY"}
+_MINING_TICKERS = {"ABX.TO", "FNV.TO", "WPM.TO", "NTR.TO", "K.TO",
+                   "TECK.TO", "FM.TO", "LUN.TO", "IVN.TO",
+                   "ABX", "FNV", "WPM", "NTR", "K", "NEM", "FCX"}
+_HIGH_RISK_TICKERS = {"WEED.TO", "ACB.TO", "TLRY.TO", "CRON.TO", "OGI.TO",
+                      "RIVN", "LCID", "PLTR", "RKLB", "IONQ", "SMCI",
+                      "MSTR", "SOUN", "HIMS", "COIN", "SOFI", "AFRM",
+                      "HOOD", "MRNA"} | _ENERGY_TICKERS | _MINING_TICKERS
+
+
+def _known_bucket(ticker: str) -> str | None:
+    """Bucket decidable WITHOUT fundamentals, or None.
+
+    Order: crypto / leveraged-inverse ETFs (hard overrides — a stale DB
+    row can't make TQQQ "safe"), then the stored bucket, then the
+    hardcoded lists.
+    """
+    from app.scanners.universe import _ETF_TICKERS, is_leveraged_or_inverse
+
     if ticker.endswith("-USD"):
         return "HIGH_RISK"
-
-    safe_suffixes = ["-UN.TO", "-B.TO", "-A.TO"]
-    from app.scanners.universe import _ETF_TICKERS
-    safe_etfs = _ETF_TICKERS | {"O", "PLD", "AMT", "SPY"}
-
-    if ticker in safe_etfs or any(ticker.endswith(s) for s in safe_suffixes):
-        return "SAFE_INCOME"
-
-    energy_tickers = {"CNQ.TO", "SU.TO", "CVE.TO", "ARX.TO", "IMO.TO", "BTE.TO",
-                      "WCP.TO", "TVE.TO", "ERF.TO",
-                      "XOM", "COP", "EOG", "SLB", "MPC", "OXY"}
-    mining_tickers = {"ABX.TO", "FNV.TO", "WPM.TO", "NTR.TO", "K.TO",
-                      "TECK.TO", "FM.TO", "LUN.TO", "IVN.TO",
-                      "ABX", "FNV", "WPM", "NTR", "K", "NEM", "FCX"}
-    high_risk_tickers = {"WEED.TO", "ACB.TO", "TLRY.TO", "CRON.TO", "OGI.TO",
-                         "RIVN", "LCID", "PLTR", "RKLB", "IONQ", "SMCI",
-                         "MSTR", "SOUN", "HIMS", "COIN", "SOFI", "AFRM",
-                         "HOOD", "MRNA"}
-    high_risk_tickers |= energy_tickers | mining_tickers
-
-    if ticker in high_risk_tickers:
+    if is_leveraged_or_inverse(ticker):
         return "HIGH_RISK"
+    if ticker in _bucket_cache:
+        return _bucket_cache[ticker]
+    safe_suffixes = ["-UN.TO", "-B.TO", "-A.TO"]
+    safe_etfs = _ETF_TICKERS | {"O", "PLD", "AMT", "SPY"}
+    if ticker in safe_etfs or any(ticker.endswith(sfx) for sfx in safe_suffixes):
+        return "SAFE_INCOME"
+    if ticker in _HIGH_RISK_TICKERS:
+        return "HIGH_RISK"
+    return None
 
-    # 3. Heuristic fallback. The brain's SAFE_INCOME bucket weights
-    # `dividend_reliability` 35% and skips Grok entirely (10% hardcoded
-    # neutral sentiment), so a growth stock dumped into SAFE_INCOME is
-    # mathematically capped near 60 and gets no sentiment signal. The
-    # rules below are ordered so growth-sector names beat token-dividend
-    # classifications:
-    #   1. Energy/Materials → HIGH_RISK
-    #   2. Tech/Comm/Consumer Cyclical → HIGH_RISK unless the dividend
-    #      is "meaningful" (>= 2% yield). Names like NVDA/AVGO/QCOM that
-    #      pay token <2% dividends still belong with growth peers, not
-    #      with telecom/utility income vehicles. Names like T (4.4%) and
-    #      BCE.TO (5.3%) DO belong with income.
-    #   3. div_yield >= 2% (any other sector) → SAFE_INCOME — meaningful
-    #      payout signals income vehicle (banks, REITs, dividend names).
-    #   4. mcap < $50B → HIGH_RISK
-    #   5. else → SAFE_INCOME
-    sector = (screening.get("sector") or "").strip()
-    sector_lower = sector.lower()
-    div_yield = screening.get("dividend_yield") or 0
-    mcap = screening.get("market_cap") or 0
 
-    high_risk_sectors_lower = {"technology", "communication services", "consumer cyclical"}
-    energy_materials_lower = {"energy", "basic materials", "materials"}
+def _has_classifying_fundamentals(f: dict | None) -> bool:
+    f = f or {}
+    return bool(
+        f.get("sector") or f.get("market_cap")
+        or (f.get("quote_type") or "").upper() == "ETF"
+    )
 
-    # 2% threshold — empirically the line where the dividend becomes
-    # the actual reason to own. Below 2%, the company's value is in
-    # growth/momentum and the SAFE_INCOME bucket's dividend weight will
-    # cap the score. Above 2%, the cash return is material.
-    MEANINGFUL_DIV_THRESHOLD = 0.02
 
-    if sector_lower in energy_materials_lower:
+def _classify_bucket(ticker: str, fundamentals: dict | None) -> str:
+    """Classify a ticker into SAFE_INCOME or HIGH_RISK.
+
+    Priority: 1) `_known_bucket` (crypto / leveraged ETFs / stored /
+    hardcoded), 2) heuristic on REAL fundamentals from
+    `market_scanner.get_fundamentals` (sector, dividend_yield as a
+    fraction, market_cap, quote_type).
+
+    The old version read sector/dividend_yield/market_cap from the bulk
+    screening row, which never contains them — every unknown ticker fell
+    through to SAFE_INCOME and that guess was persisted permanently.
+
+    If fundamentals are unavailable, return HIGH_RISK (the stricter BUY
+    threshold, and sentiment is fetched) WITHOUT persisting or caching,
+    so the next scan with real data classifies properly.
+    """
+    from app.scanners.universe import is_leveraged_or_inverse
+
+    known = _known_bucket(ticker)
+    if known is not None:
+        return known
+    if is_leveraged_or_inverse(ticker, fundamentals):
         bucket = "HIGH_RISK"
-    elif sector_lower in high_risk_sectors_lower and div_yield < MEANINGFUL_DIV_THRESHOLD:
-        bucket = "HIGH_RISK"
-    elif div_yield and div_yield >= MEANINGFUL_DIV_THRESHOLD:
-        bucket = "SAFE_INCOME"
-    elif 0 < mcap < 50_000_000_000:
-        bucket = "HIGH_RISK"
-    elif sector_lower in high_risk_sectors_lower:
-        bucket = "HIGH_RISK"
+    elif not _has_classifying_fundamentals(fundamentals):
+        logger.debug(f"{ticker}: no fundamentals — using HIGH_RISK for this scan (not persisted)")
+        return "HIGH_RISK"
     else:
-        bucket = "SAFE_INCOME"
+        bucket = _bucket_from_fundamentals(fundamentals)
 
     # Persist bucket so it's stable across scans
     try:
-        from app.scanners.universe import get_exchange
         queries.upsert_ticker(ticker, exchange=get_exchange(ticker), bucket=bucket)
     except Exception:
         pass
 
     _bucket_cache[ticker] = bucket
     return bucket
+
+
+def _bucket_from_fundamentals(fundamentals: dict) -> str:
+    """Heuristic bucket from real fundamentals.
+
+    SAFE_INCOME weights `dividend_reliability` 35% and skips Grok, so a
+    growth stock dumped there is mathematically capped near 60 and gets
+    no sentiment signal. Rules, in order:
+      1. Plain (non-leveraged) ETF → SAFE_INCOME (ETF weights)
+      2. Energy / Materials → HIGH_RISK
+      3. Tech / Comm / Consumer Cyclical → HIGH_RISK unless dividend
+         yield >= 2% (T, BCE.TO belong with income; NVDA/AVGO don't)
+      4. dividend yield >= 2% → SAFE_INCOME
+      5. market cap < $50B → HIGH_RISK
+      6. else → SAFE_INCOME
+    dividend_yield is a FRACTION (0.02 = 2%) — see
+    market_scanner._dividend_yield_fraction.
+    """
+    quote_type = (fundamentals.get("quote_type") or "").upper()
+    sector_lower = (fundamentals.get("sector") or "").strip().lower()
+    div_yield = fundamentals.get("dividend_yield") or 0
+    mcap = fundamentals.get("market_cap") or 0
+
+    high_risk_sectors_lower = {"technology", "communication services", "consumer cyclical"}
+    energy_materials_lower = {"energy", "basic materials", "materials"}
+    MEANINGFUL_DIV_THRESHOLD = 0.02
+
+    if quote_type == "ETF":
+        return "SAFE_INCOME"
+    if sector_lower in energy_materials_lower:
+        return "HIGH_RISK"
+    if sector_lower in high_risk_sectors_lower and div_yield < MEANINGFUL_DIV_THRESHOLD:
+        return "HIGH_RISK"
+    if div_yield >= MEANINGFUL_DIV_THRESHOLD:
+        return "SAFE_INCOME"
+    if 0 < mcap < 50_000_000_000:
+        return "HIGH_RISK"
+    return "SAFE_INCOME"
 
 
 # Module-level bucket cache, loaded once per scan

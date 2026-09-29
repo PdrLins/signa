@@ -9,6 +9,7 @@ from typing import Optional
 from loguru import logger
 
 from app.core.cache import TTLCache
+from app.core.config import settings
 from app.db.supabase import get_client
 
 _cache = TTLCache(max_size=200, default_ttl=300)
@@ -189,12 +190,21 @@ class KnowledgeService:
     def get_active_thinking_block(self) -> str:
         """Format active thinking entries as a 'Working Hypotheses' markdown block.
 
-        Returns an empty string if there are no active hypotheses. The framing
+        Only hypotheses with at least hypothesis_prompt_min_observations
+        observed trades are included. Returns an empty string if none
+        qualify. The framing
         is intentional: Claude is told these are LOW CONFIDENCE observations
         under test, not validated truth. The supporting/contradicting counts
         are exposed so Claude can weigh each hypothesis appropriately.
         """
-        entries = self.get_active_thinking()
+        def _observed(h: dict) -> int:
+            return sum(
+                h.get(k) or 0
+                for k in ("observations_supporting", "observations_contradicting", "observations_neutral")
+            )
+
+        min_n = settings.hypothesis_prompt_min_observations
+        entries = [h for h in self.get_active_thinking() if _observed(h) >= min_n]
         if not entries:
             return ""
 

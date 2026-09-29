@@ -32,17 +32,19 @@ run to completion on the old per-share math and do NOT touch the wallet.
 Only wallet trades (`is_wallet_trade = True`) settle through here.
 
 ============================================================
-SIZING RULES (see calc_position_size_usd)
+SIZING RULES (see calc_risk_position_size)
 ============================================================
 
-  Tier 1 (trust_multiplier 1.0) → balance × 10%
-  Tier 1 (trust_multiplier 0.5) → balance × 5%  (existing downgrade path)
-  Tier 2/3 (trust_multiplier 0.5) → balance × 5%
-  Hard cap: balance × 15% (matches kelly.MAX_POSITION_PCT)
-  Below $100 balance → return 0 (caller skips the entry)
+Risk-based (2026-09 decision-quality reset):
 
-Shorts always use Tier-1 sizing (10% of balance) and reserve 100% of
-position value as collateral until they cover.
+  risk budget   = equity × brain_risk_per_trade_pct   (default 1%)
+  shares        = risk budget / (entry − stop)         (USD per share)
+  hard cap      = equity × brain_max_position_pct     (default 10%)
+  also capped by free cash; below wallet_min_balance_for_trade → skip
+
+So a stop hit costs ~1% of equity regardless of the stock's volatility.
+Portfolio limits (max open, per-sector, crypto %) live in
+virtual_portfolio because they need the open-position book.
 
 ============================================================
 SHORT COLLATERAL MATH
@@ -63,18 +65,23 @@ SHORT COLLATERAL MATH
 ATOMICITY
 ============================================================
 
-Supabase's Python client doesn't expose real DB transactions. Every
-mutation here follows the same best-effort pattern:
+Supabase's Python client doesn't expose real DB transactions, so the
+brain orders its writes so that a failure at any step leaves the books
+consistent (or detectably inconsistent via reconcile_wallet):
 
-  1. Read current wallet row
-  2. Compute new balance + collateral
-  3. UPDATE brain_wallet with the new values
-  4. INSERT wallet_transactions audit row (with snapshot of post-update state)
+  OPEN : adjust_balance(-cost)  → INSERT virtual_trades
+         (insert fails → adjust_balance(+cost) refund) → ledger row
+  CLOSE: adjust_balance(+proceeds) → UPDATE row to CLOSED (status guard)
+         (0 rows / error → adjust_balance(-proceeds) reversal) → ledger row
 
-If step 4 fails after step 3 succeeds, we log loudly — the wallet state
-is still correct, but the audit row is missing. The caller (trade insert
-path) should also log the failure so the ledger can be reconstructed
-from virtual_trades if needed.
+`adjust_balance` raises WalletError instead of silently returning, so a
+failed debit aborts the entry. The ledger row is written last because it
+references the trade id (FK) — a missing ledger row is cosmetic; the
+balance itself is always right. `reconcile_wallet()` checks the identity
+
+  cash + collateral + Σ open LONG cost basis == net deposits + realized P&L
+
+and is called by the daily snapshot and scripts/reset_brain.py.
 
 ============================================================
 INVARIANTS
@@ -313,6 +320,62 @@ def _apply_update(
     return result.data[0] if result.data else None
 
 
+class WalletError(RuntimeError):
+    """A wallet mutation could not be applied. Callers must NOT proceed
+    with the trade-row write that depended on it."""
+
+
+def adjust_balance(
+    user_id: str | None,
+    balance_delta: float,
+    collateral_delta: float = 0.0,
+    *,
+    symbol: str | None = None,
+    allow_overdraft: bool = False,
+) -> tuple[float, float]:
+    """Apply a signed change to balance/collateral under the user lock.
+
+    Returns (new_balance, new_collateral). Raises WalletError when the
+    wallet is unavailable, when a debit would overdraw free cash (unless
+    `allow_overdraft`, used only by reversals), or when the UPDATE fails.
+    Does NOT write a ledger row — see `record_transaction`.
+    """
+    uid = _resolve_user_id(user_id)
+    if not uid:
+        raise WalletError(f"no user — cannot adjust wallet for {symbol or '?'}")
+    with _user_lock(uid):
+        wlt = get_wallet(uid)
+        if not wlt:
+            raise WalletError(f"wallet unavailable for {symbol or uid}")
+        new_balance = float(wlt["balance"]) + balance_delta
+        new_collateral = float(wlt["collateral_reserved"]) + collateral_delta
+        if new_balance < -0.005 and not allow_overdraft:
+            raise WalletError(
+                f"insufficient cash for {symbol or '?'}: balance ${float(wlt['balance']):.2f}, "
+                f"delta ${balance_delta:+.2f}"
+            )
+        try:
+            _apply_update(uid, new_balance, new_collateral)
+        except Exception as e:
+            raise WalletError(f"wallet update failed for {symbol or uid}: {e}") from e
+        return max(new_balance, 0.0), max(new_collateral, 0.0)
+
+
+def record_transaction(
+    user_id: str | None,
+    transaction_type: str,
+    amount: float,
+    balance_after: float,
+    collateral_after: float,
+    **kwargs: Any,
+) -> None:
+    """Public, best-effort ledger append (see `_write_transaction`)."""
+    uid = _resolve_user_id(user_id)
+    if not uid:
+        return
+    _write_transaction(uid, transaction_type, amount, balance_after, collateral_after, **kwargs)
+
+
 def _settle(
     uid: str,
     *,
@@ -326,95 +389,76 @@ def _settle(
     shares: float | None = None,
     price: float | None = None,
 ) -> None:
-    """Shared settlement path for every trade-driven wallet mutation.
+    """Balance update + ledger row in one call (raises WalletError).
 
-    Collapses what used to be six near-identical functions into one.
-    Each public settlement shim (debit_for_long_buy, credit_for_long_sell,
-    etc.) just computes the deltas + audit fields and forwards here —
-    the locking, wallet read, update, and ledger write happen once.
-
-    Args:
-        balance_delta: signed change to wallet.balance (negative = debit)
-        collateral_delta: signed change to wallet.collateral_reserved
-        ledger_amount: the signed amount to record on the ledger row.
-            Same as balance_delta for most types; differs for SHORT_COVER
-            where the ledger reflects the gross credit (allocation + pnl).
+    Used by the user-facing shims below. The brain's open/close paths call
+    `adjust_balance` + `record_transaction` separately so they can order
+    the trade-row write between them (see ATOMICITY in the module doc).
     """
-    with _user_lock(uid):
-        wlt = get_wallet(uid)
-        if not wlt:
-            logger.error(f"{txn_type}: wallet unavailable for {symbol or uid}")
-            return
-
-        new_balance = float(wlt["balance"]) + balance_delta
-        new_collateral = float(wlt["collateral_reserved"]) + collateral_delta
-        _apply_update(uid, new_balance, new_collateral)
-        _write_transaction(
-            user_id=uid,
-            transaction_type=txn_type,
-            amount=ledger_amount,
-            balance_after=max(new_balance, 0.0),
-            collateral_after=max(new_collateral, 0.0),
-            trade_id=trade_id,
-            symbol=symbol,
-            shares=shares,
-            price=price,
-            description=description,
-        )
+    new_balance, new_collateral = adjust_balance(
+        uid, balance_delta, collateral_delta, symbol=symbol, allow_overdraft=balance_delta >= 0,
+    )
+    _write_transaction(
+        user_id=uid,
+        transaction_type=txn_type,
+        amount=ledger_amount,
+        balance_after=new_balance,
+        collateral_after=new_collateral,
+        trade_id=trade_id,
+        symbol=symbol,
+        shares=shares,
+        price=price,
+        description=description,
+    )
 
 
 # ── Position sizing ─────────────────────────────────────────────────
 
-def calc_position_size_usd(
-    wallet_balance: float,
-    tier: int,
-    trust_multiplier: float | None,
-    tier1_pct_override: float | None = None,
-    max_pct_override: float | None = None,
-) -> float:
-    """Compute dollar allocation for a new brain entry, respecting tiers and caps.
+def calc_risk_position_size(
+    equity_usd: float,
+    cash_usd: float,
+    entry_usd: float,
+    stop_usd: float,
+    *,
+    risk_pct: float | None = None,
+    max_position_pct: float | None = None,
+    min_trade_usd: float | None = None,
+    commission_usd: float | None = None,
+    trust_multiplier: float = 1.0,
+) -> tuple[float, float]:
+    """Risk-based position size for a LONG (all amounts in USD).
 
-    Day-37: added `tier1_pct_override` and `max_pct_override` so the caller
-    (process_virtual_trades) can pass the drawdown-circuit-breaker-clamped
-    values without mutating settings. When None, falls back to settings.
+    shares = (equity × risk_pct × trust) / (entry − stop), then the dollar
+    allocation is capped at equity × max_position_pct and at free cash
+    (net of the entry commission). Returns (shares, allocation_usd) where
+    allocation_usd = shares × entry (commission excluded); (0, 0) means skip.
 
-    Rules (see module docstring for the full table):
-      • Tier 1 + trust_multiplier 1.0 → wallet_position_pct_tier1 (10%)
-      • Tier 1 + trust_multiplier 0.5 → half of that (5%)
-      • Tier 2 / Tier 3                → wallet_position_pct_tier2_3 (5%)
-      • Hard cap                       → wallet_max_position_pct (15%)
-      • Below wallet_min_balance_for_trade → return 0 (caller should skip)
-
-    The result is a dollar amount, not a share count. Caller divides by
-    entry price to get fractional shares.
+    Worked example: equity $10,000, risk 1%, entry $50, stop $46 →
+    risk/share $4 → 25 shares = $1,250 (12.5%) → capped to 10% = $1,000
+    = 20 shares; a stop-out then loses 20 × $4 = $80 (0.8% of equity).
     """
-    if wallet_balance < settings.wallet_min_balance_for_trade:
-        return 0.0
+    risk_pct = settings.brain_risk_per_trade_pct if risk_pct is None else risk_pct
+    max_position_pct = settings.brain_max_position_pct if max_position_pct is None else max_position_pct
+    min_trade_usd = settings.wallet_min_balance_for_trade if min_trade_usd is None else min_trade_usd
+    commission_usd = settings.brain_commission_usd if commission_usd is None else commission_usd
 
-    trust = float(trust_multiplier) if trust_multiplier is not None else 1.0
-
-    if tier == 1:
-        base_pct = tier1_pct_override if tier1_pct_override is not None else settings.wallet_position_pct_tier1
-    else:
-        base_pct = settings.wallet_position_pct_tier2_3
-
-    # Apply trust_multiplier to Tier 1 only. Tier 2/3 already carry the
-    # half-size intent in the config default, so applying trust again would
-    # double-discount them.
-    if tier == 1 and trust < 1.0:
-        base_pct = base_pct * trust
-
-    # Hard cap
-    cap = max_pct_override if max_pct_override is not None else settings.wallet_max_position_pct
-    pct = min(base_pct, cap)
-    allocation = wallet_balance * (pct / 100.0)
-
-    # One more sanity floor: if the computed allocation is smaller than the
-    # trade-minimum, skip rather than opening a $1 position.
-    if allocation < settings.wallet_min_balance_for_trade:
-        return 0.0
-
-    return round(allocation, 2)
+    if equity_usd <= 0 or entry_usd <= 0:
+        return 0.0, 0.0
+    risk_per_share = entry_usd - stop_usd
+    if risk_per_share <= 0:
+        return 0.0, 0.0
+    risk_budget = equity_usd * (risk_pct / 100.0) * max(0.0, float(trust_multiplier))
+    shares = risk_budget / risk_per_share
+    allocation = shares * entry_usd
+    allocation = min(
+        allocation,
+        equity_usd * (max_position_pct / 100.0),
+        max(0.0, cash_usd - commission_usd),
+    )
+    if allocation < min_trade_usd:
+        return 0.0, 0.0
+    shares = allocation / entry_usd
+    return round(shares, 6), round(allocation, 2)
 
 
 # ── Deposits / withdrawals (user-driven) ────────────────────────────
@@ -899,3 +943,113 @@ def _has_legacy_brain_positions(user_id: str) -> bool:
 # Mark-to-market math lives in virtual_portfolio.py (that's where
 # virtual_trades schema knowledge belongs). Callers import from there
 # directly; no re-export through wallet.py.
+
+
+# ── Reconciliation ──────────────────────────────────────────────────
+
+RECONCILE_TOLERANCE_USD = 0.05
+
+
+def reconcile_numbers(
+    *,
+    balance: float,
+    collateral: float,
+    open_long_cost_basis: float,
+    net_deposits: float,
+    realized_pnl: float,
+    tolerance: float = RECONCILE_TOLERANCE_USD,
+) -> dict:
+    """Pure check of the wallet identity.
+
+        cash + collateral + Σ open LONG cost basis == net deposits + realized P&L
+
+    Open SHORT allocations already sit inside `collateral`, so only LONG
+    cost basis is added. Realized P&L must be net of fees/slippage (it is:
+    close_virtual_trade stores pnl_amount = proceeds − cost basis).
+    """
+    actual = balance + collateral + open_long_cost_basis
+    expected = net_deposits + realized_pnl
+    diff = actual - expected
+    return {
+        "ok": abs(diff) <= tolerance,
+        "cash": round(balance, 2),
+        "collateral": round(collateral, 2),
+        "open_long_cost_basis": round(open_long_cost_basis, 2),
+        "net_deposits": round(net_deposits, 2),
+        "realized_pnl": round(realized_pnl, 2),
+        "actual": round(actual, 2),
+        "expected": round(expected, 2),
+        "diff": round(diff, 4),
+    }
+
+
+def reconcile_wallet(user_id: str | None = None) -> dict:
+    """Check that the wallet balance agrees with the trade book.
+
+    Reads brain_wallet + every brain wallet trade. Logs an ERROR when the
+    identity is off by more than RECONCILE_TOLERANCE_USD. Never raises;
+    returns {"ok": False, "error": ...} when it can't compute.
+    """
+    uid = _resolve_user_id(user_id)
+    if not uid:
+        return {"ok": False, "error": "no user"}
+    try:
+        wlt = get_wallet(uid)
+        if not wlt:
+            return {"ok": False, "error": "no wallet"}
+        rows = (
+            get_client()
+            .table("virtual_trades")
+            .select("status, direction, position_size_usd, pnl_amount")
+            .eq("user_id", uid)
+            .eq("source", "brain")
+            .eq("is_wallet_trade", True)
+            .execute()
+        ).data or []
+    except Exception as e:
+        logger.warning(f"reconcile_wallet: query failed: {e}")
+        return {"ok": False, "error": str(e)}
+
+    open_long_cost = sum(
+        float(r.get("position_size_usd") or 0)
+        for r in rows
+        if r.get("status") == "OPEN" and (r.get("direction") or "LONG") != "SHORT"
+    )
+    realized = sum(float(r.get("pnl_amount") or 0) for r in rows if r.get("status") == "CLOSED")
+    result = reconcile_numbers(
+        balance=float(wlt.get("balance") or 0),
+        collateral=float(wlt.get("collateral_reserved") or 0),
+        open_long_cost_basis=open_long_cost,
+        net_deposits=float(wlt.get("total_deposited") or 0) - float(wlt.get("total_withdrawn") or 0),
+        realized_pnl=realized,
+    )
+    if result["ok"]:
+        logger.info(f"Wallet reconcile OK: {result}")
+    else:
+        logger.error(f"Wallet reconcile MISMATCH (diff ${result['diff']:+.2f}): {result}")
+    return result
+
+
+def update_peak_equity(user_id: str | None, equity_usd: float) -> float | None:
+    """Ratchet brain_wallet.peak_equity up to `equity_usd`; return the peak.
+
+    Returns None if the column doesn't exist yet (migration 006 not applied)
+    or the read fails — callers then fall back to net deposits as the peak.
+    """
+    uid = _resolve_user_id(user_id)
+    if not uid:
+        return None
+    try:
+        wlt = get_wallet(uid)
+        if not wlt or "peak_equity" not in wlt:
+            return None
+        peak = float(wlt.get("peak_equity") or 0)
+        if equity_usd > peak:
+            get_client().table("brain_wallet").update(
+                {"peak_equity": round(equity_usd, 4)}
+            ).eq("user_id", uid).execute()
+            peak = equity_usd
+        return peak
+    except Exception as e:
+        logger.warning(f"update_peak_equity failed: {e}")
+        return None

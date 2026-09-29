@@ -98,13 +98,22 @@ def init_scheduler() -> AsyncIOScheduler:
             replace_existing=True,
         )
 
-        # Weekend watchdog for crypto positions (every 60 min, Sat-Sun)
+        # Crypto trades 24/7: cover every hour outside the weekday job
+        # (weeknights + weekends) every 15 min. run_watchdog only touches
+        # positions that can fill, so off-hours this is crypto-only.
         if settings.watchdog_weekend_crypto:
             scheduler.add_job(
                 brain_watchdog,
-                CronTrigger(minute=0, hour="*/1", day_of_week="sat,sun", timezone=settings.timezone),
+                CronTrigger(minute="*/15", hour="0-8,18-23", day_of_week="mon-fri", timezone=settings.timezone),
+                id="brain_watchdog_weeknight",
+                name="Brain Watchdog weeknights (every 15 min, crypto only)",
+                replace_existing=True,
+            )
+            scheduler.add_job(
+                brain_watchdog,
+                CronTrigger(minute="*/15", day_of_week="sat,sun", timezone=settings.timezone),
                 id="brain_watchdog_weekend",
-                name="Brain Watchdog Weekend (hourly, crypto only)",
+                name="Brain Watchdog weekend (every 15 min, crypto only)",
                 replace_existing=True,
             )
 

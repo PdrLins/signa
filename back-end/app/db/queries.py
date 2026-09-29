@@ -14,12 +14,17 @@ from app.db.supabase import get_client
 # ============================================================
 
 def get_user_by_username(username: str) -> dict | None:
-    """Look up a user by username (case-insensitive)."""
+    """Look up a user by exact (lower-cased) username.
+
+    Uses .eq, not .ilike: ILIKE treats '%', '_' (and PostgREST '*') as
+    wildcards, so a username of '%' would match the first user. Usernames are
+    stored lower-case.
+    """
     client = get_client()
     result = (
         client.table("users")
         .select("id, username, password_hash, telegram_chat_id, is_active, last_login, login_attempts, locked_until")
-        .ilike("username", username.lower())
+        .eq("username", username.strip().lower())
         .eq("is_active", True)
         .limit(1)
         .execute()
@@ -101,12 +106,21 @@ def get_otp_by_session_token(session_token: str) -> dict | None:
     return result.data[0] if result.data else None
 
 
-def mark_otp_used(otp_id: str) -> None:
-    """Mark an OTP as used."""
+def mark_otp_used(otp_id: str) -> bool:
+    """Atomically mark an OTP as used.
+
+    Conditional on used_at IS NULL, so only one of several concurrent
+    verifications can succeed. Returns True if this call consumed the OTP.
+    """
     client = get_client()
-    client.table("otp_codes").update(
-        {"used_at": datetime.now(timezone.utc).isoformat()}
-    ).eq("id", otp_id).execute()
+    result = (
+        client.table("otp_codes")
+        .update({"used_at": datetime.now(timezone.utc).isoformat()})
+        .eq("id", otp_id)
+        .is_("used_at", "null")
+        .execute()
+    )
+    return bool(result.data)
 
 
 def increment_otp_attempts(otp_id: str) -> None:
@@ -803,3 +817,29 @@ def close_position(
     result = client.table("positions").update(data).eq("id", position_id).execute()
     logger.info(f"Position closed: {position_id} | P&L: {pnl_percent:+.1f}% (${pnl_amount:+.2f}) | Reason: {exit_reason}")
     return result.data[0] if result.data else {}
+
+
+# ============================================================
+# BRAIN DECISIONS (entry funnel log — migration 006)
+# ============================================================
+
+def insert_brain_decisions(rows: list[dict]) -> int:
+    """Batch-insert one brain_decisions row per candidate considered in a scan.
+
+    Each row: scan_id, symbol, decided_at, decision ('ENTER' | 'SKIP'),
+    reason, score, ai_status, ai_signal, details (jsonb). Returns rows sent.
+    """
+    if not rows:
+        return 0
+    get_client().table("brain_decisions").insert(rows).execute()
+    return len(rows)
+
+
+def get_brain_decisions(scan_id: str | None = None, symbol: str | None = None, limit: int = 200) -> list[dict]:
+    """Read the entry funnel log, newest first (optionally for one scan / symbol)."""
+    query = get_client().table("brain_decisions").select("*")
+    if scan_id:
+        query = query.eq("scan_id", scan_id)
+    if symbol:
+        query = query.eq("symbol", symbol)
+    return (query.order("decided_at", desc=True).limit(limit).execute()).data or []

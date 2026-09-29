@@ -23,14 +23,36 @@ from app.scheduler.runner import init_scheduler, start_scheduler, stop_scheduler
 from app.services.log_service import init_log_capture
 
 
+def _check_supabase_key_role() -> None:
+    """Warn if the backend is using the anon key (never logs the key itself).
+
+    Migration 007 enables RLS with no policies; after it is applied only the
+    service_role key can read/write, so an anon key would break the backend.
+    Conversely, with an anon key and no RLS, the tables are world-readable.
+    """
+    from app.core.security import supabase_key_role
+
+    role = supabase_key_role(settings.supabase_key)
+    if role == "anon":
+        logger.warning(
+            "SUPABASE_KEY is an ANON key. The backend must use the service_role key. "
+            "Do NOT apply migration 007_enable_rls.sql until SUPABASE_KEY is the "
+            "service_role key, or the backend will lose database access."
+        )
+    elif role == "service_role":
+        logger.info("Supabase key role: service_role")
+    else:
+        logger.warning("Could not determine SUPABASE_KEY role (expected service_role)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
+    init_log_capture()  # first, so the secret scrubber applies to everything below
     logger.info(f"Starting {settings.app_name}...")
-    logger.info(f"Auth enabled: {settings.auth_enabled}")
     logger.info(f"Debug mode: {settings.debug}")
+    _check_supabase_key_role()
 
-    init_log_capture()
     init_scheduler()
     start_scheduler()
     start_telegram_worker()
@@ -63,17 +85,22 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.debug else None,
 )
 
-# Middleware (outermost first)
-app.add_middleware(
+# Middleware. Starlette wraps in reverse order of add_middleware(): the LAST
+# one added is the OUTERMOST. Effective request chain:
+#     CORS -> RateLimit -> Audit -> Auth -> routes
+# CORS must be outermost so every response — including 401s from
+# AuthMiddleware and 429s from RateLimitMiddleware — carries CORS headers
+# (otherwise the browser hides the status from the front-end).
+app.add_middleware(AuthMiddleware)       # innermost: validates JWT
+app.add_middleware(AuditMiddleware)      # logs every request that passed rate limiting
+app.add_middleware(RateLimitMiddleware)  # rejects floods before any DB/auth work
+app.add_middleware(                      # outermost
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Brain-Token"],
 )
-app.add_middleware(AuditMiddleware)
-app.add_middleware(RateLimitMiddleware)
-app.add_middleware(AuthMiddleware)
 
 register_exception_handlers(app)
 

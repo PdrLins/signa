@@ -33,7 +33,7 @@ state of the wallet at end-of-target_date:
       },
       "regime": "VOLATILE",           # most recent scan's market_regime
       "vix": 22.4,                    # from latest macro snapshot if present
-      "warning": None,                # 'insufficient_history' if <25 closes
+      "warning": None,                # 'insufficient_history' if <30 closes
     }
 
 ============================================================
@@ -75,7 +75,7 @@ from app.db.supabase import get_client
 # Below this threshold (closed wallet trades all-time), cohort analysis is
 # meaningless and gets skipped via warning='insufficient_history'. The
 # daily report still emits — metrics + explicit patterns still run.
-MIN_TOTAL_CLOSES_FOR_COHORTS = 25
+MIN_TOTAL_CLOSES_FOR_COHORTS = 30  # 2026-09 reset: was 25
 
 ET = ZoneInfo("America/New_York")
 

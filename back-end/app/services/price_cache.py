@@ -159,3 +159,72 @@ def enrich_signals(signals: list[dict]) -> list[dict]:
             sig["exchange"] = exchange
 
     return signals
+
+
+# ── FX (brain wallet base currency = USD) ────────────────────────────
+#
+# TSX names (.TO etc.) are quoted in CAD. The brain wallet is USD, so every
+# cash movement for a CAD-quoted trade is converted with USDCAD from Yahoo
+# ("CAD=X" = CAD per 1 USD, ~1.35). Prices stored on virtual_trades stay in
+# the instrument's NATIVE currency so stop/target/peak comparisons against
+# live quotes never mix currencies; only cash (position_size_usd, pnl_amount,
+# wallet debits/credits) is USD.
+#
+# If the rate is unavailable, `fx_to_usd` returns None and the brain SKIPS
+# new CAD entries rather than silently treating CAD as USD.
+
+_fx_cache = TTLCache(max_size=8, default_ttl=3600)  # 1h — FX drift intraday is small
+
+CAD_SUFFIXES = (".TO", ".V", ".NE", ".CN")
+
+
+def native_currency(symbol: str | None) -> str:
+    """'CAD' for Canadian listings, else 'USD' (US equities + -USD crypto)."""
+    if symbol and symbol.upper().endswith(CAD_SUFFIXES):
+        return "CAD"
+    return "USD"
+
+
+def get_usdcad_rate(force_refresh: bool = False) -> Optional[float]:
+    """CAD per 1 USD (Yahoo 'CAD=X'), cached 1h. None when unavailable.
+
+    A sanity band (1.0-2.0) rejects obviously broken quotes so a bad
+    print can't mis-size a position by 10x.
+    """
+    if not force_refresh:
+        cached = _fx_cache.get("USDCAD")
+        if cached is not None:
+            return cached or None  # 0.0 = cached failure
+    rate: Optional[float] = None
+    try:
+        import yfinance as yf
+
+        data = yf.download("CAD=X", period="5d", interval="1d", progress=False, threads=False)
+        if data is not None and not data.empty:
+            close = data["Close"]
+            if hasattr(close, "columns"):  # MultiIndex (newer yfinance)
+                close = close.iloc[:, 0]
+            close = close.dropna()
+            if len(close):
+                value = float(close.iloc[-1])
+                if 1.0 < value < 2.0:
+                    rate = value
+                else:
+                    logger.warning(f"USDCAD quote {value} outside sanity band — ignored")
+    except Exception as e:
+        logger.warning(f"USDCAD fetch failed: {e}")
+    # Cache failures briefly (5 min) so we don't hammer Yahoo every call.
+    _fx_cache.set("USDCAD", rate or 0.0, ttl=3600 if rate else 300)
+    return rate
+
+
+def fx_to_usd(symbol: str | None) -> Optional[float]:
+    """Multiplier converting a native-currency amount for `symbol` into USD.
+
+    1.0 for USD instruments; 1/USDCAD for CAD listings; None if the CAD
+    rate can't be fetched (caller must not mix currencies).
+    """
+    if native_currency(symbol) == "USD":
+        return 1.0
+    rate = get_usdcad_rate()
+    return (1.0 / rate) if rate else None

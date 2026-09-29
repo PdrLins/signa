@@ -31,11 +31,10 @@ We chose a hardcoded per-year list over `pandas_market_calendars`
   4. The 60-second cost of looking up the next year's holidays is
      amortized over the 12 months they prevent ~$200 of losses
 
-Trade-off: the list MUST be updated each December for the next year.
-A failure mode would be: forget to update, brain assumes "no holiday"
-in 2027+, suffers another LUN.TO-style trade. Mitigation: the lookup
-defaults to "open" if no entry exists for the year, AND we add a
-unit test that fails if the current year isn't covered.
+UPDATE (decision-quality reset): 2026 stays hardcoded (verified), and
+every year from 2027 on is COMPUTED from the NYSE / TMX holiday rules
+(`generate_us_holidays` / `generate_tsx_holidays`), so a forgotten
+December update can no longer silently turn holidays into trading days.
 
 If we ever add more exchanges (LSE, HKEX, ASX, etc.) or need
 half-day handling (NYSE has half-days before Christmas/Thanksgiving),
@@ -67,7 +66,8 @@ so a half-day still counts as "open" for our purposes.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 
 # ── 2026 ─────────────────────────────────────────────────────
@@ -101,13 +101,116 @@ US_HOLIDAYS_2026: frozenset[str] = frozenset({
 })
 
 
-# Master lookup keyed by exchange.
-# When adding a new year: add a YYYY_TSX_HOLIDAYS_YYYY frozenset above,
-# then add the entry here for each exchange that has the same calendar.
+# ── Rule-based generation (2027+) ───────────────────────────
+# The hardcoded 2026 sets above are the verified source of truth for
+# 2026. Every later year is COMPUTED from the published NYSE / TMX
+# holiday rules so the calendar can never silently lapse at a year
+# roll (the old design defaulted every uncovered year to "open").
+# `tests/test_scoring_calendar.py` pins that the generator reproduces
+# the verified 2026 lists exactly, plus the known 2027 dates.
+#
+# Not modeled: one-off closures (national days of mourning, weather).
+
+
+def _easter_sunday(year: int) -> date:
+    """Gregorian Easter (anonymous Gregorian algorithm)."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    ll = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * ll) // 451
+    month = (h + ll - 7 * m + 114) // 31
+    day = ((h + ll - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    """n-th (1-based) given weekday (Mon=0) of a month."""
+    first = date(year, month, 1)
+    offset = (weekday - first.weekday()) % 7
+    return first + timedelta(days=offset + 7 * (n - 1))
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    nxt = date(year + (month // 12), (month % 12) + 1, 1)
+    last = nxt - timedelta(days=1)
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _us_observed(d: date) -> date:
+    """NYSE rule: Saturday holiday -> Friday, Sunday holiday -> Monday."""
+    if d.weekday() == 5:
+        return d - timedelta(days=1)
+    if d.weekday() == 6:
+        return d + timedelta(days=1)
+    return d
+
+
+def _ca_observed(d: date) -> date:
+    """TSX rule: weekend holiday -> following Monday."""
+    if d.weekday() == 5:
+        return d + timedelta(days=2)
+    if d.weekday() == 6:
+        return d + timedelta(days=1)
+    return d
+
+
+def generate_us_holidays(year: int) -> frozenset[str]:
+    """NYSE/NASDAQ full-day closures for `year`."""
+    days: set[date] = set()
+    ny = date(year, 1, 1)
+    # NYSE does NOT close on Friday Dec 31 when Jan 1 is a Saturday.
+    if ny.weekday() != 5:
+        days.add(_us_observed(ny))
+    days.add(_nth_weekday(year, 1, 0, 3))    # MLK Day
+    days.add(_nth_weekday(year, 2, 0, 3))    # Presidents' Day
+    days.add(_easter_sunday(year) - timedelta(days=2))  # Good Friday
+    days.add(_last_weekday(year, 5, 0))      # Memorial Day
+    days.add(_us_observed(date(year, 6, 19)))  # Juneteenth
+    days.add(_us_observed(date(year, 7, 4)))   # Independence Day
+    days.add(_nth_weekday(year, 9, 0, 1))    # Labor Day
+    days.add(_nth_weekday(year, 11, 3, 4))   # Thanksgiving (4th Thu)
+    days.add(_us_observed(date(year, 12, 25)))  # Christmas
+    return frozenset(d.isoformat() for d in days)
+
+
+def generate_tsx_holidays(year: int) -> frozenset[str]:
+    """TSX full-day closures for `year`."""
+    days: set[date] = set()
+    days.add(_ca_observed(date(year, 1, 1)))   # New Year's Day
+    days.add(_nth_weekday(year, 2, 0, 3))      # Family Day
+    days.add(_easter_sunday(year) - timedelta(days=2))  # Good Friday
+    may24 = date(year, 5, 24)                  # Victoria Day: Monday on/before May 24
+    days.add(may24 - timedelta(days=may24.weekday()))
+    days.add(_ca_observed(date(year, 7, 1)))   # Canada Day
+    days.add(_nth_weekday(year, 8, 0, 1))      # Civic Holiday
+    days.add(_nth_weekday(year, 9, 0, 1))      # Labour Day
+    days.add(_nth_weekday(year, 10, 0, 2))     # Thanksgiving (CA)
+    # Christmas + Boxing Day, both shifted off weekends without colliding.
+    xmas = _ca_observed(date(year, 12, 25))
+    boxing = date(year, 12, 26)
+    if boxing.weekday() >= 5 or boxing <= xmas:
+        boxing = xmas + timedelta(days=1)
+        while boxing.weekday() >= 5:
+            boxing += timedelta(days=1)
+    days.add(xmas)
+    days.add(boxing)
+    return frozenset(d.isoformat() for d in days)
+
+
+# Years generated eagerly so covered_years_for() reports them.
+_GENERATED_YEARS = range(2027, 2036)
+
+# Master lookup keyed by exchange. 2026 = verified hardcoded lists;
+# later years computed from rules.
 _BY_EXCHANGE: dict[str, dict[int, frozenset[str]]] = {
-    "TSX": {2026: TSX_HOLIDAYS_2026},
-    "NYSE": {2026: US_HOLIDAYS_2026},
-    "NASDAQ": {2026: US_HOLIDAYS_2026},
+    "TSX": {2026: TSX_HOLIDAYS_2026, **{y: generate_tsx_holidays(y) for y in _GENERATED_YEARS}},
+    "NYSE": {2026: US_HOLIDAYS_2026, **{y: generate_us_holidays(y) for y in _GENERATED_YEARS}},
+    "NASDAQ": {2026: US_HOLIDAYS_2026, **{y: generate_us_holidays(y) for y in _GENERATED_YEARS}},
     # CRYPTO is intentionally absent — handled in is_market_open below
 }
 
@@ -146,8 +249,14 @@ def is_market_open(exchange: str | None, on_date: date) -> bool:
         # Exchange not modeled — default open. Don't silently block.
         return True
     holidays_for_year = cal_for_exchange.get(on_date.year)
+    if holidays_for_year is None and on_date.year > 2026:
+        # Beyond the eager window — compute from the rules.
+        holidays_for_year = (
+            generate_tsx_holidays(on_date.year) if exchange == "TSX"
+            else generate_us_holidays(on_date.year)
+        )
     if holidays_for_year is None:
-        # Year not covered — default open. CI/tests should catch this.
+        # Pre-2026 — not modeled, default open.
         return True
     return on_date.isoformat() not in holidays_for_year
 
@@ -158,3 +267,59 @@ def covered_years_for(exchange: str) -> set[int]:
     always in scope so December rolls don't silently disable the
     holiday filter."""
     return set((_BY_EXCHANGE.get(exchange) or {}).keys())
+
+
+# ============================================================
+# SESSION / BAR HELPERS (used by indicators + earnings blackout)
+# ============================================================
+
+_ET = ZoneInfo("America/New_York")
+# TSX and NYSE/NASDAQ share the 16:00 ET regular close.
+REGULAR_SESSION_CLOSE_ET = time(16, 0)
+
+
+def is_daily_bar_complete(exchange: str | None, bar_date: date, now: datetime | None = None) -> bool:
+    """Return True if the daily bar dated `bar_date` is final.
+
+    Equities: a bar for today's ET date is incomplete until the
+    regular session closes (16:00 ET). Bars for earlier dates are
+    complete.
+
+    Crypto: yfinance crypto daily bars are UTC calendar days, so the
+    bar for today's UTC date is always still forming.
+    """
+    now = now or datetime.now(_ET)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=_ET)
+    if exchange == "CRYPTO":
+        return bar_date < now.astimezone(ZoneInfo("UTC")).date()
+    now_et = now.astimezone(_ET)
+    if bar_date < now_et.date():
+        return True
+    if bar_date > now_et.date():
+        return False
+    # Today's bar: final only after the close (or if the exchange didn't
+    # trade today at all — then the bar is a stale artefact, treat final).
+    if not is_market_open(exchange, now_et.date()):
+        return True
+    return now_et.time() >= REGULAR_SESSION_CLOSE_ET
+
+
+def trading_days_until(exchange: str | None, target: date, today: date | None = None) -> int | None:
+    """Count trading sessions after `today` up to and including `target`.
+
+    0 = target is today, 1 = next session, ... Returns None if target is
+    in the past. Crypto counts calendar days.
+    """
+    today = today or datetime.now(_ET).date()
+    if target < today:
+        return None
+    if target == today:
+        return 0
+    count = 0
+    d = today
+    while d < target:
+        d += timedelta(days=1)
+        if exchange == "CRYPTO" or is_market_open(exchange, d):
+            count += 1
+    return count

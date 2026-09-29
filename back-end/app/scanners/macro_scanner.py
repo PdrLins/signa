@@ -1,6 +1,7 @@
 """FRED API client for macro economic data."""
 
 import asyncio
+import re
 from typing import Optional
 
 import httpx
@@ -11,10 +12,26 @@ from app.core.config import settings
 
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
 
+_SECRET_QS = re.compile(r"(api_key|apikey|key|token)=[^&\s'\"]+", re.IGNORECASE)
+
+
+def _safe_err(e: Exception) -> str:
+    """Log-safe description of a FRED request error.
+
+    httpx's HTTPStatusError message embeds the full request URL, which
+    carries `?api_key=<FRED key>` — and logs are exposed via
+    /logs/recent and the WebSocket. Never log the raw message.
+    """
+    if isinstance(e, httpx.HTTPStatusError):
+        return f"HTTP {e.response.status_code}"
+    if isinstance(e, httpx.TimeoutException):
+        return "timeout"
+    return f"{type(e).__name__}: {_SECRET_QS.sub(r'\1=***', str(e))}"
+
 SERIES = {
     "fed_funds_rate": "FEDFUNDS",
     "treasury_10y": "GS10",
-    "cpi_yoy": "CPIAUCSL",
+    "cpi_yoy": "CPIAUCSL",  # raw index level — converted to YoY % below
     "unemployment_rate": "UNRATE",
     "yield_curve_10y2y": "T10Y2Y",        # 10Y-2Y spread (pre-computed by FRED)
     "credit_spread_bbb": "BAMLC0A4CBBB",  # ICE BofA BBB Corporate OAS (~1 day lag)
@@ -38,8 +55,88 @@ async def _fetch_fred_series(series_id: str, client: httpx.AsyncClient) -> Optio
         if observations and observations[0].get("value") != ".":
             return float(observations[0]["value"])
     except Exception as e:
-        logger.warning(f"FRED fetch failed for {series_id}: {e}")
+        logger.warning(f"FRED fetch failed for {series_id}: {_safe_err(e)}")
     return None
+
+
+async def _fetch_fred_yoy_pct(series_id: str, client: httpx.AsyncClient) -> Optional[float]:
+    """Year-over-year % change of a monthly FRED index series.
+
+    CPIAUCSL is an index level (~320), not an inflation rate. It was sent
+    to the AI prompt as "CPI (YoY): 320.1". Compute latest vs the
+    observation 12 months earlier instead.
+    """
+    try:
+        params = {
+            "series_id": series_id,
+            "api_key": settings.fred_api_key,
+            "file_type": "json",
+            "sort_order": "desc",
+            "limit": 13,
+        }
+        resp = await client.get(FRED_BASE_URL, params=params, timeout=15)
+        resp.raise_for_status()
+        return _yoy_from_observations(resp.json().get("observations", []))
+    except Exception as e:
+        logger.warning(f"FRED YoY fetch failed for {series_id}: {_safe_err(e)}")
+    return None
+
+
+def _yoy_from_observations(observations: list[dict]) -> Optional[float]:
+    """YoY % from FRED observations sorted newest-first (monthly)."""
+    vals = []
+    for o in observations:
+        v = o.get("value")
+        if v in (None, "."):
+            continue
+        try:
+            vals.append((o.get("date"), float(v)))
+        except (TypeError, ValueError):
+            continue
+    if len(vals) < 13:
+        return None
+    latest_date, latest = vals[0]
+    # Match the same month one year earlier by date when possible.
+    target = None
+    if latest_date and len(latest_date) >= 7:
+        want = f"{int(latest_date[:4]) - 1}{latest_date[4:7]}"
+        target = next((v for d, v in vals if d and d[:7] == want), None)
+    if target is None:
+        target = vals[12][1]
+    if not target:
+        return None
+    return round((latest / target - 1) * 100, 2)
+
+
+async def _fetch_spy_trend() -> dict:
+    """SPY % distance from its 50- and 200-day SMAs.
+
+    `signals/regime.py` reads `spy_vs_sma200` / `spy_vs_sma50` (percent)
+    for CRISIS / RECOVERY / VOLATILE detection, but nothing ever filled
+    them, so the regime ran on VIX alone.
+    """
+    def _fetch():
+        hist = yf.Ticker("SPY").history(period="1y")
+        if hist is None or hist.empty:
+            return {}
+        close = hist["Close"].dropna()
+        out = {}
+        last = float(close.iloc[-1])
+        if len(close) >= 50:
+            sma50 = float(close.iloc[-50:].mean())
+            if sma50 > 0:
+                out["spy_vs_sma50"] = round((last - sma50) / sma50 * 100, 2)
+        if len(close) >= 200:
+            sma200 = float(close.iloc[-200:].mean())
+            if sma200 > 0:
+                out["spy_vs_sma200"] = round((last - sma200) / sma200 * 100, 2)
+        return out
+
+    try:
+        return await asyncio.to_thread(_fetch)
+    except Exception as e:
+        logger.warning(f"SPY trend fetch failed: {e}")
+        return {}
 
 
 async def _fetch_fear_greed() -> Optional[dict]:
@@ -245,11 +342,11 @@ async def get_macro_snapshot() -> dict:
         (
             fed_funds, treasury, cpi, unemployment,
             yield_curve, credit_spread,
-            vix, fear_greed, vix_term, intermarket, vix_30d_high,
+            vix, fear_greed, vix_term, intermarket, vix_30d_high, spy_trend,
         ) = await asyncio.gather(
             _fetch_fred_series(SERIES["fed_funds_rate"], client),
             _fetch_fred_series(SERIES["treasury_10y"], client),
-            _fetch_fred_series(SERIES["cpi_yoy"], client),
+            _fetch_fred_yoy_pct(SERIES["cpi_yoy"], client),
             _fetch_fred_series(SERIES["unemployment_rate"], client),
             _fetch_fred_series(SERIES["yield_curve_10y2y"], client),
             _fetch_fred_series(SERIES["credit_spread_bbb"], client),
@@ -258,6 +355,7 @@ async def get_macro_snapshot() -> dict:
             _fetch_vix_term_structure(),
             _fetch_intermarket_signals(),
             _fetch_vix_30d_high(),
+            _fetch_spy_trend(),
         )
 
     macro_data = {
@@ -272,13 +370,16 @@ async def get_macro_snapshot() -> dict:
         "vix_term_structure": vix_term,
         "intermarket": intermarket,
         "vix_30d_high": vix_30d_high,
+        "spy_vs_sma50": (spy_trend or {}).get("spy_vs_sma50"),
+        "spy_vs_sma200": (spy_trend or {}).get("spy_vs_sma200"),
     }
 
     macro_data["environment"] = classify_macro_environment(macro_data)
 
     logger.info(
         f"Macro snapshot: VIX={vix}, FedFunds={fed_funds}, "
-        f"10Y={treasury}, YieldCurve={yield_curve}, CreditSpread={credit_spread}, "
+        f"10Y={treasury}, CPI_YoY={cpi}%, SPYvs50={macro_data['spy_vs_sma50']}%, "
+        f"SPYvs200={macro_data['spy_vs_sma200']}%, YieldCurve={yield_curve}, CreditSpread={credit_spread}, "
         f"F&G={fear_greed}, VIX_term={vix_term}, "
         f"Intermarket={intermarket}, Environment={macro_data['environment']}"
     )

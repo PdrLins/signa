@@ -9,6 +9,7 @@ Uses in-memory tracking with bounded size and threading lock.
 For multi-worker production, replace with Redis TTL keys.
 """
 
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -53,6 +54,10 @@ _EXEMPT_PATHS = {
     "/",
 }
 
+# Scan progress polling (GET every 2-3s) — exempt, but ONLY this exact route.
+# A substring check ("/progress" in path) let any path dodge rate limiting.
+_PROGRESS_ROUTE = re.compile(r"^/api/v1/scans/[A-Za-z0-9_-]{1,64}/progress$")
+
 # ── Thread-safe storage ──
 _lock = threading.Lock()
 _attempts: dict[str, OrderedDict[str, list[float]]] = {
@@ -77,7 +82,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         path = request.url.path
 
         # Skip exempt paths (includes scan progress polling)
-        if path in _EXEMPT_PATHS or path.startswith("/docs") or path.startswith("/redoc") or "/progress" in path:
+        if (
+            path in _EXEMPT_PATHS
+            or path.startswith("/docs")
+            or path.startswith("/redoc")
+            or (request.method == "GET" and _PROGRESS_ROUTE.match(path))
+        ):
             return await call_next(request)
 
         ip = get_client_ip(request)

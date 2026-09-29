@@ -29,6 +29,21 @@ def _decode_brain_token(token: str) -> dict | None:
         return None
 
 
+def brain_session_exists(jti: str | None) -> bool:
+    """True if a brain_sessions row exists for this brain-token JTI."""
+    if not jti:
+        return False
+    client = get_client()
+    result = (
+        client.table("brain_sessions")
+        .select("id")
+        .eq("brain_token_jti", jti)
+        .limit(1)
+        .execute()
+    )
+    return bool(result.data)
+
+
 async def require_brain_token(
     request: Request,
     user: dict = Depends(get_current_user),
@@ -68,15 +83,7 @@ async def require_brain_token(
         )
 
     # Verify JTI exists in brain_sessions
-    client = get_client()
-    result = (
-        client.table("brain_sessions")
-        .select("id")
-        .eq("brain_token_jti", jti)
-        .limit(1)
-        .execute()
-    )
-    if not result.data:
+    if not brain_session_exists(jti):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Brain session not found. Please re-verify.",

@@ -90,13 +90,14 @@ class TestHypothesisDedupe:
         assert "resurfaced" in src
         assert "rejected" in src
 
-    def test_graduation_ratio_documented(self):
+    def test_graduation_evidence_bar_documented(self):
+        # 2026-09 reset: the 0.70-ratio-at-n=5 rule was replaced by n >= 30
+        # plus an expectancy bootstrap CI / Wilson interval (see stats.py).
         from app.services.daily_learning.hypothesis_manager import (
-            GRADUATION_RATIO, REJECTION_RATIO,
+            GRADUATION_THRESHOLD_DEFAULT, MIN_OBSERVATIONS_TO_DECIDE,
         )
-        # Pin the threshold so changes require an explicit edit.
-        assert GRADUATION_RATIO == 0.70
-        assert REJECTION_RATIO == 0.70
+        assert MIN_OBSERVATIONS_TO_DECIDE == 30
+        assert GRADUATION_THRESHOLD_DEFAULT == 30
 
 
 class TestSchedulerRegistration:

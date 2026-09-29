@@ -1,16 +1,15 @@
-"""Claude (Anthropic) API client — paid synthesis fallback.
+"""Claude (Anthropic) API client — used only when settings.claude_local=False.
 
 ============================================================
 WHAT THIS MODULE IS
 ============================================================
 
-This is the second tier in the synthesis fallback chain (see `provider.py`).
-Called when Claude Local CLI has exhausted its retries OR when
-`settings.claude_local=False`. Uses the official Anthropic Python SDK
-to hit the Claude API directly.
+The paid path to Claude (see `provider.py`). Called only when
+`settings.claude_local=False`; in local mode the router never reaches
+this module. Uses the official Anthropic Python SDK.
 
 Unlike Claude Local (which is free via Pro Max subscription), every
-call here costs money (~$0.012 per synthesis at current Sonnet 4 rates).
+call here costs money (see budget_service.COST_ESTIMATES).
 The router's budget service blocks calls that would exceed the daily
 or monthly limit, so this client never has to worry about runaway costs.
 
@@ -21,10 +20,8 @@ WHY BOTH CLAUDE LOCAL AND CLAUDE API EXIST
   • Claude Local: free, slower (subprocess overhead), occasionally flaky
   • Claude API:   paid, faster, more reliable, has retries built into SDK
 
-In production with claude_local=True, the Claude API is essentially a
-SAFETY NET that catches transient Claude Local failures. Most scans
-never hit it. But on the days it does fire, it prevents the brain from
-operating blind.
+The two are mutually exclusive, chosen by settings.claude_local: local
+machine → CLI only; a server without the CLI → API only.
 
 ============================================================
 RESPONSE SCHEMA
@@ -36,12 +33,13 @@ and `gemini_client.py` so the router can swap between them transparently:
   {
     "signal": "BUY" | "HOLD" | "SELL" | "AVOID",
     "confidence": int (0-100),
+    "p_win": float (0-1) | None,  # P(price higher in 5 trading days)
     "reasoning": str (2-3 sentences),
     "risk_factors": list[str],
     "catalyst": str | None,
     "catalyst_date": str | None,  # YYYY-MM-DD
     "red_flags": list[str],
-    "risk_reward_ratio": float | None,
+    "risk_reward_ratio": float | None,  # computed in code from levels
     "target_price": float | None,
     "stop_loss": float | None,
     "sentiment_weight": int (0-100),
@@ -60,6 +58,7 @@ import anthropic
 from loguru import logger
 
 from app.ai.prompts import (
+    SYNTHESIS_JSON_SCHEMA,
     build_synthesis_prompt,
     clean_json_response,
     normalize_synthesis_result,
@@ -69,6 +68,10 @@ from app.core.config import settings
 
 _client: Optional[anthropic.AsyncAnthropic] = None
 _client_lock = asyncio.Lock()
+
+# Server-side refusal fallback (Claude API only): if the primary model
+# declines, the API re-runs the request on a fallback model in the same call.
+_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
 async def _get_client() -> anthropic.AsyncAnthropic:
@@ -84,6 +87,44 @@ async def _get_client() -> anthropic.AsyncAnthropic:
         return _client
 
 
+def model_for_tier(tier: str) -> tuple[str, str]:
+    """(model, effort) for a call tier: "routine" (default) or "decision"."""
+    if tier == "decision":
+        return settings.claude_decision_model, settings.claude_decision_effort
+    return settings.claude_model, settings.claude_effort
+
+
+async def create_structured(prompt: str, schema: dict, tier: str = "routine") -> dict:
+    """One Claude API call constrained to `schema`; returns the parsed dict.
+
+    Raises anthropic errors as-is, `json.JSONDecodeError` on unparseable
+    output, and `ValueError` on refusal / truncation (callers retry or fail).
+    """
+    client = await _get_client()
+    model, effort = model_for_tier(tier)
+    response = await client.beta.messages.create(
+        model=model,
+        max_tokens=settings.claude_max_tokens,
+        thinking={"type": "adaptive"},
+        output_config={
+            "effort": effort,
+            "format": {"type": "json_schema", "schema": schema},
+        },
+        betas=[_FALLBACK_BETA],
+        fallbacks="default",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    if response.stop_reason == "refusal":
+        raise ValueError("Claude refused the request")
+    if response.stop_reason == "max_tokens":
+        raise ValueError("Claude response truncated (max_tokens)")
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    data = json.loads(clean_json_response(text))
+    if not isinstance(data, dict):
+        raise json.JSONDecodeError("not a JSON object", text, 0)
+    return data
+
+
 async def synthesize_signal(
     ticker: str,
     technical_data: dict,
@@ -91,35 +132,32 @@ async def synthesize_signal(
     macro_data: dict,
     grok_data: dict,
     max_retries: int = 3,
+    tier: str = "routine",
 ) -> dict:
     """Call Claude to synthesize all data into a final signal.
 
-    Includes retry logic with exponential backoff for rate limits.
+    Uses structured outputs (JSON schema). Retries rate limits / 5xx with
+    exponential backoff and retries a malformed/truncated response once.
     """
-    client = await _get_client()
-
     prompt = build_synthesis_prompt(
         ticker, technical_data, fundamental_data, macro_data, grok_data,
     )
+    current_price = (technical_data or {}).get("current_price")
 
     last_error = ""
+    parse_retry_used = False
 
     for attempt in range(1, max_retries + 1):
         try:
-            response = await client.messages.create(
-                model=settings.claude_model,
-                max_tokens=settings.claude_max_tokens,
-                messages=[{"role": "user", "content": prompt}],
-            )
-
-            content = clean_json_response(response.content[0].text)
-            data = json.loads(content)
-            result = normalize_synthesis_result(data)
+            data = await create_structured(prompt, SYNTHESIS_JSON_SCHEMA, tier=tier)
+            result = normalize_synthesis_result(data, current_price=current_price)
+            if result.get("error"):
+                raise ValueError(result["error"])
 
             logger.debug(
                 f"Claude [{ticker}] → {result['signal']} "
-                f"confidence={result['confidence']} rr={result['risk_reward_ratio']} "
-                f"(attempt {attempt})"
+                f"confidence={result['confidence']} p_win={result['p_win']} "
+                f"rr={result['risk_reward_ratio']} (attempt {attempt})"
             )
             return result
 
@@ -133,13 +171,20 @@ async def synthesize_signal(
 
         except anthropic.APIStatusError as e:
             last_error = f"API error {e.status_code}"
+            if e.status_code >= 500 and attempt < max_retries:
+                logger.warning(f"Claude {last_error} for {ticker} — retrying")
+                await asyncio.sleep(2 ** attempt)
+                continue
             logger.error(f"Claude API status error for {ticker}: {last_error}")
             break
 
-        except json.JSONDecodeError as e:
-            last_error = f"JSON parse error: {e}"
-            logger.error(f"Failed to parse Claude response for {ticker}: {e}")
-            break
+        except (json.JSONDecodeError, ValueError) as e:
+            last_error = f"Bad response: {e}"
+            logger.warning(f"Unusable Claude response for {ticker}: {e}")
+            if parse_retry_used or "refused" in str(e):
+                break
+            parse_retry_used = True
+            continue
 
         except Exception as e:
             last_error = f"Unexpected: {e}"

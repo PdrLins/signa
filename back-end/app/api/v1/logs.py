@@ -12,10 +12,13 @@ from loguru import logger
 
 from app.core.config import settings
 from app.core.security import decode_token
-from app.middleware.brain_auth import require_brain_token, _decode_brain_token
+from app.db.queries import is_token_blacklisted
+from app.middleware.brain_auth import _decode_brain_token, brain_session_exists, require_brain_token
 from app.services.log_service import get_recent_logs, subscribe, unsubscribe
 
 router = APIRouter(prefix="/logs", tags=["Logs"])
+
+LOGS_SUBPROTOCOL = "signa.logs"
 
 
 @router.get("/recent")
@@ -34,11 +37,24 @@ async def get_logs(
 async def log_stream(websocket: WebSocket):
     """WebSocket endpoint for real-time log streaming.
 
-    Requires both JWT and brain_token as query parameters:
-    ws://host/api/v1/logs/stream?token=<brain_token>&jwt=<access_token>
+    Browsers can't set headers on WebSocket requests, so both tokens travel
+    as subprotocols (kept out of URLs and access logs):
+    new WebSocket(url, ["signa.logs", "jwt.<access_token>", "brain-token.<brain_token>"])
     """
+    protocols = [
+        p.strip()
+        for p in websocket.headers.get("sec-websocket-protocol", "").split(",")
+        if p.strip()
+    ]
+
+    def _protocol_value(prefix: str) -> str | None:
+        for proto in protocols:
+            if proto.startswith(prefix):
+                return proto[len(prefix):]
+        return None
+
     # Validate JWT first
-    jwt_token = websocket.query_params.get("jwt")
+    jwt_token = _protocol_value("jwt.")
     if not jwt_token:
         await websocket.close(code=4001, reason="JWT token required")
         return
@@ -48,8 +64,14 @@ async def log_stream(websocket: WebSocket):
         await websocket.close(code=4001, reason="Invalid or expired JWT")
         return
 
+    # Same revocation check the HTTP AuthMiddleware performs
+    jwt_jti = jwt_payload.get("jti")
+    if not jwt_jti or is_token_blacklisted(jwt_jti):
+        await websocket.close(code=4001, reason="Token has been revoked")
+        return
+
     # Then validate brain token
-    brain_token = websocket.query_params.get("token")
+    brain_token = _protocol_value("brain-token.")
     if not brain_token:
         await websocket.close(code=4003, reason="Brain token required")
         return
@@ -64,7 +86,12 @@ async def log_stream(websocket: WebSocket):
         await websocket.close(code=4003, reason="Token user mismatch")
         return
 
-    await websocket.accept()
+    # Brain session must exist (same check as require_brain_token)
+    if not brain_session_exists(brain_payload.get("jti")):
+        await websocket.close(code=4003, reason="Brain session not found")
+        return
+
+    await websocket.accept(subprotocol=LOGS_SUBPROTOCOL)
     logger.info("Log stream WebSocket connected")
 
     queue = subscribe()

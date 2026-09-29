@@ -5,6 +5,51 @@ from loguru import logger
 from app.core.config import settings
 
 
+def trend_quality_score(data: dict) -> float:
+    """Rank key for pre-filter candidates — favours trend quality, not
+    today's move.
+
+    The old ranking sorted by |day_change|, so the 50 AI/tech slots went
+    to whatever moved most TODAY (gap-ups, news spikes, crashes) — i.e.
+    it chased moves that had already happened. This key rewards:
+
+      +2 / -2  price above / below SMA50
+      +2 / -2  price above / below SMA200
+      +1       SMA50 above SMA200 (uptrend structure)
+      -3..+3   3-month return excluding the last week (x10, clipped)
+      +1       RSI 45-68 (healthy trend, not stretched)
+      -2       RSI > 75 (overbought — the scorer blocks these anyway)
+      -1       RSI < 30 (falling knife)
+      -1       |day_change| > 8% (a one-day spike is noise, not trend)
+
+    Missing features contribute 0, so thin-history names are neither
+    rewarded nor dropped.
+    """
+    score = 0.0
+    vs50 = data.get("vs_sma50")
+    if vs50 is not None:
+        score += 2.0 if vs50 > 0 else -2.0
+    vs200 = data.get("vs_sma200")
+    if vs200 is not None:
+        score += 2.0 if vs200 > 0 else -2.0
+    if data.get("sma50_above_sma200"):
+        score += 1.0
+    r = data.get("ret_3m_ex_1w")
+    if r is not None:
+        score += max(-3.0, min(3.0, float(r) * 10.0))
+    rsi = data.get("rsi14")
+    if rsi is not None:
+        if 45 <= rsi <= 68:
+            score += 1.0
+        elif rsi > 75:
+            score -= 2.0
+        elif rsi < 30:
+            score -= 1.0
+    if abs(data.get("day_change", 0) or 0) > 0.08:
+        score -= 1.0
+    return score
+
+
 def prefilter_candidates(
     screening_data: dict[str, dict],
     watchlist_symbols: set[str] | None = None,
@@ -33,7 +78,8 @@ def prefilter_candidates(
             criteria so the thesis tracker can re-evaluate them.
 
     Returns:
-        List of ticker symbols sorted by absolute day change.
+        List of ticker symbols: held + watchlist first, then equities and
+        crypto ranked by `trend_quality_score` (NOT by today's move).
     """
     watchlist = watchlist_symbols or set()
     held_brain = held_brain_symbols or set()
@@ -45,7 +91,6 @@ def prefilter_candidates(
 
     for ticker, data in screening_data.items():
         volume = data.get("avg_volume", 0)
-        day_change = abs(data.get("day_change", 0))
         price = data.get("price", 0)
 
         is_watchlisted = ticker in watchlist
@@ -54,14 +99,16 @@ def prefilter_candidates(
         # Watchlisted AND held positions bypass filters -- both are
         # explicitly opted-in by user/brain, regardless of daily activity.
         if not is_watchlisted and not is_held:
+            # Liquidity + penny-stock gates only. The old
+            # `|day_change| >= min_abs_change` gate is gone: requiring a
+            # move today is itself move-chasing and dropped quiet,
+            # well-trending names from consideration.
             if volume < settings.min_volume:
-                continue
-            if day_change < settings.min_abs_change:
                 continue
             if price < 1.0:
                 continue
 
-        entry = (ticker, day_change, volume)
+        entry = (ticker, trend_quality_score(data), volume)
         if is_held:
             # Held positions get their own bucket so they're always
             # included even if they're also watchlisted (dedup happens

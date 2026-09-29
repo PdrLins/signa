@@ -23,24 +23,14 @@ This module is a parallel scorer that runs alongside the main
   • Volume ABOVE average  (someone is accumulating quietly)
   • MACD HISTOGRAM > 0    (the momentum is just starting to turn)
 
-If 3 of 4 conditions hit, the signal style is flagged "CONTRARIAN"
-and `scan_service` allows the brain to BUY at a lower score threshold
-(score >= 55 instead of 72) when contrarian_score is also high.
+If 3 of 4 conditions hit, the signal style is flagged "CONTRARIAN".
 
-============================================================
-WHY THE LOWER SCORE THRESHOLD
-============================================================
-
-A contrarian setup will SCORE LOW under the default momentum formula
-(negative momentum = low technical_momentum component). But a low
-score on a contrarian setup is GOOD — it means everyone has given up,
-which is exactly when the value buyer wants in.
-
-The 55 threshold for contrarian + score >= 55 + contrarian_score >= 60
-gives us a workable filter: scores in the 55-71 range with contrarian
-style are the deep-value zone, scores 72+ with contrarian style are
-the "mean-reversion just started, ride it" zone (the brain auto-buys
-both because they show up as BUY actions in the user-facing signal).
+UPDATE (decision-quality reset): this is now DESCRIPTIVE ONLY. The old
+scan_service override turned a 3/4 contrarian setup into BUY at score
+>= 55, bypassing the bucket thresholds (62/65) and AI validation. There
+was no out-of-sample evidence for that lower bar, so it was removed:
+contrarian signals must pass the same thresholds and AI validation as
+everything else. `signal_style` / `contrarian_score` are still stored.
 
 ============================================================
 BACKTEST PERFORMANCE

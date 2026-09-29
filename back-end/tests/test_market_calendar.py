@@ -98,10 +98,12 @@ class TestSafeDefaults:
     def test_none_exchange_returns_open(self):
         assert is_market_open(None, date(2026, 5, 18)) is True
 
-    def test_uncovered_year_returns_open(self):
-        # 2027 not yet in the hardcoded list — default open so a missing
-        # year-roll doesn't accidentally pause all trading.
+    def test_generated_year_ordinary_monday_is_open(self):
+        # Updated: 2027+ is now COMPUTED from holiday rules instead of
+        # defaulting to "open". 2027-05-17 is an ordinary Monday (Victoria
+        # Day 2027 is May 24), so it is open for a real reason now.
         assert is_market_open("TSX", date(2027, 5, 17)) is True
+        assert is_market_open("TSX", date(2027, 5, 24)) is False
 
 
 class TestCurrentYearCoverage:

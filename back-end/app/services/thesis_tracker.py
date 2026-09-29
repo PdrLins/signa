@@ -11,10 +11,10 @@ This module runs once per scan, AFTER `process_virtual_trades` and BEFORE
     "You bought {symbol} on {date} because {entry_thesis}.
      Given today's data, is that reason still valid?"
 
-If Claude returns `status='invalid'`, the position is closed with
-`exit_reason='THESIS_INVALIDATED'` — regardless of P&L direction. A
-winning position with a dead thesis is sold; a losing position with an
-intact thesis is held.
+If Claude returns `status='invalid'` with confidence >= 70 on TWO
+consecutive checks (at most one check per position per UTC day), the
+position is closed with `exit_reason='THESIS_INVALIDATED'` — regardless
+of P&L direction. A single verdict never closes a position.
 
 The thesis status is also persisted on the position row so the existing
 exit paths (STOP_HIT, TARGET_HIT, etc.) can READ it and suppress
@@ -69,12 +69,59 @@ from app.services.price_cache import _fetch_prices_batch
 THESIS_REEVAL_CONCURRENCY = 3
 
 
-# Minimum confidence required from Claude before we'll act on an "invalid"
-# thesis verdict. Without this floor, a parser glitch or hallucinated JSON
-# (e.g., {"should_exit": true, "confidence": 5}) could close arbitrary
-# winning positions. The combination of (status == 'invalid') AND
-# (confidence >= floor) is what makes the gate trustworthy.
-THESIS_INVALIDATION_MIN_CONFIDENCE = 60
+# Minimum confidence required from Claude before an "invalid" verdict counts.
+# A lower-confidence "invalid" is persisted as "weakening" so it can never
+# start (or continue) an exit streak.
+THESIS_INVALIDATION_MIN_CONFIDENCE = 70
+
+# An early THESIS_INVALIDATED exit needs this many CONSECUTIVE qualifying
+# "invalid" verdicts (status invalid AND confidence >= floor). Claude is
+# non-deterministic on borderline positions; one verdict is not enough.
+THESIS_INVALIDATION_CONSECUTIVE_CHECKS = 2
+
+
+def _coerce_confidence(raw) -> int:
+    """int 0-100 from int/float/str; garbage or None → 0."""
+    if raw is None or isinstance(raw, bool):
+        return 0
+    try:
+        return max(0, min(100, int(float(raw))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def is_qualifying_invalid(result: dict | None) -> bool:
+    """True when a re-eval result is 'invalid' with confidence >= floor."""
+    if not isinstance(result, dict):
+        return False
+    return (
+        (result.get("status") or "").lower() == "invalid"
+        and _coerce_confidence(result.get("confidence")) >= THESIS_INVALIDATION_MIN_CONFIDENCE
+    )
+
+
+def persisted_status(result: dict) -> str:
+    """Status written to `thesis_last_status`.
+
+    'invalid' is only persisted for a qualifying verdict, so a stored
+    'invalid' always means "a high-confidence invalid verdict" — the
+    consecutive-check rule relies on this.
+    """
+    status = (result.get("status") or "").lower()
+    if status not in ("valid", "weakening", "invalid"):
+        return "weakening"
+    if status == "invalid" and not is_qualifying_invalid(result):
+        return "weakening"
+    return status
+
+
+def checked_today(pos: dict, now: datetime | None = None) -> bool:
+    """True if this position was already re-evaluated on the current UTC day."""
+    last = parse_iso_utc(pos.get("thesis_last_checked_at"))
+    if last is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    return last.date() == now.date()
 
 
 async def reevaluate_open_theses(
@@ -120,7 +167,10 @@ async def reevaluate_open_theses(
     from app.services.virtual_portfolio import VIRTUAL_TRADES_CLOSE_FIELDS
     open_positions = (
         db.table("virtual_trades")
-        .select(VIRTUAL_TRADES_CLOSE_FIELDS + ", entry_thesis, entry_thesis_keywords, thesis_last_reason")
+        .select(
+            VIRTUAL_TRADES_CLOSE_FIELDS
+            + ", entry_thesis, entry_thesis_keywords, thesis_last_reason, thesis_last_checked_at"
+        )
         .eq("status", "OPEN")
         .eq("source", "brain")
         .execute()
@@ -175,6 +225,13 @@ async def reevaluate_open_theses(
                 f"scan_type={scan_type} (only re-evals at AFTER_CLOSE)"
             )
             continue
+        # At most one re-evaluation per position per UTC day. Combined with
+        # the consecutive-check rule, an early exit needs two separate days
+        # of high-confidence "invalid" verdicts; price risk in between is
+        # handled by the regular stop.
+        if checked_today(pos):
+            logger.debug(f"Thesis re-eval skipped for {sym}: already checked today")
+            continue
         if not pos.get("entry_thesis"):
             logger.debug(
                 f"Thesis re-eval skipped for {sym}: no entry_thesis "
@@ -213,6 +270,7 @@ async def reevaluate_open_theses(
 
     async def _eval_one(item: dict) -> tuple[dict, Optional[dict]]:
         """Single bounded re-eval call. Returns (work_item, result_or_None)."""
+        prior_invalid = (item["pos"].get("thesis_last_status") or "").lower() == "invalid"
         async with semaphore:
             try:
                 result = await re_evaluate_thesis(
@@ -225,8 +283,10 @@ async def reevaluate_open_theses(
                     entry_thesis=item["pos"].get("entry_thesis") or "",
                     entry_conditions=item["entry_conditions"],
                     current_conditions=item["current_conditions"],
-                    prior_status=item["pos"].get("thesis_last_status"),
-                    prior_reason=item["pos"].get("thesis_last_reason"),
+                    # A pending "invalid" is hidden so the confirming
+                    # check is an independent read, not an anchored echo.
+                    prior_status=None if prior_invalid else item["pos"].get("thesis_last_status"),
+                    prior_reason=None if prior_invalid else item["pos"].get("thesis_last_reason"),
                 )
                 return item, result
             except Exception as e:
@@ -269,8 +329,13 @@ async def reevaluate_open_theses(
             continue
 
         sym = item["pos"]["symbol"]
-        new_status = (result.get("status") or "valid").lower()
+        raw_status = (result.get("status") or "").lower()
+        new_status = persisted_status(result)
         new_reason = (result.get("reason") or "")[:500]
+        prior_status = (item["pos"].get("thesis_last_status") or "").lower()
+        # Exit only on the 2nd consecutive qualifying "invalid" verdict.
+        # A stored "invalid" is always a qualifying one (see persisted_status).
+        exit_eligible = is_qualifying_invalid(result) and prior_status == "invalid"
 
         # Bundle everything `execute_thesis_invalidation_exits` would
         # otherwise re-fetch — eliminates the 2N+1 query pattern.
@@ -280,6 +345,7 @@ async def reevaluate_open_theses(
             "live_price": item["live_price"],
             "pnl_pct": item["pnl_pct"],
             "days_held": item["days_held"],
+            "exit_eligible": exit_eligible,
         }
 
         try:
@@ -298,8 +364,10 @@ async def reevaluate_open_theses(
             payload={
                 "symbol": sym,
                 "status": new_status,
+                "raw_status": raw_status,
+                "prior_status": prior_status or None,
                 "confidence": result.get("confidence"),
-                "should_exit": bool(result.get("should_exit")),
+                "should_exit": exit_eligible,
                 "pnl_pct_at_check": round(item["pnl_pct"], 2),
                 "days_held": item["days_held"],
                 "provider": result.get("_provider"),
@@ -363,32 +431,25 @@ def execute_thesis_invalidation_exits(
     if not settings.brain_thesis_gate_enabled:
         return 0
 
-    # Confidence-gated invalidation: both status == 'invalid' AND
-    # confidence >= floor must hold. Blocks Claude parser glitches and
-    # low-confidence "should_exit=true" hallucinations from force-closing
-    # winning positions.
+    # Conservative gate: status == 'invalid' AND confidence >= floor on this
+    # check AND on the previous check (`exit_eligible`, computed in
+    # `reevaluate_open_theses`). Re-checked here so a hand-built ctx can't
+    # bypass the confidence floor.
     invalid_ctxs: list[dict] = []
     for sym, ctx in thesis_results.items():
         result = ctx.get("result") or {}
         if (result.get("status") or "").lower() != "invalid":
             continue
-        # Handle confidence as int ("60"), float (60.5), float-string ("60.5"),
-        # or garbage ("high", None). Coerce via float() first to tolerate
-        # stringified decimals Claude occasionally produces, then int() for
-        # the floor comparison.
-        raw_conf = result.get("confidence")
-        if raw_conf is None:
-            confidence = 0
-        else:
-            try:
-                confidence = int(float(raw_conf))
-            except (TypeError, ValueError):
-                confidence = 0
-        if confidence < THESIS_INVALIDATION_MIN_CONFIDENCE:
+        if not is_qualifying_invalid(result):
             logger.info(
-                f"Thesis invalidation IGNORED for {sym}: status=invalid but "
-                f"confidence={confidence} < {THESIS_INVALIDATION_MIN_CONFIDENCE} "
-                f"(low-confidence verdict, holding the position)"
+                f"Thesis invalidation IGNORED for {sym}: confidence="
+                f"{_coerce_confidence(result.get('confidence'))} < {THESIS_INVALIDATION_MIN_CONFIDENCE}"
+            )
+            continue
+        if not ctx.get("exit_eligible"):
+            logger.info(
+                f"Thesis invalidation DEFERRED for {sym}: first qualifying 'invalid' "
+                f"verdict — needs {THESIS_INVALIDATION_CONSECUTIVE_CHECKS} consecutive checks"
             )
             continue
         invalid_ctxs.append(ctx)

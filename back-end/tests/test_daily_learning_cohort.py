@@ -166,11 +166,18 @@ class TestThresholdContracts:
     """Pin the threshold constants. Changing them should require a
     documented backtest per feedback_backtest_before_brain_changes."""
 
+    # 2026-09 reset: raised 5 -> 20 (and a Wilson-interval significance
+    # check was added) — n=5 cells were flagging noise.
     def test_min_n_for_flag(self):
-        assert MIN_N_FOR_FLAG == 5
+        assert MIN_N_FOR_FLAG == 20
 
     def test_min_n_baseline(self):
-        assert MIN_N_BASELINE == 5
+        assert MIN_N_BASELINE == 20
+
+    def test_wilson_significance_required(self):
+        from app.services.daily_learning.cohort_analyzer import _significant_vs
+        assert not _significant_vs(0.2, 5, 0.5)    # 1/5 vs 50%: not significant
+        assert _significant_vs(0.2, 40, 0.5)       # 8/40 vs 50%: significant
 
     def test_wr_tails(self):
         assert WR_LOW == 0.40

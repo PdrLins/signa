@@ -1,6 +1,16 @@
 """Shared test fixtures."""
 
+import os
+
 import pytest
+
+# Strong dummy secrets for tests. Forced (not setdefault) so a weak value in the
+# shell (e.g. JWT_SECRET_KEY=x) or a placeholder in back-end/.env can't trip the
+# Settings security validator. Must run before any `app.*` import.
+os.environ["JWT_SECRET_KEY"] = "test-jwt-secret-0123456789abcdef0123456789abcdef"
+os.environ["BRAIN_TOKEN_SECRET"] = "test-brain-secret-fedcba9876543210fedcba9876543210"
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_KEY", "test-key")
 
 
 @pytest.fixture
@@ -77,3 +87,12 @@ def sample_macro():
         "vix": 18.5,
         "fed_trend": "falling",
     }
+
+
+@pytest.fixture(autouse=True)
+def _clear_ai_caches():
+    """AI result caches are module-level; keep tests from seeing each other's results."""
+    from app.ai.provider import clear_ai_caches
+    clear_ai_caches()
+    yield
+    clear_ai_caches()

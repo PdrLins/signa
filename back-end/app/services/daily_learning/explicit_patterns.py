@@ -304,7 +304,7 @@ def match_drawdown_3d(target_date: date) -> Finding | None:
     try:
         snaps = (
             db.table("virtual_snapshots")
-            .select("snapshot_date,brain_cumulative_pnl")
+            .select("snapshot_date,brain_cumulative_pnl,brain_equity")
             .gte("snapshot_date", start_date.isoformat())
             .lt("snapshot_date", end_date.isoformat())
             .order("snapshot_date")
@@ -312,7 +312,14 @@ def match_drawdown_3d(target_date: date) -> Finding | None:
         ).data or []
         if not snaps:
             return None
-        series = [(s.get("snapshot_date"), s.get("brain_cumulative_pnl") or 0) for s in snaps]
+        # Prefer real wallet equity (migration 006); fall back to the
+        # legacy cumulative-pnl series for pre-reset snapshots.
+        series = [
+            (s.get("snapshot_date"),
+             s.get("brain_equity") if s.get("brain_equity") is not None
+             else (s.get("brain_cumulative_pnl") or 0))
+            for s in snaps
+        ]
     except Exception:
         return None
 

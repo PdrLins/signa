@@ -7,6 +7,8 @@ with 7-day retention.
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -20,6 +22,41 @@ _LOG_BUFFER: deque[dict] = deque(maxlen=500)
 # WebSocket subscribers
 _subscribers: set[asyncio.Queue] = set()
 
+# ── Secret scrubbing ──
+# Applied to every log message before it reaches any sink (buffer, WebSocket,
+# DB persistence, terminal/log file). Order matters: specific patterns first.
+_REDACTED = "[REDACTED]"
+_SCRUB_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # Telegram bot token inside API URLs: .../bot123456:ABC-def/sendMessage
+    (re.compile(r"bot\d{5,}:[A-Za-z0-9_-]{20,}"), "bot" + _REDACTED),
+    # Bare Telegram bot token
+    (re.compile(r"\b\d{5,}:[A-Za-z0-9_-]{30,}"), _REDACTED),
+    # Anthropic / xAI / Google API keys
+    (re.compile(r"sk-ant-[A-Za-z0-9_-]{8,}"), _REDACTED),
+    (re.compile(r"\bxai-[A-Za-z0-9_-]{8,}"), _REDACTED),
+    (re.compile(r"AIza[0-9A-Za-z_-]{20,}"), _REDACTED),
+    # JWTs (access/brain tokens, Supabase keys): header.payload[.signature]
+    (re.compile(r"eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}(?:\.[A-Za-z0-9_-]*)?"), _REDACTED),
+    # Bearer tokens in headers
+    (re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{8,}"), r"\1" + _REDACTED),
+    # Secret-looking query/form params: ?api_key=..., &key=..., token=...
+    (re.compile(r"(?i)\b((?:api[_-]?key|apikey|key|token|access_token|jwt|secret|password)=)[^&\s\"'<>]+"), r"\1" + _REDACTED),
+]
+
+
+def scrub_secrets(text: str) -> str:
+    """Redact API keys, bot tokens, and JWTs from a log string."""
+    if not text:
+        return text
+    for pattern, repl in _SCRUB_PATTERNS:
+        text = pattern.sub(repl, text)
+    return text
+
+
+def _scrub_patcher(record) -> None:
+    """Loguru patcher: scrub the message before any sink sees it."""
+    record["message"] = scrub_secrets(record["message"])
+
 
 def _loguru_sink(message):
     """Loguru sink that captures logs into the buffer and notifies subscribers."""
@@ -30,7 +67,8 @@ def _loguru_sink(message):
         "module": record["module"],
         "function": record["function"],
         "line": record["line"],
-        "message": record["message"],
+        # Scrub again here (defence in depth, in case the patcher is bypassed)
+        "message": scrub_secrets(record["message"]),
     }
 
     _LOG_BUFFER.append(entry)
@@ -47,14 +85,19 @@ def init_log_capture():
     """Initialize the loguru sink. Call once at startup."""
     # Remove default handler and add a better formatted one
     logger.remove()
+    logger.configure(patcher=_scrub_patcher)
+    # httpx logs full request URLs at INFO (Telegram URLs contain the bot token)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     logger.add(
         _loguru_sink,
         level="DEBUG",
         format="{message}",
     )
-    # Terminal output with clear ERROR/WARNING formatting and colors
+    # Terminal output with clear ERROR/WARNING formatting and colors.
+    # Scrub the fully formatted line too (covers exception tracebacks).
     logger.add(
-        lambda m: print(m, end=""),
+        lambda m: print(scrub_secrets(m), end=""),
         level="DEBUG",
         format="<level>{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {module}:{function}:{line} - {message}</level>",
         colorize=True,

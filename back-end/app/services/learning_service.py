@@ -32,6 +32,7 @@ def record_outcome(
     market_regime: str | None = None,
     catalyst_type: str | None = None,
     notes: str | None = None,
+    pnl_pct_override: float | None = None,
 ) -> dict:
     """Record the outcome of a trade for learning.
 
@@ -39,20 +40,35 @@ def record_outcome(
     signal triggered them (the brain re-evaluates fresh signals at every scan,
     so there's no single "the signal" that owns the trade). For real positions
     that ARE tied to a signal, pass it; for virtual trades pass None.
+
+    Direction-aware: action "SHORT" / "SHORT_SELL" is a short position
+    (profit when price falls). `pnl_pct_override` lets the brain pass its
+    net P&L % (after slippage, fees and FX) instead of the raw price move.
     """
-    pnl_pct = ((exit_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
-    pnl_amount = exit_price - entry_price  # Per-share P&L (consistent unit for cross-trade comparison)
+    is_short = action in ("SHORT", "SHORT_SELL")
+    if entry_price > 0:
+        move = (entry_price - exit_price) if is_short else (exit_price - entry_price)
+        pnl_pct = move / entry_price * 100
+        pnl_amount = move  # per-share, direction-aware
+    else:
+        pnl_pct, pnl_amount = 0.0, 0.0
+    if pnl_pct_override is not None:
+        pnl_pct = float(pnl_pct_override)
 
     # Was the signal correct?
-    if action == "BUY":
+    if action == "BUY" or is_short:
         signal_correct = pnl_pct > 0
     elif action in ("SELL", "AVOID"):
         signal_correct = pnl_pct <= 0  # Correct to avoid if price dropped
     else:
         signal_correct = abs(pnl_pct) < 3  # HOLD is correct if price didn't move much
 
-    hit_target = exit_price >= target_price if target_price else False
-    hit_stop = exit_price <= stop_loss if stop_loss else False
+    if is_short:
+        hit_target = exit_price <= target_price if target_price else False
+        hit_stop = exit_price >= stop_loss if stop_loss else False
+    else:
+        hit_target = exit_price >= target_price if target_price else False
+        hit_stop = exit_price <= stop_loss if stop_loss else False
 
     client = get_client()
     data = {
