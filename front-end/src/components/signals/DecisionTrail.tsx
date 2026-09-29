@@ -80,7 +80,20 @@ function hostLabel(url: string): string {
 
 const VISIBLE_CITATIONS = 4
 
-export function DecisionTrail({ trail }: { trail: SignalTrail }) {
+/** Optional overrides so other flows (e.g. the on-demand "Check a stock"
+ *  page) can render the same trail without a stored signal / order. */
+export interface DecisionTrailOptions {
+  /** Panel title (default: "Decision trail · {date} scan"). */
+  title?: string
+  /** Step 5 title (default: "Risk check and order"). */
+  orderTitle?: string
+  /** Step 5 status label + highlight (default: Bought / Skipped / Not evaluated). */
+  orderStatus?: { label: string; active: boolean }
+  /** Hide the "What happened next" panel (no stored outcomes). */
+  showOutcomes?: boolean
+}
+
+export function DecisionTrail({ trail, options = {} }: { trail: SignalTrail; options?: DecisionTrailOptions }) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const locale = useI18nStore((s) => s.locale)
@@ -104,7 +117,8 @@ export function DecisionTrail({ trail }: { trail: SignalTrail }) {
   // 5. order
   const dec = trail.decision
   const o = trail.order
-  const bought = dec?.decision === 'ENTER'
+  const bought = options.orderStatus ? options.orderStatus.active : dec?.decision === 'ENTER'
+  const showOutcomes = options.showOutcomes ?? true
 
   const scanWhen = `${shortDate(trail.created_at, locale)}, ${etTime(trail.created_at, locale)}`
 
@@ -124,7 +138,7 @@ export function DecisionTrail({ trail }: { trail: SignalTrail }) {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_420px] gap-4 md:gap-6 items-start">
-      <Panel title={fill(tr.title, { date: scanWhen })}>
+      <Panel title={options.title ?? fill(tr.title, { date: scanWhen })}>
         <ol className="flex flex-col">
           <Step
             n={1}
@@ -267,10 +281,10 @@ export function DecisionTrail({ trail }: { trail: SignalTrail }) {
             n={5}
             last
             active={bought}
-            title={tr.order.title}
+            title={options.orderTitle ?? tr.order.title}
             right={
               <span className="text-[13px] font-semibold" style={{ color: bought ? theme.colors.up : theme.colors.textSub }}>
-                {bought ? tr.order.bought : dec ? tr.order.skipped : tr.order.notEvaluated}
+                {options.orderStatus ? options.orderStatus.label : bought ? tr.order.bought : dec ? tr.order.skipped : tr.order.notEvaluated}
               </span>
             }
           >
@@ -324,6 +338,7 @@ export function DecisionTrail({ trail }: { trail: SignalTrail }) {
           )}
         </Panel>
 
+        {showOutcomes && (
         <Panel title={tr.outcomes.title}>
           <dl className="grid grid-cols-3 gap-2.5">
             {(outcomes?.horizons ?? []).map((h) => (
@@ -344,6 +359,7 @@ export function DecisionTrail({ trail }: { trail: SignalTrail }) {
           </dl>
           <p className="mt-2.5 text-[12px]" style={{ color: theme.colors.textSub }}>{tr.outcomes.note}</p>
         </Panel>
+        )}
       </aside>
     </div>
   )

@@ -1,0 +1,88 @@
+'use client'
+
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { checkApi, CheckApiError } from '@/lib/api'
+import type { CheckJob, CheckJobError, CheckResult } from '@/types/check'
+
+const POLL_MS = 2_000
+
+export interface StockCheckState {
+  job: CheckJob | null
+  result: CheckResult | null
+  error: CheckJobError | null
+  running: boolean
+  /** the ticker the user asked for (as typed) */
+  ticker: string | null
+}
+
+const IDLE: StockCheckState = { job: null, result: null, error: null, running: false, ticker: null }
+
+function toError(e: unknown): CheckJobError {
+  if (e instanceof CheckApiError) return { code: e.code, message: e.message, status: e.status }
+  const msg = e instanceof Error ? e.message : String(e)
+  return { code: /network/i.test(msg) ? 'network' : 'internal', message: msg, status: 0 }
+}
+
+/** POST /check, then poll GET /check/{id} every 2s until done or failed. */
+export function useStockCheck(onDone?: (r: CheckResult) => void) {
+  const [state, setState] = useState<StockCheckState>(IDLE)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const runId = useRef(0)
+  const onDoneRef = useRef(onDone)
+  onDoneRef.current = onDone
+
+  const stop = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = null
+  }, [])
+
+  useEffect(() => stop, [stop])
+
+  const settle = useCallback((job: CheckJob, id: number) => {
+    if (id !== runId.current) return
+    if (job.status === 'running') {
+      setState((s) => ({ ...s, job, running: true }))
+      timer.current = setTimeout(async () => {
+        try {
+          const next = await checkApi.get(job.job_id)
+          settle(next, id)
+        } catch (e) {
+          if (id !== runId.current) return
+          setState((s) => ({ ...s, running: false, error: toError(e) }))
+        }
+      }, POLL_MS)
+      return
+    }
+    if (job.status === 'done' && job.result) {
+      setState((s) => ({ ...s, job, result: job.result ?? null, running: false, error: null }))
+      onDoneRef.current?.(job.result)
+      return
+    }
+    setState((s) => ({
+      ...s, job, running: false,
+      error: job.error ?? { code: 'internal', message: 'The check failed.', status: 500 },
+    }))
+  }, [])
+
+  const start = useCallback(async (ticker: string, force = false) => {
+    stop()
+    const id = ++runId.current
+    const clean = ticker.trim()
+    setState({ ...IDLE, running: true, ticker: clean })
+    try {
+      const job = await checkApi.start(clean, force)
+      settle(job, id)
+    } catch (e) {
+      if (id !== runId.current) return
+      setState((s) => ({ ...s, running: false, error: toError(e) }))
+    }
+  }, [settle, stop])
+
+  const reset = useCallback(() => {
+    stop()
+    runId.current++
+    setState(IDLE)
+  }, [stop])
+
+  return { ...state, start, reset }
+}

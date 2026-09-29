@@ -283,7 +283,8 @@ export interface RedFlag {
 
 export interface SignalTrail {
   symbol: string
-  signal_id: string
+  /** null for an on-demand check (no stored signal) */
+  signal_id: string | null
   scan_id: string | null
   created_at: string
   company_name: string | null
@@ -339,6 +340,7 @@ export interface SignalTrail {
     cluster_threshold: number | null
   } | null
   sector_exposure: { sector: string; held: number; max: number } | null
+  /** null for an on-demand check */
   outcomes: {
     signal_at: string | null
     horizons: {

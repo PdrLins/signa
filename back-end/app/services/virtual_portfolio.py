@@ -380,6 +380,11 @@ def compute_entry_levels(sig: dict, entry_price: float, direction: str = "LONG")
             return None
 
     stop, target = _num(sig.get("stop_loss")), _num(sig.get("target_price"))
+    if (sig.get("grok_data") or {}).get("_levels_source") == "atr_fallback":
+        # The scan filled a 2R target from the QUOTED price; measured from the
+        # slipped fill it lands just under brain_min_rr and every such entry
+        # was rejected. Rebuild the fallback target from the fill instead.
+        target = None
     source = "ai"
     stop_ok = stop is not None and ((stop > entry) if short else (0 < stop < entry))
     if stop_ok and atr and abs(entry - stop) < settings.brain_min_stop_atr_mult * atr:
@@ -1296,6 +1301,8 @@ def _evaluate_brain_entry(sig: dict, ctx: BrainEntryContext, direction: str = "L
 
     if any(p["symbol"] == symbol for p in ctx.open_book) or symbol in ctx.open_watchlist:
         return "already_held", plan
+    if direction == "LONG" and (sig.get("grok_data") or {}).get("_earnings_blackout"):
+        return "earnings_blackout", plan
     if symbol in ctx.cooldown:
         return ctx.cooldown[symbol], plan
     if ctx.breaker_tripped:

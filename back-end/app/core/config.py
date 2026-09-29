@@ -514,6 +514,15 @@ class Settings(BaseSettings):
     outcomes_report_lookback_days: int = 180    # window analysed by daily learning
     outcomes_benchmark: str = "SPY"             # benchmark for excess returns (all assets)
 
+    # --- On-demand "Check a stock" (services/stock_check.py) ---
+    # A repeat check of the same resolved symbol within this window returns
+    # the cached result (force=true bypasses). Non-cached runs are capped
+    # per US-Eastern day and at most N run at once.
+    stock_check_cache_minutes: int = 30
+    stock_check_daily_limit: int = 20
+    stock_check_max_concurrent: int = 2
+    stock_check_job_ttl_minutes: int = 60
+
     # --- Language ---
     language: str = "en"  # "en" or "pt"
 

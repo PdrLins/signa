@@ -17,6 +17,7 @@ import {
   Plug,
   HelpCircle,
   ScrollText,
+  Search,
 } from 'lucide-react'
 import { isNavActive } from '@/components/layout/LeftNav'
 
@@ -27,6 +28,7 @@ export function BottomNav() {
   const [moreOpen, setMoreOpen] = useState(false)
 
   const MORE_ITEMS = useMemo(() => [
+    { label: t.nav.check, href: '/check', icon: Search },
     { label: t.nav.brain, href: '/brain', icon: Brain },
     { label: t.nav.settings, href: '/settings', icon: Settings },
     { label: t.nav.watchlist, href: '/watchlist', icon: Star },

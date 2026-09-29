@@ -18,6 +18,7 @@ import {
   Brain,
   HelpCircle,
   LogOut,
+  Search,
 } from 'lucide-react'
 
 // Pages reached through Settings (and the mobile "More" sheet) keep the
@@ -73,6 +74,7 @@ export function LeftNav() {
   const NAV_ITEMS = [
     { label: t.nav.today, href: '/today', icon: LayoutDashboard },
     { label: t.nav.signals, href: '/signals', icon: Activity },
+    { label: t.nav.check, href: '/check', icon: Search },
     { label: t.nav.positions, href: '/positions', icon: Briefcase },
     { label: t.nav.isItWorking, href: '/performance', icon: ChartLine },
     { label: t.nav.brain, href: '/brain', icon: Brain },

@@ -150,3 +150,36 @@ class TestTradingDays:
         from datetime import date
         assert vp.trading_days_between(date(2026, 9, 25), date(2026, 9, 28)) == 1  # Fri -> Mon
         assert vp.trading_days_between(date(2026, 9, 21), date(2026, 9, 24)) == 3
+
+
+class TestEarningsBlackoutAndFallbackTargets:
+    def test_earnings_blackout_blocks_brain_entry(self):
+        """The scan flags the blackout on every candidate; the brain must skip
+        even when the score-based action was never BUY (filter mode)."""
+        sig = make_sig(grok_data={"_earnings_blackout": "Earnings blackout: next report in 1 trading day(s)"})
+        db, res = run([sig])
+        assert brain_trades(db) == []
+        (decision,) = db.rows("brain_decisions")
+        assert decision["decision"] == "SKIP"
+        assert decision["reason"] == "earnings_blackout"
+
+    def test_no_blackout_flag_still_buys(self):
+        db, _ = run([make_sig(grok_data={"_earnings_blackout": None})])
+        assert len(brain_trades(db)) == 1
+
+    def test_atr_fallback_target_rebuilt_from_fill(self):
+        """Scan-filled 2R target measured from the quote fell to ~1.8R after
+        slippage and was always rejected; it is now rebuilt from the fill."""
+        price, atr = 40.0, 0.4
+        stop = price - 2 * atr
+        sig = make_sig(price=price, atr=atr, stop=stop, target=price + 2 * (price - stop),
+                       grok_data={"_levels_source": "atr_fallback"})
+        fill = vp.apply_slippage(price, "BUY", "AAA")
+        lv = vp.compute_entry_levels(sig, fill)
+        assert lv["reason"] is None
+        assert lv["rr"] >= settings.brain_min_rr
+
+    def test_ai_levels_are_not_rebuilt(self):
+        sig = make_sig(stop=94.0, target=115.0, grok_data={"_levels_source": "ai"})
+        lv = vp.compute_entry_levels(sig, 100.0)
+        assert lv["target"] == 115.0

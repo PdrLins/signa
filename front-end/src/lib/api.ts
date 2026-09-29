@@ -5,6 +5,7 @@ import type { SignalsResponse, SignalFilters, DailyStats, ScanTodayRecord } from
 import type { WatchlistItem, WatchlistResponse, WatchlistAddRequest } from '@/types/watchlist'
 import type { ScansResponse } from '@/types/scan'
 import type { TodayInsights, PerformanceInsights, BacktestInsights, SignalTrail, SignalVerdict } from '@/types/insights'
+import type { CheckJob } from '@/types/check'
 import type { LoginRequest, LoginResponse, OtpVerifyRequest, AuthResponse } from '@/types/auth'
 import type {
   PortfolioItem,
@@ -333,6 +334,42 @@ export const insightsApi = {
 }
 
 // Health (public)
+// Check a stock — 4xx responses carry {detail: {code, message}}; they are
+// returned (not thrown by the interceptor) so the page can show a friendly,
+// translated error per code. 401 still goes through the interceptor.
+export class CheckApiError extends Error {
+  code: string
+  status: number
+  constructor(code: string, message: string, status: number) {
+    super(message)
+    this.code = code
+    this.status = status
+  }
+}
+
+async function checkCall<T>(method: 'get' | 'post', url: string, data?: unknown): Promise<T> {
+  const res = await client.request<T | { detail?: unknown }>({
+    method,
+    url,
+    data,
+    validateStatus: (s) => (s >= 200 && s < 300) || s === 400 || s === 404 || s === 422 || s === 429,
+  })
+  if (res.status >= 400) {
+    const detail = (res.data as { detail?: unknown } | undefined)?.detail
+    const obj = detail && typeof detail === 'object' ? (detail as { code?: string; message?: string }) : null
+    const code = obj?.code
+      ?? (res.status === 429 ? 'rate_limited' : res.status === 404 ? 'job_not_found' : res.status === 400 ? 'invalid_ticker' : 'internal')
+    const message = obj?.message ?? (typeof detail === 'string' ? detail : 'Request failed.')
+    throw new CheckApiError(code, message, res.status)
+  }
+  return res.data as T
+}
+
+export const checkApi = {
+  start: (ticker: string, force = false) => checkCall<CheckJob>('post', '/check', { ticker, force }),
+  get: (jobId: string) => checkCall<CheckJob>('get', `/check/${encodeURIComponent(jobId)}`),
+}
+
 export const healthApi = {
   check: () => get<{ status: string; app: string; uptime_seconds: number; scheduler_running: boolean }>('/health'),
 }

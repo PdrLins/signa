@@ -1197,8 +1197,13 @@ async def _process_candidate(
 
     # Earnings blackout: no NEW BUY right before a scheduled report.
     # HOLD, not AVOID — held positions must not be sold because of it.
-    blackout_reason = check_entry_blackout(fundamental_data) if action == "BUY" else None
-    if blackout_reason:
+    # Evaluated for every candidate (not only score-BUYs): in filter mode the
+    # brain enters on filter + AI BUY regardless of the score-based action, so
+    # it reads the flag from grok_data["_earnings_blackout"] itself.
+    blackout_reason = check_entry_blackout(fundamental_data)
+    if isinstance(grok_data, dict):
+        grok_data["_earnings_blackout"] = blackout_reason
+    if blackout_reason and action == "BUY":
         logger.info(f"{ticker}: BUY downgraded to HOLD — {blackout_reason}")
         action = "HOLD"
 

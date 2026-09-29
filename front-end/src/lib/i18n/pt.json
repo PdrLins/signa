@@ -24,7 +24,8 @@
     "logOut": "Sair",
     "mainNav": "Navegação principal",
     "moreNav": "Mais opções de navegação",
-    "closeMore": "Fechar menu"
+    "closeMore": "Fechar menu",
+    "check": "Checar ação"
   },
   "login": {
     "welcome": "Signa",
@@ -1082,7 +1083,12 @@
       "ai_not_called": "IA não chamada",
       "ai_low_confidence": "Confiança baixa da IA",
       "size_below_minimum": "Tamanho abaixo do mínimo"
-    }
+    },
+    "red_flag": "Alerta: {text}",
+    "blocker": "Bloqueio: {text}",
+    "blocker_timing": "{text}",
+    "crisis_high_risk": "Mercado em CRISIS — nomes de alto risco são pulados",
+    "ai_disabled": "Análise de IA desativada"
   },
   "performance": {
     "title": "Está funcionando?",
@@ -1274,5 +1280,131 @@
     "pwin": "p_win {p}",
     "score": "score {s}",
     "verdictLabel": "Veredito da IA"
+  },
+  "check": {
+    "title": "Checar uma ação",
+    "subtitle": "Roda a análise completa do Signa, ao vivo, em um ticker e mostra se o brain compraria agora. Nada é comprado.",
+    "label": "Ticker",
+    "placeholder": "ex.: XEQT, AAPL, BTC",
+    "submit": "Checar",
+    "checking": "Checando…",
+    "inputHelp": "Ações da TSX (.TO) e cripto (-USD) são detectadas automaticamente. Leva cerca de um minuto.",
+    "remaining": "{n} checagens restantes hoje",
+    "recent": "Checagens recentes",
+    "recentEmpty": "Suas checagens aparecem aqui.",
+    "clearRecent": "Limpar",
+    "recentOpen": "Checar {symbol} de novo",
+    "progressTitle": "Checando {symbol}…",
+    "progressLabel": "Progresso da checagem",
+    "phases": {
+      "resolving": "Encontrando o ticker",
+      "market_data": "Carregando preços e fundamentos",
+      "filter": "Filtro técnico",
+      "sentiment": "Notícias e busca no X ao vivo",
+      "synthesis": "Triagem do Sonnet",
+      "decision": "Decisão do Opus",
+      "risk": "Risco, tamanho e encaixe na carteira",
+      "done": "Pronto"
+    },
+    "verdict": {
+      "BUY_NOW": "Boa hora para comprar",
+      "WAIT": "Esperar",
+      "AVOID": "Evitar"
+    },
+    "headline": {
+      "buy_now": "{symbol} passa em todas as checagens do brain — ele compraria agora.",
+      "wait": "{symbol} parece razoável, mas não agora: {reason}.",
+      "avoid": "O brain não compraria {symbol}: {reason}."
+    },
+    "why": "Por quê",
+    "whatWouldChange": "O que mudaria a resposta",
+    "hints": {
+      "pullback_sma50": "Espere o preço voltar para no máximo {pct}% acima da média de 50 dias (~{price})",
+      "rsi_cool": "Espere o RSI esfriar para {limit} ou menos",
+      "reclaim_sma200": "O preço precisa voltar para cima da média de 200 dias (~{price})",
+      "golden_cross": "A média de 50 dias precisa voltar para cima da de 200 dias ({sma50} vs {sma200})",
+      "more_history": "Precisa de cerca de um ano de histórico de preços para o filtro de tendência",
+      "liquidity": "Precisa de mais volume negociado (pelo menos {min} por dia)",
+      "red_flag_clear": "O alerta citado precisaria ser resolvido ou se mostrar irrelevante",
+      "blocker_clear": "Este bloqueio precisaria sumir: {text}",
+      "ai_bearish": "A IA diz {signal} — a visão dela teria que mudar",
+      "ai_retry": "A análise de IA falhou — tente de novo mais tarde",
+      "ai_conviction": "A IA tende a BUY, mas precisa de confiança de pelo menos {min}",
+      "ai_hold": "A IA diz para esperar — cheque de novo após o próximo catalisador ou recuo",
+      "ai_enable": "Ative a análise de IA nas configurações",
+      "pullback_sma200": "Espere o preço voltar para no máximo 50% acima da média de 200 dias (~{price})",
+      "after_earnings": "Resultado em {date} — cheque de novo depois da divulgação",
+      "score": "A nota composta está baixa — cheque de novo quando os dados melhorarem",
+      "rr_min": "O retorno/risco precisa chegar a {min} — algo como entrar a {price} ou menos",
+      "levels": "Não foi possível definir um stop válido",
+      "already_held": "O brain já tem esta posição",
+      "cooldown": "Espera de reentrada — aguarde {days} pregões após a última saída",
+      "breaker": "Novas entradas estão pausadas pelo disjuntor de drawdown ({days} pregões restantes)",
+      "horizon": "Entradas de longo prazo estão suspensas nas configurações",
+      "size": "Não há caixa livre para uma posição de tamanho mínimo",
+      "slots": "Espere o brain liberar uma vaga (limite de posições, setor ou cripto)",
+      "diversify": "Muito correlacionada com {symbol} ({corr}), que o brain já tem",
+      "tier": "Uma regra de admissão do brain rejeita agora",
+      "regime": "Cheque de novo quando o regime de mercado sair de CRISIS"
+    },
+    "notes": {
+      "market_closed": "O mercado está fechado — uma ordem agora seria executada na próxima abertura.",
+      "no_equity": "A carteira do brain não tem patrimônio, então não há tamanho sugerido.",
+      "ai_cached": "O veredito da IA foi reaproveitado de uma checagem ou varredura das últimas horas.",
+      "ai_skipped": "A IA não foi consultada: o setup já falha numa checagem estrutural (economiza custo).",
+      "ai_skipped_disabled": "A análise de IA está desativada nas configurações."
+    },
+    "cached": "Em cache",
+    "checkedAt": "checado às {time}",
+    "recheck": "Checar de novo",
+    "recheckLabel": "Rodar a checagem completa de {symbol} de novo, ignorando o cache",
+    "price": "Preço",
+    "entry": "Entrada",
+    "stop": "Stop",
+    "target": "Alvo",
+    "rr": "Retorno / risco",
+    "rrValue": "{rr} (mín. {min})",
+    "size": "Tamanho sugerido · {pct}% de risco",
+    "sizeValue": "{shares} ações · {alloc}",
+    "sizeRisk": "arrisca {risk} ({pct}% do patrimônio)",
+    "sizeNone": "Sem tamanho (sem patrimônio ou sem stop válido)",
+    "earnings": "Próximo resultado",
+    "earningsNone": "Nenhum agendado",
+    "earningsNa": "Não se aplica",
+    "earningsBlackout": "dentro do blackout",
+    "correlation": "Correlação máx.",
+    "correlationNone": "Sem posições abertas",
+    "correlationValue": "{corr} com {symbol}",
+    "trailTitle": "Como o Signa decidiu",
+    "orderTitle": "Checagem de risco",
+    "orderBuy": "Compraria",
+    "orderNo": "Não compraria",
+    "caveatsTitle": "Antes de agir",
+    "caveats": {
+      "not_advice": "Não é recomendação de investimento. O Signa é um experimento numa carteira virtual.",
+      "edge_unproven": "A vantagem da estratégia não está comprovada — veja Está funcionando? antes de confiar em qualquer veredito.",
+      "no_order": "Uma checagem nunca faz uma operação e não entra nas estatísticas do brain."
+    },
+    "isItWorking": "Está funcionando?",
+    "assetClass": {
+      "STOCK": "Ação",
+      "ETF": "ETF",
+      "CRYPTO": "Cripto"
+    },
+    "errors": {
+      "not_found": "Não achamos um preço recente para {ticker}. Confira o símbolo — para a TSX você pode adicionar .TO.",
+      "daily_limit": "Você usou as checagens de hoje. O limite reinicia à meia-noite (ET).",
+      "busy": "Já há duas checagens rodando — espere uma terminar.",
+      "rate_limited": "Muitas checagens em pouco tempo — espere alguns minutos e tente de novo.",
+      "invalid_ticker": "Digite um ticker como AAPL, XEQT ou BTC.",
+      "insufficient_data": "Não há histórico de preços suficiente para analisar {ticker}.",
+      "job_not_found": "Essa checagem expirou — rode de novo.",
+      "network": "Erro de rede — verifique sua conexão.",
+      "internal": "A checagem falhou — tente de novo."
+    },
+    "tryAgain": "Tentar de novo",
+    "todayLabel": "Checar uma ação",
+    "todayPlaceholder": "Ticker…",
+    "todaySubmit": "Checar"
   }
 }

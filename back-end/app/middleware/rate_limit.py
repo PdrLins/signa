@@ -42,6 +42,7 @@ _STRICT_PATHS = {
     "/api/v1/scans/trigger",
     "/api/v1/learning/analyze",
     "/api/v1/learning/outcomes",
+    "/api/v1/check",            # POST: starts a paid on-demand stock check
 }
 
 # Paths exempt from rate limiting
@@ -57,6 +58,8 @@ _EXEMPT_PATHS = {
 # Scan progress polling (GET every 2-3s) — exempt, but ONLY this exact route.
 # A substring check ("/progress" in path) let any path dodge rate limiting.
 _PROGRESS_ROUTE = re.compile(r"^/api/v1/scans/[A-Za-z0-9_-]{1,64}/progress$")
+# Stock-check job polling (GET every 2s) — same treatment, exact route only.
+_CHECK_JOB_ROUTE = re.compile(r"^/api/v1/check/[a-f0-9]{32}$")
 
 # ── Thread-safe storage ──
 _lock = threading.Lock()
@@ -86,7 +89,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             path in _EXEMPT_PATHS
             or path.startswith("/docs")
             or path.startswith("/redoc")
-            or (request.method == "GET" and _PROGRESS_ROUTE.match(path))
+            or (request.method == "GET" and (_PROGRESS_ROUTE.match(path) or _CHECK_JOB_ROUTE.match(path)))
         ):
             return await call_next(request)
 

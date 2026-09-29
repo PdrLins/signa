@@ -24,7 +24,8 @@
     "logOut": "Log out",
     "mainNav": "Main navigation",
     "moreNav": "More navigation options",
-    "closeMore": "Close menu"
+    "closeMore": "Close menu",
+    "check": "Check a stock"
   },
   "login": {
     "welcome": "Signa",
@@ -1082,7 +1083,12 @@
       "ai_not_called": "AI not called",
       "ai_low_confidence": "Low AI confidence",
       "size_below_minimum": "Size below minimum"
-    }
+    },
+    "red_flag": "Red flag: {text}",
+    "blocker": "Blocker: {text}",
+    "blocker_timing": "{text}",
+    "crisis_high_risk": "Market in CRISIS — high-risk names are skipped",
+    "ai_disabled": "AI analysis is disabled"
   },
   "performance": {
     "title": "Is it working?",
@@ -1274,5 +1280,131 @@
     "pwin": "p_win {p}",
     "score": "score {s}",
     "verdictLabel": "AI verdict"
+  },
+  "check": {
+    "title": "Check a stock",
+    "subtitle": "Run Signa's full live analysis on one ticker and see whether the brain would buy it right now. Nothing is bought.",
+    "label": "Ticker",
+    "placeholder": "e.g. XEQT, AAPL, BTC",
+    "submit": "Check",
+    "checking": "Checking…",
+    "inputHelp": "TSX listings (.TO) and crypto (-USD) are detected automatically. Takes about a minute.",
+    "remaining": "{n} checks left today",
+    "recent": "Recent checks",
+    "recentEmpty": "Your checks will show up here.",
+    "clearRecent": "Clear",
+    "recentOpen": "Check {symbol} again",
+    "progressTitle": "Checking {symbol}…",
+    "progressLabel": "Check progress",
+    "phases": {
+      "resolving": "Finding the ticker",
+      "market_data": "Loading prices and fundamentals",
+      "filter": "Technical filter",
+      "sentiment": "Live news and X search",
+      "synthesis": "Sonnet screen",
+      "decision": "Opus decision",
+      "risk": "Risk, sizing and portfolio fit",
+      "done": "Done"
+    },
+    "verdict": {
+      "BUY_NOW": "Good time to buy",
+      "WAIT": "Wait",
+      "AVOID": "Avoid"
+    },
+    "headline": {
+      "buy_now": "{symbol} passes every check the brain uses — it would buy it now.",
+      "wait": "{symbol} looks reasonable, but not right now: {reason}.",
+      "avoid": "The brain would not buy {symbol}: {reason}."
+    },
+    "why": "Why",
+    "whatWouldChange": "What would change the answer",
+    "hints": {
+      "pullback_sma50": "Wait for a pullback to within {pct}% of the 50-day average (~{price})",
+      "rsi_cool": "Wait for RSI to cool to {limit} or below",
+      "reclaim_sma200": "Price needs to climb back above its 200-day average (~{price})",
+      "golden_cross": "The 50-day average needs to cross back above the 200-day ({sma50} vs {sma200})",
+      "more_history": "Needs about a year of price history before the trend check can run",
+      "liquidity": "Needs more trading volume (at least {min} a day)",
+      "red_flag_clear": "The cited red flag would need to be resolved or shown to be immaterial",
+      "blocker_clear": "This blocker would need to clear: {text}",
+      "ai_bearish": "The AI calls it {signal} — its view would have to change",
+      "ai_retry": "The AI analysis failed — try again later",
+      "ai_conviction": "The AI leans BUY but needs a confidence of at least {min}",
+      "ai_hold": "The AI says wait — re-check after the next catalyst or pullback",
+      "ai_enable": "Turn AI analysis on in settings",
+      "pullback_sma200": "Wait for price to come back within 50% of the 200-day average (~{price})",
+      "after_earnings": "Earnings on {date} — re-check after the report",
+      "score": "The composite score is too low — re-check when the data improves",
+      "rr_min": "Reward/risk must reach {min} — roughly an entry at or below {price}",
+      "levels": "No valid stop could be set",
+      "already_held": "The brain already holds it",
+      "cooldown": "Re-entry cooldown — wait {days} trading days after the last exit",
+      "breaker": "New entries are paused by the drawdown breaker ({days} trading days left)",
+      "horizon": "Long-horizon entries are suspended in settings",
+      "size": "Not enough free cash for a minimum-size position",
+      "slots": "Wait for the brain to free a slot (position, sector or crypto limit)",
+      "diversify": "Too correlated with {symbol} ({corr}), which the brain already holds",
+      "tier": "A brain admission rule rejects it right now",
+      "regime": "Re-check once the market regime leaves CRISIS"
+    },
+    "notes": {
+      "market_closed": "The market is closed — an order now would fill at the next open.",
+      "no_equity": "The brain wallet has no equity, so no position size could be suggested.",
+      "ai_cached": "The AI verdict was reused from a check or scan in the last few hours.",
+      "ai_skipped": "The AI wasn't asked: the setup already fails a structural check (saves cost).",
+      "ai_skipped_disabled": "AI analysis is disabled in settings."
+    },
+    "cached": "Cached",
+    "checkedAt": "checked at {time}",
+    "recheck": "Re-check",
+    "recheckLabel": "Re-run the full check for {symbol}, ignoring the cache",
+    "price": "Price",
+    "entry": "Entry",
+    "stop": "Stop",
+    "target": "Target",
+    "rr": "Reward / risk",
+    "rrValue": "{rr} (min {min})",
+    "size": "Suggested size · {pct}% risk",
+    "sizeValue": "{shares} sh · {alloc}",
+    "sizeRisk": "risks {risk} ({pct}% of equity)",
+    "sizeNone": "No size (no equity or no valid stop)",
+    "earnings": "Next earnings",
+    "earningsNone": "None scheduled",
+    "earningsNa": "Not applicable",
+    "earningsBlackout": "inside the blackout",
+    "correlation": "Max correlation",
+    "correlationNone": "No open positions",
+    "correlationValue": "{corr} with {symbol}",
+    "trailTitle": "How Signa decided",
+    "orderTitle": "Risk check",
+    "orderBuy": "Would buy",
+    "orderNo": "Would not buy",
+    "caveatsTitle": "Before you act",
+    "caveats": {
+      "not_advice": "Not financial advice. Signa is an experiment run on a virtual wallet.",
+      "edge_unproven": "The strategy's edge is unproven — see Is it working? before trusting any verdict.",
+      "no_order": "A check never places a trade and isn't counted in the brain's statistics."
+    },
+    "isItWorking": "Is it working?",
+    "assetClass": {
+      "STOCK": "Stock",
+      "ETF": "ETF",
+      "CRYPTO": "Crypto"
+    },
+    "errors": {
+      "not_found": "We couldn't find a recent price for {ticker}. Check the symbol — for TSX listings you can add .TO.",
+      "daily_limit": "You've used today's checks. The limit resets at midnight ET.",
+      "busy": "Two checks are already running — wait for one to finish.",
+      "rate_limited": "Too many checks in a short time — wait a few minutes and try again.",
+      "invalid_ticker": "Enter a ticker symbol like AAPL, XEQT or BTC.",
+      "insufficient_data": "There isn't enough price history to analyse {ticker}.",
+      "job_not_found": "That check expired — run it again.",
+      "network": "Network error — please check your connection.",
+      "internal": "The check failed — please try again."
+    },
+    "tryAgain": "Try again",
+    "todayLabel": "Check a stock",
+    "todayPlaceholder": "Ticker…",
+    "todaySubmit": "Check"
   }
 }
