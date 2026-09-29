@@ -103,7 +103,7 @@ function RuleEditForm({ rule, onSave, onCancel }: {
           rows={3}
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
-          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none resize-y"
+          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-0 resize-y"
           style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }}
         />
       </label>
@@ -113,7 +113,7 @@ function RuleEditForm({ rule, onSave, onCancel }: {
         <input
           value={form.formula}
           onChange={(e) => setForm({ ...form, formula: e.target.value })}
-          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none"
+          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-0"
           style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }}
         />
       </label>
@@ -122,17 +122,17 @@ function RuleEditForm({ rule, onSave, onCancel }: {
         <label>
           <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.brain.min}</span>
           <input type="number" step="any" value={form.threshold_min ?? ''} onChange={(e) => setForm({ ...form, threshold_min: e.target.value ? Number(e.target.value) : null })}
-            className="w-full mt-1 px-2 py-1.5 rounded-lg text-sm outline-none" style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
+            className="w-full mt-1 px-2 py-1.5 rounded-lg text-sm outline-0" style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
         </label>
         <label>
           <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.brain.max}</span>
           <input type="number" step="any" value={form.threshold_max ?? ''} onChange={(e) => setForm({ ...form, threshold_max: e.target.value ? Number(e.target.value) : null })}
-            className="w-full mt-1 px-2 py-1.5 rounded-lg text-sm outline-none" style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
+            className="w-full mt-1 px-2 py-1.5 rounded-lg text-sm outline-0" style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
         </label>
         <label>
           <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.brain.unit}</span>
           <select value={form.threshold_unit} onChange={(e) => setForm({ ...form, threshold_unit: e.target.value })}
-            className="w-full mt-1 px-2 py-1.5 rounded-lg text-sm outline-none" style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }}>
+            className="w-full mt-1 px-2 py-1.5 rounded-lg text-sm outline-0" style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }}>
             <option value="absolute">absolute</option>
             <option value="percent">percent</option>
             <option value="ratio">ratio</option>
@@ -148,12 +148,12 @@ function RuleEditForm({ rule, onSave, onCancel }: {
         <label>
           <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.brain.weightSafe}</span>
           <input type="number" step="0.01" min="0" max="1" value={form.weight_safe} onChange={(e) => setForm({ ...form, weight_safe: Number(e.target.value) })}
-            className="w-full mt-1 px-2 py-1.5 rounded-lg text-sm outline-none" style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
+            className="w-full mt-1 px-2 py-1.5 rounded-lg text-sm outline-0" style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
         </label>
         <label>
           <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.brain.weightRisk}</span>
           <input type="number" step="0.01" min="0" max="1" value={form.weight_risk} onChange={(e) => setForm({ ...form, weight_risk: Number(e.target.value) })}
-            className="w-full mt-1 px-2 py-1.5 rounded-lg text-sm outline-none" style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
+            className="w-full mt-1 px-2 py-1.5 rounded-lg text-sm outline-0" style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
         </label>
       </div>
 
@@ -171,7 +171,7 @@ function RuleEditForm({ rule, onSave, onCancel }: {
       <label className="block">
         <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.brain.notes}</span>
         <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
-          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none resize-y"
+          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-0 resize-y"
           style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
       </label>
 

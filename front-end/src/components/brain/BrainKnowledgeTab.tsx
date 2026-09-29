@@ -74,25 +74,25 @@ function KnowledgeEditForm({ entry, onSave, onCancel }: {
       <label className="block">
         <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.brain.explanation}</span>
         <textarea rows={6} value={form.explanation} onChange={(e) => setForm({ ...form, explanation: e.target.value })}
-          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none resize-y"
+          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-0 resize-y"
           style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
       </label>
       <label className="block">
         <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.brain.formulaOptional}</span>
         <input value={form.formula} onChange={(e) => setForm({ ...form, formula: e.target.value })}
-          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none"
+          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-0"
           style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
       </label>
       <label className="block">
         <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.brain.exampleOptional}</span>
         <textarea rows={2} value={form.example} onChange={(e) => setForm({ ...form, example: e.target.value })}
-          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none resize-y"
+          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-0 resize-y"
           style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
       </label>
       <label className="block">
         <span className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.brain.notes}</span>
         <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
-          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none resize-y"
+          className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-0 resize-y"
           style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}`, color: theme.colors.text }} />
       </label>
       <label className="flex items-center gap-2 cursor-pointer">

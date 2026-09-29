@@ -49,7 +49,7 @@ export const LongVerdictCard = forwardRef<HTMLHeadingElement, {
               id="check-verdict"
               ref={headingRef}
               tabIndex={-1}
-              className="text-[22px] md:text-[28px] font-semibold tracking-tight outline-none break-words"
+              className="text-[22px] md:text-[28px] font-semibold tracking-tight outline-0 break-words"
               style={{ color: style.color }}
             >
               {(tl.verdict as Record<string, string>)[r.verdict] ?? r.verdict}

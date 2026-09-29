@@ -216,7 +216,7 @@ function BudgetCard({ budget, claudeLocal }: { budget: BudgetData; claudeLocal?:
                     max="10"
                     value={limits.daily_limit}
                     onChange={(e) => setLimits({ ...limits, daily_limit: parseFloat(e.target.value) || 0.25 })}
-                    className="w-20 text-right text-[11px] rounded px-2 py-0.5 outline-none"
+                    className="w-20 text-right text-[11px] rounded px-2 py-0.5 outline-0"
                     style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text, border: `1px solid ${theme.colors.border}` }}
                   />
                 </div>
@@ -229,7 +229,7 @@ function BudgetCard({ budget, claudeLocal }: { budget: BudgetData; claudeLocal?:
                     max="50"
                     value={limits.claude_monthly}
                     onChange={(e) => setLimits({ ...limits, claude_monthly: parseFloat(e.target.value) || 0 })}
-                    className="w-20 text-right text-[11px] rounded px-2 py-0.5 outline-none"
+                    className="w-20 text-right text-[11px] rounded px-2 py-0.5 outline-0"
                     style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text, border: `1px solid ${theme.colors.border}` }}
                   />
                 </div>
@@ -242,7 +242,7 @@ function BudgetCard({ budget, claudeLocal }: { budget: BudgetData; claudeLocal?:
                     max="50"
                     value={limits.grok_monthly}
                     onChange={(e) => setLimits({ ...limits, grok_monthly: parseFloat(e.target.value) || 0 })}
-                    className="w-20 text-right text-[11px] rounded px-2 py-0.5 outline-none"
+                    className="w-20 text-right text-[11px] rounded px-2 py-0.5 outline-0"
                     style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text, border: `1px solid ${theme.colors.border}` }}
                   />
                 </div>

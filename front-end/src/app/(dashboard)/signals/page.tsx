@@ -205,7 +205,7 @@ export default function SignalsPage() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t.signals.searchPlaceholder}
             aria-label="Search signals"
-            className="bg-transparent outline-none text-[11px] font-medium w-24"
+            className="bg-transparent outline-0 text-[11px] font-medium w-24"
             style={{ color: theme.colors.text }}
           />
         </div>

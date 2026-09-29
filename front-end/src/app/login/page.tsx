@@ -263,7 +263,7 @@ export default function LoginPage() {
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="w-full rounded-xl px-4 py-3 text-sm outline-none transition-all"
+                    className="w-full rounded-xl px-4 py-3 text-sm outline-0 transition-all"
                     style={{
                       backgroundColor: theme.colors.surfaceAlt,
                       color: theme.colors.text,
@@ -292,7 +292,7 @@ export default function LoginPage() {
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="flex-1 bg-transparent outline-none text-sm"
+                      className="flex-1 bg-transparent outline-0 text-sm"
                       style={{ color: theme.colors.text }}
                       aria-label={t.login.password}
                     />
@@ -384,7 +384,7 @@ export default function LoginPage() {
                       onChange={(e) => handleOtpChange(i, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(i, e)}
                       aria-label={`Digit ${i + 1}`}
-                      className="w-12 h-14 text-center text-lg font-bold rounded-xl outline-none transition-all duration-200"
+                      className="w-12 h-14 text-center text-lg font-bold rounded-xl outline-0 transition-all duration-200"
                       style={{
                         backgroundColor: digit ? `${theme.colors.text}10` : theme.colors.surfaceAlt,
                         color: theme.colors.text,

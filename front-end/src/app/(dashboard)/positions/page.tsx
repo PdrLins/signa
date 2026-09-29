@@ -183,7 +183,7 @@ function PositionsContent() {
                   tabIndex={selected ? 0 : -1}
                   onClick={() => selectTab(tab)}
                   onKeyDown={onTabKeyDown}
-                  className="text-[12px] px-3 py-1.5 rounded-lg transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-1"
+                  className="text-[12px] px-3 py-1.5 rounded-lg transition-colors outline-0 focus-visible:ring-2 focus-visible:ring-offset-1"
                   style={{
                     color: selected ? theme.colors.primary : theme.colors.textSub,
                     backgroundColor: selected ? theme.colors.primary + '15' : 'transparent',
@@ -203,7 +203,7 @@ function PositionsContent() {
             id={`positions-panel-${activeTab}`}
             aria-labelledby={`positions-tab-${activeTab}`}
             tabIndex={0}
-            className="outline-none"
+            className="outline-0"
           >
             {activeTab === 'positions' && (
               <OpenPositionsTab

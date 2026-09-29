@@ -189,7 +189,7 @@ function LogViewer() {
             placeholder={t.logs.filterLogs}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="flex-1 bg-transparent text-sm outline-none"
+            className="flex-1 bg-transparent text-sm outline-0"
             style={{ color: theme.colors.text }}
           />
         </div>
@@ -351,7 +351,7 @@ function LogsLocked() {
                   type="text" inputMode="numeric" maxLength={1} value={d}
                   onChange={(e) => handleDigitChange(i, e.target.value)}
                   onKeyDown={(e) => handleKeyDown(i, e)}
-                  className="w-10 sm:w-11 h-12 text-center text-lg font-bold rounded-xl outline-none"
+                  className="w-10 sm:w-11 h-12 text-center text-lg font-bold rounded-xl outline-0"
                   style={{ backgroundColor: theme.colors.surfaceAlt, border: `2px solid ${d ? theme.colors.primary : theme.colors.border}`, color: theme.colors.text }}
                 />
               ))}

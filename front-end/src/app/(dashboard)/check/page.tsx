@@ -319,7 +319,7 @@ function CheckPageInner() {
                 onResults={onResults}
                 placeholder={tc.placeholder}
                 describedBy={helpId}
-                className="flex-1 min-w-0 h-11 rounded-[10px] px-3 text-[15px] outline-none focus-visible:outline focus-visible:outline-2"
+                className="flex-1 min-w-0 h-11 rounded-[10px] px-3 text-[15px] outline-0 focus-visible:outline focus-visible:outline-2"
                 style={{
                   backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text,
                   border: `1px solid ${theme.colors.border}`, outlineColor: theme.colors.primary,

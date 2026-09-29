@@ -174,7 +174,7 @@ export function WalletCard() {
               if (e.key === 'Enter' && !busy) submit()
               if (e.key === 'Escape') cancel()
             }}
-            className="text-[12px] font-bold tabular-nums px-2 py-1 rounded flex-1 min-w-[80px] outline-none"
+            className="text-[12px] font-bold tabular-nums px-2 py-1 rounded flex-1 min-w-[80px] outline-0"
             style={{
               backgroundColor: theme.colors.surface,
               color: theme.colors.text,

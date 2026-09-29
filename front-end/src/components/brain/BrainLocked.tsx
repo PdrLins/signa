@@ -120,7 +120,7 @@ export function BrainLocked() {
                   aria-label={`OTP digit ${i + 1}`}
                   onChange={(e) => handleDigitChange(i, e.target.value)}
                   onKeyDown={(e) => handleKeyDown(i, e)}
-                  className="w-10 sm:w-11 h-12 text-center text-lg font-bold rounded-xl outline-none transition-all"
+                  className="w-10 sm:w-11 h-12 text-center text-lg font-bold rounded-xl outline-0 transition-all"
                   style={{
                     backgroundColor: theme.colors.surfaceAlt,
                     border: `2px solid ${digit ? theme.colors.primary : theme.colors.border}`,

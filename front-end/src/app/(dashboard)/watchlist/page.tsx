@@ -108,7 +108,7 @@ export default function WatchlistPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t.watchlist.placeholder}
-              className="w-full rounded-[11px] pl-10 pr-4 py-3 text-sm outline-none"
+              className="w-full rounded-[11px] pl-10 pr-4 py-3 text-sm outline-0"
               style={{
                 backgroundColor: theme.colors.surfaceAlt,
                 color: theme.colors.text,

@@ -39,7 +39,7 @@ export function ModeToggle({ mode, onChange, label }: { mode: CheckMode; onChang
             type="button"
             aria-pressed={on}
             onClick={() => onChange(m)}
-            className="min-h-11 sm:min-h-9 px-3 rounded-[7px] text-[12.5px] font-medium outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 transition-colors"
+            className="min-h-11 sm:min-h-9 px-3 rounded-[7px] text-[12.5px] font-medium outline-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 transition-colors"
             style={{
               backgroundColor: on ? theme.colors.surface : 'transparent',
               color: on ? theme.colors.text : theme.colors.textSub,
@@ -102,7 +102,7 @@ export function CheckSearchBox({ className = '' }: { className?: string }) {
             onResults={onResults}
             onFocusChange={setFocused}
             placeholder={t.check.todayPlaceholder}
-            className={`bg-transparent outline-none min-w-0 flex-1 h-11 transition-[font-size] duration-150 ${focused ? 'text-[16px]' : 'text-[15px]'}`}
+            className={`bg-transparent outline-0 min-w-0 flex-1 h-11 transition-[font-size] duration-150 ${focused ? 'text-[16px]' : 'text-[15px]'}`}
             style={{ color: theme.colors.text }}
             panelClassName="left-0 right-0 top-full mt-2"
           />
@@ -112,7 +112,7 @@ export function CheckSearchBox({ className = '' }: { className?: string }) {
           <button
             type="submit"
             disabled={!value.trim()}
-            className="flex-1 sm:flex-none min-h-11 sm:min-h-10 px-4 rounded-[10px] text-[13px] font-semibold disabled:opacity-50 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            className="flex-1 sm:flex-none min-h-11 sm:min-h-10 px-4 rounded-[10px] text-[13px] font-semibold disabled:opacity-50 outline-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
             style={{ backgroundColor: theme.colors.primary, color: theme.colors.surface, outlineColor: theme.colors.primary }}
           >
             {t.check.todaySubmit}

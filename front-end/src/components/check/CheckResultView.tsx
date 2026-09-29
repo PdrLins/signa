@@ -87,7 +87,7 @@ export const CheckResultView = forwardRef<HTMLHeadingElement, {
                 id="check-verdict"
                 ref={headingRef}
                 tabIndex={-1}
-                className="text-[24px] md:text-[28px] font-semibold tracking-tight outline-none"
+                className="text-[24px] md:text-[28px] font-semibold tracking-tight outline-0"
                 style={{ color: style.color }}
               >
                 {(tc.verdict as Record<string, string>)[r.verdict]}
