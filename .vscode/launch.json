@@ -1,0 +1,40 @@
+{
+  // F5 runs whichever configuration is selected in Run and Debug.
+  // Pick "Signa (backend + frontend)" once; VS Code remembers it.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend (FastAPI :8000)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"],
+      "cwd": "${workspaceFolder}/back-end",
+      "python": "${workspaceFolder}/back-end/venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Frontend (Next.js :3000)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/front-end",
+      "env": {
+        "NEXT_PUBLIC_API_URL": "http://localhost:8000/api/v1"
+      },
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(https?://\\S+)",
+        "uriFormat": "%s",
+        "action": "openExternally"
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Signa (backend + frontend)",
+      "configurations": ["Backend (FastAPI :8000)", "Frontend (Next.js :3000)"],
+      "stopAll": true
+    }
+  ]
+}

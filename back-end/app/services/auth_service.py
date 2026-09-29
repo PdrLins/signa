@@ -131,6 +131,12 @@ async def login(
         user_agent=user_agent,
     )
 
+    if not settings.login_otp_enabled:
+        # Password-only login (LOGIN_OTP_ENABLED=false): skip the Telegram
+        # code and issue the JWT now.
+        token = _issue_access_token(user, ip_address, user_agent)
+        return {"message": "Logged in", "session_token": None, **token}
+
     # Generate OTP and session token
     otp_code = generate_otp()
     session_token = create_session_token()
@@ -231,7 +237,18 @@ async def verify_otp_code(
     if not user:
         raise AuthenticationError("User not found")
 
-    # Issue JWT
+    queries.insert_audit_log(
+        event_type=AuditEvent.OTP_VERIFIED,
+        success=True,
+        user_id=user["id"],
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return _issue_access_token(user, ip_address, user_agent)
+
+
+def _issue_access_token(user: dict, ip_address: str, user_agent: str) -> dict:
+    """Issue a JWT for an authenticated user and record the login."""
     access_token = create_access_token(
         user_id=user["id"],
         username=user["username"],
@@ -241,13 +258,6 @@ async def verify_otp_code(
     previous_login = user.get("last_login")
     queries.update_user_last_login(user["id"])
 
-    queries.insert_audit_log(
-        event_type=AuditEvent.OTP_VERIFIED,
-        success=True,
-        user_id=user["id"],
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
     queries.insert_audit_log(
         event_type=AuditEvent.TOKEN_ISSUED,
         success=True,

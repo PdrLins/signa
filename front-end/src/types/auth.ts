@@ -5,7 +5,10 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   message: string
-  session_token: string
+  // OTP flow: session_token is set → verify with /auth/verify-otp.
+  // Password-only flow (LOGIN_OTP_ENABLED=false): access_token is set instead.
+  session_token?: string | null
+  access_token?: string | null
   last_login?: string
 }
 

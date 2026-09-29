@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    # --- Login second factor ---
+    # True = password + Telegram code. False = password only; acceptable only
+    # while the app listens on 127.0.0.1 (the default in start.sh / F5).
+    login_otp_enabled: bool = True
+
     # --- Rate Limiting ---
     max_login_attempts_per_ip: int = 5
     max_otp_attempts_per_session: int = 3

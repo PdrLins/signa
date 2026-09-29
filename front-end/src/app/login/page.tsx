@@ -52,10 +52,16 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const res = await authApi.login({ username, password })
-      setSessionToken(res.session_token)
       if (res.last_login) {
         localStorage.setItem('signa-last-login', res.last_login)
       }
+      if (res.access_token) {
+        // Password-only login — no Telegram code step
+        setToken(res.access_token)
+        router.push('/brain/performance')
+        return
+      }
+      setSessionToken(res.session_token ?? '')
       setStep(2)
       setCountdown(30)
       setAttempts(0)
@@ -139,7 +145,7 @@ export default function LoginPage() {
     setError('')
     try {
       const res = await authApi.login({ username, password })
-      setSessionToken(res.session_token)
+      setSessionToken(res.session_token ?? '')
     } catch {
       setError(t.login.resendFailed)
     }

@@ -336,6 +336,44 @@ class TestLoginGenericErrors:
         assert e1.value.detail == e2.value.detail == "Invalid credentials."
         assert "remaining" not in e1.value.detail
 
+    @pytest.mark.asyncio
+    async def test_password_only_login_issues_token_without_otp(self, login_env, monkeypatch):
+        from app.core.config import settings
+        auth_service, _ = login_env
+        sent, logins = [], []
+        monkeypatch.setattr(settings, "login_otp_enabled", False)
+        monkeypatch.setattr(auth_service, "send_otp_message", lambda *a: sent.append(a))
+        monkeypatch.setattr(auth_service.queries, "update_user_last_login", lambda uid: logins.append(uid), raising=False)
+        res = await auth_service.login("pedro", KNOWN_PASSWORD, "1.2.3.4", "ua")
+        assert res["session_token"] is None
+        assert security.decode_token(res["access_token"])["sub"] == "u1"
+        assert sent == [] and logins == ["u1"]
+
+    @pytest.mark.asyncio
+    async def test_password_only_login_still_rejects_wrong_password(self, login_env, monkeypatch):
+        from app.core.config import settings
+        from app.core.exceptions import AuthenticationError
+        auth_service, _ = login_env
+        monkeypatch.setattr(settings, "login_otp_enabled", False)
+        with pytest.raises(AuthenticationError):
+            await auth_service.login("pedro", "wrong", "1.2.3.4", "ua")
+
+    @pytest.mark.asyncio
+    async def test_otp_login_returns_session_not_token(self, login_env, monkeypatch):
+        from app.core.config import settings
+        auth_service, _ = login_env
+        sent = []
+
+        async def fake_send(chat_id, code):
+            sent.append(chat_id)
+
+        monkeypatch.setattr(settings, "login_otp_enabled", True)
+        monkeypatch.setattr(auth_service, "send_otp_message", fake_send)
+        monkeypatch.setattr(auth_service.queries, "insert_otp", lambda **kw: None, raising=False)
+        res = await auth_service.login("pedro", KNOWN_PASSWORD, "1.2.3.4", "ua")
+        assert res["session_token"] and "access_token" not in res
+        assert sent == ["1"]
+
     def test_lockout_backoff(self):
         from app.services.auth_service import lockout_seconds
         assert [lockout_seconds(n) for n in range(1, 5)] == [0, 0, 0, 0]

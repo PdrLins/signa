@@ -45,6 +45,14 @@ def _check_supabase_key_role() -> None:
         logger.warning("Could not determine SUPABASE_KEY role (expected service_role)")
 
 
+def _warn_if_login_otp_disabled() -> None:
+    if not settings.login_otp_enabled:
+        logger.warning(
+            "LOGIN_OTP_ENABLED=false — login is password-only (no Telegram code). "
+            "Keep the app bound to 127.0.0.1; do not expose it on a network."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
@@ -52,6 +60,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.app_name}...")
     logger.info(f"Debug mode: {settings.debug}")
     _check_supabase_key_role()
+    _warn_if_login_otp_disabled()
 
     init_scheduler()
     start_scheduler()

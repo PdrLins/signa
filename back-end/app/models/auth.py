@@ -10,8 +10,13 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
+    """OTP flow: session_token is set and the client calls /verify-otp.
+    Password-only flow (LOGIN_OTP_ENABLED=false): access_token is set instead."""
     message: str = "OTP sent to your Telegram"
-    session_token: str
+    session_token: Optional[str] = None
+    access_token: Optional[str] = None
+    token_type: Optional[str] = None
+    expires_in: Optional[int] = None
     last_login: Optional[str] = None
 
 
