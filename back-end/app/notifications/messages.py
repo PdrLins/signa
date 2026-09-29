@@ -401,6 +401,31 @@ _MESSAGES = {
             "<i>{timestamp}</i>"
         ),
     },
+    # ── My holdings (real long-term positions; services/holdings_monitor.py) ──
+    "holdings_alert_header": {
+        "en": "💼 <b>Signa — My holdings</b> ({count} change(s))\n",
+        "pt": "💼 <b>Signa — Minha carteira</b> ({count} mudança(s))\n",
+    },
+    "holdings_alert_trend_break": {
+        "en": "📉 <b>{symbol}</b> fell below its 200-day average: {price} vs {sma200} ({pct}%). Long-term trend break.",
+        "pt": "📉 <b>{symbol}</b> caiu abaixo da média de 200 dias: {price} vs {sma200} ({pct}%). Quebra de tendência de longo prazo.",
+    },
+    "holdings_alert_red_flag": {
+        "en": "🚩 <b>{symbol}</b> — {severity} red flag (cited): {text}\n<a href=\"{url}\">Source</a>",
+        "pt": "🚩 <b>{symbol}</b> — alerta {severity} (com fonte): {text}\n<a href=\"{url}\">Fonte</a>",
+    },
+    "holdings_alert_earnings": {
+        "en": "📅 <b>{symbol}</b> reports earnings on {date} ({days} trading day(s)). The price can gap either way.",
+        "pt": "📅 <b>{symbol}</b> divulga resultados em {date} ({days} pregão(ões)). O preço pode abrir com gap para qualquer lado.",
+    },
+    "holdings_alert_overweight": {
+        "en": "⚖️ <b>{symbol}</b> is now {weight}% of your holdings (limit {max}%).",
+        "pt": "⚖️ <b>{symbol}</b> agora é {weight}% da sua carteira (limite {max}%).",
+    },
+    "holdings_alert_footer": {
+        "en": "\n<i>Information only — not financial advice. {timestamp}</i>",
+        "pt": "\n<i>Apenas informação — não é recomendação de investimento. {timestamp}</i>",
+    },
     "brain_otp": {
         "en": (
             "🧠 <b>Signa Brain Editor</b>\n\n"

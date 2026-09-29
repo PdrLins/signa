@@ -65,19 +65,6 @@ ProgressFn = Callable[[str, int], None]
 
 PHASES = ("resolving", "market_data", "filter", "sentiment", "synthesis", "decision", "risk", "done")
 
-# Same knowledge the scan injects into the synthesis prompt.
-KNOWLEDGE_CONCEPTS = [
-    "signa_is_short_term_only",
-    "score_ranges_and_actions",
-    "backtest_key_findings",
-    "gem_conditions",
-    "signal_blockers",
-    "market_regime_detection",
-    "grok_sentiment_calibration",
-    "supply_deficit_asymmetry",
-    "contrarian_sentiment_in_commodities",
-    "bubble_detection_framework",
-]
 
 # Technical-filter reasons that make the setup structurally unbuyable
 # (AVOID) vs. the ones that are only about timing (WAIT).
@@ -145,17 +132,19 @@ def normalize_input(raw: str | None) -> str:
     return s
 
 
-def candidate_symbols(symbol: str) -> list[str]:
+def candidate_symbols(symbol: str, prefer_tsx: bool = False) -> list[str]:
     """Symbols to try, in order: raw, .TO (TSX), -USD (crypto).
 
     An input that already carries a suffix (SHOP.TO, BRK-B, BTC-USD) is
     tried as-is only. A candidate that is part of Signa's universe is tried
     first, so "BTC" means BTC-USD (not the US-listed BTC trust) and "XEQT"
-    means XEQT.TO.
+    means XEQT.TO. prefer_tsx=True (My holdings: a Canadian owner) tries
+    .TO before the bare US symbol.
     """
     if "." in symbol or "-" in symbol:
         return [symbol]
-    cands = [symbol, f"{symbol}.TO", f"{symbol}-USD"]
+    cands = ([f"{symbol}.TO", symbol, f"{symbol}-USD"] if prefer_tsx
+             else [symbol, f"{symbol}.TO", f"{symbol}-USD"])
     try:
         known = set(get_all_tickers())
     except Exception:
@@ -242,7 +231,7 @@ async def _macro_snapshot() -> dict:
 async def _knowledge_block() -> str:
     from app.services.knowledge_service import KnowledgeService
 
-    return await KnowledgeService().get_knowledge_block(KNOWLEDGE_CONCEPTS)
+    return await KnowledgeService().get_prompt_knowledge_block()  # same set the scan uses
 
 
 def _inject_prompt_context(grok_data: dict, regime: str, knowledge: str, options_flow, bucket: str) -> None:

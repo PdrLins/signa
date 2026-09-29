@@ -29,6 +29,112 @@ def invalidate_cache():
     logger.info("Knowledge cache invalidated")
 
 
+# ============================================================
+# PROMPT KNOWLEDGE — the ONE source of truth for what Claude reads
+# ============================================================
+#
+# The synthesis prompt (scan_service + stock_check, Sonnet and the Opus
+# BUY re-check) injects exactly these signal_knowledge rows, in this order.
+# They are stored in the DB (topic PROMPT_CORE, source_type
+# curated_2026_09) by scripts/curate_brain_knowledge.py so the owner can
+# edit them in the Brain Editor. Until that script runs (or if a row is
+# deactivated/missing) the built-in text below is used instead, so the
+# prompt never falls back to the old stale 10-row list.
+
+PROMPT_CORE_TOPIC = "PROMPT_CORE"
+PROMPT_CORE_SOURCE_TYPE = "curated_2026_09"
+
+PROMPT_KNOWLEDGE_CONCEPTS = [
+    "prompt_horizon",
+    "prompt_enforced_by_code",
+    "prompt_evidence_2021_2026",
+    "prompt_factor_independence",
+    "prompt_momentum_crash_caution",
+]
+
+
+def _fmt_money(v: float) -> str:
+    return f"${v / 1_000_000:g}M" if v >= 1_000_000 else f"${v:,.0f}"
+
+
+def build_prompt_core_rows() -> list[dict]:
+    """The curated PROMPT_CORE rows (~350 tokens total), with live thresholds
+    read from settings. Hardcoded values (RSI 75 / SMA200 +50% blockers) mirror
+    `signal_engine.check_blockers`."""
+    s = settings
+    texts = {
+        "prompt_horizon": (
+            "Signa trades a 5-20 trading-day horizon; positions auto-close after at most "
+            f"{s.virtual_trade_max_days} days. p_win means the probability that the price is higher "
+            "5 trading days after entry. Judge the next 1-4 weeks, not the long-term story."
+        ),
+        "prompt_enforced_by_code": (
+            "Code already enforces these; do not penalize them again. Judge what code cannot see. "
+            "Blocked: RSI(14) > 75, price > 50% above SMA200, cited material red flags, hostile macro; "
+            f"BUY downgraded to HOLD within {s.earnings_blackout_trading_days} trading days of earnings. Technical filter: price > SMA200, "
+            f"SMA50 > SMA200, <= {s.tech_filter_max_ext_sma50_pct:g}% above SMA50, 20-day dollar volume >= "
+            f"{_fmt_money(s.tech_filter_min_dollar_volume)} ({_fmt_money(s.tech_filter_min_dollar_volume_crypto)} crypto). "
+            f"Entry needs reward:risk >= {s.brain_min_rr:g} from final levels. Sizing risks "
+            f"{s.brain_risk_per_trade_pct:g}% of equity per trade (<= {s.brain_max_position_pct:g}% per position); "
+            f"the {s.brain_stop_atr_mult:g}xATR stop is always hard. Max {s.brain_max_open_positions} positions, "
+            f"{s.brain_max_per_sector} per sector, {s.brain_max_crypto_pct:g}% crypto; correlation gate blocks "
+            f">= {s.brain_corr_max_pairwise:g} to one holding or >= {s.brain_corr_cluster_threshold:g} to "
+            f"{s.brain_corr_cluster_max} holdings."
+        ),
+        "prompt_evidence_2021_2026": (
+            "A 2021-2026 backtest of the technical layer (8,996 trades, survivorship-biased universe) found "
+            "no edge vs SPY from the technical score or the technical filter: about 40% of trades beat SPY in "
+            "every score band. Names failing the filter on RSI > 75 did best (+2.4pp vs SPY, n=104, small sample). "
+            "Most setups have no edge. Default to HOLD unless there is specific, cited, near-term evidence."
+        ),
+        "prompt_factor_independence": (
+            "RSI, MACD, moving-average trend and short-term momentum all come from the same price series: "
+            "count them as one piece of evidence, not three. Conviction needs independent sources, such as "
+            "company news or fundamentals, analyst estimate revisions, or a dated catalyst, each cited."
+        ),
+        "prompt_momentum_crash_caution": (
+            "After a sharp market rebound from a deep drawdown (the RECOVERY regime), recent losers tend to "
+            "rally hardest and recent momentum leaders can fall sharply. In RECOVERY, be skeptical of chasing "
+            "extended winners and require independent evidence."
+        ),
+    }
+    return [
+        {
+            "topic": PROMPT_CORE_TOPIC,
+            "key_concept": key,
+            "explanation": texts[key],
+            "formula": None,
+            "example": None,
+            "is_active": True,
+            "source_name": "Signa curated prompt knowledge (2026-09 audit)",
+            "source_type": PROMPT_CORE_SOURCE_TYPE,
+        }
+        for key in PROMPT_KNOWLEDGE_CONCEPTS
+    ]
+
+
+def get_live_thresholds_block() -> str:
+    """Live decision thresholds (from settings) as prompt text. These, not the
+    investment_rules table, are what the code actually enforces."""
+    s = settings
+    return "\n".join([
+        f"- brain_entry_mode={s.brain_entry_mode}; AI BUY needs confidence >= {s.ai_validated_min_confidence}",
+        f"- tech_filter_max_rsi={s.tech_filter_max_rsi:g}, tech_filter_max_ext_sma50_pct={s.tech_filter_max_ext_sma50_pct:g}, "
+        f"tech_filter_min_dollar_volume={s.tech_filter_min_dollar_volume:,.0f} (crypto {s.tech_filter_min_dollar_volume_crypto:,.0f})",
+        f"- earnings_blackout_trading_days={s.earnings_blackout_trading_days}; brain_min_rr={s.brain_min_rr:g}",
+        f"- brain_risk_per_trade_pct={s.brain_risk_per_trade_pct:g}, brain_max_position_pct={s.brain_max_position_pct:g}, "
+        f"brain_max_open_positions={s.brain_max_open_positions}, brain_max_per_sector={s.brain_max_per_sector}, "
+        f"brain_max_crypto_pct={s.brain_max_crypto_pct:g}",
+        f"- brain_stop_atr_mult={s.brain_stop_atr_mult:g}, brain_target_r_mult={s.brain_target_r_mult:g}, "
+        f"brain_trail_atr_mult={s.brain_trail_atr_mult:g} after +{s.brain_trail_activate_r:g}R, "
+        f"virtual_trade_max_days={s.virtual_trade_max_days}",
+        f"- correlation gate: pairwise >= {s.brain_corr_max_pairwise:g}, or >= {s.brain_corr_cluster_max} holdings "
+        f">= {s.brain_corr_cluster_threshold:g}; brain_max_drawdown_pct={s.brain_max_drawdown_pct:g}",
+        "- hardcoded blockers (signal_engine.check_blockers): RSI > 75, > 50% above SMA200, hostile macro, "
+        "cited material red flags, avg volume < 50K",
+    ])
+
+
 class KnowledgeService:
     """Reads rules and knowledge from Supabase."""
 
@@ -154,6 +260,33 @@ class KnowledgeService:
             lines.append(thinking_block)
 
         return "\n".join(lines).strip()
+
+    def get_prompt_knowledge_text(self) -> str:
+        """The PROMPT_CORE rows (DB text when present and active, else the
+        built-in text), in PROMPT_KNOWLEDGE_CONCEPTS order. No hypotheses."""
+        try:
+            db_rows = {k.get("key_concept"): k for k in self.get_active_knowledge()}
+        except Exception as e:
+            logger.warning(f"Prompt knowledge DB read failed, using built-in text: {e}")
+            db_rows = {}
+        defaults = {r["key_concept"]: r for r in build_prompt_core_rows()}
+        lines = []
+        for key in PROMPT_KNOWLEDGE_CONCEPTS:
+            row = db_rows.get(key) or defaults[key]
+            lines.append(f"## {key}")
+            lines.append((row.get("explanation") or defaults[key]["explanation"]).strip())
+            lines.append("")
+        return "\n".join(lines).strip()
+
+    async def get_prompt_knowledge_block(self) -> str:
+        """The knowledge block for every synthesis prompt: PROMPT_CORE rows
+        plus the working-hypotheses block (only hypotheses with enough
+        observations). Single source of truth for scan + stock check."""
+        text = self.get_prompt_knowledge_text()
+        thinking_block = self.get_active_thinking_block()
+        if thinking_block:
+            text = f"{text}\n\n{thinking_block}"
+        return text
 
     def get_active_thinking(self) -> list[dict]:
         """Get all active thinking entries (hypotheses under observation).

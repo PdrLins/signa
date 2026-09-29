@@ -25,7 +25,9 @@
     "mainNav": "Navegação principal",
     "moreNav": "Mais opções de navegação",
     "closeMore": "Fechar menu",
-    "check": "Checar ação"
+    "check": "Checar ação",
+    "holdings": "Minha carteira",
+    "holdingsShort": "Carteira"
   },
   "login": {
     "welcome": "Signa",
@@ -794,7 +796,8 @@
     "wfXTwitterSentiment": "Sentimento X/Twitter",
     "wfCatalystDetection": "Detecção de catalisador",
     "wfTechnicalMomentum": "Momentum técnico",
-    "wfFundamentals": "Fundamentos"
+    "wfFundamentals": "Fundamentos",
+    "approvedNeedsChange": "Aprovada — requer mudança no código/configuração"
   },
   "logs": {
     "systemLogs": "Logs",
@@ -1626,6 +1629,240 @@
       },
       "sourceLink": "Fonte",
       "daysValue": "{n} dias"
+    }
+  },
+  "holdings": {
+    "title": "Minha carteira",
+    "subtitle": "Suas posições reais de longo prazo. O Signa verifica todas elas em cada dia útil após o fechamento e ajuda você a pensar onde colocar dinheiro novo. Nada aqui executa ordens.",
+    "paperNote": "Posições mostra as operações simuladas do cérebro — esta página é o seu dinheiro de verdade.",
+    "disclaimer": "Apenas informação — não é recomendação de investimento. A decisão é sua.",
+    "empty": {
+      "title": "Adicione seus ativos",
+      "body": "Cole seus tickers abaixo, um por linha. Quantidade e preço médio são opcionais — todas as verificações funcionam sem eles, e você pode adicioná-los depois.",
+      "formats": "Formatos aceitos",
+      "examples": [
+        {
+          "code": "XEQT",
+          "desc": "só o ticker"
+        },
+        {
+          "code": "NVDA 17.99",
+          "desc": "ticker e quantidade"
+        },
+        {
+          "code": "RY.TO 4.1 @ 145.20",
+          "desc": "ticker, quantidade @ preço médio"
+        },
+        {
+          "code": "symbol,shares,avg_cost",
+          "desc": "CSV com linha de cabeçalho (tabs ou ; também funcionam)"
+        }
+      ],
+      "suffixHint": "Não precisa de .TO — o Signa procura o ticker na TSX e nas bolsas dos EUA e pede sua confirmação."
+    },
+    "import": {
+      "title": "Importar ativos",
+      "addMore": "Adicionar ativos",
+      "label": "Tickers, um por linha",
+      "placeholder": "XEQT\nNVDA 17.99\nRY.TO 4.1 @ 145.20",
+      "check": "Verificar tickers",
+      "checking": "Verificando tickers…",
+      "checkingHint": "Procurando cada ticker na TSX e nas bolsas dos EUA — cerca de um minuto para 30 tickers.",
+      "cancel": "Cancelar",
+      "back": "Editar texto",
+      "save": "Salvar {n} ativos",
+      "saving": "Salvando…",
+      "saved": "{n} ativos salvos. Preços e verificações estão sendo atualizados.",
+      "confirmTitle": "Confirme seus ativos",
+      "confirmHint": "Confira cada correspondência. Quando um ticker é negociado na TSX e numa bolsa dos EUA, o Signa escolhe a listagem da TSX (ou a ação dos EUA quando a da TSX é um CDR) — troque se estiver errado.",
+      "include": "Incluir {symbol}",
+      "listing": "Listagem",
+      "chooseListing": "Listagem de {symbol}",
+      "price": "Último preço",
+      "shares": "Quantidade",
+      "cost": "Preço médio",
+      "summary": "{ok} encontrados · {ambiguous} para conferir · {missing} não encontrados",
+      "status": {
+        "ok": "Encontrado",
+        "ambiguous": "Confira: negociado em mais de um lugar",
+        "not_found": "Não encontrado — confira o ticker",
+        "invalid": "Ticker inválido"
+      },
+      "notes": {
+        "prefer_tsx": "Listagem da TSX escolhida (você está no Canadá)",
+        "cdr": "Ação dos EUA escolhida — a listagem da TSX é um CDR",
+        "prefer_known": "Listagem mais comum escolhida"
+      },
+      "existing": "Já está na sua carteira — quantidade e custo deixados em branco são mantidos",
+      "merged": "{n} linhas combinadas",
+      "none": "Nada selecionado para salvar"
+    },
+    "list": {
+      "title": "Ativos",
+      "count": "{n} ativos",
+      "symbol": "Ativo",
+      "price": "Preço",
+      "day": "Dia",
+      "m1": "1M",
+      "ytd": "No ano",
+      "weight": "Peso",
+      "value": "Valor",
+      "gain": "Ganho",
+      "status": "Status",
+      "verdict": "Longo prazo",
+      "actions": "Ações",
+      "noData": "Sem dados de preço ainda",
+      "updated": "Verificado {time}",
+      "neverUpdated": "Ainda não verificado",
+      "refresh": "Atualizar agora",
+      "refreshing": "Atualizando preços e verificações…",
+      "stale": "Dados antigos",
+      "shares": "{n} cotas",
+      "avgCost": "médio {cost}",
+      "noShares": "Quantidade não informada"
+    },
+    "chips": {
+      "trendOk": "Tendência OK",
+      "trendWeak": "Tendência enfraquecendo",
+      "trendBreak": "Quebra de tendência",
+      "trendUnknown": "Tendência n/d",
+      "trendOkHelp": "Acima da média de 200 dias, média de 50 acima da de 200",
+      "trendWeakHelp": "Acima da média de 200 dias, mas a de 50 está abaixo da de 200",
+      "trendBreakHelp": "Abaixo da média de 200 dias ({pct} em relação à média)",
+      "earnings": "Resultados em {n}d",
+      "earningsToday": "Resultados hoje",
+      "redFlag": "Alerta",
+      "redFlags": "{n} alertas",
+      "overweight": "Acima do limite",
+      "overweightHelp": "{w} da sua carteira — acima do seu limite de {max}",
+      "drawdown": "{pct} da máxima",
+      "coveredCall": "Covered call",
+      "leveraged": "Alavancado",
+      "cashLike": "Tipo caixa",
+      "notReviewed": "Sem revisão"
+    },
+    "verdictShort": {
+      "SOLID": "Sólido",
+      "REASONABLE_WITH_CAVEATS": "Razoável",
+      "NOT_A_GOOD_FIT": "Não recomendado"
+    },
+    "actions": {
+      "review": "Revisar",
+      "reviewing": "Revisando…",
+      "reReview": "Revisar de novo",
+      "edit": "Editar",
+      "remove": "Remover",
+      "confirmRemove": "Remover {symbol} da sua carteira?",
+      "checkLong": "Checagem de longo prazo",
+      "signals": "Sinais",
+      "save": "Salvar",
+      "cancel": "Cancelar",
+      "more": "Detalhes de {symbol}",
+      "less": "Ocultar detalhes",
+      "keyConcern": "Principal preocupação",
+      "reviewedOn": "Revisado em {date}",
+      "source": "Fonte"
+    },
+    "edit": {
+      "title": "Editar {symbol}",
+      "shares": "Quantidade",
+      "avgCost": "Preço médio ({ccy})",
+      "account": "Conta",
+      "notes": "Notas",
+      "invalid": "Informe um número positivo ou deixe em branco.",
+      "accounts": {
+        "none": "Não definida",
+        "TFSA": "TFSA",
+        "RRSP": "RRSP",
+        "FHSA": "FHSA",
+        "NON_REGISTERED": "Não registrada",
+        "OTHER": "Outra"
+      }
+    },
+    "totals": {
+      "title": "Valor total (CAD)",
+      "gain": "Ganho não realizado",
+      "coverage": "Com base em {n} de {total} ativos com quantidade informada.",
+      "fx": "Ativos em USD convertidos a {rate} CAD por USD.",
+      "fxMissing": "Ativos em USD ficaram de fora — cotação do câmbio indisponível.",
+      "noShares": "Informe as quantidades (Editar) para ver totais, pesos e ganhos. Todo o resto funciona sem elas.",
+      "weightNote": "Os pesos consideram só os ativos com quantidade informada."
+    },
+    "review": {
+      "title": "Revisões de longo prazo",
+      "subtitle": "A mesma checagem de longo prazo do Checar ação — veredito, scorecard e a principal preocupação de cada ativo. As revisões não usam seu limite diário de checagens.",
+      "all": "Revisar todos",
+      "allHint": "Verifica cada ativo, um de cada vez — alguns minutos. Disponível uma vez a cada {days} dias.",
+      "nextAt": "Revisar todos estará disponível de novo em {date}.",
+      "running": "Revisando {current} — {done} de {total}",
+      "starting": "Iniciando…",
+      "done": "{n} ativos revisados.",
+      "failedN": "{n} não puderam ser revisados.",
+      "reviewedCount": "{n} de {total} revisados"
+    },
+    "allocate": {
+      "title": "Onde colocar dinheiro novo?",
+      "subtitle": "Considerações ordenadas pelas revisões de longo prazo, tendência, desconto em relação à máxima de 52 semanas e concentração. Não são ordens de compra nem valores.",
+      "show": "Mostrar considerações",
+      "refresh": "Recalcular",
+      "includeWatchlist": "Incluir meus favoritos",
+      "loading": "Ordenando…",
+      "empty": "Adicione ativos para ver as considerações.",
+      "reviewFirst": "Dica: rode as revisões de longo prazo primeiro — o veredito é o fator mais importante.",
+      "tiers": {
+        "consider": "Vale olhar",
+        "neutral": "Neutro",
+        "caution": "Cautela"
+      },
+      "watchlist": "Favoritos",
+      "weight": "{n} da carteira",
+      "overlapTitle": "Sobreposição e estrutura dos fundos",
+      "caveat": "Não é recomendação de investimento. São considerações ordenadas com os dados do próprio Signa — não são ordens de compra nem valores. Seus objetivos, impostos e espaço nas contas importam mais que qualquer pontuação. A decisão é sua.",
+      "factors": {
+        "verdict_solid": "revisão de longo prazo: sólido",
+        "verdict_reasonable_with_caveats": "revisão de longo prazo: razoável, com ressalvas",
+        "verdict_not_a_good_fit": "revisão de longo prazo: não recomendado",
+        "not_reviewed": "ainda sem revisão",
+        "trend_break": "abaixo da média de 200 dias (quebra de tendência)",
+        "death_cross": "média de 50 dias abaixo da de 200",
+        "near_high": "perto da máxima de 52 semanas",
+        "modest_discount": "um desconto moderado da máxima de 52 semanas ({drawdown_pct})",
+        "deeper_discount": "bem abaixo da máxima de 52 semanas ({drawdown_pct})",
+        "steep_fall": "uma queda forte da máxima de 52 semanas ({drawdown_pct}) — vale entender o motivo",
+        "stretched": "esticado: {pct_vs_sma200} acima da média de 200 dias",
+        "near_trend": "perto da média de 200 dias",
+        "overweight": "já é {weight_pct} da sua carteira (acima de {max_pct})",
+        "heavy": "já é uma posição grande ({weight_pct})",
+        "red_flag": "um alerta com fonte nas notícias recentes",
+        "leveraged": "fundo alavancado (reinício diário)",
+        "covered_call": "fundo covered call: alta limitada",
+        "cash_like": "fundo tipo caixa",
+        "earnings_soon": "resultados em {days} dias",
+        "no_data": "sem dados de preço ainda"
+      },
+      "notes": {
+        "overlap_us_large_tech": "{symbols} têm as mesmas grandes empresas de tecnologia dos EUA (Apple, Microsoft, Nvidia…) — aportar em qualquer um aumenta a mesma exposição.",
+        "overlap_mega_caps": "{symbols} também estão entre as maiores posições dos seus fundos amplos — você tem essas ações duas vezes.",
+        "covered_call": "{symbols} vendem opções de compra para gerar renda: rendimento alto, mas alta limitada em mercados fortes, e o preço tende a ficar atrás do índice com o tempo.",
+        "leveraged": "{symbols} é alavancado e reinicia diariamente: pode perder valor em mercados laterais mesmo com o índice estável — normalmente uma posição satélite pequena, não central.",
+        "group_bitcoin": "{symbols} acompanham o bitcoin — a mesma exposição duas vezes.",
+        "group_canadian_banks": "{symbols} são todos bancos canadenses (o XEQT também tem esses bancos).",
+        "group_enbridge": "{symbols}: o retorno da E Split Corp depende da Enbridge — exposição sobreposta.",
+        "group_precious_metals": "{symbols} são ambos exposição a metais preciosos.",
+        "group_cash_like": "{symbols} são tipo caixa (T-bills / money market): lugar para deixar dinheiro parado, não para crescimento."
+      }
+    },
+    "errors": {
+      "holdings_unavailable": "O armazenamento da carteira ainda não foi configurado — aplique a migração 010_holdings.sql.",
+      "nothing_to_import": "Nenhum ticker encontrado no texto.",
+      "review_all_limit": "Revisar todos foi usado recentemente — disponível de novo em {date}.",
+      "busy": "Uma revisão já está em andamento — aguarde terminar.",
+      "too_many": "Ativos demais selecionados — use Revisar todos.",
+      "not_found": "Esse ativo não existe mais.",
+      "invalid_input": "Alguns valores são inválidos — confira os números.",
+      "rate_limited": "Muitas requisições — aguarde um momento.",
+      "network": "Erro de rede — verifique sua conexão.",
+      "internal": "Algo deu errado — tente novamente."
     }
   }
 }

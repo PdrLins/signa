@@ -513,6 +513,108 @@ def delete_portfolio_item(item_id: str, user_id: str) -> bool:
 
 
 # ============================================================
+# HOLDINGS (the owner's real long-term positions — migration 010)
+# ============================================================
+
+HOLDING_COLUMNS = (
+    "id, user_id, symbol, input_symbol, name, exchange, currency, asset_type, shares, avg_cost, "
+    "account, notes, holding_status, status_updated_at, alert_state, last_review, last_reviewed_at, "
+    "created_at, updated_at"
+)
+
+
+def get_holdings(user_id: str) -> list[dict]:
+    """All holdings for a user, oldest first (import order)."""
+    client = get_client()
+    result = (
+        client.table("holdings")
+        .select(HOLDING_COLUMNS)
+        .eq("user_id", user_id)
+        .order("created_at")
+        .limit(500)
+        .execute()
+    )
+    return result.data or []
+
+
+def get_all_holdings() -> list[dict]:
+    """Every user's holdings (scheduler monitor — single-tenant today)."""
+    client = get_client()
+    result = client.table("holdings").select(HOLDING_COLUMNS).order("created_at").limit(2000).execute()
+    return result.data or []
+
+
+def get_holding(holding_id: str, user_id: str) -> dict | None:
+    client = get_client()
+    result = (
+        client.table("holdings")
+        .select(HOLDING_COLUMNS)
+        .eq("id", holding_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+def upsert_holdings(user_id: str, rows: list[dict]) -> list[dict]:
+    """Insert or update (user_id, symbol) rows. Every row must carry the
+    same keys (PostgREST bulk upsert); `user_id` is forced."""
+    if not rows:
+        return []
+    client = get_client()
+    payload = [{**r, "user_id": user_id} for r in rows]
+    result = client.table("holdings").upsert(payload, on_conflict="user_id,symbol").execute()
+    return result.data or []
+
+
+def update_holding(holding_id: str, user_id: str, data: dict) -> dict | None:
+    """Update one holding owned by `user_id` (does not mutate `data`)."""
+    client = get_client()
+    update_data = {**data, "updated_at": datetime.now(timezone.utc).isoformat()}
+    result = (
+        client.table("holdings")
+        .update(update_data)
+        .eq("id", holding_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+def delete_holding(holding_id: str, user_id: str) -> bool:
+    client = get_client()
+    result = (
+        client.table("holdings")
+        .delete()
+        .eq("id", holding_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return bool(result.data)
+
+
+def get_holdings_review_all_at(user_id: str) -> str | None:
+    """Last "review all" run (user_settings.holdings_review_all_at)."""
+    client = get_client()
+    result = (
+        client.table("user_settings")
+        .select("holdings_review_all_at")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return (result.data[0] or {}).get("holdings_review_all_at") if result.data else None
+
+
+def set_holdings_review_all_at(user_id: str, at_iso: str) -> None:
+    client = get_client()
+    client.table("user_settings").upsert(
+        {"user_id": user_id, "holdings_review_all_at": at_iso}, on_conflict="user_id",
+    ).execute()
+
+
+# ============================================================
 # WATCHLIST
 # ============================================================
 

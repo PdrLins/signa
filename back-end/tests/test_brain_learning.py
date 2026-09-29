@@ -36,6 +36,19 @@ class TestStrictMatching:
     def test_every_key_must_match(self, pm, expected):
         assert vp._trade_matches_pattern(TRADE, pm, "STOP_HIT") is expected
 
+    @pytest.mark.parametrize("pm,expected", [
+        # Some signal_thinking rows store pattern_match as a JSON string.
+        ('{"bucket": "HIGH_RISK", "signal_style": "MOMENTUM"}', True),
+        ('{"bucket": "SAFE_INCOME"}', False),
+        ('{"hold_through_dip_count_gte": 5}', False),   # parsed, unknown key
+        ("not json {", False),                         # unparseable -> no match
+        ('"just a string"', False),                    # JSON but not a dict
+        ("[1, 2]", False),
+        (None, False),
+    ])
+    def test_json_string_patterns_are_parsed(self, pm, expected):
+        assert vp._trade_matches_pattern(TRADE, pm) is expected
+
     def test_cohort_pattern_shapes_match_trades(self):
         pm = cohort_analyzer._build_crosstab_pattern_match("signal_style", "MOMENTUM", "score_band", "80-84")
         assert vp._trade_matches_pattern(TRADE, pm)

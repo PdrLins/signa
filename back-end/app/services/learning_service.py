@@ -2,10 +2,14 @@
 
 Flow:
 1. record_outcome() — called when a position is closed or signal expires
-2. run_weekly_analysis() — Claude reviews all recent outcomes + current rules
-3. Claude generates specific brain_suggestions with reasoning
+2. run_weekly_analysis() — the model reviews recent outcomes against the
+   PROMPT_CORE knowledge and the LIVE thresholds from settings
+3. It generates specific brain_suggestions with reasoning
 4. User approves/rejects in Brain Editor
-5. apply_suggestion() — writes approved changes to investment_rules
+5. apply_suggestion() — records the approval ONLY. Nothing is applied
+   automatically: scoring, gating and exits read thresholds from code and
+   settings, never from investment_rules, so an approved suggestion is
+   marked "APPROVED — requires code/config change" and a human makes it.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -14,7 +18,7 @@ from typing import Optional
 from loguru import logger
 
 from app.db.supabase import get_client
-from app.services.knowledge_service import KnowledgeService
+from app.services.knowledge_service import KnowledgeService, get_live_thresholds_block
 
 
 def record_outcome(
@@ -121,41 +125,49 @@ def get_suggestions(status: str | None = None, limit: int = 50) -> list[dict]:
     return query.execute().data or []
 
 
+REQUIRES_CODE_CHANGE_MESSAGE = (
+    "APPROVED — requires code/config change. Signa's scoring, gates and exits "
+    "read thresholds from code and settings, not from investment_rules, so "
+    "nothing was changed automatically."
+)
+
+
 def apply_suggestion(suggestion_id: str, user_id: str) -> dict:
-    """Apply an approved suggestion to investment_rules."""
+    """Record approval of a suggestion. Does NOT change any rule.
+
+    investment_rules is documentation only (no scoring/gating/exit code reads
+    it), so writing the proposed value there would be a silent no-op that
+    pretends to apply. Instead the suggestion is marked APPROVED (reviewer +
+    time recorded) and the response says a code/config change is required.
+    """
     client = get_client()
 
-    # Get the suggestion
     result = client.table("brain_suggestions").select("*").eq("id", suggestion_id).limit(1).execute()
     if not result.data:
         return {"error": "Suggestion not found"}
 
     suggestion = result.data[0]
-    if suggestion["status"] != "APPROVED":
-        return {"error": "Suggestion must be APPROVED before applying"}
+    if suggestion.get("status") not in ("PENDING", "APPROVED"):
+        return {"error": f"Suggestion is {suggestion.get('status')}; only PENDING or APPROVED can be approved"}
 
-    ks = KnowledgeService()
-    proposed = suggestion.get("proposed_value", {})
-    rule_id = suggestion.get("rule_id")
-
-    if suggestion["suggestion_type"] == "MODIFY_RULE" and rule_id:
-        ks.update_rule(rule_id, proposed)
-        logger.info(f"Applied suggestion {suggestion_id}: modified rule {suggestion.get('rule_name')}")
-    elif suggestion["suggestion_type"] == "MODIFY_WEIGHT" and rule_id:
-        ks.update_rule(rule_id, proposed)
-        logger.info(f"Applied suggestion {suggestion_id}: modified weight for {suggestion.get('rule_name')}")
-    elif suggestion["suggestion_type"] == "DISABLE_RULE" and rule_id:
-        ks.update_rule(rule_id, {"is_active": False})
-        logger.info(f"Applied suggestion {suggestion_id}: disabled rule {suggestion.get('rule_name')}")
-
-    # Mark as applied
     client.table("brain_suggestions").update({
-        "status": "APPLIED",
+        "status": "APPROVED",
         "reviewed_at": datetime.now(timezone.utc).isoformat(),
         "reviewed_by": user_id,
     }).eq("id", suggestion_id).execute()
+    logger.info(
+        f"Suggestion {suggestion_id} ({suggestion.get('rule_name')}) approved — "
+        "requires a code/config change; nothing applied automatically"
+    )
 
-    return {"status": "applied", "rule_name": suggestion.get("rule_name")}
+    return {
+        "status": "approved",
+        "applied": False,
+        "requires_code_change": True,
+        "message": REQUIRES_CODE_CHANGE_MESSAGE,
+        "rule_name": suggestion.get("rule_name"),
+        "proposed_value": suggestion.get("proposed_value"),
+    }
 
 
 async def run_weekly_analysis(period_days: int = 7) -> list[dict]:
@@ -174,15 +186,16 @@ async def run_weekly_analysis(period_days: int = 7) -> list[dict]:
     win_rate = correct / total if total > 0 else 0
     avg_return = sum(o.get("pnl_pct", 0) for o in outcomes) / total if total > 0 else 0
 
-    # Get current rules for context
-    ks = KnowledgeService()
-    rules = ks.get_all_rules()
+    # Context: the curated PROMPT_CORE knowledge + the LIVE thresholds.
+    # (Not investment_rules: nothing in the scoring/gating/exit code reads
+    # that table, so presenting it as "current rules" was misleading.)
+    knowledge_text = KnowledgeService().get_prompt_knowledge_text()
+    thresholds_text = get_live_thresholds_block()
 
     # Build analysis prompt
     outcomes_text = _format_outcomes(outcomes)
-    rules_text = _format_rules(rules)
 
-    prompt = f"""You are an investment signal engine optimizer. Analyze these real trade outcomes and suggest specific improvements to the scoring rules.
+    prompt = f"""You are an investment signal engine optimizer. Analyze these real trade outcomes and suggest specific improvements to the live decision thresholds.
 
 ## TRADE OUTCOMES (last {period_days} days)
 Total trades: {total}
@@ -191,8 +204,11 @@ Average return: {avg_return:+.2f}%
 
 {outcomes_text}
 
-## CURRENT INVESTMENT RULES
-{rules_text}
+## WHAT THE MODEL IS TOLD (curated knowledge)
+{knowledge_text}
+
+## LIVE THRESHOLDS (settings / code — these are what the system enforces)
+{thresholds_text}
 
 ## YOUR TASK
 Based on the trade outcomes, identify patterns and suggest specific rule changes that would improve future signal quality. For each suggestion provide:
@@ -200,7 +216,7 @@ Based on the trade outcomes, identify patterns and suggest specific rule changes
 Return a JSON array of suggestions:
 [
   {{
-    "rule_name": "name of rule to modify (or NEW_RULE for new ones)",
+    "rule_name": "settings field or code rule to change (e.g. tech_filter_max_rsi), or NEW_RULE",
     "suggestion_type": "MODIFY_RULE" | "MODIFY_WEIGHT" | "DISABLE_RULE" | "NEW_RULE",
     "current_value": {{"field": "current_value"}},
     "proposed_value": {{"field": "new_value"}},
@@ -212,6 +228,8 @@ Return a JSON array of suggestions:
 
 Rules:
 - Only suggest changes supported by the outcome data — no speculation
+- Fewer than 30 trades behind a pattern is not evidence; say so rather than suggest a change
+- Any approved change is made by a human in code/config; nothing auto-applies
 - Be conservative: small adjustments (5-10%) are better than large swings
 - Focus on the rules that had the most incorrect signals
 - Maximum 5 suggestions per analysis
@@ -250,13 +268,9 @@ Return JSON only."""
         period_start = (now - timedelta(days=period_days)).isoformat()
 
         for s in suggestions_data[:5]:  # Max 5
-            # Find rule_id if modifying existing rule
+            # Suggestions target settings / code, not investment_rules rows.
             rule_id = None
             rule_name = s.get("rule_name", "")
-            if rule_name and rule_name != "NEW_RULE":
-                matching = [r for r in rules if r.get("name") == rule_name]
-                if matching:
-                    rule_id = matching[0].get("id")
 
             entry = {
                 "analysis_date": now.isoformat(),
@@ -296,19 +310,5 @@ def _format_outcomes(outcomes: list[dict]) -> str:
             f"→ {o.get('pnl_pct', 0):+.2f}% in {o.get('days_held', '?')}d "
             f"({'✓' if o.get('signal_correct') else '✗'}) "
             f"bucket={o.get('bucket')} regime={o.get('market_regime', '?')}"
-        )
-    return "\n".join(lines)
-
-
-def _format_rules(rules: list[dict]) -> str:
-    """Format current rules for the AI prompt."""
-    lines = []
-    for r in rules:
-        if not r.get("is_active"):
-            continue
-        lines.append(
-            f"- [{r.get('rule_type')}] {r.get('name')}: "
-            f"w_safe={r.get('weight_safe', 0)} w_risk={r.get('weight_risk', 0)} "
-            f"blocker={r.get('is_blocker', False)}"
         )
     return "\n".join(lines)

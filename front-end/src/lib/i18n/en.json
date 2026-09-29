@@ -25,7 +25,9 @@
     "mainNav": "Main navigation",
     "moreNav": "More navigation options",
     "closeMore": "Close menu",
-    "check": "Check a stock"
+    "check": "Check a stock",
+    "holdings": "My holdings",
+    "holdingsShort": "Holdings"
   },
   "login": {
     "welcome": "Signa",
@@ -794,7 +796,8 @@
     "wfXTwitterSentiment": "X/Twitter sentiment",
     "wfCatalystDetection": "Catalyst detection",
     "wfTechnicalMomentum": "Technical momentum",
-    "wfFundamentals": "Fundamentals"
+    "wfFundamentals": "Fundamentals",
+    "approvedNeedsChange": "Approved — needs a code/config change"
   },
   "logs": {
     "systemLogs": "Logs",
@@ -1626,6 +1629,240 @@
       },
       "sourceLink": "Source",
       "daysValue": "{n} days"
+    }
+  },
+  "holdings": {
+    "title": "My holdings",
+    "subtitle": "Your real long-term positions. Signa checks them every weekday after the close and helps you think about where new cash could go. Nothing here places a trade.",
+    "paperNote": "Positions shows the brain's paper trades — this page is your real money.",
+    "disclaimer": "Information only — not financial advice. You decide.",
+    "empty": {
+      "title": "Add your holdings",
+      "body": "Paste your tickers below, one per line. Shares and average cost are optional — every check works without them, and you can add them later.",
+      "formats": "Accepted formats",
+      "examples": [
+        {
+          "code": "XEQT",
+          "desc": "ticker only"
+        },
+        {
+          "code": "NVDA 17.99",
+          "desc": "ticker and shares"
+        },
+        {
+          "code": "RY.TO 4.1 @ 145.20",
+          "desc": "ticker, shares @ average cost"
+        },
+        {
+          "code": "symbol,shares,avg_cost",
+          "desc": "CSV with a header row (tabs or ; work too)"
+        }
+      ],
+      "suffixHint": "No need for .TO — Signa looks the ticker up on the TSX and US exchanges and asks you to confirm."
+    },
+    "import": {
+      "title": "Import holdings",
+      "addMore": "Add holdings",
+      "label": "Tickers, one per line",
+      "placeholder": "XEQT\nNVDA 17.99\nRY.TO 4.1 @ 145.20",
+      "check": "Check tickers",
+      "checking": "Checking tickers…",
+      "checkingHint": "Looking up each ticker on the TSX and US exchanges — about a minute for 30 tickers.",
+      "cancel": "Cancel",
+      "back": "Edit text",
+      "save": "Save {n} holdings",
+      "saving": "Saving…",
+      "saved": "Saved {n} holdings. Prices and checks are updating.",
+      "confirmTitle": "Confirm your holdings",
+      "confirmHint": "Check each match. When a ticker trades on both the TSX and a US exchange, Signa picks the TSX listing (or the US share when the TSX one is a CDR) — change it if that's wrong.",
+      "include": "Include {symbol}",
+      "listing": "Listing",
+      "chooseListing": "Listing for {symbol}",
+      "price": "Last price",
+      "shares": "Shares",
+      "cost": "Avg cost",
+      "summary": "{ok} matched · {ambiguous} to check · {missing} not found",
+      "status": {
+        "ok": "Matched",
+        "ambiguous": "Check: trades in more than one place",
+        "not_found": "Not found — check the ticker",
+        "invalid": "Not a valid ticker"
+      },
+      "notes": {
+        "prefer_tsx": "TSX listing chosen (you're in Canada)",
+        "cdr": "US share chosen — the TSX listing is a CDR",
+        "prefer_known": "Most common listing chosen"
+      },
+      "existing": "Already in your holdings — shares and cost you leave empty are kept",
+      "merged": "{n} lines merged",
+      "none": "Nothing selected to save"
+    },
+    "list": {
+      "title": "Holdings",
+      "count": "{n} holdings",
+      "symbol": "Holding",
+      "price": "Price",
+      "day": "Day",
+      "m1": "1M",
+      "ytd": "YTD",
+      "weight": "Weight",
+      "value": "Value",
+      "gain": "Gain",
+      "status": "Status",
+      "verdict": "Long-term",
+      "actions": "Actions",
+      "noData": "No price data yet",
+      "updated": "Checked {time}",
+      "neverUpdated": "Not checked yet",
+      "refresh": "Refresh now",
+      "refreshing": "Updating prices and checks…",
+      "stale": "Stale data",
+      "shares": "{n} shares",
+      "avgCost": "avg {cost}",
+      "noShares": "Shares not entered"
+    },
+    "chips": {
+      "trendOk": "Trend OK",
+      "trendWeak": "Trend weakening",
+      "trendBreak": "Trend break",
+      "trendUnknown": "Trend n/a",
+      "trendOkHelp": "Above its 200-day average, 50-day above 200-day",
+      "trendWeakHelp": "Above its 200-day average, but the 50-day is below the 200-day",
+      "trendBreakHelp": "Below its 200-day average ({pct} vs the average)",
+      "earnings": "Earnings in {n}d",
+      "earningsToday": "Earnings today",
+      "redFlag": "Red flag",
+      "redFlags": "{n} red flags",
+      "overweight": "Overweight",
+      "overweightHelp": "{w} of your holdings — above your {max} limit",
+      "drawdown": "{pct} from high",
+      "coveredCall": "Covered call",
+      "leveraged": "Leveraged",
+      "cashLike": "Cash-like",
+      "notReviewed": "Not reviewed"
+    },
+    "verdictShort": {
+      "SOLID": "Solid",
+      "REASONABLE_WITH_CAVEATS": "Reasonable",
+      "NOT_A_GOOD_FIT": "Not a good fit"
+    },
+    "actions": {
+      "review": "Review",
+      "reviewing": "Reviewing…",
+      "reReview": "Review again",
+      "edit": "Edit",
+      "remove": "Remove",
+      "confirmRemove": "Remove {symbol} from your holdings?",
+      "checkLong": "Long-term check",
+      "signals": "Signals",
+      "save": "Save",
+      "cancel": "Cancel",
+      "more": "Details for {symbol}",
+      "less": "Hide details",
+      "keyConcern": "Key concern",
+      "reviewedOn": "Reviewed {date}",
+      "source": "Source"
+    },
+    "edit": {
+      "title": "Edit {symbol}",
+      "shares": "Shares",
+      "avgCost": "Average cost ({ccy})",
+      "account": "Account",
+      "notes": "Notes",
+      "invalid": "Enter a positive number, or leave it empty.",
+      "accounts": {
+        "none": "Not set",
+        "TFSA": "TFSA",
+        "RRSP": "RRSP",
+        "FHSA": "FHSA",
+        "NON_REGISTERED": "Non-registered",
+        "OTHER": "Other"
+      }
+    },
+    "totals": {
+      "title": "Total value (CAD)",
+      "gain": "Unrealized gain",
+      "coverage": "Based on {n} of {total} holdings with shares entered.",
+      "fx": "USD holdings converted at {rate} CAD per USD.",
+      "fxMissing": "USD holdings are left out — the exchange rate is unavailable.",
+      "noShares": "Add share counts (Edit) to see totals, weights and gains. Everything else works without them.",
+      "weightNote": "Weights are shares of the holdings with shares entered."
+    },
+    "review": {
+      "title": "Long-term reviews",
+      "subtitle": "The same long-term check as Check a stock — verdict, scorecard and the key concern for each holding. Reviews don't use your daily check limit.",
+      "all": "Review all",
+      "allHint": "Checks every holding, one at a time — a few minutes. Available once every {days} days.",
+      "nextAt": "Review all is available again {date}.",
+      "running": "Reviewing {current} — {done} of {total}",
+      "starting": "Starting…",
+      "done": "Reviewed {n} holdings.",
+      "failedN": "{n} could not be reviewed.",
+      "reviewedCount": "{n} of {total} reviewed"
+    },
+    "allocate": {
+      "title": "Where could new cash go?",
+      "subtitle": "Considerations ranked from your long-term reviews, the trend, the discount from the 52-week high and concentration. Not buy instructions and no amounts.",
+      "show": "Show considerations",
+      "refresh": "Recalculate",
+      "includeWatchlist": "Include my watchlist",
+      "loading": "Ranking…",
+      "empty": "Add holdings to see considerations.",
+      "reviewFirst": "Tip: run the long-term reviews first — the verdict is the biggest factor.",
+      "tiers": {
+        "consider": "Worth a look",
+        "neutral": "Neutral",
+        "caution": "Caution"
+      },
+      "watchlist": "Watchlist",
+      "weight": "{n} of holdings",
+      "overlapTitle": "Overlap and fund structure",
+      "caveat": "Not financial advice. These are considerations ranked from Signa's own data — not buy instructions or amounts. Your goals, taxes and account room matter more than any score. You decide.",
+      "factors": {
+        "verdict_solid": "long-term review: solid",
+        "verdict_reasonable_with_caveats": "long-term review: reasonable, with caveats",
+        "verdict_not_a_good_fit": "long-term review: not a good fit",
+        "not_reviewed": "not reviewed yet",
+        "trend_break": "below its 200-day average (trend break)",
+        "death_cross": "50-day average below the 200-day",
+        "near_high": "trading near its 52-week high",
+        "modest_discount": "a modest discount from its 52-week high ({drawdown_pct})",
+        "deeper_discount": "well below its 52-week high ({drawdown_pct})",
+        "steep_fall": "a steep fall from its 52-week high ({drawdown_pct}) — worth understanding why",
+        "stretched": "stretched: {pct_vs_sma200} above its 200-day average",
+        "near_trend": "close to its 200-day average",
+        "overweight": "already {weight_pct} of your holdings (over {max_pct})",
+        "heavy": "already a large position ({weight_pct})",
+        "red_flag": "a cited red flag in recent news",
+        "leveraged": "leveraged fund (daily reset)",
+        "covered_call": "covered-call fund: capped upside",
+        "cash_like": "cash-like fund",
+        "earnings_soon": "earnings in {days} days",
+        "no_data": "no price data yet"
+      },
+      "notes": {
+        "overlap_us_large_tech": "{symbols} all hold the same US large-cap tech names (Apple, Microsoft, Nvidia…), so adding to any of them adds to the same exposure.",
+        "overlap_mega_caps": "{symbols} are also top holdings inside your broad funds — you own them twice.",
+        "covered_call": "{symbols} sell call options for income: a high yield, but capped upside in strong markets, and the price tends to lag the index over time.",
+        "leveraged": "{symbols} is leveraged and resets daily: it can lose value in choppy markets even when the index ends flat — usually a small satellite, not a core holding.",
+        "group_bitcoin": "{symbols} all track bitcoin — the same exposure twice.",
+        "group_canadian_banks": "{symbols} are all Canadian banks (XEQT holds them too).",
+        "group_enbridge": "{symbols}: E Split Corp's return depends on Enbridge — overlapping exposure.",
+        "group_precious_metals": "{symbols} are both precious-metals exposure.",
+        "group_cash_like": "{symbols} are cash-like (T-bills / money market): a place to park cash, not growth."
+      }
+    },
+    "errors": {
+      "holdings_unavailable": "Holdings storage isn't set up yet — apply database migration 010_holdings.sql.",
+      "nothing_to_import": "No tickers found in the text.",
+      "review_all_limit": "Review all was used recently — it's available again {date}.",
+      "busy": "A review is already running — wait for it to finish.",
+      "too_many": "Too many holdings selected — use Review all.",
+      "not_found": "That holding no longer exists.",
+      "invalid_input": "Some values are invalid — check the numbers.",
+      "rate_limited": "Too many requests — wait a moment.",
+      "network": "Network error — check your connection.",
+      "internal": "Something went wrong — please try again."
     }
   }
 }

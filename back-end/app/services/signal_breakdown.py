@@ -300,10 +300,10 @@ RULES: list[dict] = [
     ),
 
     # ── Short interest warnings ──
-    # High short interest is a double-edged signal:
-    #   • Negative when combined with falling price (informed bears, LB pattern)
-    #   • Positive when combined with rising momentum (squeeze, WING pattern)
-    # We surface both so Claude can interpret the context.
+    # High short interest predicts LOWER average returns (informed shorts):
+    #   • Negative when combined with falling price (trend confirms the bears)
+    #   • Neutral (not positive) with rising momentum: a squeeze is possible
+    #     but not a reliable edge (2026-09 audit; scoring bonus removed).
     _rule(
         "high_short_interest_bearish", TONE_NEGATIVE,
         fires=lambda s, t, f, o: (
@@ -315,7 +315,7 @@ RULES: list[dict] = [
         },
     ),
     _rule(
-        "high_short_interest_squeeze", TONE_POSITIVE,
+        "high_short_interest_squeeze", TONE_NEUTRAL,
         fires=lambda s, t, f, o: (
             (_safe_float(f.get("short_percent_of_float")) or 0) > 0.10
             and (_safe_float(t.get("vs_sma50")) or 0) > 0

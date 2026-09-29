@@ -130,19 +130,18 @@ async def get_brain_insights(ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10
 
     # Pick knowledge by context
     ticker_upper = ticker.upper()
-    is_energy = any(t in ticker_upper for t in ["CNQ", "SU.", "CVE", "ARX", "IMO", "BTE", "WCP", "TVE", "EOG", "COP", "XOM", "MPC", "OXY", "SLB"])
-    is_mining = any(t in ticker_upper for t in ["ABX", "FNV", "WPM", "NTR", "TECK", "NEM", "FCX"])
     is_crypto = ticker_upper.endswith("-USD")
 
-    relevant_topics = set()
-    if regime != "TRENDING":
+    # Curated rows only (2026-09 audit): the old picks (market_regime_detection
+    # with Kelly text, contrarian_commodities, supply_deficit, bubble) were
+    # stale or sector-biased.
+    relevant_topics = {"prompt_evidence_2021_2026"}
+    if regime == "RECOVERY":
+        relevant_topics.add("prompt_momentum_crash_caution")
+    elif regime != "TRENDING":
         relevant_topics.add("market_regime_detection")
-    if signal_style == "CONTRARIAN":
-        relevant_topics.add("contrarian_sentiment_in_commodities")
-    if is_energy or is_mining:
-        relevant_topics |= {"supply_deficit_asymmetry", "contrarian_sentiment_in_commodities"}
     if is_crypto:
-        relevant_topics.add("bubble_detection_framework")
+        relevant_topics.add("crypto_handling")
 
     relevant_knowledge = [
         k for k in all_knowledge

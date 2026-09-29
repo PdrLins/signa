@@ -527,6 +527,25 @@ class Settings(BaseSettings):
     # this long per resolved symbol. Shares the daily limit above.
     stock_check_long_cache_hours: int = 24
 
+    # --- My holdings (the owner's REAL long-term positions; migration 010) ---
+    # Daily 17:45 ET monitor (services/holdings_monitor.py): trend, drawdown,
+    # earnings, cited red flags (stocks only), concentration. Telegram alerts
+    # fire only on state changes and are de-duplicated per holding.
+    holdings_monitor_enabled: bool = True
+    holdings_alerts_enabled: bool = True
+    holdings_max_weight_pct: float = 15.0        # "overweight" above this share of the book
+    holdings_earnings_alert_trading_days: int = 3
+    # Red-flag search for held stocks uses the FREE path (Gemini grounded
+    # search first; a cached Grok result is reused). At most one AI
+    # sentiment call per holding per ET day; never for ETFs / crypto.
+    holdings_ai_red_flags: bool = True
+    # When Gemini fails, may the monitor fall back to paid Grok? Off = $0.
+    holdings_sentiment_paid_fallback: bool = False
+    # Long-term reviews (POST /holdings/review): "review all" at most once
+    # per N days; a single request may review at most N selected holdings.
+    holdings_review_all_days: int = 7
+    holdings_review_max_ids: int = 10
+
     # --- Language ---
     language: str = "en"  # "en" or "pt"
 

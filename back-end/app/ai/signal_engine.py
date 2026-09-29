@@ -39,9 +39,13 @@ shaped the rules:
   • Stocks > 50% above their SMA200 have INVERTED returns
     (gravity wins). Auto-blocked.
 
-  • Score ceiling at 72 — scores between 72 and 90 are the meaningful
-    BUY zone. Scores > 90 have inverted win rates (overbought trap)
-    and get force-converted to HOLD.
+  • Score ceiling at 90 — scores > 90 are force-converted to HOLD
+    (overbought guard; `score_to_action`).
+
+  NOTE (2026-09): the 2021-2026 study (8,996 trades, tech layer only)
+  found the score has NO monotonic edge vs SPY, and names above RSI 75
+  did best (n=104). The findings above are historical priors, not
+  validated rules; the score no longer gates or ranks brain entries.
 
 ============================================================
 THE TWO BUCKETS
@@ -66,9 +70,7 @@ its own scoring formula and BUY threshold:
     Weights:        35% sentiment + 30% catalyst + 25% technical momentum +
                     10% fundamentals
     BUY threshold:  65 (validated at 52.6% win rate by backtest)
-    Bonus:          Short-squeeze bonus (up to +20) when high short
-                    interest combines with bullish momentum.
-                    Momentum factor bonus (up to +6) from 3m+6m returns.
+    Bonus:          Momentum factor bonus (up to +6) from 3m+6m returns.
 
 ============================================================
 DYNAMIC ADJUSTMENTS
@@ -180,7 +182,7 @@ def compute_score(
       • Catalyst type detection (PEAD vs PRE_EARNINGS, mutually exclusive).
       • Regime multipliers (VOLATILE × 0.85, CRISIS × 0.60 or 0).
       • Quality bonus for SAFE_INCOME (Fama-French QMJ-inspired, up to +6).
-      • Short squeeze bonus + momentum factor bonus for HIGH_RISK.
+      • Momentum factor bonus for HIGH_RISK (no short-squeeze bonus).
 
     Args:
         technical_data: Output of `indicators.compute_indicators` — RSI,
@@ -198,7 +200,8 @@ def compute_score(
             stop, R/R ratio, catalyst, red flags. Empty dict for tech-only.
         bucket: "SAFE_INCOME" or "HIGH_RISK" (set by `_classify_bucket`
             in scan_service).
-        market_regime: "TRENDING" / "VOLATILE" / "CRISIS" — drives the
+        market_regime: "TRENDING" / "VOLATILE" / "CRISIS" / "RECOVERY"
+            (RECOVERY gets no adjustment) — drives the
             regime multiplier and the GEM eligibility for SAFE_INCOME.
         asset_type: "STOCK" / "ETF" / "CRYPTO". Only "ETF" affects scoring
             (uses ETF-specific weights with reduced dividend weight).
@@ -214,7 +217,7 @@ def compute_score(
               dividend_reliability / fundamental_health / macro / sentiment
               (SAFE_INCOME) or sentiment / catalyst / technical_momentum /
               fundamentals (HIGH_RISK), plus quality_bonus, momentum_bonus,
-              short_squeeze_bonus, total, market_regime, regime_adjustment_*,
+              total, market_regime, regime_adjustment_*,
               catalyst_type, sentiment_weight_effective, grok_mention_count.
     """
     # ── Null safety ──
@@ -314,10 +317,9 @@ def compute_score(
             + fundamental_score * weights["fundamentals"]
         )
 
-        # Short squeeze bonus (additive, not weighted)
-        squeeze_bonus = _score_short_squeeze(fundamental_data, technical_data)
-        if squeeze_bonus > 0:
-            total = total + squeeze_bonus
+        # No short-squeeze bonus (removed 2026-09): high short interest
+        # predicts LOWER average returns. The only short-interest input is
+        # the enrichment short-trend adjustment (rising SI = -1).
 
         # Momentum factor bonus (strong 3m+6m trend = higher conviction)
         momentum_bonus = max(0, (momentum_factor_score - 60) * 0.15)  # Up to +6 points
@@ -328,7 +330,6 @@ def compute_score(
             "catalyst": round(catalyst_score * weights["catalyst"], 1),
             "technical_momentum": round(technical_score * weights["technical_momentum"], 1),
             "fundamentals": round(fundamental_score * weights["fundamentals"], 1),
-            "short_squeeze_bonus": squeeze_bonus,
             "momentum_factor_score": round(momentum_factor_score, 1),
             "momentum_bonus": round(momentum_bonus, 1),
         }
@@ -356,10 +357,10 @@ def compute_score(
         score = score * 0.85
         regime_adjustment_applied = True
         regime_adjustment_note = "Score reduced 15%: volatile market regime"
-    elif market_regime == "RECOVERY" and bucket == "HIGH_RISK":
-        score = score * 1.10
-        regime_adjustment_applied = True
-        regime_adjustment_note = "Score boosted 10%: recovery regime favors momentum"
+    # RECOVERY: no adjustment. The old x1.10 HIGH_RISK boost was removed
+    # (2026-09 audit): sharp rebounds from deep drawdowns are exactly when
+    # momentum crashes (Daniel-Moskowitz), so boosting momentum there had
+    # the sign backwards.
     elif market_regime == "CRISIS":
         if bucket == "HIGH_RISK":
             score = 0
@@ -420,11 +421,9 @@ def score_to_action(score: int, bucket: str = "") -> str:
       score >= 55 AND score < buy_threshold   → HOLD
       score < 55                              → AVOID
 
-    The 90-ceiling is critical: scores in the 90+ range correlate with
-    overbought conditions where the rally is already exhausted. The
-    backtest showed that 90+ scores have INVERTED win rates compared to
-    scores in the 72-89 range. Force-converting to HOLD prevents the
-    user from chasing tops.
+    The 90-ceiling is an unvalidated overbought guard (from an old
+    30-ticker test; the 2021-2026 study found no monotonic score edge).
+    Scores above 90 are force-converted to HOLD.
 
     Args:
         score: 0-100 composite score from `compute_score`.
@@ -1062,34 +1061,6 @@ def _score_dividend_reliability(fund_data: dict) -> float:
     return max(0, min(100, score))
 
 
-def _score_short_squeeze(fund_data: dict, technical_data: dict) -> float:
-    """Bonus score for short squeeze potential (0-20).
-
-    High short float + bullish momentum = squeeze catalyst.
-    Only applies as a bonus, never penalizes.
-    """
-    short_float = fund_data.get("short_percent_of_float")
-    if short_float is None or short_float < 0.05:
-        return 0
-
-    bonus = 0
-    # High short interest (>10%)
-    if short_float >= 0.20:
-        bonus += 12
-    elif short_float >= 0.10:
-        bonus += 8
-    else:
-        bonus += 4
-
-    # Bullish momentum confirmation
-    rsi = technical_data.get("rsi")
-    macd_hist = technical_data.get("macd_histogram")
-    if rsi is not None and 50 <= rsi <= 70 and macd_hist is not None and macd_hist > 0:
-        bonus += 8
-
-    return min(20, bonus)
-
-
 def _score_quality(fund_data: dict) -> float:
     """Score company quality (0-100) — Fama-French QMJ inspired.
 
@@ -1193,44 +1164,14 @@ def _score_momentum_factor(technical_data: dict) -> float:
 # PROBABILITY VS BENCHMARK
 # ============================================================
 
-# Derived from backtest: 18,759 signals across ~18 months (tech-only, no AI).
-# Maps score ranges to 20-day probability of beating SPY.
-# AI-analyzed signals add ~5% to win rate over tech-only baseline.
-_PROB_VS_SPY = {
-    "SAFE_INCOME": {
-        (80, 101): 68.0,
-        (70, 80): 64.5,
-        (65, 70): 62.2,
-        (60, 65): 58.4,
-        (55, 60): 54.0,
-        (0, 55): 48.0,
-    },
-    "HIGH_RISK": {
-        (80, 101): 62.0,
-        (70, 80): 59.5,
-        (65, 70): 56.7,
-        (60, 65): 53.6,
-        (55, 60): 50.5,
-        (0, 55): 45.0,
-    },
-}
-
-
-def compute_probability_vs_spy(score: int, bucket: str, has_ai: bool = False) -> float:
-    """Compute probability of beating SPY in 20 days based on backtest data.
-
-    Returns a percentage (e.g. 62.2 means "62.2% chance of beating SPY").
-    AI-analyzed signals get a +5% boost over tech-only baseline.
-    """
-    table = _PROB_VS_SPY.get(bucket, _PROB_VS_SPY["HIGH_RISK"])
-    prob = 50.0  # default: coin flip
-    for (lo, hi), p in table.items():
-        if lo <= score < hi:
-            prob = p
-            break
-    if has_ai:
-        prob = min(85.0, prob + 5.0)
-    return round(prob, 1)
+# The old score -> "probability of beating SPY" table (45-68%, from an
+# 18,759-signal tech-only backtest, +5 for AI) was removed in 2026-09: the
+# 2021-2026 study found about 40% of trades beat SPY in EVERY score band,
+# so the table invented probabilities. Until a calibrated model exists this
+# returns None and the UI hides the badge (it renders only when != null).
+def compute_probability_vs_spy(score: int, bucket: str, has_ai: bool = False) -> float | None:
+    """Probability of beating SPY — not available (no calibrated model). Returns None."""
+    return None
 
 
 # ============================================================

@@ -3,7 +3,7 @@
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useToast } from '@/hooks/useToast'
-import { useRunAnalysis, useApproveSuggestion, useRejectSuggestion, useApplySuggestion } from '@/hooks/useBrain'
+import { useRunAnalysis, useApproveSuggestion, useRejectSuggestion } from '@/hooks/useBrain'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 
@@ -18,7 +18,6 @@ export function BrainSuggestionsTab({ suggestions }: BrainSuggestionsTabProps) {
   const runAnalysis = useRunAnalysis()
   const approveSuggestion = useApproveSuggestion()
   const rejectSuggestion = useRejectSuggestion()
-  const applySuggestion = useApplySuggestion()
 
   return (
     <div role="tabpanel" id="tabpanel-suggestions" aria-labelledby="tab-suggestions" className="space-y-3">
@@ -111,17 +110,12 @@ export function BrainSuggestionsTab({ suggestions }: BrainSuggestionsTabProps) {
                   </div>
                 )}
                 {isApproved && (
-                  <button
-                    onClick={() => applySuggestion.mutate(String(s.id), {
-                      onSuccess: () => toast.show(t.brain.appliedSuccess, 'success'),
-                      onError: (err) => toast.show((err as Error)?.message || t.brain.appliedFailed, 'error'),
-                    })}
-                    disabled={applySuggestion.isPending}
-                    className="text-[10px] font-bold px-3 py-1 rounded-lg disabled:opacity-50"
+                  <span
+                    className="text-[10px] font-medium px-3 py-1 rounded-lg"
                     style={{ backgroundColor: theme.colors.primary + '15', color: theme.colors.primary }}
                   >
-                    {t.brain.applyToBrain}
-                  </button>
+                    {t.brain.approvedNeedsChange}
+                  </span>
                 )}
               </div>
             </div>

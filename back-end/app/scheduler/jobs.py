@@ -216,3 +216,22 @@ async def brain_watchdog():
                 logger.debug(f"Watchdog follow-up scheduling failed: {e}")
     except Exception as e:
         logger.error(f"Brain watchdog failed: {e}")
+
+
+async def holdings_monitor():
+    """5:45 PM ET weekdays — watch the owner's REAL long-term holdings.
+
+    Trend / drawdown / earnings / cited red flags (stocks only, free AI
+    path, <= 1 AI call per holding per day) / concentration. Telegram only
+    on state changes. See app/services/holdings_monitor.py.
+    """
+    from app.core.config import settings
+
+    if not settings.holdings_monitor_enabled:
+        return
+    try:
+        from app.services.holdings_monitor import run_holdings_monitor
+        result = await run_holdings_monitor()
+        logger.info(f"Holdings monitor: {result}")
+    except Exception as e:
+        logger.error(f"Holdings monitor failed: {e}")

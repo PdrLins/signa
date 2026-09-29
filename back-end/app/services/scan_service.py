@@ -312,18 +312,9 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
 
         from app.services.knowledge_service import KnowledgeService
         _ks = KnowledgeService()
-        knowledge_task = asyncio.create_task(_ks.get_knowledge_block([
-            "signa_is_short_term_only",
-            "score_ranges_and_actions",
-            "backtest_key_findings",
-            "gem_conditions",
-            "signal_blockers",
-            "market_regime_detection",
-            "grok_sentiment_calibration",
-            "supply_deficit_asymmetry",
-            "contrarian_sentiment_in_commodities",
-            "bubble_detection_framework",
-        ]))
+        # Single source of truth (knowledge_service.PROMPT_KNOWLEDGE_CONCEPTS),
+        # shared with the "Check a stock" flow.
+        knowledge_task = asyncio.create_task(_ks.get_prompt_knowledge_block())
 
         # Macro pulse only on first scan of the day (Grok tokens).
         # Wrapped in try/except to match the original defensive behavior:

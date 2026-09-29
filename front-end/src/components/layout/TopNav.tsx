@@ -15,7 +15,7 @@ export function TopNav() {
   const t = useI18nStore((s) => s.t)
 
   // Day 32 revamp: /brain/performance is the home; /overview and
-  // /portfolio dropped from main nav (still routable for old bookmarks).
+  // /portfolio now redirects to /holdings (My holdings).
   const NAV_ITEMS = [
     { label: t.nav.brainPerformance, href: '/brain/performance' },
     { label: t.nav.signals, href: '/signals' },

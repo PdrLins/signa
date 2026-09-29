@@ -184,17 +184,20 @@ async def apply_suggestion(
     request: Request,
     user: dict = Depends(require_brain_token),
 ):
-    """Apply an approved suggestion to the brain rules."""
+    """Approve a suggestion for implementation. Changes NO rule: scoring and
+    gates read code/settings, so the response carries
+    requires_code_change=True and a message for the owner."""
     result = await asyncio.to_thread(learning_service.apply_suggestion, suggestion_id, user.get("user_id"))
 
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
 
     insert_audit_log(
-        event_type="LEARNING_SUGGESTION_APPLIED",
+        event_type="LEARNING_SUGGESTION_APPROVED",
         success=True,
         user_id=user.get("user_id"),
         ip_address=get_client_ip(request),
-        metadata={"suggestion_id": suggestion_id, "rule_name": result.get("rule_name")},
+        metadata={"suggestion_id": suggestion_id, "rule_name": result.get("rule_name"),
+                  "applied": False, "requires_code_change": True},
     )
     return result

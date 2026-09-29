@@ -12,6 +12,7 @@ from app.scheduler.jobs import (
     candidate_outcome_tracking,
     cleanup_expired_tokens,
     daily_learning_loop,
+    holdings_monitor,
     midday_scan,
     morning_scan,
     pre_close_scan,
@@ -100,6 +101,17 @@ def init_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # 5:45 PM ET — My holdings monitor (the owner's REAL positions): after
+    # the close so daily bars are complete; alerts only on state changes.
+    if settings.holdings_monitor_enabled:
+        scheduler.add_job(
+            holdings_monitor,
+            CronTrigger(hour=17, minute=45, day_of_week="mon-fri", timezone=settings.timezone),
+            id="holdings_monitor",
+            name="My Holdings Monitor (5:45 PM ET)",
+            replace_existing=True,
+        )
+
     # Every 15 min during market hours (9 AM - 5 PM ET, Mon-Fri)
     if settings.watchdog_enabled:
         scheduler.add_job(
@@ -132,7 +144,7 @@ def init_scheduler() -> AsyncIOScheduler:
     watchdog_status = "enabled" if settings.watchdog_enabled else "disabled"
     logger.info(
         f"Scheduler configured: {len(SCAN_SCHEDULE)} scans + cleanup + snapshot "
-        f"+ outcomes + daily-learning + watchdog ({watchdog_status}) "
+        f"+ outcomes + daily-learning + holdings + watchdog ({watchdog_status}) "
         f"(timezone: {settings.timezone})"
     )
 

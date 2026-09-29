@@ -89,10 +89,15 @@ from app.core.config import settings
 _sentiment_cache = TTLCache(max_size=500, default_ttl=3600)
 _synthesis_cache = TTLCache(max_size=500, default_ttl=3600)
 _decision_cache = TTLCache(max_size=200, default_ttl=3600)
+# Free-path (prefer_free / free_only) sentiment results — kept apart so a
+# Gemini answer fetched for the holdings monitor never replaces the scan's
+# Grok (live X) sentiment.
+_free_sentiment_cache = TTLCache(max_size=500, default_ttl=3600)
 
 
 def clear_ai_caches() -> None:
     _sentiment_cache.clear()
+    _free_sentiment_cache.clear()
     _synthesis_cache.clear()
     _decision_cache.clear()
 
@@ -261,24 +266,59 @@ async def _route_synthesis(
     }
 
 
-async def analyze_sentiment(ticker: str, market_cap: float | None = None) -> dict:
+def sentiment_provider_order(prefer_free: bool = False, free_only: bool = False) -> list[str]:
+    """Provider order for a sentiment call.
+
+    Default: settings.sentiment_providers unchanged (Grok first).
+    prefer_free: Gemini (free) first, then the rest in configured order.
+    free_only: Gemini only (never a paid provider).
+    """
+    configured = list(settings.sentiment_providers)
+    if free_only:
+        return ["gemini"]
+    if prefer_free:
+        return ["gemini"] + [p for p in configured if p != "gemini"]
+    return configured
+
+
+async def analyze_sentiment(
+    ticker: str,
+    market_cap: float | None = None,
+    prefer_free: bool = False,
+    free_only: bool = False,
+) -> dict:
     """Route sentiment analysis to the first available provider within budget.
 
     Successful results are cached per ticker for sentiment_cache_hours — the
     search window is 48h, so re-searching X every scan buys almost nothing.
+
+    prefer_free=True (used by the My-holdings monitor) tries Gemini grounded
+    search before Grok; free_only=True never calls a paid provider. Either
+    way a cached result (e.g. a Grok answer from today's scan) is reused
+    first. Results obtained on the free path go to a separate cache so the
+    scan's default (Grok-first, live X) behaviour is unchanged.
     """
+    free_path = prefer_free or free_only
     if settings.sentiment_cache_hours > 0:
         cached = _sentiment_cache.get(ticker)
+        if cached is None and free_path:
+            cached = _free_sentiment_cache.get(ticker)
         if cached is not None:
             return {**cached, "_cached": True}
-    result = await _route_sentiment(ticker, market_cap)
+    if free_path:
+        providers = sentiment_provider_order(prefer_free, free_only)
+        result = await _route_sentiment(ticker, market_cap, providers=providers)
+    else:
+        result = await _route_sentiment(ticker, market_cap)
     if not result.get("error") and settings.sentiment_cache_hours > 0:
-        _sentiment_cache.set(ticker, result, ttl=settings.sentiment_cache_hours * 3600)
+        cache = _free_sentiment_cache if free_path else _sentiment_cache
+        cache.set(ticker, result, ttl=settings.sentiment_cache_hours * 3600)
     return result
 
 
-async def _route_sentiment(ticker: str, market_cap: float | None = None) -> dict:
-    providers = settings.sentiment_providers
+async def _route_sentiment(ticker: str, market_cap: float | None = None,
+                           providers: list[str] | None = None) -> dict:
+    providers = providers if providers is not None else settings.sentiment_providers
     budget = await _get_budget()
 
     for provider in providers:

@@ -198,7 +198,7 @@ export function PortfolioWidget() {
   if (isLoading) return <Card><Skeleton width="100%" height={100} /></Card>
 
   return (
-    <Link href="/portfolio" className="block h-full">
+    <Link href="/holdings" className="block h-full">
       <Card className="h-full">
         <div className="flex items-center justify-between mb-2.5">
           <div className="flex items-center gap-1.5">

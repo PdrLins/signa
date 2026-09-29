@@ -18,6 +18,7 @@ import {
   HelpCircle,
   ScrollText,
   Search,
+  Wallet,
 } from 'lucide-react'
 import { isNavActive } from '@/components/layout/LeftNav'
 
@@ -28,6 +29,7 @@ export function BottomNav() {
   const [moreOpen, setMoreOpen] = useState(false)
 
   const MORE_ITEMS = useMemo(() => [
+    { label: t.nav.positions, href: '/positions', icon: Briefcase },
     { label: t.nav.check, href: '/check', icon: Search },
     { label: t.nav.brain, href: '/brain', icon: Brain },
     { label: t.nav.settings, href: '/settings', icon: Settings },
@@ -40,13 +42,13 @@ export function BottomNav() {
   const TABS = useMemo(() => [
     { label: t.nav.today, href: '/today', icon: LayoutDashboard },
     { label: t.nav.signals, href: '/signals', icon: Activity },
-    { label: t.nav.positions, href: '/positions', icon: Briefcase },
+    { label: t.nav.holdingsShort, href: '/holdings', icon: Wallet },
     { label: t.nav.isItWorkingShort, href: '/performance', icon: ChartLine },
     { label: t.nav.more, href: '#more', icon: Menu },
   ], [t])
 
   const moreActive = (href: string) =>
-    href === '/brain' ? isNavActive('/brain', pathname) : (pathname === href || pathname.startsWith(href + '/'))
+    href === '/brain' || href === '/positions' ? isNavActive(href, pathname) : (pathname === href || pathname.startsWith(href + '/'))
 
   const isMoreActive = useMemo(
     () => MORE_ITEMS.some((item) => moreActive(item.href)),

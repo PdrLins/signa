@@ -108,7 +108,7 @@ KEY_TO_PROMPT_TEXT: dict[str, str] = {
     ),
     "high_short_interest_squeeze": (
         "High short interest ({pct}% of float) with price above SMA50 and positive MACD — "
-        "potential short squeeze setup if momentum continues"
+        "a squeeze is possible, but high short interest predicts lower average returns"
     ),
     "vix_backwardation_stress": (
         "VIX term structure in backwardation (ratio {ratio}) — acute market stress, "

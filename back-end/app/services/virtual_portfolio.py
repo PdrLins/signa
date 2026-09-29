@@ -99,6 +99,7 @@ by `.eq("status", "OPEN")` so scan / watchdog / thesis tracker can race
 safely (see close_virtual_trade for the wallet ordering).
 """
 
+import json
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -829,14 +830,27 @@ PATTERN_MATCHERS = {
 OUTCOME_PATTERN_KEYS = frozenset({"exit_reason", "exit_reason_family"})
 
 
-def _trade_matches_pattern(trade: dict, pattern_match: dict, exit_reason: str | None = None) -> bool:
+def _parse_pattern_match(pattern_match) -> dict | None:
+    """pattern_match as a dict. Some rows store it as a JSON *string*
+    (jsonb holding a string); parse those. Unparseable / non-dict → None."""
+    if isinstance(pattern_match, str):
+        try:
+            pattern_match = json.loads(pattern_match)
+        except (TypeError, ValueError):
+            return None
+    return pattern_match if isinstance(pattern_match, dict) else None
+
+
+def _trade_matches_pattern(trade: dict, pattern_match: dict | str, exit_reason: str | None = None) -> bool:
     """Strict match of a closed trade against a hypothesis pattern_match.
 
     EVERY key must be a known key (see PATTERN_MATCHERS) AND match. Unknown
-    keys (e.g. window_days, count_threshold, new_cohorts) → no match. An
-    empty or non-dict pattern → no match.
+    keys (e.g. window_days, count_threshold, new_cohorts) → no match. A
+    JSON-string pattern is parsed first; an empty, unparseable or non-dict
+    pattern → no match.
     """
-    if not pattern_match or not isinstance(pattern_match, dict):
+    pattern_match = _parse_pattern_match(pattern_match)
+    if not pattern_match:
         return False
     for key, expected in pattern_match.items():
         matcher = PATTERN_MATCHERS.get(key)

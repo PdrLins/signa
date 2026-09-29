@@ -8,6 +8,9 @@ import type { TodayInsights, PerformanceInsights, BacktestInsights, SignalTrail,
 import type { CheckJob, CheckMode } from '@/types/check'
 import type { LoginRequest, LoginResponse, OtpVerifyRequest, AuthResponse } from '@/types/auth'
 import type {
+  AllocateResponse, Holding, HoldingPatch, HoldingsResponse, HoldingUpsertItem, ResolveResponse, ReviewJob,
+} from '@/types/holdings'
+import type {
   PortfolioItem,
   PortfolioResponse,
   PortfolioAddRequest,
@@ -369,6 +372,53 @@ export const checkApi = {
   start: (ticker: string, force = false, mode: CheckMode = 'short') =>
     checkCall<CheckJob>('post', '/check', { ticker, force, mode }),
   get: (jobId: string) => checkCall<CheckJob>('get', `/check/${encodeURIComponent(jobId)}`),
+}
+
+// My holdings — coded 4xx/503 errors are returned as CheckApiError (same
+// {detail: {code, message}} shape as /check) so the page can translate them.
+async function holdingsCall<T>(
+  method: 'get' | 'post' | 'patch' | 'delete',
+  url: string,
+  data?: unknown,
+  extra?: AxiosRequestConfig,
+): Promise<T> {
+  const res = await client.request<T | { detail?: unknown }>({
+    method,
+    url,
+    data,
+    ...extra,
+    validateStatus: (s) => (s >= 200 && s < 300) || [400, 404, 409, 422, 429, 503].includes(s),
+  })
+  if (res.status >= 400) {
+    const detail = (res.data as { detail?: unknown } | undefined)?.detail
+    const obj = detail && typeof detail === 'object' && !Array.isArray(detail)
+      ? (detail as { code?: string; message?: string; next_allowed_at?: string })
+      : null
+    const code = obj?.code ?? (res.status === 422 ? 'invalid_input' : res.status === 429 ? 'rate_limited' : 'internal')
+    const message = obj?.message ?? (typeof detail === 'string' ? detail : 'Request failed.')
+    const err = new CheckApiError(code, message, res.status) as CheckApiError & { nextAllowedAt?: string }
+    if (obj?.next_allowed_at) err.nextAllowedAt = obj.next_allowed_at
+    throw err
+  }
+  return res.data as T
+}
+
+export const holdingsApi = {
+  list: () => holdingsCall<HoldingsResponse>('get', '/holdings'),
+  // Resolving ~30 tickers makes several Yahoo lookups each — allow 90s.
+  resolve: (text: string) => holdingsCall<ResolveResponse>('post', '/holdings/resolve', { text }, { timeout: 90_000 }),
+  save: (items: HoldingUpsertItem[]) =>
+    holdingsCall<{ count: number; created: number; updated: number; refreshing: boolean }>('post', '/holdings', { items }),
+  update: (id: string, body: HoldingPatch) =>
+    holdingsCall<Holding>('patch', `/holdings/${encodeURIComponent(id)}`, body),
+  remove: (id: string) => holdingsCall<{ message: string }>('delete', `/holdings/${encodeURIComponent(id)}`),
+  refresh: () => holdingsCall<{ status: 'started' | 'running' }>('post', '/holdings/refresh'),
+  review: (body: { ids?: string[]; all?: boolean }) => holdingsCall<ReviewJob>('post', '/holdings/review', body),
+  reviewCurrent: () => holdingsCall<{ job: ReviewJob | null }>('get', '/holdings/review/current'),
+  reviewJob: (jobId: string) => holdingsCall<ReviewJob>('get', `/holdings/review/${encodeURIComponent(jobId)}`),
+  allocate: (includeWatchlist = false) =>
+    holdingsCall<AllocateResponse>('get', '/holdings/allocate-ideas', undefined,
+      { params: includeWatchlist ? { include_watchlist: true } : undefined, timeout: 45_000 }),
 }
 
 export const healthApi = {

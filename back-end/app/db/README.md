@@ -9,7 +9,8 @@ These tables have a `user_id` column and are filtered by the authenticated user.
 | Table | Purpose |
 |-------|---------|
 | **watchlist** | Tickers the user is tracking. Used to trigger Telegram SELL/AVOID alerts and feed the virtual portfolio. Each user has their own watchlist. |
-| **portfolio** | User's real holdings — symbol, shares, avg cost, account type (TFSA/RRSP/TAXABLE). For manual portfolio tracking. |
+| **holdings** | The owner's REAL long-term holdings (migration 010) — resolved symbol, optional shares / avg cost / account, the daily monitor snapshot (`holding_status`), Telegram de-dup state (`alert_state`) and the latest long-term review (`last_review`). Replaces `portfolio`. |
+| **portfolio** | Legacy, unused by the UI (rows are copied into `holdings` by migration 010). |
 | **positions** | Open/closed trade positions with entry/exit prices, P&L, stop loss, and target. Linked to signals. Used for position monitoring alerts (stop loss hit, target reached, signal weakening). |
 | **alerts** | Telegram notifications sent to the user — GEM alerts, watchlist SELL alerts, scan digests, stop loss/target alerts. Tracks delivery status (SENT/FAILED/PENDING). |
 | **trade_outcomes** | Recorded trade results for the self-learning loop. Entry/exit prices, P&L, whether signal was correct. Fed to Claude weekly for brain improvement suggestions. |

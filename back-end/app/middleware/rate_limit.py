@@ -60,6 +60,8 @@ _EXEMPT_PATHS = {
 _PROGRESS_ROUTE = re.compile(r"^/api/v1/scans/[A-Za-z0-9_-]{1,64}/progress$")
 # Stock-check job polling (GET every 2s) — same treatment, exact route only.
 _CHECK_JOB_ROUTE = re.compile(r"^/api/v1/check/[a-f0-9]{32}$")
+# My-holdings review job polling (GET every 2s) — exact route only.
+_HOLDINGS_REVIEW_JOB_ROUTE = re.compile(r"^/api/v1/holdings/review/(?:[a-f0-9]{32}|current)$")
 
 # ── Thread-safe storage ──
 _lock = threading.Lock()
@@ -89,7 +91,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             path in _EXEMPT_PATHS
             or path.startswith("/docs")
             or path.startswith("/redoc")
-            or (request.method == "GET" and (_PROGRESS_ROUTE.match(path) or _CHECK_JOB_ROUTE.match(path)))
+            or (request.method == "GET" and (_PROGRESS_ROUTE.match(path) or _CHECK_JOB_ROUTE.match(path)
+                                               or _HOLDINGS_REVIEW_JOB_ROUTE.match(path)))
         ):
             return await call_next(request)
 
