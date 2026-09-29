@@ -1476,7 +1476,11 @@
       "failed": "Busca indisponível — pressione Enter para checar como digitado.",
       "count": "{n} sugestões disponíveis. Use as setas para cima e para baixo para escolher.",
       "tracked": "Acompanhado pelo Signa",
-      "types": { "stock": "Ação", "etf": "ETF", "crypto": "Cripto" }
+      "types": {
+        "stock": "Ação",
+        "etf": "ETF",
+        "crypto": "Cripto"
+      }
     },
     "long": {
       "verdict": {
@@ -1673,6 +1677,112 @@
       },
       "sourceLink": "Fonte",
       "daysValue": "{n} dias"
+    },
+    "compare": {
+      "kindLabel": "O que verificar",
+      "kinds": {
+        "single": "Uma",
+        "compare": "Comparar"
+      },
+      "kindHelp": {
+        "single": "Verifica um ticker.",
+        "compare": "Compara 2–3 tickers lado a lado. Cada um conta como uma verificação, a menos que haja um resultado recente em cache."
+      },
+      "tickerLabel": "Ticker {n}",
+      "add": "Adicionar um terceiro ticker",
+      "remove": "Remover ticker {n}",
+      "submit": "Comparar",
+      "running": "Comparando…",
+      "help": "Escolha 2 ou 3 símbolos ou nomes de empresas.",
+      "needTwo": "Informe pelo menos dois tickers diferentes.",
+      "progressTitle": "Comparando {symbols}",
+      "progressLabel": "Progresso geral",
+      "summarizing": "Escrevendo a comparação",
+      "status": {
+        "queued": "Aguardando uma vaga",
+        "running": "Em andamento",
+        "done": "Concluído",
+        "failed": "Falhou"
+      },
+      "cachedBadge": "em cache",
+      "rankingTitle": "Ranking",
+      "rankingAi": "Ranking e resumo pelo Opus",
+      "rankingRules": "Ordenado pelo veredito e depois pelo número de métricas em que cada um lidera",
+      "aiEnglish": "O resumo é escrito pela IA em inglês.",
+      "notes": {
+        "ai_unavailable": "O resumo da IA não está disponível agora, então o ranking usa as regras acima.",
+        "ai_disabled": "A IA está desligada, então o ranking usa as regras acima.",
+        "not_enough_results": "Menos de duas verificações terminaram, então não há o que ordenar."
+      },
+      "perSymbolFallback": "{verdict} · melhor em {n} de {total} métricas",
+      "tableTitle": "Lado a lado",
+      "tableCaption": "Comparação de {symbols}. O melhor valor de cada linha está marcado como “Melhor”.",
+      "metric": "Métrica",
+      "best": "Melhor",
+      "fullCheck": "Análise completa",
+      "fullCheckLabel": "Abrir a análise completa de {symbol}",
+      "swipeHint": "Deslize para ver cada ticker.",
+      "cardLabel": "{symbol}, {rank} de {total}",
+      "groups": {
+        "verdict": "Veredito",
+        "setup": "Configuração",
+        "ai": "Modelos de IA",
+        "risk": "Risco",
+        "size": "Tamanho",
+        "returns": "Retornos",
+        "cost": "Custo",
+        "valuation": "Valuation",
+        "scorecard": "Scorecard"
+      },
+      "metrics": {
+        "verdict": "Veredito",
+        "tech_filter": "Filtro técnico",
+        "score": "Pontuação",
+        "routine_signal": "Sinal do Sonnet",
+        "routine_confidence": "Confiança do Sonnet",
+        "decision_signal": "Sinal do Opus",
+        "decision_confidence": "Confiança do Opus",
+        "p_win": "Chance de ganho (IA)",
+        "codex": "Segunda opinião do Codex",
+        "rr": "Retorno : risco",
+        "earnings_days": "Dias até o balanço",
+        "correlation": "Correlação com a carteira do cérebro",
+        "position_pct": "Tamanho sugerido com 1% de risco",
+        "cagr_1y": "CAGR de 1 ano",
+        "cagr_3y": "CAGR de 3 anos",
+        "cagr_5y": "CAGR de 5 anos",
+        "max_drawdown": "Queda máxima",
+        "recovery_days": "Recuperação da queda máxima",
+        "volatility": "Volatilidade",
+        "expense_ratio": "Taxa de administração",
+        "pe": "P/L",
+        "fcf_yield": "Rendimento do FCL",
+        "rating_cost": "Nota de custo",
+        "rating_diversification": "Nota de diversificação",
+        "rating_track_record": "Nota de histórico",
+        "rating_valuation": "Nota de valuation",
+        "rating_risk": "Nota de risco",
+        "rating_quality": "Nota de qualidade do negócio"
+      },
+      "pass": "Passou",
+      "fail": "Não passou",
+      "daysValue": "{n} d",
+      "vsBench": "vs {bench} {cagr}",
+      "notRecovered": "Não recuperou",
+      "sharesValue": "{shares} ações",
+      "corrWith": "com {symbol}",
+      "caveat": "Não é recomendação financeira. Compara dados passados e respostas de modelos; nenhuma ordem é enviada.",
+      "again": "Refazer tudo",
+      "againLabel": "Refazer todas as verificações (as que não estão em cache contam no limite de hoje)",
+      "remaining": "{n} verificações restantes hoje",
+      "errors": {
+        "compare_count": "Compare 2 ou 3 tickers.",
+        "compare_duplicate": "Estes são a mesma listagem: {symbols}. Escolha tickers diferentes.",
+        "compare_unknown": "Não encontramos um preço recente para {inputs}.",
+        "compare_not_found": "Essa comparação expirou — rode de novo.",
+        "daily_limit": "Esta comparação precisa de {needed} novas verificações, mas só restam {remaining} hoje. O limite zera à meia-noite (ET).",
+        "resolve_failed": "Não foi possível consultar um dos tickers — tente de novo."
+      }
     }
   },
   "holdings": {

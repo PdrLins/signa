@@ -229,3 +229,80 @@ export type AnyCheckResult = CheckResult | LongCheckResult
 export function isLongResult(r: AnyCheckResult | null | undefined): r is LongCheckResult {
   return !!r && (r as LongCheckResult).mode === 'long'
 }
+
+// ── Compare 2–3 symbols (/check/compare) ────────────────────────────
+
+export type CompareItemStatus = 'queued' | 'running' | 'done' | 'failed'
+
+export interface CompareItem {
+  input: string
+  symbol: string
+  status: CompareItemStatus
+  phase: CheckPhase | LongCheckPhase | 'queued' | string
+  pct: number
+  /** null until done */
+  cached: boolean | null
+  error: CheckJobError | null
+}
+
+export type CompareFormat =
+  | 'verdict' | 'bool' | 'num' | 'signal' | 'int' | 'prob' | 'ratio' | 'days' | 'corr' | 'pct' | 'rating'
+
+export interface CompareMetric {
+  key: string
+  group: string
+  format: CompareFormat | string
+  /** null = informational (never marked best) */
+  better: 'higher' | 'lower' | null
+  values: Record<string, string | number | boolean | null>
+  /** symbols holding the best value (ties allowed); null = not comparable */
+  best: string[] | null
+  detail?: Record<string, unknown>
+}
+
+export interface CompareIdentity {
+  symbol: string
+  name: string | null
+  exchange: string | null
+  currency: string | null
+  price: number | null
+  asset_type: string | null
+  verdict: CheckVerdict | LongVerdict | string
+  cached: boolean
+  checked_at: string | null
+}
+
+export interface Comparison {
+  mode: CheckMode
+  symbols: string[]
+  identity: Record<string, CompareIdentity>
+  metrics: CompareMetric[]
+  best_counts: Record<string, number>
+}
+
+export interface CompareSummary {
+  source: 'ai' | 'deterministic'
+  /** best -> worst */
+  ranking: string[]
+  /** AI text (English); null for the deterministic ranking */
+  summary: string | null
+  per_symbol: Record<string, string>
+  caveats: string[]
+  note: { code: string; text: string } | null
+  provider: string | null
+}
+
+export interface CompareJob {
+  compare_id: string
+  mode: CheckMode
+  status: 'running' | 'done'
+  phase: 'checking' | 'summarizing' | 'done' | string
+  pct: number
+  symbols: string[]
+  items: CompareItem[]
+  started_at: string
+  results?: Record<string, AnyCheckResult>
+  comparison?: Comparison | null
+  summary?: CompareSummary | null
+  remaining_today?: number
+}

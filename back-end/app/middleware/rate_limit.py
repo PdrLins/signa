@@ -43,6 +43,7 @@ _STRICT_PATHS = {
     "/api/v1/learning/analyze",
     "/api/v1/learning/outcomes",
     "/api/v1/check",            # POST: starts a paid on-demand stock check
+    "/api/v1/check/compare",    # POST: starts 2-3 on-demand stock checks
 }
 
 # Paths exempt from rate limiting
@@ -59,7 +60,7 @@ _EXEMPT_PATHS = {
 # A substring check ("/progress" in path) let any path dodge rate limiting.
 _PROGRESS_ROUTE = re.compile(r"^/api/v1/scans/[A-Za-z0-9_-]{1,64}/progress$")
 # Stock-check job polling (GET every 2s) — same treatment, exact route only.
-_CHECK_JOB_ROUTE = re.compile(r"^/api/v1/check/[a-f0-9]{32}$")
+_CHECK_JOB_ROUTE = re.compile(r"^/api/v1/check/(?:compare/)?[a-f0-9]{32}$")
 # My-holdings review job polling (GET every 2s) — exact route only.
 _HOLDINGS_REVIEW_JOB_ROUTE = re.compile(r"^/api/v1/holdings/review/(?:[a-f0-9]{32}|current)$")
 

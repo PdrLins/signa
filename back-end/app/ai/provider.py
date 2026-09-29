@@ -528,6 +528,47 @@ async def assess_long_term(symbol: str, prompt: str) -> dict | None:
 
 
 # ============================================================
+# STOCK COMPARISON SUMMARY (Check a stock -> Compare)
+# ============================================================
+#
+# One decision-tier Claude call over the computed comparison block
+# (services/stock_compare.py). Same routing as assess_long_term: the local
+# CLI only when claude_local=True (recorded at $0), the budget-checked API
+# only otherwise. Never Gemini. Returns the raw parsed dict (+ "_provider")
+# or None; the caller validates and falls back to a deterministic ranking.
+
+async def compare_stocks(prompt: str, schema: dict, label: str) -> dict | None:
+    if settings.claude_local:
+        try:
+            from app.ai.claude_local_client import call_with_prompt
+            data = await call_with_prompt(prompt, json_schema=schema, tier="decision")
+            await _record_local("claude-local", "compare", label, isinstance(data, dict))
+            if isinstance(data, dict):
+                return {**data, "_provider": "claude-local-decision"}
+        except Exception as e:
+            logger.warning(f"Compare summary Claude Local failed for {label}: {e}")
+        # Local mode never touches the paid API.
+        return None
+
+    budget = await _get_budget()
+    allowed, reason = await budget.can_call("claude", "decision")
+    if not allowed:
+        logger.warning(f"Budget blocked compare summary for {label}: {reason}")
+        return None
+    if not settings.anthropic_api_key:
+        return None
+    try:
+        from app.ai.claude_client import create_structured
+        data = await create_structured(prompt, schema, tier="decision")
+        await budget.record_call("claude", "decision", label, success=isinstance(data, dict))
+        return {**data, "_provider": "claude-decision"} if isinstance(data, dict) else None
+    except Exception as e:
+        logger.warning(f"Compare summary Claude API failed for {label}: {e}")
+        await budget.record_call("claude", "decision", label, success=False)
+        return None
+
+
+# ============================================================
 # GENERIC STRUCTURED CLAUDE CALL (learning analysis, tools)
 # ============================================================
 

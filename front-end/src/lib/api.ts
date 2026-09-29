@@ -5,7 +5,7 @@ import type { SignalsResponse, SignalFilters, DailyStats, ScanTodayRecord } from
 import type { WatchlistItem, WatchlistResponse, WatchlistAddRequest } from '@/types/watchlist'
 import type { ScansResponse } from '@/types/scan'
 import type { TodayInsights, PerformanceInsights, BacktestInsights, SignalTrail, SignalVerdict } from '@/types/insights'
-import type { CheckJob, CheckMode } from '@/types/check'
+import type { CheckJob, CheckMode, CompareJob } from '@/types/check'
 import type { SymbolSearchResponse } from '@/types/symbols'
 import type { LoginRequest, LoginResponse, OtpVerifyRequest, AuthResponse } from '@/types/auth'
 import type {
@@ -344,10 +344,13 @@ export const insightsApi = {
 export class CheckApiError extends Error {
   code: string
   status: number
-  constructor(code: string, message: string, status: number) {
+  /** the rest of the {detail} object (e.g. compare: symbols / inputs / needed) */
+  extra: Record<string, unknown>
+  constructor(code: string, message: string, status: number, extra: Record<string, unknown> = {}) {
     super(message)
     this.code = code
     this.status = status
+    this.extra = extra
   }
 }
 
@@ -364,7 +367,7 @@ async function checkCall<T>(method: 'get' | 'post', url: string, data?: unknown)
     const code = obj?.code
       ?? (res.status === 429 ? 'rate_limited' : res.status === 404 ? 'job_not_found' : res.status === 400 ? 'invalid_ticker' : 'internal')
     const message = obj?.message ?? (typeof detail === 'string' ? detail : 'Request failed.')
-    throw new CheckApiError(code, message, res.status)
+    throw new CheckApiError(code, message, res.status, obj && !Array.isArray(obj) ? { ...obj } : {})
   }
   return res.data as T
 }
@@ -373,6 +376,10 @@ export const checkApi = {
   start: (ticker: string, force = false, mode: CheckMode = 'short') =>
     checkCall<CheckJob>('post', '/check', { ticker, force, mode }),
   get: (jobId: string) => checkCall<CheckJob>('get', `/check/${encodeURIComponent(jobId)}`),
+  compareStart: (tickers: string[], force = false, mode: CheckMode = 'short') =>
+    checkCall<CompareJob>('post', '/check/compare', { tickers, force, mode }),
+  compareGet: (compareId: string) =>
+    checkCall<CompareJob>('get', `/check/compare/${encodeURIComponent(compareId)}`),
 }
 
 // Symbol search (ticker or company name, typo tolerant) for the Check box

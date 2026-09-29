@@ -1476,7 +1476,11 @@
       "failed": "Search is unavailable — press Enter to check it as typed.",
       "count": "{n} suggestions available. Use the up and down arrows to choose.",
       "tracked": "Tracked by Signa",
-      "types": { "stock": "Stock", "etf": "ETF", "crypto": "Crypto" }
+      "types": {
+        "stock": "Stock",
+        "etf": "ETF",
+        "crypto": "Crypto"
+      }
     },
     "long": {
       "verdict": {
@@ -1673,6 +1677,112 @@
       },
       "sourceLink": "Source",
       "daysValue": "{n} days"
+    },
+    "compare": {
+      "kindLabel": "What to check",
+      "kinds": {
+        "single": "Single",
+        "compare": "Compare"
+      },
+      "kindHelp": {
+        "single": "Check one ticker.",
+        "compare": "Compare 2–3 tickers side by side. Each one counts as a check unless a recent result is cached."
+      },
+      "tickerLabel": "Ticker {n}",
+      "add": "Add a third ticker",
+      "remove": "Remove ticker {n}",
+      "submit": "Compare",
+      "running": "Comparing…",
+      "help": "Pick 2 or 3 symbols or company names.",
+      "needTwo": "Enter at least two different tickers.",
+      "progressTitle": "Comparing {symbols}",
+      "progressLabel": "Overall progress",
+      "summarizing": "Writing the comparison",
+      "status": {
+        "queued": "Waiting for a free slot",
+        "running": "Running",
+        "done": "Done",
+        "failed": "Failed"
+      },
+      "cachedBadge": "cached",
+      "rankingTitle": "Ranking",
+      "rankingAi": "Ranking and summary by Opus",
+      "rankingRules": "Ranked by verdict, then by the number of metrics each one leads",
+      "aiEnglish": "The summary is written by the AI in English.",
+      "notes": {
+        "ai_unavailable": "The AI summary is unavailable right now, so the ranking uses the rules above.",
+        "ai_disabled": "AI is turned off, so the ranking uses the rules above.",
+        "not_enough_results": "Fewer than two checks finished, so there is nothing to rank."
+      },
+      "perSymbolFallback": "{verdict} · best on {n} of {total} metrics",
+      "tableTitle": "Side by side",
+      "tableCaption": "Comparison of {symbols}. The best value in each row is marked “Best”.",
+      "metric": "Metric",
+      "best": "Best",
+      "fullCheck": "Full check",
+      "fullCheckLabel": "Open the full check for {symbol}",
+      "swipeHint": "Swipe to see each ticker.",
+      "cardLabel": "{symbol}, {rank} of {total}",
+      "groups": {
+        "verdict": "Verdict",
+        "setup": "Setup",
+        "ai": "AI models",
+        "risk": "Risk",
+        "size": "Size",
+        "returns": "Returns",
+        "cost": "Cost",
+        "valuation": "Valuation",
+        "scorecard": "Scorecard"
+      },
+      "metrics": {
+        "verdict": "Verdict",
+        "tech_filter": "Technical filter",
+        "score": "Score",
+        "routine_signal": "Sonnet signal",
+        "routine_confidence": "Sonnet confidence",
+        "decision_signal": "Opus signal",
+        "decision_confidence": "Opus confidence",
+        "p_win": "Chance of a win (AI)",
+        "codex": "Codex second opinion",
+        "rr": "Reward : risk",
+        "earnings_days": "Days to earnings",
+        "correlation": "Correlation to the brain's book",
+        "position_pct": "Suggested size at 1% risk",
+        "cagr_1y": "1-year CAGR",
+        "cagr_3y": "3-year CAGR",
+        "cagr_5y": "5-year CAGR",
+        "max_drawdown": "Max drawdown",
+        "recovery_days": "Recovery from max drawdown",
+        "volatility": "Volatility",
+        "expense_ratio": "Expense ratio",
+        "pe": "P/E",
+        "fcf_yield": "FCF yield",
+        "rating_cost": "Cost rating",
+        "rating_diversification": "Diversification rating",
+        "rating_track_record": "Track record rating",
+        "rating_valuation": "Valuation rating",
+        "rating_risk": "Risk rating",
+        "rating_quality": "Business quality rating"
+      },
+      "pass": "Pass",
+      "fail": "Fail",
+      "daysValue": "{n} d",
+      "vsBench": "vs {bench} {cagr}",
+      "notRecovered": "Not recovered",
+      "sharesValue": "{shares} shares",
+      "corrWith": "with {symbol}",
+      "caveat": "Not financial advice. This compares past data and model output; it places no trade.",
+      "again": "Re-run all",
+      "againLabel": "Re-run every check (non-cached runs count toward today's limit)",
+      "remaining": "{n} checks left today",
+      "errors": {
+        "compare_count": "Compare 2 or 3 tickers.",
+        "compare_duplicate": "These are the same listing: {symbols}. Pick different tickers.",
+        "compare_unknown": "We couldn't find a recent price for {inputs}.",
+        "compare_not_found": "That comparison expired — run it again.",
+        "daily_limit": "This comparison needs {needed} new checks, but only {remaining} are left today. The limit resets at midnight ET.",
+        "resolve_failed": "Couldn't look up one of the tickers — please try again."
+      }
     }
   },
   "holdings": {

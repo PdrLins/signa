@@ -113,3 +113,46 @@ export function checkHref(ticker: string, mode: CheckMode): string {
   const q = `ticker=${encodeURIComponent(ticker)}`
   return mode === 'long' ? `/check?${q}&mode=long` : `/check?${q}`
 }
+
+// ── Compare (2–3 symbols) ──────────────────────────────────────────
+
+export const COMPARE_MIN = 2
+export const COMPARE_MAX = 3
+const COMPARE_KEY = 'signa-compare-set'
+
+/** "aapl, msft,,NVDA" -> ["AAPL","MSFT","NVDA"] (max 3, deduped). */
+export function parseCompareParam(v: string | null | undefined): string[] {
+  if (!v) return []
+  const out: string[] = []
+  for (const part of v.split(',')) {
+    const s = part.trim().toUpperCase()
+    if (s && !out.includes(s) && out.length < COMPARE_MAX) out.push(s)
+  }
+  return out
+}
+
+/** /check URL for a comparison (short is the default and omitted). */
+export function compareHref(tickers: string[], mode: CheckMode): string {
+  const q = `compare=${tickers.map(encodeURIComponent).join(',')}`
+  return mode === 'long' ? `/check?${q}&mode=long` : `/check?${q}`
+}
+
+export function loadCompareSet(): { tickers: string[]; mode: CheckMode } | null {
+  try {
+    const raw = window.localStorage.getItem(COMPARE_KEY)
+    const v = raw ? (JSON.parse(raw) as { tickers?: unknown; mode?: unknown }) : null
+    if (!v || !Array.isArray(v.tickers)) return null
+    const tickers = parseCompareParam(v.tickers.filter((x) => typeof x === 'string').join(','))
+    return tickers.length ? { tickers, mode: parseMode(v.mode as string) ?? 'short' } : null
+  } catch {
+    return null
+  }
+}
+
+export function saveCompareSet(tickers: string[], mode: CheckMode): void {
+  try {
+    window.localStorage.setItem(COMPARE_KEY, JSON.stringify({ tickers, mode }))
+  } catch {
+    // storage disabled — the set just won't persist
+  }
+}
