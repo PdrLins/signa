@@ -1,15 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
-import { useQueryClient } from '@tanstack/react-query'
 import { useAllSignals } from '@/hooks/useSignals'
-import { scansApi, type ScanProgress } from '@/lib/api'
+import { useScanTrigger } from '@/hooks/useScanTrigger'
+import { ScanProgressPanel } from '@/components/scans/ScanProgressPanel'
 import { SignalList } from '@/components/signals/SignalList'
 import { Button } from '@/components/ui/Button'
-import { ProgressBar } from '@/components/ui/ProgressBar'
-import { useToast } from '@/hooks/useToast'
 import { Search } from 'lucide-react'
 import { Sidebar } from '@/components/layout/Sidebar'
 import type { Signal, SignalFilters } from '@/types/signal'
@@ -17,8 +15,6 @@ import type { Signal, SignalFilters } from '@/types/signal'
 export default function SignalsPage() {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
-  const toast = useToast()
-  const queryClient = useQueryClient()
   const [bucket, setBucket] = useState<string>('All')
   const [assetType, setAssetType] = useState<string>('All')
   const [market, setMarket] = useState<string>('All')
@@ -28,9 +24,6 @@ export default function SignalsPage() {
   const [sortBy, setSortBy] = useState<'score' | 'rr' | 'change'>('score')
   const [search, setSearch] = useState<string>('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [scanId, setScanId] = useState<string | null>(null)
-  const [progress, setProgress] = useState<ScanProgress | null>(null)
-  const scanning = !!scanId
 
   // Debounce search input
   useEffect(() => {
@@ -38,54 +31,7 @@ export default function SignalsPage() {
     return () => clearTimeout(timer)
   }, [search])
 
-  // Poll scan progress
-  useEffect(() => {
-    if (!scanId) return
-    let cancelled = false
-    const poll = async () => {
-      try {
-        const p = await scansApi.getProgress(scanId)
-        if (cancelled) return
-        setProgress(p)
-        if (p.status === 'COMPLETE') {
-          toast.show(
-            t.signals.scanComplete.replace('{signals}', String(p.signals_found)).replace('{gems}', String(p.gems_found)),
-            'success',
-            5000,
-          )
-          setScanId(null)
-          setProgress(null)
-          queryClient.invalidateQueries({ queryKey: ['signals'] })
-          queryClient.invalidateQueries({ queryKey: ['scans'] })
-          queryClient.invalidateQueries({ queryKey: ['stats'] })
-        } else if (p.status === 'FAILED') {
-          toast.show(p.error_message || t.signals.scanFailedGeneric, 'error')
-          setScanId(null)
-          setProgress(null)
-        }
-      } catch {
-        // Ignore polling errors, retry next interval
-      }
-    }
-    poll()
-    const interval = setInterval(poll, 2500)
-    return () => { cancelled = true; clearInterval(interval) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- t.signals refs are stable across renders
-  }, [scanId, queryClient, toast])
-
-  const [scanCooldown, setScanCooldown] = useState(false)
-  const handleScanNow = useCallback(async () => {
-    if (scanning || scanCooldown) return
-    setScanCooldown(true)
-    setTimeout(() => setScanCooldown(false), 5000) // 5s cooldown between scans
-    try {
-      const res = await scansApi.trigger('MANUAL')
-      setScanId(res.scan_id)
-      toast.show(t.signals.scanStarted, 'info', 3000)
-    } catch {
-      toast.show(t.signals.scanFailed, 'error')
-    }
-  }, [scanning, scanCooldown, toast, t])
+  const { scanning, progress, cooldown: scanCooldown, trigger: handleScanNow, phaseLabel } = useScanTrigger()
 
   const filters: SignalFilters = {}
   if (bucket === 'SAFE_INCOME' || bucket === 'HIGH_RISK') filters.bucket = bucket
@@ -182,24 +128,6 @@ export default function SignalsPage() {
     { label: t.signals.sortChange, value: 'change' },
   ]
 
-  const phaseLabel = (phase: string) => {
-    const p = t.signals.phases
-    const map: Record<string, string> = {
-      queued: p.queued,
-      loading: p.loading,
-      screening: p.screening,
-      filtering: p.filtering,
-      macro: p.macro,
-      prescoring: p.prescoring,
-      analyzing: progress?.current_ticker ? `${p.analyzing} ${progress.current_ticker}...` : p.analyzing,
-      saving: p.saving,
-      alerting: p.alerting,
-      monitoring: p.monitoring,
-      complete: p.complete,
-    }
-    return map[phase] || phase
-  }
-
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -224,29 +152,7 @@ export default function SignalsPage() {
         <div className="space-y-5">
 
       {/* Scan progress bar */}
-      {scanning && progress && (
-        <div
-          className="rounded-xl px-4 py-3 space-y-2"
-          style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}` }}
-        >
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-medium" style={{ color: theme.colors.text }}>
-              {phaseLabel(progress.phase)}
-            </span>
-            <span className="text-xs tabular-nums font-semibold" style={{ color: theme.colors.primary }}>
-              {progress.progress_pct}%
-            </span>
-          </div>
-          <ProgressBar value={progress.progress_pct} color={theme.colors.primary} height={4} />
-          {progress.signals_found > 0 && (
-            <p className="text-[11px]" style={{ color: theme.colors.textSub }}>
-              {progress.gems_found > 0
-                ? t.signals.signalsFoundGems.replace('{count}', String(progress.signals_found)).replace('{gems}', String(progress.gems_found))
-                : t.signals.signalsFound.replace('{count}', String(progress.signals_found))}
-            </p>
-          )}
-        </div>
-      )}
+      {scanning && progress && <ScanProgressPanel progress={progress} phaseLabel={phaseLabel} />}
 
       {/* Summary stats bar */}
       {signals && !scanning && signals.length > 0 && (

@@ -13,6 +13,7 @@ import { client } from '@/lib/api'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { SettingsLinks } from '@/components/layout/SettingsLinks'
 import { Check, Brain, Zap, Sparkles, ChevronUp, ChevronDown } from 'lucide-react'
 
 const themeIds = Object.keys(themes) as ThemeId[]
@@ -358,6 +359,8 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
+
+      <SettingsLinks />
 
       {/* AI Providers */}
       <Card>

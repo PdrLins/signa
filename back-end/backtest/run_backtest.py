@@ -24,7 +24,7 @@ from backtest import live, metrics, report
 from backtest.macro import warmup_start
 from backtest.portfolio import FX, SimConfig, simulate
 from backtest.signals import SignalConfig, generate_signals
-from backtest.study import BANDS, band, run_study, signal_class
+from backtest.study import BANDS, band, by_tech_filter_reason, run_study, signal_class
 
 BENCHMARKS = ("SPY", "XIU.TO")
 BAND_ORDER = [b[2] for b in BANDS]
@@ -139,9 +139,9 @@ def run(
         "slippage_bps_crypto": s.brain_slippage_bps_crypto,
         "commission_usd": s.brain_commission_usd if sim.commission_usd is None else sim.commission_usd,
         "buy_thresholds": f"SAFE_INCOME {s.score_buy_safe} / HIGH_RISK {s.score_buy_risk}",
-        "entry_rule": ("live tech-only action == BUY (bucket thresholds %s/%s)" % (
-            s.score_buy_safe, s.score_buy_risk)) if sim.signal.entry_score is None
-        else f"score >= {sim.signal.entry_score} (NON-LIVE threshold), live blockers/ceiling",
+        "entry_mode": sim.signal.mode,
+        "filter_only_entries": bool(sim.signal.filter_only_entries),
+        "entry_rule": _entry_rule(sim.signal),
         "ai_veto": sim.signal.ai_veto,
         "initial_cash": sim.initial_cash,
         "drawdown_breaker": sim.drawdown_breaker,
@@ -151,6 +151,9 @@ def run(
             "brain_max_per_sector", "brain_max_crypto_pct", "brain_reentry_cooldown_days",
             "brain_stop_atr_mult", "brain_target_r_mult", "brain_min_rr", "brain_trail_atr_mult",
             "brain_trail_activate_r", "brain_max_hold_days", "brain_max_drawdown_pct",
+            "brain_drawdown_pause_trading_days", "brain_entry_mode", "tech_filter_max_rsi",
+            "tech_filter_max_ext_sma50_pct", "tech_filter_min_dollar_volume",
+            "tech_filter_min_dollar_volume_crypto",
             "max_candidates", "min_volume") if hasattr(s, k)},
     })
     meta.setdefault("generated_at", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
@@ -166,6 +169,8 @@ def run(
             "by_bucket": metrics.group_by(res.trades, "bucket"),
             "entry_decisions": dict(res.skips.most_common()),
             "breaker_days": res.breaker_days,
+            "breaker_trips": res.breaker_trips,
+            "breaker_resumes": res.breaker_resumes,
             "turnover_annual_x": metrics._r(metrics.turnover(res.notional_traded, res.equity)),
             "fees_usd": round(res.fees, 2),
             "trade_log": res.trades,
@@ -179,12 +184,29 @@ def run(
             "by_bucket": metrics.group_by(study, "bucket", pnl_key="_", pct_key="ret_pct"),
             "by_class": metrics.group_by(study, "class", pnl_key="_", pct_key="ret_pct"),
             "by_regime": metrics.group_by(study, "regime", pnl_key="_", pct_key="ret_pct"),
+            "by_tech_filter": metrics.group_by(study, "tech_filter", order=["PASS", "FAIL"],
+                                               pnl_key="_", pct_key="ret_pct"),
+            "by_tech_filter_reason": by_tech_filter_reason(
+                [t for t in study if t.get("tech_filter") == "FAIL"], pnl_key="_", pct_key="ret_pct"),
             "n_trades": len(study),
         },
         "score_distribution": _score_distribution(signals_by_day),
     }
     out["caveats"] = report.caveats(meta)
     return out
+
+
+def _entry_rule(sc: SignalConfig) -> str:
+    s = live.settings
+    if sc.mode == "filter":
+        if sc.filter_only_entries:
+            return ("NON-LIVE --filter-only-entries: enter on a live technical_filter PASS alone "
+                    "(the live brain also requires a validated AI BUY)")
+        return "live filter mode: validated AI BUY + technical_filter PASS (no historical AI → no entries)"
+    if sc.entry_score is None:
+        return "live tech-only action == BUY (bucket thresholds %s/%s) [score mode]" % (
+            s.score_buy_safe, s.score_buy_risk)
+    return f"score >= {sc.entry_score} (NON-LIVE threshold), live blockers/ceiling [score mode]"
 
 
 def _parse_args(argv=None):
@@ -202,6 +224,13 @@ def _parse_args(argv=None):
                    help="skip yfinance .info (no sector → no sector cap; bucket from live lists only)")
     p.add_argument("--entry-score", type=int,
                    help="NON-LIVE: enter at score >= N instead of the bucket BUY threshold")
+    p.add_argument("--entry-mode", choices=("filter", "score"),
+                   help="filter (live default: AI BUY + technical_filter) or score (legacy "
+                        "tech-only action / --entry-score). Default: score if --entry-score "
+                        "is given, else filter")
+    p.add_argument("--filter-only-entries", action="store_true",
+                   help="NON-LIVE (filter mode): enter on a technical-filter pass alone, "
+                        "without the AI BUY the live brain requires")
     p.add_argument("--ai-veto", action="store_true",
                    help="route entries through the AI-veto placeholder (no-op: no historical AI)")
     p.add_argument("--no-drawdown-breaker", action="store_true")
@@ -220,6 +249,10 @@ def _parse_args(argv=None):
 
 def main(argv=None) -> int:
     a = _parse_args(argv)
+    if a.entry_mode == "filter" and a.entry_score is not None:
+        raise SystemExit("--entry-score only applies to --entry-mode score")
+    if a.filter_only_entries and (a.entry_mode == "score" or a.entry_score is not None):
+        raise SystemExit("--filter-only-entries only applies to --entry-mode filter")
     live.quiet_live_logs()
     t0 = time.time()
 
@@ -250,7 +283,8 @@ def main(argv=None) -> int:
         raw = bt_data.load_fundamentals(symbols, use_cache=use_cache)
         fundamentals = {s: bt_data.filter_fundamentals(f, a.include_fundamentals) for s, f in raw.items()}
 
-    name = a.name or f"tech_only_{a.start}_{a.end}" + ("_LOOKAHEAD" if a.include_fundamentals else "")
+    name = a.name or (f"tech_only_{a.start}_{a.end}" + ("_LOOKAHEAD" if a.include_fundamentals else "")
+                      + ("_FILTER_ONLY_NONLIVE" if a.filter_only_entries else ""))
     out_dir = Path(a.out or f"docs/backtests/{name}")
 
     def progress(i, n):
@@ -259,7 +293,8 @@ def main(argv=None) -> int:
     sim = SimConfig(
         initial_cash=a.initial_cash, commission_usd=a.commission,
         drawdown_breaker=not a.no_drawdown_breaker, correlation_gate=not a.no_correlation_gate,
-        signal=SignalConfig(entry_score=a.entry_score, ai_veto=a.ai_veto),
+        signal=SignalConfig(entry_score=a.entry_score, ai_veto=a.ai_veto, entry_mode=a.entry_mode,
+                            filter_only_entries=a.filter_only_entries),
     )
     res = run(
         start=a.start, end=a.end, bars=bars, symbols=symbols,

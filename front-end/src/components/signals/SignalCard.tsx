@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { Badge } from '@/components/ui/Badge'
-import { ScoreRing } from '@/components/ui/ScoreRing'
+import { SignalVerdictChips } from '@/components/signals/SignalVerdictChips'
 import { SparkLine } from '@/components/ui/SparkLine'
 import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Button } from '@/components/ui/Button'
@@ -148,7 +148,8 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
                   disabled={addTicker.isPending || removeTicker.isPending}
                   className="p-0.5 rounded transition-opacity hover:opacity-70"
                   title={isWatchlisted ? t.signal.removeFromWatchlist : t.signal.addToWatchlist}
-                  aria-label="Toggle watchlist"
+                  aria-label={isWatchlisted ? t.signal.removeFromWatchlist : t.signal.addToWatchlist}
+                  aria-pressed={isWatchlisted}
                 >
                   <Star
                     size={14}
@@ -198,9 +199,16 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
           </div>
         </div>
 
-        {/* Row 2: Score + Metrics + Badges */}
+        {/* Row 2: action + AI verdict first (score is small, display only) */}
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
+          <Badge variant={signal.action === 'BUY' ? 'buy' : signal.action === 'SELL' ? 'sell' : signal.action === 'AVOID' ? 'avoid' : 'hold'}>
+            {signal.action}
+          </Badge>
+          <SignalVerdictChips signal={signal} />
+        </div>
+
+        {/* Row 3: levels + badges */}
         <div className="flex items-center gap-3 mt-3">
-          <ScoreRing score={signal.score} size={38} />
           <div className="flex items-center gap-4 flex-1 min-w-0">
             <div>
               <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.target}</p>
@@ -215,10 +223,6 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
               <p className="text-[13px] font-semibold tabular-nums" style={{ color: theme.colors.primary }}>{signal.risk_reward ? `${signal.risk_reward.toFixed(1)}x` : '--'}</p>
             </div>
           </div>
-          {/* Action badge always visible inline */}
-          <Badge variant={signal.action === 'BUY' ? 'buy' : signal.action === 'SELL' ? 'sell' : signal.action === 'AVOID' ? 'avoid' : 'hold'}>
-            {signal.action}
-          </Badge>
           {/* Desktop-only: all badges inline */}
           <div className="hidden md:flex items-center gap-1.5 shrink-0">
             {signal.signal_style === 'CONTRARIAN' && (
@@ -245,7 +249,7 @@ export const SignalCard = memo(function SignalCard({ signal, defaultExpanded = f
         </div>
 
         {/* Mobile-only: badges on separate row */}
-        <div className="flex md:hidden items-center flex-wrap gap-1.5 mt-2 pl-[50px]">
+        <div className="flex md:hidden items-center flex-wrap gap-1.5 mt-2">
           {signal.signal_style === 'CONTRARIAN' && (
             <Badge variant="upgraded">{t.signal.contrarian}</Badge>
           )}

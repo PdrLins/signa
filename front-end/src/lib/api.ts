@@ -4,6 +4,7 @@ import { useAuthStore } from '@/store/authStore'
 import type { SignalsResponse, SignalFilters, DailyStats, ScanTodayRecord } from '@/types/signal'
 import type { WatchlistItem, WatchlistResponse, WatchlistAddRequest } from '@/types/watchlist'
 import type { ScansResponse } from '@/types/scan'
+import type { TodayInsights, PerformanceInsights, BacktestInsights, SignalTrail, SignalVerdict } from '@/types/insights'
 import type { LoginRequest, LoginResponse, OtpVerifyRequest, AuthResponse } from '@/types/auth'
 import type {
   PortfolioItem,
@@ -318,6 +319,17 @@ export const tickersApi = {
     get<TickerChart>(`/tickers/${ticker}/chart`, period ? { period } : undefined),
   getSignals: (ticker: string, limit?: number) =>
     get<SignalsResponse>(`/tickers/${ticker}/signals`, limit ? { limit } : undefined),
+}
+
+// Insights — read-only views over scans, decisions, outcomes and backtests
+export const insightsApi = {
+  getToday: () => get<TodayInsights>('/insights/today'),
+  getPerformance: () => get<PerformanceInsights>('/insights/performance'),
+  getBacktest: () => get<BacktestInsights>('/insights/backtest'),
+  getSignalTrail: (ticker: string) =>
+    get<SignalTrail>(`/insights/signal/${encodeURIComponent(ticker)}`),
+  getVerdicts: (ids: string[]) =>
+    get<{ verdicts: Record<string, SignalVerdict> }>('/insights/verdicts', { ids: ids.join(',') }),
 }
 
 // Health (public)

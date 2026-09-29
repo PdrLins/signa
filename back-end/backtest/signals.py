@@ -34,8 +34,22 @@ from backtest.macro import MacroSeries
 
 @dataclass
 class SignalConfig:
-    entry_score: int | None = None   # None = live score_to_action BUY
+    entry_score: int | None = None   # score mode: None = live score_to_action BUY
     ai_veto: bool = False            # placeholder hook, never vetoes (no data)
+    # "filter" (live default brain_entry_mode): an entry needs a validated AI
+    # BUY + a passing live technical_filter → no historical AI, so 0 entries.
+    # "score": the legacy tech-only action / --entry-score rule.
+    # None → "score" when entry_score is set, else "filter".
+    entry_mode: str | None = None
+    # NON-LIVE: in filter mode, enter on a technical-filter pass alone (no AI
+    # BUY) to study the filter as an entry rule.
+    filter_only_entries: bool = False
+
+    @property
+    def mode(self) -> str:
+        if self.entry_mode:
+            return self.entry_mode
+        return "score" if self.entry_score is not None else "filter"
 
 
 class Bars:
@@ -114,6 +128,7 @@ def signals_for_day(
         score, breakdown = live.compute_score(tech, fund, macro_data, {}, {}, bucket, regime, ac)
         action, reasons = live.tech_only_action(score, bucket, tech, fund, macro_data)
         blocked, block_reasons = live.check_blockers(tech, fund, macro_data)
+        tf_pass, tf_reasons = live.technical_filter(tech, fund, ac, block_reasons)
         out.append({
             "date": t,
             "symbol": s,
@@ -122,6 +137,8 @@ def signals_for_day(
             "reasons": reasons,
             "blocked": bool(blocked),
             "block_reasons": block_reasons,
+            "tech_filter_passed": bool(tf_pass),
+            "tech_filter_reasons": tf_reasons,
             "blackout": live.check_entry_blackout(fund),
             "bucket": bucket,
             "asset_type": ac,
@@ -146,11 +163,20 @@ def ai_veto(sig: dict) -> bool:
 def is_entry(sig: dict, cfg: SignalConfig) -> bool:
     """Would this signal open a long?
 
-    Default: the live tech-only action is BUY (bucket threshold, 90-ceiling,
-    blockers, blackout — all live). `entry_score` replaces only the bucket
-    threshold; blockers, blackout and the >90 ceiling still come from live.
+    filter mode (live default): live `is_ai_buy` AND the live technical
+    filter passed. Historical signals are tech-only (ai_status "skipped"),
+    so this is never true — unless the NON-LIVE `filter_only_entries`
+    study flag drops the AI-BUY requirement.
+
+    score mode: the live tech-only action is BUY (bucket threshold,
+    90-ceiling, blockers, blackout — all live). `entry_score` replaces only
+    the bucket threshold; blockers, blackout and the >90 ceiling still come
+    from live.
     """
-    if cfg.entry_score is None:
+    if cfg.mode == "filter":
+        passed = bool(sig.get("tech_filter_passed"))
+        ok = passed if cfg.filter_only_entries else (live.is_ai_buy(sig) and passed)
+    elif cfg.entry_score is None:
         ok = sig["action"] == "BUY"
     else:
         score, bucket = sig["score"], sig["bucket"]

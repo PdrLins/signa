@@ -281,6 +281,34 @@ _MESSAGES = {
             "<i>{timestamp}</i>"
         ),
     },
+    "brain_breaker_tripped": {
+        "en": (
+            "<b>Brain drawdown breaker TRIPPED</b>\n\n"
+            "Equity ${equity} is {dd}% below peak ${peak} (limit {limit}%).\n"
+            "New entries paused for {days} trading days; open positions keep their stops.\n"
+            "<i>{timestamp}</i>"
+        ),
+        "pt": (
+            "<b>Disjuntor de drawdown do Brain ACIONADO</b>\n\n"
+            "Patrimonio ${equity} esta {dd}% abaixo do pico ${peak} (limite {limit}%).\n"
+            "Novas entradas pausadas por {days} pregoes; posicoes abertas mantem os stops.\n"
+            "<i>{timestamp}</i>"
+        ),
+    },
+    "brain_breaker_resumed": {
+        "en": (
+            "<b>Brain drawdown breaker RESUMED</b>\n\n"
+            "Pause over after {days} trading days. Peak reset to current equity ${equity}; "
+            "new entries allowed again.\n"
+            "<i>{timestamp}</i>"
+        ),
+        "pt": (
+            "<b>Disjuntor de drawdown do Brain LIBERADO</b>\n\n"
+            "Pausa encerrada apos {days} pregoes. Pico redefinido para o patrimonio atual ${equity}; "
+            "novas entradas liberadas.\n"
+            "<i>{timestamp}</i>"
+        ),
+    },
     "budget_threshold": {
         "en": (
             "<b>💰 AI Budget Alert -- {provider}</b>\n\n"

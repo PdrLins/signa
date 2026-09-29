@@ -32,7 +32,9 @@ def _long_sig(score: int, sector: str, ai_status: str = "validated", ai_signal: 
         "ai_status": ai_status,
         "ai_signal": ai_signal,
         "fundamental_data": {"sector": sector} if sector else {},
-        "technical_data": {},
+        # passes technical_filter (brain_entry_mode="filter" is the default gate)
+        "technical_data": {"last_close": 100.0, "sma_50": 95.0, "sma_200": 85.0, "rsi": 55.0,
+                           "dollar_volume_avg_20": 1e8},
     }
 
 

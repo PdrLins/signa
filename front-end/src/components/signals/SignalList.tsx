@@ -3,6 +3,8 @@
 import { SignalCard, SignalCardSkeleton } from './SignalCard'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
+import { useMemo } from 'react'
+import { useSignalVerdicts } from '@/hooks/useInsights'
 import type { Signal } from '@/types/signal'
 
 interface SignalListProps {
@@ -17,6 +19,13 @@ interface SignalListProps {
 export function SignalList({ signals, isLoading, isError, error, emptyMessage, topPickId }: SignalListProps) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
+  // /signals doesn't return the AI verdict columns; fetch them once for the list
+  const ids = useMemo(() => (signals ?? []).map((s) => s.id).filter(Boolean), [signals])
+  const { data: verdicts } = useSignalVerdicts(ids)
+  const merged = useMemo(
+    () => (signals ?? []).map((s) => (verdicts?.[s.id] ? { ...s, ...verdicts[s.id] } as Signal : s)),
+    [signals, verdicts],
+  )
 
   if (isLoading) {
     return (
@@ -52,7 +61,7 @@ export function SignalList({ signals, isLoading, isError, error, emptyMessage, t
 
   return (
     <div className="space-y-4">
-      {signals.map((signal) => (
+      {merged.map((signal) => (
         <SignalCard key={signal.id} signal={signal} isTopPick={signal.id === topPickId} />
       ))}
     </div>

@@ -38,16 +38,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <>
       <LeftNav />
       {/* MarketIndicator moved into LeftNav sidebar as a dot + hover panel */}
-      {/* Desktop: offset for floating nav */}
-      <div className="hidden md:block md:ml-[72px]">
-        <main className="max-w-[1440px] mx-auto px-6 lg:px-8 py-6">
+      {/* Children render ONCE. Mobile: full width + bottom padding for the
+          BottomNav. md+: offset for the floating LeftNav rail. (Rendering
+          separate desktop/mobile copies mounted every page twice.) */}
+      <div className="md:ml-[72px]">
+        <main id="main-content" className="max-w-[1440px] mx-auto px-4 pt-6 pb-24 md:px-6 md:pb-6 lg:px-8">
           <div className="min-w-0">{children}</div>
-        </main>
-      </div>
-      {/* Mobile: full width */}
-      <div className="md:hidden">
-        <main className="px-4 py-6 pb-24">
-          {children}
         </main>
       </div>
       <BottomNav />

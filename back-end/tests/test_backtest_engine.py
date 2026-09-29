@@ -95,16 +95,21 @@ def test_backtest_calls_live_compute_score(market, monkeypatch):
     assert all(c[3] == {} and c[4] == {} for c in calls)
 
 
+# The default entry mode is now "filter" (live brain_entry_mode), so the
+# legacy action/score rule is exercised with an explicit entry_mode="score".
+SCORE = SignalConfig(entry_mode="score")
+
+
 def test_entry_rule_uses_live_action():
     sig = {"action": "BUY", "score": 70, "bucket": "HIGH_RISK", "blocked": False, "blackout": None}
-    assert is_entry(sig, SignalConfig())
-    assert not is_entry({**sig, "action": "HOLD"}, SignalConfig())
+    assert is_entry(sig, SCORE)
+    assert not is_entry({**sig, "action": "HOLD"}, SCORE)
     # override threshold keeps live blockers and the >90 ceiling
     assert is_entry({**sig, "action": "AVOID", "score": 52}, SignalConfig(entry_score=50))
     assert not is_entry({**sig, "blocked": True}, SignalConfig(entry_score=50))
     assert not is_entry({**sig, "score": 95}, SignalConfig(entry_score=50))
     # AI veto placeholder is a no-op
-    assert is_entry(sig, SignalConfig(ai_veto=True))
+    assert is_entry(sig, SignalConfig(entry_mode="score", ai_veto=True))
 
 
 # ── execution ────────────────────────────────────────────────
@@ -125,7 +130,7 @@ def test_entry_fills_next_bar_open_with_live_slippage():
     df = _flat_bars(days, o=104.0, h=105.0, low=103.0, c=104.0)
     df.loc[pd.Timestamp(days[0]), ["Open", "High", "Low", "Close"]] = [100.0, 101.0, 99.0, 100.0]
     sim = Simulator(days, {days[0]: [_signal("AAA", days[0])]}, {"AAA": df}, FX(None),
-                    SimConfig(correlation_gate=False))
+                    SimConfig(correlation_gate=False, signal=SCORE))
     sim.run()
     assert len(sim.trades) == 1
     t = sim.trades[0]
@@ -140,7 +145,7 @@ def test_sizing_uses_live_risk_budget():
     days = [date(2024, 1, 2), date(2024, 1, 3), date(2024, 1, 4)]
     df = _flat_bars(days)
     sim = Simulator(days, {days[0]: [_signal("AAA", days[0], atr=2.0)]}, {"AAA": df}, FX(None),
-                    SimConfig(initial_cash=10_000, correlation_gate=False))
+                    SimConfig(initial_cash=10_000, correlation_gate=False, signal=SCORE))
     sim.run()
     fill = vp.apply_slippage(100.0, "BUY", "AAA")
     stop = fill - settings.brain_stop_atr_mult * 2.0

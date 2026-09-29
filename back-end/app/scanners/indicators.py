@@ -140,6 +140,13 @@ def compute_indicators(
         # itself.
         if not volume.empty:
             result["volume_avg"] = round(float(volume.mean()), 0)
+            # 20-session liquidity (last 20 COMPLETED bars) for the brain's
+            # technical_filter. Dollar volume = Σ close × volume / n, in the
+            # listing's native currency (Yahoo crypto volume is already
+            # quoted in USD — technical_filter handles that case).
+            v20 = volume.iloc[-20:].astype(float)
+            result["volume_avg_20"] = round(float(v20.mean()), 0)
+            result["dollar_volume_avg_20"] = round(float((close.iloc[-20:].astype(float) * v20).mean()), 0)
             baseline = volume.iloc[-21:-1] if len(volume) >= 21 else volume.iloc[:-1]
             if len(baseline) >= 5 and baseline.std() > 0:
                 result["volume_zscore"] = round(

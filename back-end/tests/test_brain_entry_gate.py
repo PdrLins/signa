@@ -12,14 +12,27 @@ from app.core.config import settings
 from app.services import virtual_portfolio as vp
 
 
+def passing_tech(price=100.0, atr=3.0, **over) -> dict:
+    """Indicators that PASS `technical_filter` (uptrend, RSI 55, 5% above
+    SMA50, ~$100M/day). Since brain_entry_mode="filter" the brain requires
+    a passing filter, so the shared fixture must describe a sane setup."""
+    t = {"atr": atr, "current_price": price, "last_close": price,
+         "sma_50": price / 1.05, "sma_200": price / 1.20, "rsi": 55.0,
+         "vs_sma50": 5.0, "vs_sma200": 20.0,
+         "volume_avg": 1_000_000, "volume_avg_20": 1_000_000,
+         "dollar_volume_avg_20": price * 1_000_000}
+    t.update(over)
+    return t
+
+
 def make_sig(symbol="AAA", *, ai_status="validated", ai_signal="BUY", score=80,
              price=100.0, stop=94.0, target=115.0, atr=3.0, sector="Technology", **extra):
     sig = {
         "symbol": symbol, "action": "BUY" if ai_signal == "BUY" else "HOLD",
         "score": score, "price_at_signal": price, "ai_status": ai_status, "ai_signal": ai_signal,
         "stop_loss": stop, "target_price": target, "bucket": "HIGH_RISK",
-        "technical_data": {"atr": atr}, "fundamental_data": {"sector": sector},
-        "scan_id": "scan-1", "p_win": 0.55,
+        "technical_data": passing_tech(price, atr), "fundamental_data": {"sector": sector},
+        "scan_id": "scan-1", "p_win": 0.55, "confidence": 70,
     }
     sig.update(extra)
     return sig
@@ -63,9 +76,19 @@ class TestNoAutoBuyWithoutAIBuy:
         assert decision["details"]["trade_id"] == trade["id"]
         assert decision["scan_id"] == "scan-1"
 
-    def test_score_floor_still_applies(self):
+    # Was `test_score_floor_still_applies` (score >= 75 gate). Since
+    # brain_entry_mode="filter" the score no longer gates entry: the
+    # 2021-2026 signal study showed higher scores did NOT predict better
+    # returns. The floor survives only in legacy "score" mode.
+    def test_low_score_no_longer_blocks_in_filter_mode(self):
+        db, _ = run([make_sig(score=vp.BRAIN_MIN_SCORE - 30)])
+        assert len(brain_trades(db)) == 1
+
+    def test_score_floor_applies_in_legacy_score_mode(self, monkeypatch):
+        monkeypatch.setattr(settings, "brain_entry_mode", "score")
         db, _ = run([make_sig(score=vp.BRAIN_MIN_SCORE - 1)])
         assert brain_trades(db) == []
+        assert db.rows("brain_decisions")[0]["reason"] == f"score_below_min_{vp.BRAIN_MIN_SCORE - 1}"
 
 
 class TestRewardRisk:

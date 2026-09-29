@@ -9,7 +9,8 @@ the portfolio. A position occupies its symbol, so trades never overlap
 and consecutive-day signals are not double-counted.
 
 Every candidate signal is eligible (BUY, HOLD, AVOID, blocked), so the
-study shows whether the score and the blockers actually separate outcomes.
+study shows whether the score, the blockers and the live technical filter
+(`tech_filter` PASS/FAIL + `tech_filter_reasons`) actually separate outcomes.
 Returns are net of slippage on both sides (commission is per-fill dollars
 and size-dependent, so it is excluded here; the portfolio includes it).
 Each trade also carries SPY's return over the same holding window.
@@ -40,6 +41,25 @@ def signal_class(sig: dict) -> str:
     if sig["blocked"]:
         return "BLOCKED"
     return sig["action"]
+
+
+def tech_filter_class(sig: dict) -> str:
+    """PASS / FAIL of the live technical filter (UNKNOWN for old signal dicts)."""
+    if "tech_filter_passed" not in sig:
+        return "UNKNOWN"
+    return "PASS" if sig["tech_filter_passed"] else "FAIL"
+
+
+def by_tech_filter_reason(trades: list[dict], **kw) -> dict[str, dict]:
+    """Metrics per failing reason. A trade failing several conditions is
+    counted under EACH of its reasons, so rows overlap (not additive)."""
+    from backtest import metrics
+    groups: dict[str, list[dict]] = {}
+    for t in trades:
+        for r in t.get("tech_filter_reasons") or []:
+            groups.setdefault(r, []).append(t)
+    return {r: metrics.trade_metrics(groups[r], **kw)
+            for r in sorted(groups, key=lambda r: -len(groups[r]))}
 
 
 def _spy_px(spy: pd.DataFrame, d: date, col: str) -> float | None:
@@ -101,6 +121,8 @@ def run_study(signals_by_day: dict[date, list[dict]], bars: dict[str, pd.DataFra
                 "symbol": sym, "signal_date": t.isoformat(), "entry_date": d_entry.isoformat(),
                 "exit_date": d_exit.isoformat(), "score": sig["score"], "band": band(sig["score"]),
                 "bucket": sig["bucket"], "class": signal_class(sig), "regime": sig["market_regime"],
+                "tech_filter": tech_filter_class(sig),
+                "tech_filter_reasons": list(sig.get("tech_filter_reasons") or []),
                 "ret_pct": round(ret, 3),
                 "r_multiple": round((exit_fill - fill) / risk, 3) if risk > 0 else None,
                 "spy_ret_pct": round(spy_ret, 3) if spy_ret is not None else None,

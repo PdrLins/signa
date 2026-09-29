@@ -34,6 +34,13 @@ export interface Signal {
   probability_vs_spy: number | null
   factor_labels: Record<string, 'Strong' | 'Neutral' | 'Weak'> | null
   is_discovered?: boolean
+  // AI verdict columns (migrations 005 / 008) — absent on older rows
+  ai_status?: 'validated' | 'low_confidence' | 'rejected' | 'failed' | 'skipped' | null
+  ai_signal?: 'BUY' | 'HOLD' | 'SELL' | 'AVOID' | null
+  p_win?: number | null
+  routine_ai_signal?: string | null
+  decision_overturned?: boolean | null
+  tech_filter_passed?: boolean | null
   scan_id: string | null
   created_at: string
   updated_at: string

@@ -187,6 +187,10 @@ def execute_reset(db, plan: dict[str, list[dict]], starting_capital: float) -> N
         db.table("brain_wallet").update({"peak_equity": starting_capital}).eq("user_id", uid).execute()
     except Exception as e:
         print(f"  !! peak_equity not set (is migration 006 applied?): {e}")
+    try:  # clear any drawdown-breaker pause (migration 009)
+        db.table("brain_wallet").update({"breaker_tripped_at": None}).eq("user_id", uid).execute()
+    except Exception as e:
+        print(f"  !! breaker_tripped_at not cleared (is migration 009 applied?): {e}")
     print(f"  brain_wallet          re-seeded with ${starting_capital:,.2f}")
     print(f"  reconcile_wallet ->   {wallet_svc.reconcile_wallet(uid)}")
 

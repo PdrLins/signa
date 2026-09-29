@@ -552,6 +552,106 @@ def check_gem(score: int, grok_data: dict, synthesis: dict) -> tuple[bool, list[
 
 
 # ============================================================
+# TECHNICAL FILTER (brain entry gate, pass/fail — not a ranking)
+# ============================================================
+
+def _num(v) -> float | None:
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def technical_filter(
+    technical_data: dict | None,
+    fundamental_data: dict | None = None,
+    asset_class: str | None = None,
+    blockers: list[str] | None = None,
+) -> tuple[bool, list[str]]:
+    """Pass/fail technical gate for a brain entry. NOT a score.
+
+    Why: the 2021-2026 signal study (docs/backtests/live-2021-2026/report.md,
+    8,996 per-symbol trades) found that a higher `compute_score` did not
+    predict better returns (band <50 best, 60-64 worst) and blocked vs
+    unblocked did not separate outcomes. So instead of "higher score =
+    stronger buy", the brain asks only "is this a sane long setup?".
+
+    Conditions (all must hold; every failure is reported, in this order):
+      trend      price > SMA200 AND SMA50 > SMA200
+                 (SMA50/SMA200/price missing → "insufficient_history",
+                 trend not evaluated)
+      extension  RSI(14) <= tech_filter_max_rsi ("rsi_overbought") and price
+                 <= tech_filter_max_ext_sma50_pct % above SMA50
+                 ("overextended_vs_sma50")
+      liquidity  20-session average dollar volume >= tech_filter_min_dollar_volume
+                 (stocks/ETFs, native currency) or
+                 tech_filter_min_dollar_volume_crypto (crypto; Yahoo crypto
+                 volume is already USD-denominated). No volume data →
+                 "no_liquidity_data"; below the floor → "low_liquidity".
+      blocker    any active `check_blockers` reason passed in `blockers`
+                 → "active_blocker".
+
+    Args:
+        technical_data: `compute_indicators` output (sma_50, sma_200, rsi,
+            last_close/current_price, dollar_volume_avg_20 /
+            volume_avg_20 / volume_avg).
+        fundamental_data: used only to recognise crypto via quote_type.
+        asset_class: "STOCK" | "ETF" | "CRYPTO" (None → inferred).
+        blockers: reasons from `check_blockers`, when available.
+
+    Returns:
+        (passed, reasons) — reasons is empty when passed.
+    """
+    t = technical_data or {}
+    f = fundamental_data or {}
+    reasons: list[str] = []
+
+    price = _num(t.get("last_close")) or _num(t.get("current_price"))
+    sma50, sma200 = _num(t.get("sma_50")), _num(t.get("sma_200"))
+
+    if not price or not sma50 or not sma200:
+        reasons.append("insufficient_history")
+    else:
+        if price <= sma200:
+            reasons.append("below_sma200")
+        if sma50 <= sma200:
+            reasons.append("sma50_below_sma200")
+
+    rsi = _num(t.get("rsi"))
+    if rsi is not None and rsi > settings.tech_filter_max_rsi:
+        reasons.append("rsi_overbought")
+    if price and sma50:
+        ext_pct = (price / sma50 - 1.0) * 100.0
+        if ext_pct > settings.tech_filter_max_ext_sma50_pct:
+            reasons.append("overextended_vs_sma50")
+
+    is_crypto = (
+        (asset_class or "").upper() == "CRYPTO"
+        or (f.get("quote_type") or "").upper() == "CRYPTOCURRENCY"
+    )
+    dollar_vol = None
+    if is_crypto:
+        # Yahoo quotes crypto volume in USD already — do not multiply by price.
+        dollar_vol = _num(t.get("volume_avg_20")) or _num(t.get("volume_avg"))
+    else:
+        dollar_vol = _num(t.get("dollar_volume_avg_20"))
+        if dollar_vol is None and price:
+            shares = _num(t.get("volume_avg_20")) or _num(t.get("volume_avg"))
+            dollar_vol = shares * price if shares is not None else None
+    floor = (settings.tech_filter_min_dollar_volume_crypto if is_crypto
+             else settings.tech_filter_min_dollar_volume)
+    if dollar_vol is None:
+        reasons.append("no_liquidity_data")
+    elif dollar_vol < floor:
+        reasons.append("low_liquidity")
+
+    if blockers:
+        reasons.append("active_blocker")
+
+    return (not reasons), reasons
+
+
+# ============================================================
 # BLOCKERS
 # ============================================================
 

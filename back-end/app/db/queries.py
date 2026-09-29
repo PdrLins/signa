@@ -949,3 +949,130 @@ def get_candidate_outcomes(since_iso: str) -> list[dict]:
             .gte("signal_at", since_iso).order("signal_at")
         )
     return _select_all_pages(_q)
+
+
+# ============================================================
+# INSIGHTS (read-only helpers for /api/v1/insights/*)
+# ============================================================
+# All selects use "*" (or tolerant column lists) so a DB that is missing a
+# later migration (008 / 009) still answers. Nothing here writes.
+
+def get_latest_insight_scan() -> dict | None:
+    """Most recent COMPLETE scan, falling back to the most recent scan of any status."""
+    scan = get_last_completed_scan()
+    if scan:
+        return scan
+    rows = get_scans(limit=1)
+    return rows[0] if rows else None
+
+
+def get_signals_for_scan(scan_id: str, limit: int = 500) -> list[dict]:
+    """Every signal persisted by one scan (all columns — tolerates missing migrations)."""
+    if not scan_id:
+        return []
+    client = get_client()
+    return (
+        client.table("signals").select("*").eq("scan_id", scan_id)
+        .order("created_at", desc=True).limit(limit).execute()
+    ).data or []
+
+
+def get_latest_signal_for_symbol(symbol: str) -> dict | None:
+    """Newest signal row for a symbol (all columns)."""
+    client = get_client()
+    rows = (
+        client.table("signals").select("*").eq("symbol", symbol)
+        .order("created_at", desc=True).limit(1).execute()
+    ).data or []
+    return rows[0] if rows else None
+
+
+def get_brain_wallet_readonly(user_id: str | None) -> dict | None:
+    """brain_wallet row for the brain user — read only (never lazy-creates)."""
+    if not user_id:
+        return None
+    client = get_client()
+    rows = (
+        client.table("brain_wallet").select("*").eq("user_id", user_id).limit(1).execute()
+    ).data or []
+    return rows[0] if rows else None
+
+
+def get_open_brain_trades() -> list[dict]:
+    """Open brain virtual_trades (all columns)."""
+    client = get_client()
+    return (
+        client.table("virtual_trades").select("*")
+        .eq("status", "OPEN").eq("source", "brain")
+        .order("entry_date", desc=False).execute()
+    ).data or []
+
+
+def get_virtual_trade_by_id(trade_id: str) -> dict | None:
+    """One virtual_trades row by id."""
+    if not trade_id:
+        return None
+    client = get_client()
+    rows = (client.table("virtual_trades").select("*").eq("id", trade_id).limit(1).execute()).data or []
+    return rows[0] if rows else None
+
+
+def count_closed_brain_trades(since_iso: str | None = None) -> int:
+    """Number of CLOSED brain trades (exit_date >= since when given)."""
+    client = get_client()
+    q = client.table("virtual_trades").select("id").eq("status", "CLOSED").eq("source", "brain")
+    if since_iso:
+        q = q.gte("exit_date", since_iso)
+    return len((q.limit(10_000).execute()).data or [])
+
+
+def get_virtual_snapshots_since(since_date: str | None = None, limit: int = 1000) -> list[dict]:
+    """Daily virtual_snapshots (oldest first), optionally from a date (YYYY-MM-DD)."""
+    client = get_client()
+    q = client.table("virtual_snapshots").select("*")
+    if since_date:
+        q = q.gte("snapshot_date", since_date)
+    return (q.order("snapshot_date", desc=False).limit(limit).execute()).data or []
+
+
+def get_candidate_outcome_for_signal(signal_id: str) -> dict | None:
+    """candidate_outcomes row for one signal, or None."""
+    if not signal_id:
+        return None
+    client = get_client()
+    rows = (
+        client.table("candidate_outcomes").select("*").eq("signal_id", signal_id).limit(1).execute()
+    ).data or []
+    return rows[0] if rows else None
+
+
+_SIGNAL_VERDICT_COLUMNS = (
+    "id, ai_status, ai_signal, p_win, routine_ai_signal, decision_overturned, "
+    "tech_filter:technical_data->_tech_filter"
+)
+_SIGNAL_VERDICT_COLUMNS_MIN = "id, ai_status, tech_filter:technical_data->_tech_filter"
+
+
+def get_signal_verdicts(signal_ids: list[str], chunk: int = 100) -> list[dict]:
+    """AI-verdict columns for the given signal ids (read-only).
+
+    Falls back to a minimal column set when migrations 005/008 columns are
+    missing, so older databases still return ai_status + the tech filter.
+    """
+    ids = [s for s in dict.fromkeys(signal_ids) if s]
+    if not ids:
+        return []
+    client = get_client()
+    out: list[dict] = []
+    cols = _SIGNAL_VERDICT_COLUMNS
+    for i in range(0, len(ids), chunk):
+        part = ids[i:i + chunk]
+        try:
+            out.extend((client.table("signals").select(cols).in_("id", part).execute()).data or [])
+        except Exception as e:
+            if cols == _SIGNAL_VERDICT_COLUMNS_MIN:
+                raise
+            logger.warning(f"signal verdict columns unavailable ({e}); using the minimal set")
+            cols = _SIGNAL_VERDICT_COLUMNS_MIN
+            out.extend((client.table("signals").select(cols).in_("id", part).execute()).data or [])
+    return out

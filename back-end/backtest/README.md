@@ -43,7 +43,9 @@ gitignored.
 | `--exclude-tsx` | Drop `.TO` listings. By default they are converted to USD with point-in-time `CAD=X`. |
 | `--include-fundamentals` | Apply **today's** yfinance fundamentals to every past date. **Lookahead.** The report gets a LOOKAHEAD WARNING and the default name gets a `_LOOKAHEAD` suffix. |
 | `--no-info` | Skip `.info` entirely: no sector (so no sector cap), bucket from the live hard-coded lists only. |
-| `--entry-score N` | **Not a live rule.** Enter at `score >= N` instead of the bucket BUY threshold. Live blockers, blackout and the >90 ceiling still apply. |
+| `--entry-mode filter\|score` | `filter` (the default, same as live `brain_entry_mode`): an entry needs a validated AI BUY plus a live `technical_filter` pass. There is no historical AI, so the portfolio makes **0 entries**. `score` is the legacy rule: the tech-only action is BUY, or `--entry-score`. With `--entry-score` the mode defaults to `score`. |
+| `--filter-only-entries` | **Not a live rule** (filter mode only). Enters on a technical-filter pass alone, without the AI BUY the live brain requires. Use it to study the filter as an entry rule. The report and the default name (`_FILTER_ONLY_NONLIVE`) carry the label. |
+| `--entry-score N` | **Not a live rule** (score mode). Enter at `score >= N` instead of the bucket BUY threshold. Live blockers, blackout and the >90 ceiling still apply. |
 | `--ai-veto` | Sends entries through the AI-veto placeholder (`signals.ai_veto`). It never vetoes, because there is no historical AI data. The hook exists so archived AI outputs can be plugged in later. |
 | `--no-drawdown-breaker`, `--no-correlation-gate` | Turn off those live gates. |
 | `--commission USD` | Commission per fill. The default is live `brain_commission_usd`. |
@@ -60,7 +62,7 @@ backtest/
 ├── signals.py        point-in-time daily scan (live prefilter / indicators / score / action)
 ├── execution.py      daily-bar replay of the live evaluate_exit
 ├── portfolio.py      cash / positions / live sizing, limits, cooldown, breaker, correlation
-├── study.py          per-symbol non-overlapping signal study (score bands etc.)
+├── study.py          per-symbol non-overlapping signal study (score bands, technical filter PASS/FAIL + failing reasons)
 ├── metrics.py        CAGR, drawdown, Sharpe, win rate, payoff, expectancy, benchmarks
 ├── report.py         markdown + JSON
 ├── replay_horizons.py  (separate tool: replays REAL stored signals from the DB)
@@ -76,8 +78,9 @@ check_entry_blackout / score_to_action`, `scan_service._tech_only_action /
 _known_bucket / _bucket_from_fundamentals / _asset_class`,
 `regime.get_market_regime`, `macro_scanner.classify_macro_environment`,
 `virtual_portfolio.apply_slippage / compute_entry_levels / check_portfolio_limits /
-evaluate_exit / compute_close_amounts / drawdown_breaker_tripped /
-trading_days_between`, `wallet.calc_risk_position_size`,
+evaluate_exit / compute_close_amounts / evaluate_drawdown_breaker /
+is_ai_buy / brain_entry_sort_key / trading_days_between`,
+`signal_engine.technical_filter`, `wallet.calc_risk_position_size`,
 `portfolio_risk.check_correlation_limit` (with a point-in-time closes loader).
 
 ### No lookahead
@@ -89,7 +92,7 @@ trading_days_between`, `wallet.calc_risk_position_size`,
 
 ### Portfolio
 
-The simulator uses live sizing (1% risk, 10% cap, cash net of commission) and the live limits: max open positions, per-sector cap and crypto cap. It also applies the re-entry cooldown (in trading days), the drawdown breaker and the correlation gate. Orders fill in descending score order, the same as live. The cost basis is allocation plus commission, and exits settle through the live `compute_close_amounts`. A position occupies its symbol, so trades never overlap. Anything still open at the end is closed at the last close (`END_OF_WINDOW`).
+The simulator uses live sizing (1% risk, 10% cap, cash net of commission) and the live limits: max open positions, per-sector cap and crypto cap. It also applies the re-entry cooldown (in trading days), the drawdown breaker and the correlation gate. The breaker is the live pause-and-reset state machine: it trips at −10% from peak, pauses entries for `brain_drawdown_pause_trading_days` US sessions, then resets the peak to equity. The report lists trips, resumes and paused days. Orders fill in the live entry order (`brain_entry_sort_key`). In filter mode that is AI p_win, then confidence; neither exists historically, so ties keep the prefilter's trend-quality order. In score mode it is descending score. The cost basis is allocation plus commission, and exits settle through the live `compute_close_amounts`. A position occupies its symbol, so trades never overlap. Anything still open at the end is closed at the last close (`END_OF_WINDOW`).
 
 ### Signal study
 
@@ -105,7 +108,7 @@ The study runs per symbol and ignores portfolio capacity. Every prefiltered cand
 ## Known limitations (also printed in every report)
 
 1. **Survivorship bias.** The default universe is today's `app/scanners/universe.py` list, and those names were picked with hindsight. Use `--universe` with a point-in-time CSV to remove the bias.
-2. **Tech-only scores are structurally capped.** With no sentiment or catalyst, HIGH_RISK scores top out around 60 and SAFE_INCOME around 56. That is below the live BUY thresholds (65/62) and far below the brain's 75. With live rules the portfolio usually makes **zero trades**. Read the signal study, or use `--entry-score` and label the result as non-live.
+2. **Tech-only scores are structurally capped.** With no sentiment or catalyst, HIGH_RISK scores top out around 60 and SAFE_INCOME around 56. That is below the live BUY thresholds (65/62) and far below the brain's 75. With live rules the portfolio usually makes **zero trades**. In the default filter mode it always makes zero, because there is no historical AI BUY. Read the signal study's *By technical filter* tables, or use `--filter-only-entries` / `--entry-mode score --entry-score N` and label the result as non-live.
 3. **Macro coverage.** Only VIX and the SPY trend are available. FRED data, Fear & Greed and VIX term structure are absent, so the hostile-macro blocker can't fire.
 4. **Earnings.** There is no point-in-time earnings calendar, so the earnings blackout and the PEAD / PRE_EARNINGS catalysts never fire.
 5. **Execution simplifications.** The simulation uses daily bars only, with no intraday watchdog, no thesis tracker and no AI SELL exits. Shorts are off, as in live. Market-hours rules are reduced to "fill at the regular-session open".

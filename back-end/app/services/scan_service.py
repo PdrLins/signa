@@ -179,12 +179,13 @@ from app.ai.signal_engine import (
     compute_score,
     determine_status,
     score_to_action,
+    technical_filter,
 )
 from app.core.config import settings
 from app.db import queries
 from app.notifications.telegram_bot import send_gem_alert, send_scan_digest, send_watchlist_sell_alert
 from app.scanners import barchart_scanner, indicators, macro_scanner, market_scanner
-from app.scanners.prefilter import prefilter_candidates
+from app.scanners.prefilter import prefilter_candidates, trend_quality_score
 from app.signals.earnings import get_earnings_context
 
 # Ticker universe — hardcoded for now, could move to DB
@@ -487,30 +488,17 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
             prescore_results.extend(batch_results)
         pre_scores = [r for r in prescore_results if r is not None]
 
-        # Sort by pre-score descending, pick top N for AI
-        # Ensure a balanced mix: at least 5 HIGH_RISK slots so Grok sentiment gets used
+        # Stamp the brain's pass/fail technical filter on every candidate
+        # (stored with the signal in technical_data["_tech_filter"]).
+        _stamp_tech_filter(pre_scores, macro_data, prescore_cache)
         pre_scores.sort(key=lambda x: x[1], reverse=True)
+        filter_mode = (settings.brain_entry_mode or "").lower() != "score"
 
         if settings.ai_enabled and AI_CANDIDATE_LIMIT > 0:
-            safe_pool = [x for x in pre_scores if x[2] == "SAFE_INCOME"]
-            risk_pool = [x for x in pre_scores if x[2] == "HIGH_RISK"]
-
-            # Reserve at least 5 slots for HIGH_RISK (sentiment matters most there)
-            min_risk_slots = min(5, len(risk_pool))
-            safe_slots = AI_CANDIDATE_LIMIT - min_risk_slots
-
-            ai_safe = safe_pool[:safe_slots]
-            ai_risk = risk_pool[:min_risk_slots]
-
-            # If one bucket didn't fill its slots, give extras to the other
-            remaining = AI_CANDIDATE_LIMIT - len(ai_safe) - len(ai_risk)
-            if remaining > 0:
-                used = {(t[0]) for t in ai_safe + ai_risk}
-                extras = [x for x in pre_scores if x[0] not in used][:remaining]
-                ai_candidates = ai_safe + ai_risk + extras
-            else:
-                ai_candidates = ai_safe + ai_risk
-
+            # filter mode: filter-FAILING candidates get no AI call (the
+            # brain could never buy them); passing ones ranked by trend
+            # quality. Legacy score mode: top pre-score.
+            ai_candidates = _select_ai_candidates(pre_scores, screening_data, AI_CANDIDATE_LIMIT)
             ai_tickers = {x[0] for x in ai_candidates}
 
             # AI retry queue: prepend tickers whose synthesis failed last scan.
@@ -535,6 +523,8 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                         # Ticker not in this scan's pre-scored pool — skip it.
                         # Likely it dropped out of the pre-filter (low volume etc).
                         continue
+                    if filter_mode and not _tech_filter_passed(rt_pre):
+                        continue  # the brain can't buy it — don't pay for AI
                     ai_candidates.append(rt_pre)
                     ai_tickers.add(rt_sym)
                     added += 1
@@ -689,7 +679,14 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 "catalyst": None,
                 "sentiment_score": 50,
                 "reasoning": (
-                    "Technical + fundamental analysis only (AI skipped — below pre-score threshold)"
+                    "Technical + fundamental analysis only (AI skipped — "
+                    + (
+                        "technical filter failed: " + ", ".join(
+                            (technical_data.get("_tech_filter") or {}).get("reasons") or [])
+                        if filter_mode and not (technical_data.get("_tech_filter") or {}).get("passed", True)
+                        else "not selected for AI analysis"
+                    )
+                    + ")"
                     + (f". {'; '.join(tech_block_reasons)}" if tech_block_reasons else "")
                 ),
                 "technical_data": technical_data,
@@ -1393,6 +1390,64 @@ def _persist_signals(signals: list[dict]) -> list[dict]:
             for s in signals
         ]
         return queries.insert_signals_batch(stripped)
+
+
+def _tech_filter_passed(item: tuple) -> bool:
+    """Pre-score tuple (ticker, score, bucket, tech, fund) → stamped filter result."""
+    tech = item[3] if len(item) > 3 and isinstance(item[3], dict) else {}
+    return bool((tech.get("_tech_filter") or {}).get("passed"))
+
+
+def _stamp_tech_filter(pre_scores: list[tuple], macro_data: dict | None,
+                       prescore_cache: dict[str, dict] | None = None) -> None:
+    """Run `technical_filter` (with the tech-level blockers) on every
+    pre-scored candidate and store {"passed", "reasons"} in its
+    technical_data["_tech_filter"] — persisted with the signal (JSONB), so
+    no new column is needed."""
+    for ticker, _score, _bucket, tech, fund in pre_scores:
+        if not isinstance(tech, dict):
+            continue
+        ac = ((prescore_cache or {}).get(ticker) or {}).get("asset_class") or _asset_class(ticker, fund)
+        try:
+            _, blockers = check_blockers({}, fund or {}, macro_data or {}, tech)
+        except Exception:
+            blockers = []
+        passed, reasons = technical_filter(tech, fund, ac, blockers)
+        tech["_tech_filter"] = {"passed": passed, "reasons": reasons}
+
+
+def _select_ai_candidates(pre_scores: list[tuple], screening_data: dict | None, limit: int,
+                          entry_mode: str | None = None) -> list[tuple]:
+    """Pick the PASS-2 (paid AI) candidates from the pre-scored pool.
+
+    filter mode (default brain_entry_mode): only candidates whose stamped
+    technical filter PASSED (see `_stamp_tech_filter`) — the brain can
+    never buy a failing one, so its AI call would be wasted. Passing
+    candidates are ranked by the prefilter's `trend_quality_score`
+    (screening features), then pre-score. score mode (legacy): by pre-score.
+
+    Either way at least 5 slots go to HIGH_RISK when available (sentiment
+    matters most there) and unused slots spill over. Capped at `limit`.
+    """
+    mode = (entry_mode or settings.brain_entry_mode or "").lower()
+    if mode == "score":
+        pool = sorted(pre_scores, key=lambda x: x[1], reverse=True)
+    else:
+        def _key(x):
+            feats = (screening_data or {}).get(x[0])
+            tqs = trend_quality_score(feats) if feats else float("-inf")
+            return (-tqs, -x[1])
+        pool = sorted((x for x in pre_scores if _tech_filter_passed(x)), key=_key)
+
+    safe_pool = [x for x in pool if x[2] == "SAFE_INCOME"]
+    risk_pool = [x for x in pool if x[2] == "HIGH_RISK"]
+    min_risk_slots = min(5, len(risk_pool), limit)
+    ai = safe_pool[:limit - min_risk_slots] + risk_pool[:min_risk_slots]
+    remaining = limit - len(ai)
+    if remaining > 0:
+        used = {t[0] for t in ai}
+        ai += [x for x in pool if x[0] not in used][:remaining]
+    return ai
 
 
 def _classify_ai_status(synthesis: dict) -> str:

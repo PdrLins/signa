@@ -22,12 +22,22 @@ so every rule below is chosen to make the measurement honest:
 ============================================================
 
 ENTRY (all must pass, see `_evaluate_brain_entry`)
-  1. AI BUY: ai_status == "validated" AND ai_signal == "BUY" AND
-     score >= BRAIN_MIN_SCORE. Tech-only / low_confidence / failed
-     signals NEVER auto-buy (`_eval_brain_trust_tier`).
+  1. AI BUY: ai_status == "validated" AND ai_signal == "BUY" AND the
+     technical gate passes. Tech-only / low_confidence / failed signals
+     NEVER auto-buy (`_eval_brain_trust_tier`). The technical gate is
+     `signal_engine.technical_filter` (price > SMA200, SMA50 > SMA200,
+     RSI <= 75, <= 15% above SMA50, 20d $ volume floor, no blocker) when
+     brain_entry_mode == "filter" (default), or the legacy
+     score >= BRAIN_MIN_SCORE when "score". Several qualifying
+     candidates in one scan are taken in AI p_win order, then AI
+     confidence (`brain_entry_sort_key`) — never by score in filter mode.
   2. Not already held (either track), not in the same-symbol re-entry
      cooldown (`brain_reentry_cooldown_days` trading days after any exit).
-  3. Drawdown breaker not tripped: equity > peak × (1 − brain_max_drawdown_pct).
+  3. Drawdown breaker (`evaluate_drawdown_breaker`): when equity falls to
+     peak × (1 − brain_max_drawdown_pct) the breaker trips
+     (brain_wallet.breaker_tripped_at) and new entries pause for
+     brain_drawdown_pause_trading_days US trading days; then the peak is
+     reset to current equity and entries resume (no permanent latch).
   4. Exchange open today (holiday filter) and market hours for equities.
   5. Levels: Claude's stop/target when valid, otherwise ATR fallback
      (stop = entry − brain_stop_atr_mult × ATR, target = entry +
@@ -117,8 +127,10 @@ from app.services.price_cache import _fetch_prices_batch, fx_to_usd, native_curr
 # ============================================================
 
 BRAIN_MIN_SCORE = 75
-"""Score floor for an AI-BUY entry. Score is a quality FILTER, not a
-ranker; the decisive gate is Claude's BUY call + computed R:R."""
+"""LEGACY (brain_entry_mode == "score") score floor for an AI-BUY entry.
+In the default "filter" mode the gate is `signal_engine.technical_filter`
+and the score is display-only: the 2021-2026 signal study showed higher
+scores did not predict better returns."""
 
 FILTER_D_BLOCKED_SECTORS: frozenset[str] = frozenset({
     "Financial Services",
@@ -214,12 +226,51 @@ def is_ai_buy(sig: dict) -> bool:
     return (sig.get("ai_signal") or "").upper() == "BUY"
 
 
+def _entry_mode() -> str:
+    return "score" if (settings.brain_entry_mode or "").lower() == "score" else "filter"
+
+
+def brain_technical_filter(sig: dict) -> tuple[bool, list[str]]:
+    """`signal_engine.technical_filter` on a signal dict, with the live
+    tech-level blockers (RSI / volume / SMA200 / hostile macro / cited red
+    flags) as the blocker input."""
+    from app.ai.signal_engine import check_blockers, technical_filter
+    tech = sig.get("technical_data") or {}
+    fund = sig.get("fundamental_data") or {}
+    try:
+        _, blockers = check_blockers(sig.get("grok_data") or {}, fund, sig.get("macro_data") or {}, tech)
+    except Exception:
+        blockers = []
+    asset_class = sig.get("asset_type") or ("CRYPTO" if _is_crypto_symbol(sig.get("symbol"), sig) else None)
+    return technical_filter(tech, fund, asset_class, blockers)
+
+
+def brain_entry_sort_key(sig: dict, mode: str | None = None) -> tuple:
+    """Order in which one scan's candidates claim entry slots.
+
+    filter mode (default): AI p_win desc, then AI confidence desc (missing
+    values last). score mode (legacy): score desc. Python's sort is stable,
+    so ties keep the incoming (prefilter) order.
+    """
+    if (mode or _entry_mode()) == "score":
+        return (-(sig.get("score") or 0),)
+    p_win = sig.get("p_win")
+    conf = sig.get("confidence")
+    return (
+        -(float(p_win) if p_win is not None else -1.0),
+        -(float(conf) if conf is not None else -1.0),
+    )
+
+
 def _eval_brain_trust_tier(sig: dict, portfolio_heat: int = 0) -> tuple[int, float, str]:
     """Decide whether a signal may be auto-bought.
 
     Returns (tier, trust_multiplier, reason). tier 0 = do not buy. After the
     2026-09 reset there is ONE admissible tier: an AI BUY (see `is_ai_buy`)
-    with score >= BRAIN_MIN_SCORE. Low-confidence, tech-only ("skipped") and
+    that passes `technical_filter` (brain_entry_mode "filter", default) or
+    has score >= BRAIN_MIN_SCORE (legacy "score" mode; skip reason
+    "technical_filter:<first failing reason>" / "score_below_min_<n>").
+    Low-confidence, tech-only ("skipped") and
     failed-AI signals never auto-buy. trust_multiplier scales the per-trade
     RISK budget; it is 1.0 unless one of the legacy downsizing flags is on.
     """
@@ -246,8 +297,13 @@ def _eval_brain_trust_tier(sig: dict, portfolio_heat: int = 0) -> tuple[int, flo
         if portfolio_heat >= 1 and score < 76:
             return 0, 0.0, f"portfolio_cautious_score{score}"
 
-    if score < BRAIN_MIN_SCORE:
-        return 0, 0.0, f"score_below_min_{score}"
+    if _entry_mode() == "score":
+        if score < BRAIN_MIN_SCORE:
+            return 0, 0.0, f"score_below_min_{score}"
+    else:
+        passed, reasons = brain_technical_filter(sig)
+        if not passed:
+            return 0, 0.0, f"technical_filter:{reasons[0]}"
 
     if settings.brain_trend_downsize_enabled:
         vs_sma50 = technical_data.get("vs_sma50")
@@ -392,6 +448,83 @@ def drawdown_breaker_tripped(equity_usd: float, peak_equity_usd: float,
     if pct is None or pct <= 0 or peak_equity_usd <= 0:
         return False
     return equity_usd <= peak_equity_usd * (1.0 - pct / 100.0)
+
+
+@dataclass
+class BreakerState:
+    """Result of one `evaluate_drawdown_breaker` call."""
+    blocked: bool
+    peak: float
+    tripped_at: object | None     # same type the caller passed/received (ISO str, datetime or date)
+    reason: str | None            # "drawdown_breaker_pause" when blocked
+    event: str | None             # "tripped" | "resumed" | None
+    days_elapsed: int | None = None
+    days_remaining: int | None = None
+
+    def details(self) -> dict:
+        return {"days_elapsed": self.days_elapsed, "days_remaining": self.days_remaining,
+                "peak": round(self.peak, 2), "tripped_at": str(self.tripped_at) if self.tripped_at else None}
+
+
+_ET = ZoneInfo("America/New_York")
+
+
+def _et_date(x) -> date | None:
+    """ISO string / datetime (naive = UTC) / date → US-Eastern calendar date."""
+    if x is None:
+        return None
+    if isinstance(x, str):
+        x = parse_iso_utc(x)
+        if x is None:
+            return None
+    if isinstance(x, datetime):
+        if x.tzinfo is None:
+            x = x.replace(tzinfo=timezone.utc)
+        return x.astimezone(_ET).date()
+    if isinstance(x, date):
+        return x
+    return None
+
+
+def evaluate_drawdown_breaker(
+    equity: float,
+    peak: float,
+    tripped_at,
+    now,
+    *,
+    max_drawdown_pct: float | None = None,
+    pause_trading_days: int | None = None,
+) -> BreakerState:
+    """Drawdown breaker with a timed pause instead of a permanent latch.
+
+    Pure. `tripped_at` / `now` may be ISO strings, datetimes or dates; the
+    elapsed count is US trading days (market_calendar, NYSE holidays)
+    strictly after the trip day up to and including today.
+
+      not tripped, drawdown <  max → not blocked; peak ratchets to new highs
+      not tripped, drawdown >= max → TRIP: tripped_at = now, blocked
+      tripped, elapsed <  N       → blocked (pause)
+      tripped, elapsed >= N       → RESUME: peak = current equity,
+                                    tripped_at cleared, not blocked
+
+    Why the reset: once the book is flat in cash, equity cannot climb back
+    to the old peak, so a peak-referenced breaker would block forever.
+    """
+    n = settings.brain_drawdown_pause_trading_days if pause_trading_days is None else pause_trading_days
+    n = max(0, int(n or 0))
+    peak = max(float(peak or 0.0), float(equity))
+    trip_day = _et_date(tripped_at)
+    today = _et_date(now)
+    if trip_day is not None and today is not None:
+        from app.core.market_calendar import us_trading_days_between
+        elapsed = us_trading_days_between(trip_day, today)
+        if elapsed < n:
+            return BreakerState(True, peak, tripped_at, "drawdown_breaker_pause", None,
+                                elapsed, n - elapsed)
+        return BreakerState(False, float(equity), None, None, "resumed", elapsed, 0)
+    if drawdown_breaker_tripped(equity, peak, max_drawdown_pct):
+        return BreakerState(True, peak, now, "drawdown_breaker_pause", "tripped", 0, n)
+    return BreakerState(False, peak, None, None, None)
 
 
 def trading_days_between(start: date, end: date) -> int:
@@ -1027,6 +1160,7 @@ class BrainEntryContext:
     open_watchlist: set[str]
     market_open: bool
     portfolio_heat: int = 0
+    breaker_details: dict | None = None   # days elapsed / remaining while paused
 
 
 def _book_entry(row: dict) -> dict:
@@ -1152,6 +1286,9 @@ def _evaluate_brain_entry(sig: dict, ctx: BrainEntryContext, direction: str = "L
     else:
         tier, trust, tier_reason = _eval_brain_trust_tier(sig, ctx.portfolio_heat)
     plan.update({"tier": tier, "trust": trust, "tier_reason": tier_reason})
+    if direction == "LONG" and _entry_mode() == "filter" and is_ai_buy(sig):
+        passed, reasons = brain_technical_filter(sig)
+        plan["tech_filter"] = {"passed": passed, "reasons": reasons}
     if tier <= 0:
         return tier_reason, plan
     if not settings.wallet_enabled:
@@ -1162,7 +1299,9 @@ def _evaluate_brain_entry(sig: dict, ctx: BrainEntryContext, direction: str = "L
     if symbol in ctx.cooldown:
         return ctx.cooldown[symbol], plan
     if ctx.breaker_tripped:
-        return (f"drawdown_breaker_equity_{ctx.equity:.0f}_peak_{ctx.peak_equity:.0f}"), plan
+        plan["breaker"] = {**(ctx.breaker_details or {}),
+                           "equity": round(ctx.equity, 2), "peak": round(ctx.peak_equity, 2)}
+        return "drawdown_breaker_pause", plan
     if not _is_tradable_now(symbol, ctx.market_open):
         return "market_closed", plan
 
@@ -1361,6 +1500,10 @@ def _decision_row(scan_id, sig: dict, decision: str, reason: str, plan: dict | N
         "sector": plan.get("sector"),
         "trade_id": plan.get("trade_id"),
         "correlation": plan.get("correlation"),
+        "confidence": sig.get("confidence"),
+        "tech_filter": plan.get("tech_filter"),
+        "breaker": plan.get("breaker"),
+        "entry_mode": _entry_mode(),
     }
     return {
         "scan_id": scan_id or sig.get("scan_id"),
@@ -1375,6 +1518,57 @@ def _decision_row(scan_id, sig: dict, decision: str, reason: str, plan: dict | N
     }
 
 
+def _apply_drawdown_breaker(wallet_row: dict | None, uid: str | None, equity: float,
+                            peak: float, notifications: BrainNotificationQueue) -> BreakerState:
+    """Evaluate the breaker for this scan, persist trip / resume, notify once.
+
+    Tolerates a DB without migration 009 (no `breaker_tripped_at` column):
+    the trip can't be persisted, so every scan re-evaluates as "not yet
+    tripped" (blocked while in drawdown, no timed resume) and no Telegram
+    notification is sent (it would repeat every scan).
+    """
+    now = datetime.now(timezone.utc)
+    has_col = bool(wallet_row) and "breaker_tripped_at" in wallet_row
+    if wallet_row and not has_col:
+        logger.warning("brain_wallet.breaker_tripped_at missing — apply migration "
+                       "009_breaker_reset.sql; drawdown pause/reset is not persisted")
+    tripped_at = (wallet_row or {}).get("breaker_tripped_at") if has_col else None
+    st = evaluate_drawdown_breaker(equity, peak, tripped_at, now)
+    pct = settings.brain_max_drawdown_pct
+    n = settings.brain_drawdown_pause_trading_days
+
+    if st.event == "tripped":
+        st.tripped_at = now.isoformat()
+        logger.warning(
+            f"Drawdown breaker TRIPPED: equity ${equity:,.2f} is "
+            f"{(1 - equity / st.peak) * 100:.1f}% below peak ${st.peak:,.2f} "
+            f"(limit {pct}%) — pausing new entries for {n} trading days"
+        )
+        if has_col and _persist_breaker_state(uid, tripped_at=st.tripped_at):
+            notifications.append(("brain_breaker_tripped", {
+                "equity": f"{equity:,.2f}", "peak": f"{st.peak:,.2f}",
+                "dd": f"{(1 - equity / st.peak) * 100:.1f}", "limit": f"{pct:g}", "days": str(n),
+            }))
+    elif st.event == "resumed":
+        logger.warning(
+            f"Drawdown breaker RESUMED after {st.days_elapsed} trading days — "
+            f"peak reset to equity ${equity:,.2f}"
+        )
+        if _persist_breaker_state(uid, tripped_at=None, peak_equity=equity):
+            notifications.append(("brain_breaker_resumed", {
+                "equity": f"{equity:,.2f}", "days": str(st.days_elapsed),
+            }))
+    elif st.blocked:
+        logger.info(f"Drawdown breaker pause: {st.days_elapsed} trading days elapsed, "
+                    f"{st.days_remaining} remaining — no new entries this scan")
+    return st
+
+
+def _persist_breaker_state(uid, **kw) -> bool:
+    from app.services import wallet as wallet_svc
+    return wallet_svc.set_breaker_state(uid, **kw)
+
+
 def process_virtual_trades(
     signals: list[dict],
     watchlist_symbols: set[str],
@@ -1383,7 +1577,8 @@ def process_virtual_trades(
 ) -> dict:
     """Run the brain's buy/sell decision loop over a scan's fresh signals.
 
-    Per signal (highest score first):
+    Per signal (in `brain_entry_sort_key` order — AI p_win, then AI
+    confidence; score only in legacy brain_entry_mode="score"):
       1. SELL/AVOID → close held LONGs when `signal_exit_reason` says so
          (AI SELL/AVOID or user-forced); equities outside hours are flagged
          for review instead.
@@ -1424,15 +1619,13 @@ def process_virtual_trades(
         float((wallet_row or {}).get("total_deposited") or 0)
         - float((wallet_row or {}).get("total_withdrawn") or 0)
     )
-    peak = wallet_svc.update_peak_equity(brain_user_id, equity) if wallet_row else None
-    peak = max(peak or 0.0, net_deposits, equity)
-    breaker = drawdown_breaker_tripped(equity, peak)
-    if breaker:
-        logger.warning(
-            f"Drawdown breaker TRIPPED: equity ${equity:,.2f} is "
-            f"{(1 - equity / peak) * 100:.1f}% below peak ${peak:,.2f} "
-            f"(limit {settings.brain_max_drawdown_pct}%) — no new entries this scan"
-        )
+    stored_peak = wallet_svc.update_peak_equity(brain_user_id, equity) if wallet_row else None
+    # Net deposits are only the FALLBACK peak (no stored peak yet): after a
+    # breaker reset the stored peak is legitimately below net deposits.
+    peak = max(stored_peak if stored_peak else net_deposits, equity)
+    breaker_state = _apply_drawdown_breaker(wallet_row, brain_user_id, equity, peak, notifications)
+    peak = breaker_state.peak
+    breaker = breaker_state.blocked
 
     ctx = BrainEntryContext(
         uid=brain_user_id,
@@ -1445,6 +1638,7 @@ def process_virtual_trades(
         open_watchlist=open_watchlist,
         market_open=market_open,
         portfolio_heat=_portfolio_heat(len(brain_rows), signals),
+        breaker_details=breaker_state.details() if breaker else None,
     )
 
     decisions: dict[str, dict] = {}
@@ -1457,7 +1651,9 @@ def process_virtual_trades(
     def _drop_from_book(trade_id) -> None:
         ctx.open_book[:] = [p for p in ctx.open_book if p.get("id") != trade_id]
 
-    signals = sorted(signals, key=lambda s: -(s.get("score") or 0))
+    # Entry order: AI p_win, then AI confidence (filter mode) — score only
+    # in legacy "score" mode. Exits in the same loop are order-independent.
+    signals = sorted(signals, key=brain_entry_sort_key)
 
     for sig in signals:
         symbol = sig.get("symbol")

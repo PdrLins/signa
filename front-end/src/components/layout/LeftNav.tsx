@@ -10,16 +10,25 @@ import { useAllSignals } from '@/hooks/useSignals'
 import { useStats } from '@/hooks/useStats'
 import { isMarketOpen, DEFAULT_TIMEZONE } from '@/lib/utils'
 import {
-  TrendingUp,
-  Star,
-  HelpCircle,
+  LayoutDashboard,
+  Activity,
+  Briefcase,
+  ChartLine,
   Settings,
   Brain,
-  ScrollText,
-  Plug,
-  Activity,
   LogOut,
 } from 'lucide-react'
+
+// Pages reached through Settings (and the mobile "More" sheet) keep the
+// Settings rail item highlighted.
+const SETTINGS_CHILDREN = ['/settings', '/integrations', '/logs', '/how-it-works', '/watchlist']
+
+export function isNavActive(href: string, pathname: string): boolean {
+  if (href === '/settings') return SETTINGS_CHILDREN.some((p) => pathname === p || pathname.startsWith(p + '/'))
+  if (href === '/positions') return pathname === '/positions' || pathname.startsWith('/brain/performance')
+  if (href === '/brain') return pathname === '/brain' || (pathname.startsWith('/brain/') && !pathname.startsWith('/brain/performance'))
+  return pathname === href || pathname.startsWith(href + '/')
+}
 
 export function LeftNav() {
   const theme = useTheme()
@@ -58,23 +67,20 @@ export function LeftNav() {
 
   const dotColor = open ? theme.colors.up : theme.colors.textHint
 
-  // Day 32 revamp: /brain/performance is the home, surfaced first.
-  // /overview and /portfolio removed from nav (still routable for old
-  // bookmarks but de-emphasized). /brain root kept for now — it was the
-  // pre-performance entry point. Order reflects daily usage frequency.
+  // Primary destinations, then (after a divider) Settings, which links
+  // onward to Integrations, Logs, Watchlist and How it works.
   const NAV_ITEMS = [
-    { label: t.nav.brainPerformance, href: '/brain/performance', icon: Activity },
-    { label: t.nav.signals, href: '/signals', icon: TrendingUp },
-    { label: t.nav.watchlist, href: '/watchlist', icon: Star },
+    { label: t.nav.today, href: '/today', icon: LayoutDashboard },
+    { label: t.nav.signals, href: '/signals', icon: Activity },
+    { label: t.nav.positions, href: '/positions', icon: Briefcase },
+    { label: t.nav.isItWorking, href: '/performance', icon: ChartLine },
     { label: t.nav.brain, href: '/brain', icon: Brain },
-    { label: t.nav.logs, href: '/logs', icon: ScrollText },
-    { label: t.nav.integrations, href: '/integrations', icon: Plug },
-    { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle },
     { label: t.nav.settings, href: '/settings', icon: Settings },
   ]
 
   return (
     <nav
+      aria-label={t.nav.mainNav}
       className="hidden md:flex flex-col items-center fixed left-5 top-1/2 -translate-y-1/2 z-50 py-3 px-1.5 gap-1 rounded-2xl"
       style={{
         backgroundColor: theme.colors.surface,
@@ -86,9 +92,15 @@ export function LeftNav() {
     >
       {/* Market status dot — hover for full macro panel */}
       <div
-        className="relative flex items-center justify-center w-10 h-10 rounded-xl transition-all cursor-default"
+        className="relative flex items-center justify-center w-10 h-10 rounded-xl transition-all cursor-default focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+        style={{ outlineColor: theme.colors.primary }}
+        tabIndex={0}
+        role="status"
+        aria-label={open ? (t.market?.open ?? 'Market Open') : (t.market?.closed ?? 'Market Closed')}
         onMouseEnter={() => setMarketHovered(true)}
         onMouseLeave={() => setMarketHovered(false)}
+        onFocus={() => setMarketHovered(true)}
+        onBlur={() => setMarketHovered(false)}
       >
         <span
           className="w-3 h-3 rounded-full"
@@ -251,7 +263,7 @@ export function LeftNav() {
       <div className="w-6 h-px mx-auto mb-1" style={{ backgroundColor: theme.colors.border }} />
 
       {NAV_ITEMS.map((item, i) => {
-        const isActive = pathname === item.href || (item.href === '/signals' && pathname.startsWith('/signals/'))
+        const isActive = isNavActive(item.href, pathname)
         const isLast = i === NAV_ITEMS.length - 1
         return (
           <div key={item.href}>
@@ -264,14 +276,17 @@ export function LeftNav() {
             )}
             <Link
               href={item.href}
-              className="flex items-center justify-center w-10 h-10 rounded-xl transition-all"
+              aria-label={item.label}
+              aria-current={isActive ? 'page' : undefined}
+              className="flex items-center justify-center w-10 h-10 rounded-xl transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
               style={{
+                outlineColor: theme.colors.primary,
                 backgroundColor: isActive ? theme.colors.primary + '15' : 'transparent',
                 color: isActive ? theme.colors.primary : theme.colors.textSub,
               }}
               title={item.label}
             >
-              <item.icon size={20} strokeWidth={isActive ? 2.2 : 1.8} />
+              <item.icon size={20} strokeWidth={isActive ? 2.2 : 1.8} aria-hidden="true" />
             </Link>
           </div>
         )
@@ -283,15 +298,17 @@ export function LeftNav() {
         style={{ backgroundColor: theme.colors.border }}
       />
       <button
+        type="button"
         onClick={() => {
           logout()
           window.location.href = '/login'
         }}
-        className="flex items-center justify-center w-10 h-10 rounded-xl transition-all hover:opacity-80"
-        style={{ color: theme.colors.down }}
+        className="flex items-center justify-center w-10 h-10 rounded-xl transition-all hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+        style={{ color: theme.colors.down, outlineColor: theme.colors.primary }}
         title={t.settings.logOut}
+        aria-label={t.settings.logOut}
       >
-        <LogOut size={18} strokeWidth={1.8} />
+        <LogOut size={18} strokeWidth={1.8} aria-hidden="true" />
       </button>
     </nav>
   )

@@ -1053,3 +1053,31 @@ def update_peak_equity(user_id: str | None, equity_usd: float) -> float | None:
     except Exception as e:
         logger.warning(f"update_peak_equity failed: {e}")
         return None
+
+
+def set_breaker_state(user_id: str | None, *, tripped_at: str | None,
+                      peak_equity: float | None = None) -> bool:
+    """Persist the drawdown-breaker trip state (migration 009).
+
+    `tripped_at` is an ISO timestamp (trip) or None (resume). On resume the
+    caller also passes `peak_equity` = current equity: the peak is RESET
+    (it may go down), unlike `update_peak_equity` which only ratchets up.
+
+    Returns False — never raises — when the write fails, e.g. the
+    `breaker_tripped_at` column does not exist yet (009 not applied).
+    """
+    uid = _resolve_user_id(user_id)
+    if not uid:
+        return False
+    patch: dict[str, Any] = {"breaker_tripped_at": tripped_at}
+    if peak_equity is not None:
+        patch["peak_equity"] = round(peak_equity, 4)
+    try:
+        get_client().table("brain_wallet").update(patch).eq("user_id", uid).execute()
+        return True
+    except Exception as e:
+        logger.warning(
+            f"set_breaker_state failed ({e}) — apply migration 009_breaker_reset.sql; "
+            "the breaker pause cannot be persisted until then"
+        )
+        return False

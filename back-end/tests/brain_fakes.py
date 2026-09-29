@@ -173,7 +173,7 @@ USER_ID = "user-1"
 def wallet_row(balance=10_000.0, collateral=0.0, deposited=10_000.0, peak=10_000.0):
     return {"id": "w1", "user_id": USER_ID, "balance": balance, "collateral_reserved": collateral,
             "initial_deposit": deposited, "total_deposited": deposited, "total_withdrawn": 0.0,
-            "peak_equity": peak}
+            "peak_equity": peak, "breaker_tripped_at": None}  # post-migration 009 row
 
 
 def patch_db(db: FakeDB, *, prices: dict | None = None, market_open: bool = True, fx: float | None = 1.0):

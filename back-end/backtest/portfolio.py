@@ -6,10 +6,15 @@ Timeline for each calendar day d (union of all symbols' bar dates):
             open (`execution.open_step`).
   2. ENTRY  pending orders from signals on an earlier day t < d fill at the
             symbol's NEXT bar's OPEN (t+1 open; an equity signal on Friday
-            fills Monday). Highest score first, the live order. Gates, in
+            fills Monday). Order = live `brain_entry_sort_key`: filter mode
+            → AI p_win, then AI confidence (absent historically, so ties keep
+            the prefilter's trend-quality order); score mode → highest score
+            first. Gates, in
             the live `_evaluate_brain_entry` order:
               already held → re-entry cooldown (live trading_days_between,
-              brain_reentry_cooldown_days) → drawdown breaker (live) →
+              brain_reentry_cooldown_days) → drawdown breaker (live
+              `evaluate_drawdown_breaker`: trip → pause
+              brain_drawdown_pause_trading_days US sessions → reset peak) →
               FX available → fill = live apply_slippage(open, BUY) → live
               compute_entry_levels (ATR stop/target, min R:R) → live
               calc_risk_position_size (1% risk, 10% cap, cash) → live
@@ -81,6 +86,8 @@ class SimResult:
     orders: int
     notional_traded: float
     fees: float
+    breaker_trips: int = 0
+    breaker_resumes: int = 0
 
 
 def _bar(bars: dict[str, pd.DataFrame], sym: str, d: date):
@@ -124,7 +131,10 @@ class Simulator:
         self.trades: list[dict] = []
         self.skips: Counter = Counter()
         self.last_px: dict[str, float] = {}
-        self.breaker_days = 0
+        self.breaker_days = 0          # days on which the breaker blocked entries (paused)
+        self.breaker_trips = 0
+        self.breaker_resumes = 0
+        self.breaker_tripped_at: date | None = None
         self.orders = 0
         self.notional = 0.0
         self.fees = 0.0
@@ -193,7 +203,7 @@ class Simulator:
         if ex is not None and n > 0 and live.trading_days_between(ex, d) < n:
             return "reentry_cooldown"
         if tripped:
-            return "drawdown_breaker"
+            return "drawdown_breaker_pause"
         fx = self.fx.to_usd(sym, d)
         if not fx:
             return "fx_unavailable"
@@ -254,14 +264,21 @@ class Simulator:
                     if r:
                         self.close(sym, r[0], r[1], d)
 
-            # 2. entries at the open, highest score first
+            # 2. entries at the open, in the live entry order
             equity, _ = self.mark(d)
-            tripped = self.cfg.drawdown_breaker and live.drawdown_breaker_tripped(equity, self.peak)
+            tripped = False
+            if self.cfg.drawdown_breaker:
+                st = live.evaluate_drawdown_breaker(equity, self.peak, self.breaker_tripped_at, d)
+                self.peak, self.breaker_tripped_at = st.peak, st.tripped_at
+                self.breaker_trips += int(st.event == "tripped")
+                self.breaker_resumes += int(st.event == "resumed")
+                tripped = st.blocked
             self.breaker_days += int(bool(tripped))
+            mode = self.cfg.signal.mode
             fillable = sorted(
                 ((sym, sig) for sym, (sig, t) in self.pending.items()
                  if t < d and todays.get(sym) is not None),
-                key=lambda x: -(x[1]["score"] or 0),
+                key=lambda x: live.brain_entry_sort_key(x[1], mode),
             )
             for sym, sig in fillable:
                 self.pending.pop(sym, None)
@@ -304,7 +321,7 @@ class Simulator:
         return SimResult(pd.Series(eq, dtype=float).sort_index(),
                          pd.Series(inv, dtype=float).sort_index(),
                          self.trades, self.skips, self.breaker_days, self.orders,
-                         self.notional, self.fees)
+                         self.notional, self.fees, self.breaker_trips, self.breaker_resumes)
 
 
 def simulate(days, signals_by_day, bars, fx: FX, cfg: SimConfig) -> SimResult:

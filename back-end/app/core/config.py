@@ -206,6 +206,17 @@ class Settings(BaseSettings):
     # may auto-buy. Tech-only / low_confidence / failed signals never do.
     brain_require_ai_buy: bool = True
     brain_min_rr: float = 2.0                   # reward:risk computed in code from final levels
+    # Technical gate for an AI BUY. "filter" (default): the pass/fail
+    # `signal_engine.technical_filter` (trend, not overextended, liquid, no
+    # blocker); entries are ordered by AI p_win, then AI confidence.
+    # "score" (legacy): score >= BRAIN_MIN_SCORE, ordered by score. The
+    # 2021-2026 signal study (8,996 trades) found a higher compute_score did
+    # NOT predict better returns, so score no longer gates or ranks entries.
+    brain_entry_mode: str = "filter"
+    tech_filter_max_rsi: float = 75.0                  # RSI(14) must be <= this
+    tech_filter_max_ext_sma50_pct: float = 15.0        # price at most this % above SMA50
+    tech_filter_min_dollar_volume: float = 10_000_000  # 20d avg $ volume, stocks/ETFs (native ccy)
+    tech_filter_min_dollar_volume_crypto: float = 50_000_000  # 20d avg $ volume, crypto (USD)
     # Risk-based sizing: size so (entry - stop) * shares = risk_pct of equity,
     # then cap the position at max_position_pct of equity.
     brain_risk_per_trade_pct: float = 1.0
@@ -242,6 +253,11 @@ class Settings(BaseSettings):
     brain_commission_usd: float = 0.0           # per fill
     # Drawdown breaker: halt NEW entries when equity is this % below its peak.
     brain_max_drawdown_pct: float = 10.0
+    # After the breaker trips, pause new entries for this many US trading
+    # days, then reset the peak to current equity and resume. Without the
+    # reset a flat-in-cash book can never climb back to the old peak and
+    # the breaker latches forever (backtest: 1,734 blocked days after one trip).
+    brain_drawdown_pause_trading_days: int = 10
     # Same-symbol re-entry cooldown after ANY exit, in trading days.
     brain_reentry_cooldown_days: int = 3
     # Time stop for brain positions (calendar days).

@@ -125,7 +125,7 @@ export function NotFoundDisplay({ fullScreen = true }: NotFoundDisplayProps) {
         {t.error.pageNotFoundDesc}
       </p>
       <Link
-        href="/overview"
+        href="/today"
         style={{
           padding: '10px 24px',
           borderRadius: 8,

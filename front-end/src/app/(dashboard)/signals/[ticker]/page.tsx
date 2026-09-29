@@ -1,6 +1,5 @@
 'use client'
 
-import { useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
@@ -10,11 +9,9 @@ import { useToast } from '@/hooks/useToast'
 import { useWatchlist, useAddTicker, useRemoveTicker } from '@/hooks/useWatchlist'
 import { tickersApi, signalsApi, client } from '@/lib/api'
 import { Card } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
-import { ScoreRing } from '@/components/ui/ScoreRing'
-import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { PriceChart } from '@/components/charts/PriceChart'
+import { DecisionTrail } from '@/components/signals/DecisionTrail'
+import { useSignalTrail } from '@/hooks/useInsights'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { formatPrice, interpolate } from '@/lib/utils'
 import { ArrowLeft, Star, TrendingUp, TrendingDown, Minus, Brain, BookOpen, Check, X } from 'lucide-react'
@@ -60,33 +57,11 @@ export default function TickerDetailPage() {
     staleTime: 60_000,
   })
 
+  const { data: trail, isLoading: trailLoading, isError: trailError, error: trailErr } = useSignalTrail(ticker)
+
   const latest = signalHistory?.[0]
   const fundamentals = detail?.fundamentals as Record<string, string | number | null> | undefined
   const currentPrice = detail?.current_price as number | undefined
-
-  // Scoring weights — ETFs use reduced dividend weight (15% vs 35%)
-  const isHighRisk = latest?.bucket === 'HIGH_RISK'
-  const isEtf = latest?.asset_type === 'ETF'
-  const weights = useMemo(() => isHighRisk
-    ? [
-        { label: t.signal.sentimentXTwitter, pct: 35, color: theme.colors.primary },
-        { label: t.signal.catalyst, pct: 30, color: theme.colors.up },
-        { label: t.signal.technicalMomentum, pct: 25, color: theme.colors.warning },
-        { label: t.signal.fundamentals, pct: 10, color: theme.colors.textSub },
-      ]
-    : isEtf
-    ? [
-        { label: t.signal.fundamentalHealth, pct: 40, color: theme.colors.primary },
-        { label: t.signal.macroConditions, pct: 30, color: theme.colors.warning },
-        { label: t.signal.dividendReliability, pct: 15, color: theme.colors.up },
-        { label: t.signal.sentiment, pct: 15, color: theme.colors.textSub },
-      ]
-    : [
-        { label: t.signal.dividendReliability, pct: 35, color: theme.colors.up },
-        { label: t.signal.fundamentalHealth, pct: 30, color: theme.colors.primary },
-        { label: t.signal.macroConditions, pct: 25, color: theme.colors.warning },
-        { label: t.signal.sentiment, pct: 10, color: theme.colors.textSub },
-      ], [isHighRisk, isEtf, t, theme])
 
   if (loadingDetail) {
     return (
@@ -102,12 +77,17 @@ export default function TickerDetailPage() {
     <div className="space-y-4">
       {/* Back + Header */}
       <div className="flex items-center gap-3">
-        <Link href="/signals" aria-label="Go back" className="p-1.5 rounded-lg transition-opacity hover:opacity-70" style={{ color: theme.colors.textSub }}>
-          <ArrowLeft size={20} />
+        <Link
+          href="/today"
+          className="self-start inline-flex items-center gap-1 p-1.5 rounded-lg text-[13px] transition-opacity hover:opacity-70 focus-visible:outline focus-visible:outline-2"
+          style={{ color: theme.colors.accent, outlineColor: theme.colors.primary }}
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+          {t.trail.back}
         </Link>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>{ticker}</h1>
+            <h1 className="text-2xl font-semibold" style={{ color: theme.colors.text, fontFamily: 'var(--font-mono)' }}>{ticker}</h1>
             {latest?.is_gem && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ backgroundColor: theme.colors.up + '18', color: theme.colors.up }}>
                 GEM
@@ -135,9 +115,11 @@ export default function TickerDetailPage() {
               disabled={addTicker.isPending || removeTicker.isPending}
               className="p-1 rounded transition-opacity hover:opacity-70"
               title={isWatchlisted ? t.signal.removeFromWatchlist : t.signal.addToWatchlist}
-              aria-label="Toggle watchlist"
+              aria-label={isWatchlisted ? t.signal.removeFromWatchlist : t.signal.addToWatchlist}
+              aria-pressed={isWatchlisted}
             >
               <Star
+                aria-hidden="true"
                 size={18}
                 fill={isWatchlisted ? theme.colors.warning : 'none'}
                 style={{ color: isWatchlisted ? theme.colors.warning : theme.colors.textHint }}
@@ -147,9 +129,30 @@ export default function TickerDetailPage() {
           {detail?.company_name && (
             <p className="text-[13px]" style={{ color: theme.colors.text }}>{detail.company_name as string}</p>
           )}
-          <p className="text-[11px]" style={{ color: theme.colors.textSub }}>
+          <p className="text-[12px]" style={{ color: theme.colors.textSub }}>
             {detail?.exchange as string ?? ''} &middot; {(detail?.asset_type as string) === 'CRYPTO' ? t.signal.crypto : (detail?.asset_type as string) === 'ETF' ? t.signal.etf : t.signal.equity}
+            {trail?.sector && <> &middot; {trail.sector}</>}
+            {trail?.bucket && <> &middot; {trail.bucket === 'HIGH_RISK' ? t.signal.highRisk : trail.bucket === 'SAFE_INCOME' ? t.signal.safeIncome : trail.bucket}</>}
           </p>
+          {/* Decision first; the score is display-only context */}
+          <div className="flex flex-wrap items-center gap-3 mt-2">
+            {trail?.decision && (
+              <span
+                className="text-[13px] font-bold px-3 py-1.5 rounded-lg"
+                style={trail.decision.decision === 'ENTER'
+                  ? { backgroundColor: theme.colors.up, color: theme.colors.bg }
+                  : { backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text }}
+              >
+                {trail.decision.decision === 'ENTER' ? t.trail.boughtBadge : t.trail.skippedBadge}
+              </span>
+            )}
+            {(trail?.score ?? latest?.score) != null && (
+              <span className="text-[13px]" style={{ color: theme.colors.textSub }}>
+                {t.trail.scoreDisplay.replace('{score}', String(trail?.score ?? latest?.score))}{' '}
+                <span>{t.trail.displayOnly}</span>
+              </span>
+            )}
+          </div>
         </div>
         <div className="text-right">
           {(() => {
@@ -236,143 +239,22 @@ export default function TickerDetailPage() {
         )
       })()}
 
+      {/* Decision trail: filter → Grok → Sonnet → Opus → risk/order */}
+      {trailLoading ? (
+        <Skeleton width="100%" height={420} borderRadius={16} />
+      ) : trail ? (
+        <DecisionTrail trail={trail} />
+      ) : (
+        <Card>
+          <p className="text-sm" style={{ color: theme.colors.textSub }}>
+            {trailError && !/not found/i.test(String((trailErr as Error | null)?.message)) ? t.trail.loadFailed : t.trail.noTrail}
+          </p>
+        </Card>
+      )}
+
       {/* Content + Sidebar grid */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
         <div className="space-y-4">
-
-      {/* Price Chart */}
-      <Card>
-        <PriceChart symbol={ticker} />
-      </Card>
-
-      {/* Latest Signal */}
-      {latest && (
-        <Card>
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>{t.signal.latestSignal}</p>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <Badge variant={latest.action === 'BUY' ? 'buy' : latest.action === 'SELL' ? 'sell' : latest.action === 'AVOID' ? 'avoid' : 'hold'}>
-                {latest.action}
-              </Badge>
-              {latest.signal_style === 'CONTRARIAN' && <Badge variant="upgraded">{t.signal.contrarian}</Badge>}
-              {latest.signal_style === 'MOMENTUM' && <Badge variant="confirmed">{t.signal.momentum}</Badge>}
-              <Badge variant={latest.status === 'CONFIRMED' ? 'confirmed' : latest.status === 'WEAKENING' ? 'weakening' : latest.status === 'UPGRADED' ? 'upgraded' : 'cancelled'}>
-                {latest.status}
-              </Badge>
-              {latest.account_recommendation && (
-                <Badge variant={latest.account_recommendation === 'TFSA' ? 'safe' : 'risk'}>
-                  {latest.account_recommendation}
-                </Badge>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4 mb-4">
-            <ScoreRing score={latest.score} size={50} />
-            <div className="grid grid-cols-3 gap-4 flex-1">
-              <div>
-                <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.target}</p>
-                <p className="text-sm font-semibold" style={{ color: theme.colors.up }}>{formatPrice(latest.target_price)}</p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.stopLoss}</p>
-                <p className="text-sm font-semibold" style={{ color: theme.colors.down }}>{formatPrice(latest.stop_loss)}</p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.riskReward}</p>
-                <p className="text-sm font-semibold" style={{ color: theme.colors.primary }}>{latest.risk_reward ? `${latest.risk_reward.toFixed(1)}x` : '--'}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Sub-score pills */}
-          {latest.factor_labels && (() => {
-            const factorNames: Record<string, string> = {
-              dividend_reliability: t.signal.factorDividendReliability,
-              fundamental_health: t.signal.factorFundamentalHealth,
-              macro: t.signal.factorMacro,
-              sentiment: t.signal.factorSentiment,
-              catalyst: t.signal.factorCatalyst,
-              technical_momentum: t.signal.factorTechnicalMomentum,
-              fundamentals: t.signal.factorFundamentals,
-            }
-            return (
-              <div className="flex flex-wrap gap-1.5 mb-4">
-                {Object.entries(latest.factor_labels as Record<string, string>).map(([factor, label]) => {
-                  const color = label === 'Strong' ? theme.colors.up
-                    : label === 'Weak' ? theme.colors.down
-                    : theme.colors.textSub
-                  return (
-                    <span
-                      key={factor}
-                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                      style={{ backgroundColor: color + '12', color }}
-                    >
-                      {factorNames[factor] || factor}: {label}
-                    </span>
-                  )
-                })}
-              </div>
-            )
-          })()}
-
-          {/* Probability vs SPY */}
-          {latest.probability_vs_spy != null && latest.probability_vs_spy > 50 && (
-            <div className="mb-4">
-              <span
-                className="text-[11px] font-bold px-2.5 py-1 rounded-lg tabular-nums"
-                style={{ backgroundColor: theme.colors.up + '10', color: theme.colors.up }}
-              >
-                {latest.probability_vs_spy.toFixed(0)}% {t.signal.vsSpyChance ?? 'chance of beating SPY (20d)'}
-              </span>
-            </div>
-          )}
-
-          {/* Confidence + Regime */}
-          {(latest.confidence > 0 || latest.market_regime) && (
-            <div className="flex items-center gap-4 mb-4">
-              {latest.confidence > 0 && (
-                <div>
-                  <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.confidence}</p>
-                  <p className="text-sm font-semibold" style={{ color: theme.colors.primary }}>{latest.confidence}%</p>
-                </div>
-              )}
-              {latest.market_regime && (
-                <div>
-                  <p className="text-[10px] uppercase tracking-wide" style={{ color: theme.colors.textHint }}>{t.signal.regime}</p>
-                  <Badge variant={latest.market_regime === 'TRENDING' ? 'confirmed' : latest.market_regime === 'VOLATILE' ? 'hold' : 'cancelled'}>
-                    {latest.market_regime}
-                  </Badge>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Reasoning */}
-          {latest.reasoning && (
-            <div className="mb-3">
-              <p className="text-[10px] uppercase tracking-wide mb-1" style={{ color: theme.colors.textHint }}>{t.signal.whyThisSignal}</p>
-              <p className="text-sm leading-relaxed" style={{ color: theme.colors.textSub }}>{latest.reasoning}</p>
-            </div>
-          )}
-
-          {/* Score breakdown */}
-          <div>
-            <p className="text-[10px] uppercase tracking-wide mb-2" style={{ color: theme.colors.textHint }}>
-              {t.signal.scoreBreakdown} ({isHighRisk ? t.signal.highRiskModel : t.signal.safeIncomeModel})
-            </p>
-            <div className="space-y-1.5">
-              {weights.map((w) => (
-                <div key={w.label} className="flex items-center gap-2">
-                  <span className="text-[11px] w-[140px] shrink-0" style={{ color: theme.colors.textSub }}>{w.label}</span>
-                  <div className="flex-1"><ProgressBar value={w.pct} color={w.color} height={3} /></div>
-                  <span className="text-[11px] font-semibold w-8 text-right tabular-nums" style={{ color: w.color }}>{w.pct}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Card>
-      )}
 
       {/* Signal Breakdown — plain-English read of each indicator firing */}
       {(() => {

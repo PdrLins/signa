@@ -12,12 +12,22 @@ def caveats(meta: dict) -> list[str]:
         "Claude synthesis, catalysts, cited red flags) do not exist, so every signal is the "
         "live pipeline's *tech-only* signal (`compute_score` with empty grok/synthesis, "
         "`ai_status=\"skipped\"`). The live brain NEVER auto-buys tech-only signals (it "
-        "requires a validated AI BUY and score >= %s). This is NOT the brain's track record."
+        "requires a validated AI BUY that passes the technical filter — or, in legacy score "
+        "mode, score >= %s). This is NOT the brain's track record."
         % meta.get("brain_min_score"),
         "AI veto: %s" % (
             "placeholder ENABLED — it is a no-op (no historical AI data); no signal was vetoed."
             if meta.get("ai_veto") else "not simulated (no historical AI data)."),
     ]
+    if meta.get("filter_only_entries"):
+        c.append("**NON-LIVE ENTRY RULE — `--filter-only-entries`.** Portfolio entries fire on a "
+                 "technical-filter PASS alone. The live brain additionally requires a validated "
+                 "AI BUY; this run studies the filter as an entry rule, not live behaviour.")
+    elif meta.get("entry_mode") == "filter":
+        c.append("Entry mode `filter` (live default): an entry needs a validated AI BUY + a "
+                 "technical-filter PASS. No historical AI exists, so the portfolio makes no "
+                 "entries — see the signal study's *By technical filter* tables, or re-run with "
+                 "`--filter-only-entries` (NON-LIVE) / `--entry-mode score`.")
     if meta.get("include_fundamentals"):
         c.append("**LOOKAHEAD WARNING — `--include-fundamentals` is ON.** TODAY's yfinance "
                  "fundamentals (P/E, growth, margins, dividend yield, short interest, market cap) "
@@ -97,11 +107,19 @@ def render_markdown(res: dict) -> str:
     p = res["portfolio"]
     L += [f"Exposure: avg {p['equity'].get('exposure_avg_pct')}% of equity invested, "
           f"{p['equity'].get('days_invested_pct')}% of sessions with a position · turnover "
-          f"{p.get('turnover_annual_x')}x/yr · fees ${p.get('fees_usd')} · drawdown-breaker "
-          f"blocked entries on {p.get('breaker_days')} days", ""]
+          f"{p.get('turnover_annual_x')}x/yr · fees ${p.get('fees_usd')} · drawdown breaker: "
+          f"{p.get('breaker_trips', 0)} trips, {p.get('breaker_resumes', 0)} resumes, entries "
+          f"paused on {p.get('breaker_days')} days (pause "
+          f"{(meta.get('live_settings') or {}).get('brain_drawdown_pause_trading_days')} "
+          f"trading days, then peak reset)", ""]
 
     L += ["## Portfolio trades", ""]
-    if not p["trades"].get("trades"):
+    if not p["trades"].get("trades") and meta.get("entry_mode") == "filter" \
+            and not meta.get("filter_only_entries"):
+        L += ["> **No entries (expected).** Filter mode needs a validated AI BUY, which does not "
+              "exist historically. See *By technical filter* in the signal study, or use "
+              "`--filter-only-entries` (NON-LIVE).", ""]
+    elif not p["trades"].get("trades"):
         sd = res["score_distribution"]["by_bucket"]
         mx = ", ".join(f"{b} max {v['max']}" for b, v in sd.items()) or "no candidates"
         L += [f"> **No entries.** Under the live rules the tech-only score never produced a BUY "
@@ -139,6 +157,14 @@ def render_markdown(res: dict) -> str:
     L += ["### By bucket", ""] + _table(st["by_bucket"], ST_COLS, "Bucket")
     L += ["### By live tech-only action", ""] + _table(st["by_class"], ST_COLS, "Action")
     L += ["### By regime", ""] + _table(st["by_regime"], ST_COLS, "Regime")
+    if st.get("by_tech_filter"):
+        L += ["### By technical filter", "",
+              "Live `technical_filter` (trend above SMA200 with SMA50 > SMA200, RSI <= 75, "
+              "<= 15% above SMA50, 20d dollar-volume floor, no blocker). Does PASS beat FAIL?", ""]
+        L += _table(st["by_tech_filter"], ST_COLS, "Filter")
+        L += ["Failing trades by reason (a trade failing several conditions appears in each "
+              "row, so rows overlap):", ""]
+        L += _table(st.get("by_tech_filter_reason") or {}, ST_COLS, "Failing reason")
 
     sd = res["score_distribution"]
     L += ["## Score distribution (all candidate-days)", "",

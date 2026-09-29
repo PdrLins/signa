@@ -1,24 +1,24 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import {
-  TrendingUp,
+  LayoutDashboard,
+  Activity,
+  Briefcase,
+  ChartLine,
   Star,
   Settings,
   Menu,
   Brain,
-  Activity,
   Plug,
   HelpCircle,
   ScrollText,
 } from 'lucide-react'
-
-// /brain in More uses exact match so /brain/performance doesn't highlight it
-const EXACT_MORE_HREFS = new Set(['/brain'])
+import { isNavActive } from '@/components/layout/LeftNav'
 
 export function BottomNav() {
   const theme = useTheme()
@@ -28,32 +28,37 @@ export function BottomNav() {
 
   const MORE_ITEMS = useMemo(() => [
     { label: t.nav.brain, href: '/brain', icon: Brain },
-    { label: t.nav.integrations, href: '/integrations', icon: Plug },
-    { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle },
-    { label: t.nav.logs, href: '/logs', icon: ScrollText },
     { label: t.nav.settings, href: '/settings', icon: Settings },
-  ], [t])
-
-  // /brain in More menu uses exact match so /brain/performance doesn't highlight it
-
-
-  // Day 32 revamp: /brain/performance is the home tab (leftmost).
-  // /overview removed from bottom nav — it had become a low-information
-  // landing the user wasn't using.
-  const TABS = useMemo(() => [
-    { label: t.nav.brainPerformance, href: '/brain/performance', icon: Activity },
-    { label: t.nav.signals, href: '/signals', icon: TrendingUp },
     { label: t.nav.watchlist, href: '/watchlist', icon: Star },
-    { label: 'More', href: '#more', icon: Menu },
+    { label: t.nav.integrations, href: '/integrations', icon: Plug },
+    { label: t.nav.logs, href: '/logs', icon: ScrollText },
+    { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle },
   ], [t])
+
+  const TABS = useMemo(() => [
+    { label: t.nav.today, href: '/today', icon: LayoutDashboard },
+    { label: t.nav.signals, href: '/signals', icon: Activity },
+    { label: t.nav.positions, href: '/positions', icon: Briefcase },
+    { label: t.nav.isItWorkingShort, href: '/performance', icon: ChartLine },
+    { label: t.nav.more, href: '#more', icon: Menu },
+  ], [t])
+
+  const moreActive = (href: string) =>
+    href === '/brain' ? isNavActive('/brain', pathname) : (pathname === href || pathname.startsWith(href + '/'))
 
   const isMoreActive = useMemo(
-    () => MORE_ITEMS.some((item) => {
-      if (EXACT_MORE_HREFS.has(item.href)) return pathname === item.href
-      return pathname === item.href || pathname.startsWith(item.href + '/')
-    }),
+    () => MORE_ITEMS.some((item) => moreActive(item.href)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [MORE_ITEMS, pathname]
   )
+
+  // Escape closes the More sheet
+  useEffect(() => {
+    if (!moreOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMoreOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [moreOpen])
 
   return (
     <>
@@ -61,7 +66,6 @@ export function BottomNav() {
         <div
           className="fixed inset-0 z-[60] md:hidden"
           onClick={() => setMoreOpen(false)}
-          aria-label="Close more menu"
         >
           <div
             className="absolute bottom-[72px] left-0 right-0 rounded-t-2xl p-4 pb-6 animate-in slide-in-from-bottom duration-200"
@@ -73,12 +77,12 @@ export function BottomNav() {
                 : '0 -8px 24px rgba(0,0,0,0.1)',
             }}
             onClick={(e) => e.stopPropagation()}
-            role="menu"
-            aria-label="Additional navigation"
+            role="dialog"
+            aria-label={t.nav.moreNav}
           >
             <div className="grid grid-cols-3 gap-3">
               {MORE_ITEMS.map((item) => {
-                const isActive = EXACT_MORE_HREFS.has(item.href) ? pathname === item.href : (pathname === item.href || pathname.startsWith(item.href + '/'))
+                const isActive = moreActive(item.href)
                 return (
                   <Link
                     key={item.href}
@@ -88,10 +92,10 @@ export function BottomNav() {
                     style={{
                       backgroundColor: isActive ? theme.colors.primary + '15' : 'transparent',
                     }}
-                    role="menuitem"
-                    aria-label={item.label}
+                    aria-current={isActive ? 'page' : undefined}
                   >
                     <item.icon
+                      aria-hidden="true"
                       size={20}
                       style={{ color: isActive ? theme.colors.primary : theme.colors.textSub }}
                     />
@@ -119,24 +123,26 @@ export function BottomNav() {
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
         }}
-        aria-label="Main navigation"
+        aria-label={t.nav.mainNav}
       >
         <div className="flex items-center justify-around py-2 pb-[max(8px,env(safe-area-inset-bottom))]">
           {TABS.map((tab) => {
             const isMore = tab.href === '#more'
-            const isActive = isMore ? isMoreActive || moreOpen : pathname === tab.href
+            const isActive = isMore ? isMoreActive || moreOpen : isNavActive(tab.href, pathname)
             const color = isActive ? theme.colors.primary : theme.colors.textSub
 
             if (isMore) {
               return (
                 <button
+                  type="button"
                   key={tab.href}
                   onClick={() => setMoreOpen((prev) => !prev)}
-                  className="flex flex-col items-center gap-0.5 px-3 py-2"
-                  aria-label="More navigation options"
+                  className="flex flex-col items-center gap-0.5 px-2 py-2 min-w-[56px] rounded-lg focus-visible:outline focus-visible:outline-2"
+                  style={{ outlineColor: theme.colors.primary }}
+                  aria-label={t.nav.moreNav}
                   aria-expanded={moreOpen}
                 >
-                  <tab.icon size={20} style={{ color }} />
+                  <tab.icon size={20} style={{ color }} aria-hidden="true" />
                   <span className="text-[10px] font-medium" style={{ color }}>
                     {tab.label}
                   </span>
@@ -148,11 +154,12 @@ export function BottomNav() {
               <Link
                 key={tab.href}
                 href={tab.href}
-                className="flex flex-col items-center gap-0.5 px-3 py-2"
-                aria-label={tab.label}
+                className="flex flex-col items-center gap-0.5 px-2 py-2 min-w-[56px] rounded-lg focus-visible:outline focus-visible:outline-2"
+                style={{ outlineColor: theme.colors.primary }}
+                aria-current={isActive ? 'page' : undefined}
                 onClick={() => setMoreOpen(false)}
               >
-                <tab.icon size={20} style={{ color }} />
+                <tab.icon size={20} style={{ color }} aria-hidden="true" />
                 <span className="text-[10px] font-medium" style={{ color }}>
                   {tab.label}
                 </span>

@@ -21,7 +21,11 @@ the wrapper:
     fetches the live USDCAD rate. The portfolio simulator calls the same
     building blocks in the same order (apply_slippage →
     compute_entry_levels → calc_risk_position_size → check_portfolio_limits
-    → correlation gate) with point-in-time prices and FX.
+    → correlation gate) with point-in-time prices and FX. The technical
+    gate is the live `signal_engine.technical_filter` (brain_entry_mode
+    "filter") and the drawdown breaker is the live
+    `evaluate_drawdown_breaker` state machine (trip → pause N US trading
+    days → reset peak), driven with simulated trip state.
 """
 
 from __future__ import annotations
@@ -77,6 +81,10 @@ def tech_only_action(score, bucket, technical, fundamental, macro) -> tuple[str,
 
 def check_blockers(technical, fundamental, macro) -> tuple[bool, list[str]]:
     return signal_engine.check_blockers({}, fundamental, macro, technical)
+
+
+def technical_filter(technical, fundamental, asset_class_, blockers) -> tuple[bool, list[str]]:
+    return signal_engine.technical_filter(technical, fundamental, asset_class_, blockers)
 
 
 def check_entry_blackout(fundamental) -> str | None:
@@ -168,6 +176,18 @@ def compute_close_amounts(trade: dict, exit_ref_price: float, fx_exit: float) ->
 
 def drawdown_breaker_tripped(equity: float, peak: float) -> bool:
     return vp.drawdown_breaker_tripped(equity, peak)
+
+
+def evaluate_drawdown_breaker(equity: float, peak: float, tripped_at, now):
+    return vp.evaluate_drawdown_breaker(equity, peak, tripped_at, now)
+
+
+def is_ai_buy(sig: dict) -> bool:
+    return vp.is_ai_buy(sig)
+
+
+def brain_entry_sort_key(sig: dict, mode: str) -> tuple:
+    return vp.brain_entry_sort_key(sig, mode)
 
 
 def trading_days_between(a, b) -> int:

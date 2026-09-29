@@ -309,7 +309,7 @@ export function BrainPerformanceWidget() {
   })()
 
   return (
-    <Link href="/brain/performance" className="block">
+    <Link href="/positions" className="block">
     <Card>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-1.5">

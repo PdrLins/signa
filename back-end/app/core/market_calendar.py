@@ -170,7 +170,8 @@ def generate_us_holidays(year: int) -> frozenset[str]:
     days.add(_nth_weekday(year, 2, 0, 3))    # Presidents' Day
     days.add(_easter_sunday(year) - timedelta(days=2))  # Good Friday
     days.add(_last_weekday(year, 5, 0))      # Memorial Day
-    days.add(_us_observed(date(year, 6, 19)))  # Juneteenth
+    if year >= 2022:  # NYSE first closed for Juneteenth in 2022
+        days.add(_us_observed(date(year, 6, 19)))  # Juneteenth
     days.add(_us_observed(date(year, 7, 4)))   # Independence Day
     days.add(_nth_weekday(year, 9, 0, 1))    # Labor Day
     days.add(_nth_weekday(year, 11, 3, 4))   # Thanksgiving (4th Thu)
@@ -259,6 +260,36 @@ def is_market_open(exchange: str | None, on_date: date) -> bool:
         # Pre-2026 — not modeled, default open.
         return True
     return on_date.isoformat() not in holidays_for_year
+
+
+def is_us_trading_day(d: date) -> bool:
+    """True when NYSE holds a regular session on `d` (weekday, not a holiday).
+
+    Unlike `is_market_open`, years without a hardcoded / eagerly generated
+    list (e.g. the backtest's 2021-2025) are computed from the NYSE rules
+    instead of defaulting to "open".
+    """
+    if d.weekday() >= 5:
+        return False
+    holidays = _BY_EXCHANGE["NYSE"].get(d.year)
+    if holidays is None:
+        holidays = generate_us_holidays(d.year)
+    return d.isoformat() not in holidays
+
+
+def us_trading_days_between(start: date, end: date) -> int:
+    """US trading sessions strictly after `start` up to and including `end`.
+
+    0 when end <= start. Weekends and NYSE holidays are skipped.
+    """
+    if end <= start:
+        return 0
+    n, d = 0, start
+    while d < end:
+        d += timedelta(days=1)
+        if is_us_trading_day(d):
+            n += 1
+    return n
 
 
 def covered_years_for(exchange: str) -> set[int]:

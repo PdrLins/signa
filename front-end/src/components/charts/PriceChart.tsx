@@ -13,18 +13,30 @@ const Area = dynamic(() => import('recharts').then((m) => m.Area), { ssr: false 
 const XAxis = dynamic(() => import('recharts').then((m) => m.XAxis), { ssr: false })
 const YAxis = dynamic(() => import('recharts').then((m) => m.YAxis), { ssr: false })
 const Tooltip = dynamic(() => import('recharts').then((m) => m.Tooltip), { ssr: false })
+const ReferenceLine = dynamic(() => import('recharts').then((m) => m.ReferenceLine), { ssr: false })
 const ResponsiveContainer = dynamic(() => import('recharts').then((m) => m.ResponsiveContainer), { ssr: false })
+
+export interface PriceLevels {
+  entry?: number | null
+  stop?: number | null
+  target?: number | null
+  labels?: { entry: string; stop: string; target: string }
+}
 
 interface PriceChartProps {
   symbol: string
+  defaultRange?: TimeRange
+  /** Optional horizontal reference lines (entry / stop / target). */
+  levels?: PriceLevels
+  title?: string
 }
 
 const TIME_RANGES: TimeRange[] = ['1D', '1W', '1M', '3M']
 
-export const PriceChart = memo(function PriceChart({ symbol }: PriceChartProps) {
+export const PriceChart = memo(function PriceChart({ symbol, defaultRange = '1D', levels, title }: PriceChartProps) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
-  const [range, setRange] = useState<TimeRange>('1D')
+  const [range, setRange] = useState<TimeRange>(defaultRange)
   const { data: points, isLoading, isError } = usePriceHistory(symbol, range)
 
   if (isLoading) {
@@ -40,8 +52,9 @@ export const PriceChart = memo(function PriceChart({ symbol }: PriceChartProps) 
   }
 
   const prices = points.map((p) => p.price)
-  const minPrice = Math.min(...prices)
-  const maxPrice = Math.max(...prices)
+  const levelValues = [levels?.entry, levels?.stop, levels?.target].filter((v): v is number => v != null && Number.isFinite(v))
+  const minPrice = Math.min(...prices, ...levelValues)
+  const maxPrice = Math.max(...prices, ...levelValues)
   const isPositive = prices[prices.length - 1] >= prices[0]
   const lineColor = isPositive ? theme.colors.up : theme.colors.down
 
@@ -56,7 +69,7 @@ export const PriceChart = memo(function PriceChart({ symbol }: PriceChartProps) 
       {/* Time range pills */}
       <div className="flex items-center justify-between mb-3">
         <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
-          {t.charts.priceChart}
+          {title ?? t.charts.priceChart}
         </p>
         <div
           className="inline-flex items-center gap-0.5 rounded-lg px-0.5 py-0.5"
@@ -120,6 +133,18 @@ export const PriceChart = memo(function PriceChart({ symbol }: PriceChartProps) 
               labelFormatter={(label) => formatDate(String(label))}
               formatter={(value) => [`$${Number(value).toFixed(2)}`, t.charts.price]}
             />
+            {levels?.target != null && (
+              <ReferenceLine y={levels.target} stroke={theme.colors.up} strokeDasharray="5 4"
+                label={{ value: `${levels.labels?.target ?? 'Target'} $${levels.target.toFixed(2)}`, position: 'insideTopLeft', fill: theme.colors.up, fontSize: 11 }} />
+            )}
+            {levels?.entry != null && (
+              <ReferenceLine y={levels.entry} stroke={theme.colors.text} strokeDasharray="2 3"
+                label={{ value: `${levels.labels?.entry ?? 'Entry'} $${levels.entry.toFixed(2)}`, position: 'insideTopLeft', fill: theme.colors.textSub, fontSize: 11 }} />
+            )}
+            {levels?.stop != null && (
+              <ReferenceLine y={levels.stop} stroke={theme.colors.warning} strokeDasharray="5 4"
+                label={{ value: `${levels.labels?.stop ?? 'Stop'} $${levels.stop.toFixed(2)}`, position: 'insideBottomLeft', fill: theme.colors.warning, fontSize: 11 }} />
+            )}
             <Area
               type="monotone"
               dataKey="price"
