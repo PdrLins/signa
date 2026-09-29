@@ -59,9 +59,18 @@ class TestBlockers:
         assert blocked is False
 
     def test_cited_breaking_news_blocks(self):
-        grok = {"confidence": 60, "breaking_news": "Company hit with class-action lawsuit"}
+        # Updated: plain "lawsuit" was dropped from the fraud keyword
+        # fallback (routine litigation blocked mega-caps on immaterial
+        # verdicts). Fraud-type breaking news still blocks; a generic
+        # lawsuit headline no longer does.
+        grok = {"confidence": 60, "breaking_news": "SEC investigation into accounting fraud"}
         blocked, reasons = check_blockers(grok, {}, {}, {})
         assert blocked is True
+
+    def test_lawsuit_breaking_news_no_longer_blocks(self):
+        grok = {"confidence": 60, "breaking_news": "Company hit with class-action lawsuit"}
+        blocked, _ = check_blockers(grok, {}, {}, {})
+        assert blocked is False
 
     def test_hostile_macro(self):
         blocked, reasons = check_blockers(

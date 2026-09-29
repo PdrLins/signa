@@ -301,7 +301,10 @@ Return this JSON object:
   "top_themes": ["<theme grounded in retrieved posts>", "..."],
   "breaking_news": "<one-line headline of a material news item from the window, or null>",
   "breaking_news_url": "<URL of the source for breaking_news, or null>",
-  "red_flags": [{{"text": "<fraud / SEC investigation / lawsuit / delisting / accounting issue>", "url": "<source URL>"}}],
+  "red_flags": [{{"text": "<one-line description of the issue>", "url": "<source URL>",
+                  "category": <"fraud" | "regulatory" | "litigation" | "accounting" | "going_concern" | "other">,
+                  "severity": <"low" | "medium" | "high" | "critical">,
+                  "estimated_impact_usd": <monetary amount stated in the source (fine, verdict, settlement, write-down) as a plain number in USD, or null if none is stated>}}],
   "notable_accounts": ["<handle that actually posted about {ticker} in the window>"],
   "summary": "<2 sentences max, grounded in the retrieved sources>",
   "sources": ["<URL of every post/article you relied on>"]
@@ -310,7 +313,65 @@ Return this JSON object:
 Rules: every red_flags item and breaking_news must come from a retrieved source
 and carry its URL; omit anything you cannot cite. Use an empty list / null when
 there is nothing.
+{size_context}
+Red-flag severity must reflect MATERIALITY to this specific company, not how
+alarming the headline sounds:
+- critical: credible fraud/accounting-restatement allegations from regulators or
+  auditors, going-concern doubt, delisting, bankruptcy risk, or a loss that
+  threatens the business.
+- high: a probable loss or sanction above ~5% of market cap, a formal regulatory
+  enforcement action, or an issue likely to impair the core business.
+- medium: meaningful but contained (~1-5% of market cap), open investigations,
+  auditor/CFO changes, material weaknesses.
+- low: routine or immaterial for a company this size (e.g. a patent verdict or
+  settlement well under 1% of market cap, ordinary class actions, appeals pending).
+Do not inflate severity; ordinary litigation at a large company is usually "low".
 """
+
+RED_FLAG_SEVERITIES = ("low", "medium", "high", "critical")
+RED_FLAG_CATEGORIES = ("fraud", "regulatory", "litigation", "accounting", "going_concern", "other")
+
+
+def sentiment_size_context(market_cap: object = None) -> str:
+    """One prompt line telling the sentiment model the company's size, so
+    it can judge red-flag severity relative to it. Empty when unknown."""
+    cap = _safe_float(market_cap)
+    if cap is None or cap <= 0:
+        return ""
+    if cap >= 1e12:
+        human = f"${cap / 1e12:.2f} trillion"
+    elif cap >= 1e9:
+        human = f"${cap / 1e9:.1f} billion"
+    else:
+        human = f"${cap / 1e6:.0f} million"
+    return f"Company size: market capitalization is approximately {human} (USD {cap:,.0f})."
+
+
+def normalize_red_flag(flag: object) -> dict | None:
+    """Normalize one red-flag item from a sentiment model.
+
+    Always keeps {text, url}; adds `severity` / `category` /
+    `estimated_impact_usd` only when the model supplied valid values
+    (older cached results and older prompts carry none — the blocker
+    then falls back to its keyword rule). URL validation (must be a
+    cited source) is the caller's job.
+    """
+    if not isinstance(flag, dict) or not flag.get("text"):
+        return None
+    out: dict = {"text": str(flag["text"])[:200], "url": flag.get("url")}
+    sev = str(flag.get("severity") or "").strip().lower()
+    if sev in RED_FLAG_SEVERITIES:
+        out["severity"] = sev
+    cat = str(flag.get("category") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if cat in RED_FLAG_CATEGORIES:
+        out["category"] = cat
+    elif "severity" in out:
+        out["category"] = "other"
+    impact = _safe_float(flag.get("estimated_impact_usd"))
+    if impact is not None and impact > 0:
+        out["estimated_impact_usd"] = impact
+    return out
+
 
 CLAUDE_SYNTHESIS_PROMPT = """You are an investment analyst producing a trading decision for {ticker}.
 Today is {today} (UTC). Decisions are evaluated on what the price does over the
@@ -581,7 +642,59 @@ def format_fundamentals(fund_data: dict) -> str:
         lines.append(f"- Sector: {fund_data['sector']}")
     if fund_data.get("earnings_date"):
         lines.append(f"- Next Earnings: {fund_data['earnings_date']}")
+    lines.extend(_format_enrichment(fund_data))
     return "\n".join(lines) if lines else "No fundamental data available"
+
+
+def _format_enrichment(fund_data: dict) -> list[str]:
+    """Earnings surprise, estimate revisions, short-interest trend and insider
+    activity — neutral wording, one line per item, only what is present."""
+    f = fund_data or {}
+    lines: list[str] = []
+
+    surprise = _num(f, "last_eps_surprise_pct")
+    days_since = _num(f, "days_since_last_earnings")
+    if surprise is not None:
+        when = f" ({days_since:.0f} days ago)" if days_since is not None else ""
+        lines.append(f"- Last EPS surprise vs consensus: {surprise:+.1f}%{when}")
+
+    rev_parts = []
+    for key, label in (
+        ("eps_est_change_0q_30d_pct", "current-quarter EPS estimate 30d"),
+        ("eps_est_change_0q_90d_pct", "current-quarter 90d"),
+        ("eps_est_change_fy1_30d_pct", "fiscal-year EPS estimate 30d"),
+        ("eps_est_change_fy1_90d_pct", "fiscal-year 90d"),
+    ):
+        v = _num(f, key)
+        if v is not None:
+            rev_parts.append(f"{label} {v:+.1f}%")
+    if rev_parts:
+        lines.append(f"- Consensus EPS estimate changes: {', '.join(rev_parts)}")
+    up, down = _num(f, "eps_revisions_up_30d"), _num(f, "eps_revisions_down_30d")
+    if up is not None or down is not None:
+        lines.append(f"- Analyst EPS revisions last 30d: {int(up or 0)} up, {int(down or 0)} down")
+
+    sif = _num(f, "short_percent_of_float")
+    sic = _num(f, "short_interest_change_pct")
+    if sif is not None or sic is not None:
+        parts = []
+        if sif is not None:
+            parts.append(f"{sif:.1%} of float")
+        if sic is not None:
+            parts.append(f"{sic:+.1f}% vs prior month")
+        dtc = _num(f, "short_ratio_days")
+        if dtc is not None:
+            parts.append(f"{dtc:.1f} days to cover")
+        lines.append(f"- Short interest: {', '.join(parts)}")
+
+    net = _num(f, "insider_net_shares_6m")
+    if net is not None:
+        buys, sells = _num(f, "insider_buy_count_6m"), _num(f, "insider_sell_count_6m")
+        counts = ""
+        if buys is not None or sells is not None:
+            counts = f" ({int(buys or 0)} purchase / {int(sells or 0)} sale transactions)"
+        lines.append(f"- Insider net shares, last 6 months: {net:+,.0f}{counts}")
+    return lines
 
 
 def format_macro(macro_data: dict) -> str:
@@ -685,7 +798,12 @@ def format_sentiment(grok_data: dict) -> str:
     flags = grok_data.get("red_flags") or []
     for flag in flags[:3]:
         if isinstance(flag, dict) and flag.get("text"):
-            lines.append(f"- Cited red flag: {flag['text']} ({flag.get('url', '')})")
+            meta = [m for m in (flag.get("category"), flag.get("severity")) if m]
+            impact = _safe_float(flag.get("estimated_impact_usd"))
+            if impact:
+                meta.append(f"stated impact ~${impact / 1e9:.2f}B" if impact >= 1e8 else f"stated impact ~${impact:,.0f}")
+            tag = f" [{', '.join(meta)}]" if meta else ""
+            lines.append(f"- Cited red flag{tag}: {flag['text']} ({flag.get('url', '')})")
     accounts = grok_data.get("notable_accounts") or []
     if accounts:
         lines.append(f"- Notable Accounts: {', '.join(str(a) for a in accounts)}")
@@ -738,6 +856,16 @@ def format_price_context(tech_data: dict, fund_data: dict) -> str:
         lines.append(f"- vs 52-week high (${hi:.2f}): {(price / hi - 1) * 100:+.1f}%")
     if price and lo and lo > 0:
         lines.append(f"- vs 52-week low (${lo:.2f}): {(price / lo - 1) * 100:+.1f}%")
+
+    from app.scanners.indicators import compute_relative_strength
+    rs = compute_relative_strength(tech_data, fund_data)
+    for ref, label in (("benchmark", rs.get("rs_benchmark")), ("spy", "SPY")):
+        parts = [
+            f"{p} {rs[f'rs_vs_{ref}_{p}']:+.1f} pts"
+            for p in ("3m", "6m") if rs.get(f"rs_vs_{ref}_{p}") is not None
+        ]
+        if parts and label:
+            lines.append(f"- Return relative to {label}: {', '.join(parts)}")
     return "\n".join(lines) if lines else "No price-context data available"
 
 

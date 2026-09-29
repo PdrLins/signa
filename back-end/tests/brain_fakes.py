@@ -199,4 +199,6 @@ def patch_db(db: FakeDB, *, prices: dict | None = None, market_open: bool = True
     stack.enter_context(patch("app.services.virtual_portfolio.fx_to_usd",
                               side_effect=lambda s: 1.0 if not s.endswith(".TO") else fx))
     stack.enter_context(patch("app.services.watchdog_service._tg_send"))
+    # Correlation gate: no price history in tests -> check is skipped, never blocks
+    stack.enter_context(patch("app.services.portfolio_risk._load_closes", return_value={}))
     return stack

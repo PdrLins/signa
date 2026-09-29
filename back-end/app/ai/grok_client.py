@@ -21,7 +21,13 @@ from urllib.parse import urlparse
 import httpx
 from loguru import logger
 
-from app.ai.prompts import GROK_SENTIMENT_PROMPT, GROK_SENTIMENT_SYSTEM, clean_json_response
+from app.ai.prompts import (
+    GROK_SENTIMENT_PROMPT,
+    GROK_SENTIMENT_SYSTEM,
+    clean_json_response,
+    normalize_red_flag,
+    sentiment_size_context,
+)
 from app.core.config import settings
 
 _client: Optional[httpx.AsyncClient] = None
@@ -133,10 +139,14 @@ def _validate_sentiment(data: dict, ticker: str, citations: list[str]) -> dict:
     if not (isinstance(breaking, str) and breaking.strip() and _is_cited(breaking_url, cited)):
         breaking, breaking_url = None, None
 
+    # Each kept flag: {text, url} + severity / category /
+    # estimated_impact_usd when the model supplied valid values (the
+    # signal-engine blocker decides materiality from those).
     red_flags = []
     for flag in data.get("red_flags") or []:
-        if isinstance(flag, dict) and flag.get("text") and _is_cited(flag.get("url"), cited):
-            red_flags.append({"text": str(flag["text"])[:200], "url": flag["url"]})
+        norm = normalize_red_flag(flag)
+        if norm and _is_cited(norm.get("url"), cited):
+            red_flags.append(norm)
 
     try:
         mention_count = max(0, int(float(data.get("mention_count") or 0)))
@@ -195,17 +205,34 @@ def _error_response(ticker: str, reason: str) -> dict:
     }
 
 
-async def analyze_sentiment(ticker: str, max_retries: int = 3) -> dict:
+async def analyze_sentiment(
+    ticker: str, max_retries: int = 3, market_cap: float | None = None,
+) -> dict:
     """Call Grok with live X + web search to analyze sentiment for a ticker.
 
     Returns the sentiment dict (score, label, confidence, mention_count,
     top_themes, breaking_news, red_flags, notable_accounts, summary,
     citations, error). `error` is set (and confidence=0) when the call
-    failed or returned no citations.
+    failed or returned no citations. Each red flag carries `severity`,
+    `category` and `estimated_impact_usd` when the model supplied them.
+
+    `market_cap` (optional, USD) is put in the prompt so the model can
+    judge red-flag severity relative to company size.
+
+    Latency: a live-search call is dominated by server-side search turns
+    (~10-20s each) plus reasoning — observed ~57s at max_turns=4.
+    `settings.grok_max_turns` (3) bounds the turns and
+    `settings.grok_timeout_s` (75) bounds the whole request. A timed-out
+    request is NOT retried: a retry would double the wait, and the
+    provider router falls through to the next sentiment provider.
+    Successful results are cached 24h per ticker by the router.
     """
     client = await _get_client()
     from_date, to_date = search_window()
-    prompt = GROK_SENTIMENT_PROMPT.format(ticker=ticker, from_date=from_date, to_date=to_date)
+    prompt = GROK_SENTIMENT_PROMPT.format(
+        ticker=ticker, from_date=from_date, to_date=to_date,
+        size_context=sentiment_size_context(market_cap),
+    )
     body = build_search_request(prompt, system=GROK_SENTIMENT_SYSTEM)
     headers = {
         "Authorization": f"Bearer {settings.xai_api_key}",
@@ -250,6 +277,11 @@ async def analyze_sentiment(ticker: str, max_retries: int = 3) -> dict:
                 break
             parse_retry_used = True
             continue
+
+        except httpx.TimeoutException as e:
+            last_error = f"Timeout after {settings.grok_timeout_s}s: {e!r}"
+            logger.warning(f"Grok timed out for {ticker} — not retrying ({last_error})")
+            break
 
         except httpx.HTTPError as e:
             last_error = f"HTTP error: {e}"

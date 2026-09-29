@@ -677,6 +677,8 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
                 "ai_signal": None,
                 "ai_provider": None,
                 "p_win": None,
+                "routine_ai_signal": None,
+                "decision_overturned": None,
                 "sentiment_citations": 0,
                 "is_gem": False,
                 "bucket": bucket,
@@ -708,7 +710,7 @@ async def run_scan(scan_type: str, scan_id: str | None = None) -> str:
         # Phase 5: Persist signals (85-90%)
         _update_progress(85, "saving", "Persisting signals...")
         if valid_signals:
-            queries.insert_signals_batch(valid_signals)
+            _persist_signals(valid_signals)
 
         gems = [s for s in valid_signals if s.get("is_gem")]
         gems_count = len(gems)
@@ -990,7 +992,9 @@ async def _process_candidate(
             grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [], "summary": "Sentiment skipped for Safe Income (10% weight)"}
         else:
             grok_data, options_flow = await asyncio.gather(
-                ai_provider.analyze_sentiment(ticker),
+                ai_provider.analyze_sentiment(
+                    ticker, market_cap=(fundamental_data or {}).get("market_cap"),
+                ),
                 barchart_scanner.get_options_flow(ticker),
             )
     else:
@@ -1006,7 +1010,9 @@ async def _process_candidate(
             grok_data = {"score": 50, "label": "neutral", "confidence": 0, "top_themes": [], "summary": "Sentiment skipped for Safe Income (10% weight)"}
         else:
             grok_data, options_flow = await asyncio.gather(
-                ai_provider.analyze_sentiment(ticker),
+                ai_provider.analyze_sentiment(
+                    ticker, market_cap=(fundamental_data or {}).get("market_cap"),
+                ),
                 barchart_scanner.get_options_flow(ticker),
             )
         fundamental_data = dict(fundamental_data or {})
@@ -1238,6 +1244,9 @@ async def _process_candidate(
             grok_data["_ai_signal"] = _ai_signal
         if synthesis.get("self_check"):
             grok_data["_self_check"] = synthesis["self_check"]
+        # Decision-model escalation outcome ("confirmed" | "unavailable").
+        if synthesis.get("_decision"):
+            grok_data["_decision"] = synthesis["_decision"]
 
     # Build signal record
     signal_data = {
@@ -1256,6 +1265,9 @@ async def _process_candidate(
         "ai_signal": (synthesis.get("signal") or None),
         "ai_provider": synthesis.get("_provider"),
         "p_win": _clean_p_win(synthesis.get("p_win")),
+        # Routine-vs-decision model audit (migration 008): what the
+        # screening model said and whether the decision model overturned it.
+        **_decision_audit_fields(synthesis),
         "sentiment_citations": (
             len(grok_data.get("citations") or []) if isinstance(grok_data, dict) else 0
         ),
@@ -1336,6 +1348,51 @@ async def _confirm_buy_with_decision_model(
         f"confidence={decision.get('confidence')}"
     )
     return {**decision, "_routine_signal": synthesis.get("signal"), "_decision": "confirmed"}
+
+
+# Columns added by migration 008. If the migration hasn't been applied
+# yet, PostgREST rejects the whole insert — retry without them rather
+# than losing the scan's signals.
+_OUTCOME_AUDIT_COLUMNS = ("routine_ai_signal", "decision_overturned")
+
+
+def _decision_audit_fields(synthesis: dict) -> dict:
+    """routine_ai_signal / decision_overturned for the signals row.
+
+    - escalated + confirmed: routine = `_routine_signal`, overturned =
+      decision signal != routine signal (e.g. Opus said HOLD to a Sonnet BUY)
+    - escalated + unavailable: routine = the (kept) routine signal,
+      overturned = None (no decision was made)
+    - not escalated: routine = the synthesis signal (the routine model's
+      own answer), overturned = None
+    """
+    signal = synthesis.get("signal") or None
+    if synthesis.get("_decision") == "confirmed":
+        routine = synthesis.get("_routine_signal") or None
+        overturned = (
+            None if routine is None
+            else str(signal or "").upper() != str(routine).upper()
+        )
+        return {"routine_ai_signal": routine, "decision_overturned": overturned}
+    return {"routine_ai_signal": signal, "decision_overturned": None}
+
+
+def _persist_signals(signals: list[dict]) -> list[dict]:
+    """Insert the scan's signals; tolerate a DB without migration 008."""
+    try:
+        return queries.insert_signals_batch(signals)
+    except Exception as e:
+        if not any(col in str(e) for col in _OUTCOME_AUDIT_COLUMNS):
+            raise
+        logger.warning(
+            "signals insert rejected the migration-008 columns "
+            f"({e}); retrying without them — apply 008_decision_outcomes.sql"
+        )
+        stripped = [
+            {k: v for k, v in s.items() if k not in _OUTCOME_AUDIT_COLUMNS}
+            for s in signals
+        ]
+        return queries.insert_signals_batch(stripped)
 
 
 def _classify_ai_status(synthesis: dict) -> str:

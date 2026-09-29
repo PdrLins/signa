@@ -1,4 +1,14 @@
-"""Fundamental data extraction and bucket classification for backtest."""
+"""DEPRECATED — legacy divergent copy, NOT used by the backtest.
+
+This module is a hand-maintained copy of an OLD version of the scoring
+logic. It diverged from the live engine (app/ai/signal_engine.py) and is
+kept ONLY because tests/test_fundamentals.py still imports it. The rebuilt
+backtest (backtest/run_backtest.py) imports the LIVE functions instead.
+Do not add features here; delete this file once that test is retired.
+
+Original docstring follows.
+
+Fundamental data extraction and bucket classification for backtest."""
 
 NUMERIC_FIELDS = [
     "pe_ratio",

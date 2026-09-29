@@ -1,4 +1,14 @@
-"""Core scoring logic for backtest — tuned from backtest data analysis.
+"""DEPRECATED — legacy divergent copy, NOT used by the backtest.
+
+This module is a hand-maintained copy of an OLD version of the scoring
+logic. It diverged from the live engine (app/ai/signal_engine.py) and is
+kept ONLY because tests/test_scorer.py still imports it. The rebuilt
+backtest (backtest/run_backtest.py) imports the LIVE functions instead.
+Do not add features here; delete this file once that test is retired.
+
+Original docstring follows.
+
+Core scoring logic for backtest — tuned from backtest data analysis.
 
 Key findings from data:
 - RSI 55-80 wins more than oversold (57.3% vs 52.9%)

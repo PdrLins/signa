@@ -85,7 +85,7 @@ def test_decision_tier_has_its_own_cache(monkeypatch):
 def test_sentiment_cached_per_ticker(monkeypatch):
     calls = []
 
-    async def fake_route(ticker):
+    async def fake_route(ticker, market_cap=None):
         calls.append(ticker)
         return {"score": 60, "confidence": 0.8}
 
@@ -150,3 +150,15 @@ def test_escalation_can_be_disabled(monkeypatch):
     )
     assert seen == []
     assert scan_service._classify_ai_status(result) == "validated"
+
+
+def test_market_cap_reaches_sentiment_provider(monkeypatch):
+    seen = []
+
+    async def fake_route(ticker, market_cap=None):
+        seen.append(market_cap)
+        return {"score": 60, "confidence": 0.8}
+
+    monkeypatch.setattr(provider, "_route_sentiment", fake_route)
+    asyncio.run(provider.analyze_sentiment("ABC", market_cap=5e12))
+    assert seen == [5e12]

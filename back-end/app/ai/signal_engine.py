@@ -108,9 +108,11 @@ BLOCKERS (auto-AVOID, override the score entirely)
 ANY of these conditions triggers an immediate AVOID, regardless of how
 high the score is:
 
-  1. Fraud / legal risk in CITED red flags or breaking news
-     (keywords: fraud, sec investigation, lawsuit, scam, ponzi,
-     insider trading)
+  1. MATERIAL red flag in CITED evidence: severity high/critical, or
+     category fraud/accounting/going_concern at severity >= medium
+     (see `red_flag_block_reason`). Flags without severity and cited
+     breaking news fall back to keywords (fraud, sec investigation,
+     scam, ponzi, insider trading — plain "lawsuit" no longer blocks)
   2. Hostile macro environment (high VIX + high Fed funds + high CPI)
   3. Suspiciously low volume (Z-score < -2.0 OR avg < 50K)
   4. Overbought RSI > 75 (backtest: 60%+ failure rate)
@@ -330,6 +332,19 @@ def compute_score(
             "momentum_factor_score": round(momentum_factor_score, 1),
             "momentum_bonus": round(momentum_bonus, 1),
         }
+
+    # ── Richer-data adjustment (estimate revisions, relative strength,
+    # insider buying, short-interest trend). UNVALIDATED priors, small
+    # and capped at ±ENRICHMENT_CAP; stocks only. Disabled (0) by
+    # settings.enrichment_scoring_enabled=False so backtests / outcome
+    # tracking can measure the lift. See `_score_enrichment`.
+    enrichment_bonus, enrichment_detail = 0.0, {}
+    if asset_type == "STOCK" and getattr(settings, "enrichment_scoring_enabled", True):
+        enrichment_bonus, enrichment_detail = _score_enrichment(fundamental_data, technical_data)
+        total = total + enrichment_bonus
+    breakdown["enrichment_bonus"] = round(enrichment_bonus, 1)
+    if enrichment_detail:
+        breakdown["enrichment_detail"] = enrichment_detail
 
     score = max(0, min(100, total))
 
@@ -555,10 +570,16 @@ def check_blockers(
 
     The 6 blockers, in order of severity:
 
-      1. FRAUD / LEGAL RISK
-         Triggers if any of these keywords appear in a CITED red flag
-         or in (cited-only) breaking news:
-           fraud, sec investigation, lawsuit, scam, ponzi, insider trading
+      1. MATERIAL RED FLAG (cited evidence only)
+         A red flag with a cited url blocks when the sentiment model
+         rated it severity high/critical, or category fraud / accounting
+         / going_concern at severity >= medium — unless a stated monetary
+         impact is < 1% of market cap for a non-integrity category (a
+         $5.7B patent verdict at a ~$5T company is immaterial). Flags
+         without severity (old prompts / cached results) and cited
+         breaking news use the keyword fallback: fraud, sec
+         investigation, scam, ponzi, insider trading. Plain "lawsuit" no
+         longer blocks — routine litigation is not a fraud signal.
          Why: an earnings beat means nothing if the SEC is closing in.
 
       2. (Reserved — was "2+ consecutive earnings misses" in earlier
@@ -612,28 +633,27 @@ def check_blockers(
     macro_data = macro_data or {}
     technical_data = technical_data or {}
 
-    # 1. Fraud / legal risk — CITED evidence only.
-    # The sentiment provider validates `red_flags` (list of {text, url},
-    # each url must be one of the live-search citations) and
-    # `breaking_news` (kept only when its url is cited). The free-text
-    # `summary` / `top_themes` are uncited LLM prose — a keyword there is
-    # as likely hallucinated or generic ("no lawsuit risk") as real, so
-    # they are ignored. A failed / uncited sentiment call (error set or
-    # confidence 0) contributes nothing.
+    # 1. Material red flag — CITED evidence only.
+    # The sentiment provider validates `red_flags` (list of {text, url,
+    # severity?, category?, estimated_impact_usd?}; each url must be one
+    # of the live-search citations) and `breaking_news` (kept only when
+    # its url is cited). The free-text `summary` / `top_themes` are
+    # uncited LLM prose — a keyword there is as likely hallucinated or
+    # generic ("no lawsuit risk") as real, so they are ignored. A failed
+    # / uncited sentiment call (error set or confidence 0) contributes
+    # nothing. Materiality rules: see `red_flag_block_reason`.
     sentiment_ok = not grok_data.get("error") and (grok_data.get("confidence") or 0) > 0
     if sentiment_ok:
-        fraud_keywords = ["fraud", "sec investigation", "lawsuit", "scam", "ponzi", "insider trading"]
+        market_cap = fundamental_data.get("market_cap")
         for flag in grok_data.get("red_flags") or []:
-            text = (flag.get("text") if isinstance(flag, dict) else "") or ""
-            url = flag.get("url") if isinstance(flag, dict) else None
-            hit = next((k for k in fraud_keywords if k in text.lower()), None)
-            if hit and url:
-                reasons.append(f"Fraud/legal risk: '{hit}' in cited red flag ({url})")
+            reason = red_flag_block_reason(flag, market_cap)
+            if reason:
+                reasons.append(reason)
                 break
 
         news = grok_data.get("breaking_news") or ""
         if news and isinstance(news, str):
-            hit = next((k for k in fraud_keywords if k in news.lower()), None)
+            hit = _fraud_keyword(news)
             if hit:
                 reasons.append(f"Breaking news red flag: '{hit}'")
 
@@ -664,6 +684,70 @@ def check_blockers(
         logger.warning(f"Signal BLOCKED: {', '.join(reasons)}")
 
     return is_blocked, reasons
+
+
+# Keyword fallback for flags WITHOUT a model severity (older prompt /
+# cached sentiment) and for cited breaking news. "lawsuit" was dropped:
+# routine litigation is not a fraud signal and blocked mega-caps on
+# immaterial verdicts.
+FRAUD_KEYWORDS = ("fraud", "sec investigation", "scam", "ponzi", "insider trading")
+_SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+# Categories that block from "medium" up — integrity / solvency issues
+# where the stated dollar amount understates the damage.
+_INTEGRITY_CATEGORIES = ("fraud", "accounting", "going_concern")
+# A stated monetary impact below this fraction of market cap makes a
+# non-integrity flag immaterial even if the model rated it "high".
+IMMATERIAL_IMPACT_FRACTION = 0.01
+
+
+def _fraud_keyword(text: str) -> str | None:
+    low = (text or "").lower()
+    return next((k for k in FRAUD_KEYWORDS if k in low), None)
+
+
+def red_flag_block_reason(flag: dict, market_cap: float | None = None) -> str | None:
+    """Return a blocker reason if this red flag is MATERIAL, else None.
+
+    Rules (a url — i.e. a cited source — is always required):
+      • severity present (new sentiment schema):
+          - category fraud / accounting / going_concern and severity >= medium → block
+          - any category with severity high / critical → block, EXCEPT a
+            non-integrity flag whose stated `estimated_impact_usd` is
+            < IMMATERIAL_IMPACT_FRACTION (1%) of market cap
+          - everything else (low; medium litigation/regulatory/other) → no block
+      • severity absent (legacy): block only on the fraud keywords
+        (fraud, sec investigation, scam, ponzi, insider trading).
+    """
+    if not isinstance(flag, dict):
+        return None
+    url = flag.get("url")
+    text = str(flag.get("text") or "")
+    if not url or not text:
+        return None
+
+    severity = str(flag.get("severity") or "").lower()
+    if severity not in _SEVERITY_RANK:
+        hit = _fraud_keyword(text)
+        return f"Fraud/legal risk: '{hit}' in cited red flag ({url})" if hit else None
+
+    rank = _SEVERITY_RANK[severity]
+    category = str(flag.get("category") or "other").lower()
+    if category in _INTEGRITY_CATEGORIES and rank >= _SEVERITY_RANK["medium"]:
+        return f"Material red flag ({category}, {severity}): {text[:120]} ({url})"
+    if rank >= _SEVERITY_RANK["high"]:
+        impact = flag.get("estimated_impact_usd")
+        try:
+            frac = float(impact) / float(market_cap) if impact and market_cap else None
+        except (TypeError, ValueError, ZeroDivisionError):
+            frac = None
+        if frac is not None and frac < IMMATERIAL_IMPACT_FRACTION:
+            logger.info(
+                f"Red flag rated {severity} but stated impact is {frac:.2%} of market cap "
+                f"— treated as immaterial: {text[:80]}"
+            )
+            return None
+        return f"Material red flag ({category}, {severity}): {text[:120]} ({url})"
+    return None
 
 
 def check_entry_blackout(fundamental_data: dict) -> str | None:
@@ -771,6 +855,88 @@ def determine_status(
 # ============================================================
 # PRIVATE SCORING HELPERS
 # ============================================================
+
+ENRICHMENT_CAP = 5.0
+
+
+def _score_enrichment(fund_data: dict, technical_data: dict) -> tuple[float, dict]:
+    """Additive score points from the richer equity data (±ENRICHMENT_CAP).
+
+    ALL WEIGHTS HERE ARE UNVALIDATED PRIORS, deliberately small. They
+    encode well-documented effects (analyst estimate-revision momentum,
+    industry-relative price momentum, opportunistic insider buying,
+    rising short interest as informed pessimism) but have NOT been
+    backtested on this system. `settings.enrichment_scoring_enabled`
+    turns them off; `breakdown["enrichment_detail"]` records each part so
+    outcome tracking can attribute results. Missing data → 0.
+
+      revisions (±3): mean % change of consensus EPS estimates
+          (`eps_revision_momentum`): >=+5 → +2, >=+1 → +1, <=-1 → -1,
+          <=-5 → -2; plus ±1 when 30-day up/down revision counts differ
+          by >= 3.
+      relative_strength (±2): mean of 3m/6m return minus the sector ETF
+          (XIU.TO for TSX; SPY when no sector benchmark), in %-points:
+          >=+10 → +2, >=+3 → +1, <=-3 → -1, <=-10 → -2.
+      insider_buying (0..+1): net insider shares bought over 6 months > 0
+          with >= 2 purchase transactions. Selling is NOT penalized
+          (usually diversification / tax / comp-driven).
+      short_interest (-1..0): shares short up >= 25% month over month.
+    """
+    from app.scanners.indicators import compute_relative_strength
+
+    fund_data = fund_data or {}
+    detail: dict = {}
+
+    def _f(key):
+        v = fund_data.get(key)
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    rev = 0.0
+    m = _f("eps_revision_momentum")
+    if m is not None:
+        if m >= 5:
+            rev += 2
+        elif m >= 1:
+            rev += 1
+        elif m <= -5:
+            rev -= 2
+        elif m <= -1:
+            rev -= 1
+    up, down = _f("eps_revisions_up_30d"), _f("eps_revisions_down_30d")
+    if up is not None or down is not None:
+        net = (up or 0) - (down or 0)
+        if net >= 3:
+            rev += 1
+        elif net <= -3:
+            rev -= 1
+    rev = max(-3.0, min(3.0, rev))
+    if rev:
+        detail["revisions"] = rev
+
+    rs = compute_relative_strength(technical_data or {}, fund_data)
+    rs_vals = [rs[k] for k in ("rs_vs_benchmark_3m", "rs_vs_benchmark_6m") if k in rs]
+    if not rs_vals:
+        rs_vals = [rs[k] for k in ("rs_vs_spy_3m", "rs_vs_spy_6m") if k in rs]
+    if rs_vals:
+        avg = sum(rs_vals) / len(rs_vals)
+        pts = 2 if avg >= 10 else 1 if avg >= 3 else -2 if avg <= -10 else -1 if avg <= -3 else 0
+        if pts:
+            detail["relative_strength"] = float(pts)
+
+    net_sh, buys = _f("insider_net_shares_6m"), _f("insider_buy_count_6m")
+    if net_sh is not None and net_sh > 0 and (buys or 0) >= 2:
+        detail["insider_buying"] = 1.0
+
+    sic = _f("short_interest_change_pct")
+    if sic is not None and sic >= 25:
+        detail["short_interest"] = -1.0
+
+    total = max(-ENRICHMENT_CAP, min(ENRICHMENT_CAP, sum(detail.values())))
+    return total, detail
+
 
 def _score_dividend_reliability(fund_data: dict) -> float:
     """Score dividend reliability (0-100)."""

@@ -40,6 +40,12 @@ ENTRY (all must pass, see `_evaluate_brain_entry`)
      brain_max_per_sector, brain_max_crypto_pct. No rotation — when full,
      new candidates simply wait.
   8. CAD listings need a USDCAD rate; without one the entry is skipped.
+  9. Correlation gate (`_correlation_gate` → portfolio_risk, LONG only,
+     `brain_correlation_check_enabled`): skip "correlation_limit" when the
+     candidate's 120d daily-return correlation to any open position is
+     >= brain_corr_max_pairwise, or >= brain_corr_cluster_max open
+     positions correlate >= brain_corr_cluster_threshold. Missing price
+     history never blocks. Optional post-trade beta cap (off by default).
 
 EXIT (`evaluate_exit`, used by check_virtual_exits AND the watchdog)
   STOP_HIT       price through stop — always hard, never thesis-gated.
@@ -1204,6 +1210,37 @@ def _evaluate_brain_entry(sig: dict, ctx: BrainEntryContext, direction: str = "L
     return None, plan
 
 
+def _correlation_gate(sig: dict, plan: dict, ctx: BrainEntryContext) -> str | None:
+    """Portfolio correlation / beta gate, run AFTER `_evaluate_brain_entry`
+    passed (so history is only fetched for real candidates). Kept out of
+    `_evaluate_brain_entry` so offline callers (backtest) never hit the
+    network. Returns a skip reason or None; details go to plan["correlation"].
+    No-op (plan untouched) when brain_correlation_check_enabled is False.
+    """
+    if not settings.brain_correlation_check_enabled or plan.get("direction") != "LONG":
+        return None
+    from app.services import portfolio_risk
+
+    try:
+        check = portfolio_risk.check_correlation_limit(
+            symbol=sig.get("symbol"), alloc_usd=float(plan.get("alloc_usd") or 0),
+            equity_usd=ctx.equity, open_book=ctx.open_book,
+        )
+    except Exception as e:  # never block an entry on a risk-model bug
+        logger.warning(f"Correlation gate error for {sig.get('symbol')}: {e}")
+        plan["correlation"] = {"status": "skipped", "why": "error"}
+        return None
+    plan["correlation"] = check.details
+    if check.reason:
+        d = check.details
+        logger.info(
+            f"Brain SKIP {sig.get('symbol')}: {check.reason} (rule={d.get('rule')}, "
+            f"max_corr={d.get('max_corr')} vs {d.get('max_corr_symbol')}, "
+            f"cluster={d.get('cluster_symbols')}, beta={d.get('post_trade_beta')})"
+        )
+    return check.reason
+
+
 def _open_brain_position(db, sig: dict, plan: dict, ctx: BrainEntryContext, now_iso: str) -> str | None:
     """Open a planned brain position with wallet-safe ordering.
 
@@ -1323,6 +1360,7 @@ def _decision_row(scan_id, sig: dict, decision: str, reason: str, plan: dict | N
         "risk_usd": plan.get("risk_usd"),
         "sector": plan.get("sector"),
         "trade_id": plan.get("trade_id"),
+        "correlation": plan.get("correlation"),
     }
     return {
         "scan_id": scan_id or sig.get("scan_id"),
@@ -1530,6 +1568,8 @@ def process_virtual_trades(
 
         # ── 4. Brain entry ──
         reason, plan = _evaluate_brain_entry(sig, ctx, "LONG")
+        if not reason:
+            reason = _correlation_gate(sig, plan, ctx)
         if reason:
             _decide(sig, "SKIP", reason, plan)
             logger.debug(f"Brain SKIP {symbol} (score {score}): {reason}")
@@ -2665,5 +2705,19 @@ def snapshot_virtual_portfolio() -> dict:
         snapshot.pop("brain_equity", None)
         db.table("virtual_snapshots").upsert(snapshot, on_conflict="snapshot_date").execute()
     logger.info(f"Virtual snapshot saved for {today}: brain_cum={brain_cum:+.1f}%, watchlist_cum={watchlist_cum:+.1f}%")
+
+    # Portfolio risk (correlation / beta / vol) — reported, not persisted:
+    # virtual_snapshots has no column for it yet.
+    try:
+        from app.services.portfolio_risk import get_portfolio_risk_metrics
+        risk = get_portfolio_risk_metrics()
+        snapshot["portfolio_risk"] = risk
+        logger.info(
+            f"Portfolio risk: n={risk['n_positions']} beta={risk['beta']} "
+            f"vol={risk['vol_annual_pct']}% avg_corr={risk['avg_pairwise_corr']} "
+            f"largest_cluster={risk['largest_cluster']['symbols']}"
+        )
+    except Exception as e:
+        logger.warning(f"Portfolio risk metrics failed: {e}")
 
     return snapshot

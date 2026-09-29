@@ -136,6 +136,28 @@ async def catch_up_missed_scans():
             logger.error(f"Catch-up scan {scan_type} failed: {e}")
 
 
+async def candidate_outcome_tracking():
+    """5:15 PM ET — seed + fill counterfactual candidate outcomes.
+
+    Runs after the AFTER_CLOSE scan (so today's signals get seeded) and
+    before the 5:30 PM daily learning loop (which reads the filled rows).
+    Seeds one candidate_outcomes row per new signal, then fills every
+    5/10/20 trading-day horizon that has elapsed with forward returns vs
+    SPY. Idempotent; see app/services/decision_outcomes.py.
+    """
+    import asyncio
+    from app.core.config import settings
+
+    if not settings.outcomes_enabled:
+        return
+    try:
+        from app.services.decision_outcomes import run_outcome_tracking
+        result = await asyncio.to_thread(run_outcome_tracking)
+        logger.info(f"Candidate outcomes: {result}")
+    except Exception as e:
+        logger.error(f"Candidate outcome tracking failed: {e}")
+
+
 async def daily_learning_loop():
     """5:30 PM ET — Autonomous Daily Learning Loop.
 

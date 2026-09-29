@@ -101,8 +101,12 @@ class Settings(BaseSettings):
     grok_base_url: str = "https://api.x.ai/v1"
     grok_model: str = "grok-4.7"
     grok_search_window_hours: int = 48
-    grok_max_turns: int = 4  # cap on server-side search tool turns per request
-    grok_timeout_s: int = 90
+    # Latency: each server-side search turn costs ~10-20s (observed ~57s
+    # per call at 4 turns). 3 turns (one X + one web search + a follow-up)
+    # is enough for a 48h window; a timed-out request is not retried
+    # (router falls through to Gemini). Results are cached 24h per ticker.
+    grok_max_turns: int = 3  # cap on server-side search tool turns per request
+    grok_timeout_s: int = 75
 
     # --- Gemini ---
     gemini_api_key: str = ""
@@ -166,6 +170,14 @@ class Settings(BaseSettings):
     macd_hist_strong_atr: float = 0.25
     # No new BUY when the next earnings report is within N trading days.
     earnings_blackout_trading_days: int = 3
+    # Richer equity data (scanners/enrichment.py): estimate revisions,
+    # relative strength vs sector ETF / SPY, short-interest trend, insider
+    # buying. fetch=False skips the extra yfinance requests entirely;
+    # scoring=False keeps the data (prompt context) but zeroes the
+    # UNVALIDATED score contributions so backtests can A/B them.
+    enrichment_fetch_enabled: bool = True
+    enrichment_scoring_enabled: bool = True
+    enrichment_cache_hours: int = 12
 
     # --- Scheduler ---
     timezone: str = "America/New_York"
@@ -201,6 +213,17 @@ class Settings(BaseSettings):
     brain_max_open_positions: int = 8           # all brain positions (long + short)
     brain_max_per_sector: int = 2
     brain_max_crypto_pct: float = 25.0          # max % of equity (cost basis) in crypto
+    # Correlation gate (services/portfolio_risk.py), LONG entries only, after
+    # the limits above. Block when the candidate's daily-return correlation to
+    # ANY open position >= corr_max_pairwise, OR when >= corr_cluster_max open
+    # positions correlate >= corr_cluster_threshold. Missing data -> no block.
+    brain_correlation_check_enabled: bool = True
+    brain_corr_lookback_days: int = 120         # trading days of daily returns
+    brain_corr_min_obs: int = 40                # min overlapping returns per pair
+    brain_corr_max_pairwise: float = 0.80
+    brain_corr_cluster_threshold: float = 0.70
+    brain_corr_cluster_max: int = 2
+    brain_max_portfolio_beta: float = 0.0       # post-trade beta-to-SPY cap; 0 = off
     # Default levels when Claude's are absent: stop = entry - k*ATR,
     # target = entry + R_mult * (entry - stop).
     brain_stop_atr_mult: float = 2.0
@@ -463,6 +486,17 @@ class Settings(BaseSettings):
     # Hypotheses are shown to Claude only once they have this many observed
     # trades; below it they're noise that can still sway a live decision.
     hypothesis_prompt_min_observations: int = 30
+
+    # --- Counterfactual candidate outcomes (migration 008) ---
+    # Daily 17:15 ET job: seed one candidate_outcomes row per signal and
+    # fill 5/10/20 trading-day forward returns vs SPY. Read by the daily
+    # learning report (skip-reason effectiveness, p_win calibration,
+    # routine-vs-decision model, AI-status cohorts).
+    outcomes_enabled: bool = True
+    outcomes_seed_lookback_days: int = 7        # seed signals created in this window
+    outcomes_fill_max_age_days: int = 60        # stop retrying fills older than this
+    outcomes_report_lookback_days: int = 180    # window analysed by daily learning
+    outcomes_benchmark: str = "SPY"             # benchmark for excess returns (all assets)
 
     # --- Language ---
     language: str = "en"  # "en" or "pt"

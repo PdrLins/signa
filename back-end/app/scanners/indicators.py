@@ -211,6 +211,43 @@ def compute_indicators(
         return {}
 
 
+def compute_relative_strength(technical_data: dict, fundamental_data: dict) -> dict:
+    """Stock 3m/6m return minus its benchmark ETF and minus SPY (in %-points).
+
+    The stock side is `momentum_3m` / `momentum_6m` from
+    `compute_indicators` (63 / 126 completed bars). The benchmark side is
+    stored in fundamental_data by `scanners.enrichment.get_enrichment`
+    (`rs_benchmark` = sector SPDR ETF, or XIU.TO for TSX names, plus
+    `rs_benchmark_return_3m/6m` and `spy_return_3m/6m`, same bar windows).
+
+    Returns only the keys that are computable:
+      rs_benchmark, rs_vs_benchmark_3m, rs_vs_benchmark_6m,
+      rs_vs_spy_3m, rs_vs_spy_6m.
+    """
+    technical_data = technical_data or {}
+    fundamental_data = fundamental_data or {}
+    out: dict = {}
+
+    def _num(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    for period in ("3m", "6m"):
+        stock = _num(technical_data.get(f"momentum_{period}"))
+        if stock is None:
+            continue
+        bench = _num(fundamental_data.get(f"rs_benchmark_return_{period}"))
+        if bench is not None and fundamental_data.get("rs_benchmark"):
+            out[f"rs_vs_benchmark_{period}"] = round(stock - bench, 2)
+            out["rs_benchmark"] = fundamental_data["rs_benchmark"]
+        spy = _num(fundamental_data.get(f"spy_return_{period}"))
+        if spy is not None:
+            out[f"rs_vs_spy_{period}"] = round(stock - spy, 2)
+    return out
+
+
 def compute_momentum_score(indicators: dict) -> float:
     """Compute a simple momentum score (0-100) from technical indicators."""
     score = 50.0

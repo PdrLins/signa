@@ -9,6 +9,7 @@ from app.core.scan_schedule import SCAN_SCHEDULE
 from app.scheduler.jobs import (
     after_close_scan,
     brain_watchdog,
+    candidate_outcome_tracking,
     cleanup_expired_tokens,
     daily_learning_loop,
     midday_scan,
@@ -77,6 +78,17 @@ def init_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # 5:15 PM ET — Counterfactual candidate outcomes (seed + fill forward
+    # returns). Before the 5:30 learning loop, which reads them.
+    if settings.outcomes_enabled:
+        scheduler.add_job(
+            candidate_outcome_tracking,
+            CronTrigger(hour=17, minute=15, day_of_week="mon-fri", timezone=settings.timezone),
+            id="candidate_outcome_tracking",
+            name="Candidate Outcome Tracking (5:15 PM ET)",
+            replace_existing=True,
+        )
+
     # 5:30 PM ET — Daily Learning Loop. Must run AFTER virtual_portfolio_snapshot
     # (5:00 PM) and the AFTER_CLOSE scan (4:30 PM) so the analysis sees the
     # day's full close-out. See app/services/daily_learning/ for design.
@@ -120,7 +132,7 @@ def init_scheduler() -> AsyncIOScheduler:
     watchdog_status = "enabled" if settings.watchdog_enabled else "disabled"
     logger.info(
         f"Scheduler configured: {len(SCAN_SCHEDULE)} scans + cleanup + snapshot "
-        f"+ daily-learning + watchdog ({watchdog_status}) "
+        f"+ outcomes + daily-learning + watchdog ({watchdog_status}) "
         f"(timezone: {settings.timezone})"
     )
 

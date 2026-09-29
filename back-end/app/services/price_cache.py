@@ -228,3 +228,84 @@ def fx_to_usd(symbol: str | None) -> Optional[float]:
         return 1.0
     rate = get_usdcad_rate()
     return (1.0 / rate) if rate else None
+
+
+# ── Daily close history (portfolio risk: correlation / beta / vol) ────
+#
+# ~1y of daily closes per symbol, cached 6h (correlations over 120 trading
+# days barely move intraday). A failed/empty symbol is cached as None for
+# 30 min so one bad ticker doesn't trigger a Yahoo call on every scan.
+
+_history_cache = TTLCache(max_size=1000, default_ttl=6 * 3600)
+_HISTORY_MISS_TTL = 1800
+
+
+def _close_series_from_download(data, sym: str, multi: bool):
+    """Pull a clean Close series for `sym` out of a yf.download frame."""
+    try:
+        if multi:
+            close = data["Close"]
+            if sym not in close.columns:
+                return None
+            s = close[sym]
+        else:
+            s = data["Close"]
+            if hasattr(s, "columns"):  # MultiIndex single ticker (newer yfinance)
+                s = s.iloc[:, 0]
+        s = s.dropna()
+        s = s[s > 0]
+        if s.empty:
+            return None
+        import pandas as pd
+
+        idx = pd.DatetimeIndex(s.index)
+        if idx.tz is not None:  # crypto bars come back tz-aware
+            idx = idx.tz_localize(None)
+        s.index = idx.normalize()
+        s = s[~s.index.duplicated(keep="last")]
+        s.name = sym
+        return s
+    except Exception as e:
+        logger.debug(f"History parse failed for {sym}: {e}")
+        return None
+
+
+def fetch_daily_closes(symbols: list[str], period: str = "1y") -> dict:
+    """Daily closes per symbol → {symbol: pandas.Series indexed by date}.
+
+    One batched yf.download for all uncached symbols (synchronous — call
+    via asyncio.to_thread from async code). Symbols with no data are
+    simply absent from the result; never raises.
+    """
+    out: dict = {}
+    missing: list[str] = []
+    for sym in dict.fromkeys(s for s in symbols if s):
+        entry = _history_cache.get(f"hist:{period}:{sym}")
+        if entry is None:
+            missing.append(sym)
+        elif entry is not False:
+            out[sym] = entry
+    if not missing:
+        return out
+    try:
+        import pandas as pd
+        import yfinance as yf
+
+        data = yf.download(missing, period=period, interval="1d", progress=False,
+                           threads=False, auto_adjust=True)
+        multi = data is not None and not data.empty and isinstance(data.columns, pd.MultiIndex) \
+            and len(missing) > 1
+        for sym in missing:
+            s = None
+            if data is not None and not data.empty:
+                s = _close_series_from_download(data, sym, multi)
+            if s is None:
+                _history_cache.set(f"hist:{period}:{sym}", False, ttl=_HISTORY_MISS_TTL)
+            else:
+                _history_cache.set(f"hist:{period}:{sym}", s)
+                out[sym] = s
+    except Exception as e:
+        logger.warning(f"Daily history fetch failed for {len(missing)} symbols: {e}")
+        for sym in missing:
+            _history_cache.set(f"hist:{period}:{sym}", False, ttl=_HISTORY_MISS_TTL)
+    return out

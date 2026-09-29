@@ -843,3 +843,109 @@ def get_brain_decisions(scan_id: str | None = None, symbol: str | None = None, l
     if symbol:
         query = query.eq("symbol", symbol)
     return (query.order("decided_at", desc=True).limit(limit).execute()).data or []
+
+
+# ============================================================
+# CANDIDATE OUTCOMES (counterfactual forward returns — migration 008)
+# ============================================================
+
+_OUTCOME_PAGE = 1000  # PostgREST default max rows per request
+_OUTCOME_SIGNAL_COLUMNS = (
+    "id, scan_id, symbol, exchange, asset_type, created_at, price_at_signal, "
+    "action, score, ai_status, ai_signal, ai_provider, p_win, bucket, "
+    "routine_ai_signal, decision_overturned"
+)
+
+
+def _select_all_pages(build_query, page_size: int = _OUTCOME_PAGE, max_rows: int = 50_000) -> list[dict]:
+    """Page through a select with .range() until a short page comes back."""
+    rows: list[dict] = []
+    start = 0
+    while start < max_rows:
+        page = (build_query().range(start, start + page_size - 1).execute()).data or []
+        rows.extend(page)
+        if len(page) < page_size:
+            break
+        start += page_size
+    return rows
+
+
+def get_signals_for_outcomes(since_iso: str) -> list[dict]:
+    """Signals created at/after `since_iso`, with the columns outcome tracking needs."""
+    client = get_client()
+
+    def _q():
+        return (
+            client.table("signals").select(_OUTCOME_SIGNAL_COLUMNS)
+            .gte("created_at", since_iso).order("created_at")
+        )
+    return _select_all_pages(_q)
+
+
+def get_candidate_outcome_signal_ids(since_iso: str) -> set[str]:
+    """signal_ids that already have a candidate_outcomes row (signal_at >= since)."""
+    client = get_client()
+
+    def _q():
+        return (
+            client.table("candidate_outcomes").select("signal_id")
+            .gte("signal_at", since_iso).order("signal_at")
+        )
+    return {r["signal_id"] for r in _select_all_pages(_q) if r.get("signal_id")}
+
+
+def get_brain_decisions_for_scans(scan_ids: list[str], chunk: int = 100) -> list[dict]:
+    """brain_decisions rows for the given scan ids (chunked IN queries)."""
+    client = get_client()
+    ids = [s for s in dict.fromkeys(scan_ids) if s]
+    out: list[dict] = []
+    for i in range(0, len(ids), chunk):
+        part = ids[i:i + chunk]
+        out.extend(
+            (client.table("brain_decisions")
+             .select("scan_id, symbol, decision, reason, decided_at")
+             .in_("scan_id", part).execute()).data or []
+        )
+    return out
+
+
+def insert_candidate_outcomes(rows: list[dict], chunk: int = 500) -> int:
+    """Insert candidate_outcomes rows; duplicates on signal_id are ignored."""
+    if not rows:
+        return 0
+    client = get_client()
+    for i in range(0, len(rows), chunk):
+        client.table("candidate_outcomes").upsert(
+            rows[i:i + chunk], on_conflict="signal_id", ignore_duplicates=True,
+        ).execute()
+    return len(rows)
+
+
+def get_unfilled_candidate_outcomes(since_iso: str) -> list[dict]:
+    """Outcome rows with at least one horizon still empty (20d is filled last)."""
+    client = get_client()
+
+    def _q():
+        return (
+            client.table("candidate_outcomes").select("*")
+            .gte("signal_at", since_iso).is_("filled_20d_at", "null").order("signal_at")
+        )
+    return _select_all_pages(_q)
+
+
+def update_candidate_outcome(row_id: str, fields: dict) -> None:
+    """Patch one candidate_outcomes row."""
+    if fields:
+        get_client().table("candidate_outcomes").update(fields).eq("id", row_id).execute()
+
+
+def get_candidate_outcomes(since_iso: str) -> list[dict]:
+    """All candidate_outcomes rows with signal_at >= since (for analysis)."""
+    client = get_client()
+
+    def _q():
+        return (
+            client.table("candidate_outcomes").select("*")
+            .gte("signal_at", since_iso).order("signal_at")
+        )
+    return _select_all_pages(_q)

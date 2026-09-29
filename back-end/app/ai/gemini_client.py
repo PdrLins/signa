@@ -54,7 +54,9 @@ from app.ai.prompts import (
     GROK_SENTIMENT_SYSTEM,
     build_synthesis_prompt,
     clean_json_response,
+    normalize_red_flag,
     normalize_synthesis_result,
+    sentiment_size_context,
     synthesis_error_response,
 )
 from app.core.config import settings
@@ -191,8 +193,14 @@ def _grounding_urls(response) -> list[str]:
     return urls
 
 
-async def analyze_sentiment(ticker: str, max_retries: int = 2) -> dict:
-    """Call Gemini (Google Search grounded) to analyze news sentiment for a ticker."""
+async def analyze_sentiment(
+    ticker: str, max_retries: int = 2, market_cap: float | None = None,
+) -> dict:
+    """Call Gemini (Google Search grounded) to analyze news sentiment for a ticker.
+
+    `market_cap` (optional, USD) lets the model judge red-flag severity
+    relative to company size (same prompt as Grok).
+    """
     from datetime import datetime, timedelta, timezone
 
     from google.genai import types
@@ -201,7 +209,7 @@ async def analyze_sentiment(ticker: str, max_retries: int = 2) -> dict:
     start = now - timedelta(hours=settings.grok_search_window_hours)
     prompt = (
         f"{GROK_SENTIMENT_SYSTEM}\n\n"
-        f"{GROK_SENTIMENT_PROMPT.format(ticker=ticker, from_date=start.date().isoformat(), to_date=now.date().isoformat())}\n"
+        f"{GROK_SENTIMENT_PROMPT.format(ticker=ticker, from_date=start.date().isoformat(), to_date=now.date().isoformat(), size_context=sentiment_size_context(market_cap))}\n"
         "You only have web search (no X access): set mention_count to 0 and "
         "notable_accounts to []."
     )
@@ -239,9 +247,8 @@ async def analyze_sentiment(ticker: str, max_retries: int = 2) -> dict:
             if not (isinstance(news, str) and news.strip() and isinstance(news_url, str) and news_url.startswith("http")):
                 news, news_url = None, None
             red_flags = [
-                {"text": str(f["text"])[:200], "url": f["url"]}
-                for f in (data.get("red_flags") or [])
-                if isinstance(f, dict) and f.get("text") and isinstance(f.get("url"), str) and f["url"].startswith("http")
+                norm for norm in (normalize_red_flag(f) for f in (data.get("red_flags") or []))
+                if norm and isinstance(norm.get("url"), str) and norm["url"].startswith("http")
             ]
             label = str(data.get("label", "neutral")).lower()
             if label not in ("bullish", "neutral", "bearish"):

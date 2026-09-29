@@ -11,7 +11,7 @@ source venv/bin/activate
 python -m uvicorn main:app --reload --port 8000
 pytest tests/ -v                             # all tests
 pytest tests/test_scorer.py::test_name -v    # single test
-python -m backtest.run_backtest --dry-run    # backtest (no AI)
+python -m backtest.run_backtest --start 2021-01-01 --end 2026-09-01  # backtest (live code, tech-only)
 python -m app.db.seed_brain                  # seed brain tables
 ```
 
@@ -32,18 +32,14 @@ Config in `app/core/config.py` (Pydantic Settings from `.env`). Required: `JWT_S
 
 ## Key Thresholds
 
-- BUY: 65 (HIGH_RISK), 62 (SAFE_INCOME) — `SCORE_BUY_*` env vars
-- Contrarian BUY: score >= 55 + contrarian_score >= 60
-- Score ceiling: 90 (forced HOLD)
-- GEM: score >= 85, bullish sentiment >= 80%, catalyst <= 30d, R/R >= 3.0, no red flags
-- RSI blocker: > 75 auto-blocks BUY
-- Pre-filter: volume >= 200K, price >= $1, abs(day_change) >= 1%
-  - Sorted by absolute day change (most active first), capped at 50 candidates
-  - Top 15 by pre-score get AI synthesis, remaining 35 are tech-only
-  - Crypto gets 5 reserved slots so equities don't crowd them out
-  - **Watchlist tickers are NOT guaranteed** — if they don't move enough, they drop off
-- Sentiment: Grok runs for HIGH_RISK only (35% weight); SAFE_INCOME skips it (10% weight, hardcoded neutral)
-- Kelly: fractional 25%, max position 15%
-- Virtual portfolio: brain auto-picks score >= 72 with target+stop filled, max 20 open (`brain_max_open`), exits on stop/target/30d/SELL/THESIS_INVALIDATED
-- **Brain thesis gate** (`brain_thesis_gate_enabled`, default True): suppresses noise exits when Claude's last thesis re-eval said `valid`. Carve-out at `brain_thesis_hard_stop_pct = -8.0` — catastrophic stops always fire. See `/brain-learning`.
-- **Brain re-buy cooldown** (`brain_thesis_rebuy_cooldown_minutes`, default 60): after a `THESIS_INVALIDATED` close, the symbol is blocked from brain re-entry for N minutes. Prevents the buy → invalidate → re-buy loop caused by Claude non-determinism on borderline trades. Set to 0 to disable.
+All live values are in `app/core/config.py`; this is the shape of the decision.
+
+- **Candidates:** prefilter ranks by trend quality (not today's move); top `ai_candidate_limit` (15) by pre-score get AI. Indicators use completed daily bars only.
+- **AI:** Grok live X/web search (uncited results get zero weight) → Sonnet 5.5 synthesis → a routine BUY is re-checked by Opus 5.5. `CLAUDE_LOCAL=true` = `claude` CLI only, never the API. `ai_status="validated"` requires AI BUY with confidence ≥ 60.
+- **Score:** BUY at 65 (HIGH_RISK) / 62 (SAFE_INCOME), ceiling 90. Enrichment (estimate revisions, relative strength, insider buying, short trend) adds at most ±5 (`enrichment_scoring_enabled`).
+- **Blockers:** RSI > 75; red flags only when cited AND material (severity vs market cap; low-severity litigation never blocks); earnings blackout 3 trading days before earnings.
+- **Brain entry:** validated AI BUY + score ≥ 75 (`BRAIN_MIN_SCORE`) + computed R:R ≥ 2.0; risk 1% of equity per trade, ≤ 10% per position; ≤ 8 open, ≤ 2 per sector, ≤ 25% crypto; correlation gate (≥ 0.80 to one holding, or ≥ 0.70 to two); 3-trading-day same-symbol re-entry cooldown; entries halt at −10% from peak equity. Shorts off by default.
+- **Exits:** one policy (`evaluate_exit`) shared by scans and the watchdog. Stop = 2×ATR, always hard (the thesis never suppresses it); target 2R; trailing 2.5×ATR once +1R. Claude's thesis re-eval can only close early (invalid, confidence ≥ 70, twice). Crypto watched on weekends.
+- **Costs:** fills include slippage (10 bps stocks / 20 bps crypto) and CAD/USD FX for `.TO`.
+- **Learning:** nothing auto-applies. Hypotheses need ≥ 30 observations to reach the prompt or graduate. `candidate_outcomes` tracks 5/10/20-day excess returns vs SPY for every candidate (bought or skipped); the daily report grades skip reasons, p_win calibration and Opus vetoes.
+- **Old overfitted gates** (post-loss/winner cooldowns, MOMENTUM/NEUTRAL caps, Filter D, heat, LONG suspension, per-day caps) still exist in code but are disabled via config.

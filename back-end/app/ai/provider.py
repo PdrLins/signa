@@ -261,7 +261,7 @@ async def _route_synthesis(
     }
 
 
-async def analyze_sentiment(ticker: str) -> dict:
+async def analyze_sentiment(ticker: str, market_cap: float | None = None) -> dict:
     """Route sentiment analysis to the first available provider within budget.
 
     Successful results are cached per ticker for sentiment_cache_hours — the
@@ -271,13 +271,13 @@ async def analyze_sentiment(ticker: str) -> dict:
         cached = _sentiment_cache.get(ticker)
         if cached is not None:
             return {**cached, "_cached": True}
-    result = await _route_sentiment(ticker)
+    result = await _route_sentiment(ticker, market_cap)
     if not result.get("error") and settings.sentiment_cache_hours > 0:
         _sentiment_cache.set(ticker, result, ttl=settings.sentiment_cache_hours * 3600)
     return result
 
 
-async def _route_sentiment(ticker: str) -> dict:
+async def _route_sentiment(ticker: str, market_cap: float | None = None) -> dict:
     providers = settings.sentiment_providers
     budget = await _get_budget()
 
@@ -291,7 +291,7 @@ async def _route_sentiment(ticker: str) -> dict:
         try:
             if provider == "grok" and settings.xai_api_key:
                 from app.ai.grok_client import analyze_sentiment as grok_sent
-                result = await grok_sent(ticker)
+                result = await grok_sent(ticker, market_cap=market_cap)
                 if not result.get("error"):
                     result["_provider"] = "grok"
                     await budget.record_call("grok", "sentiment", ticker, success=True)
@@ -301,7 +301,7 @@ async def _route_sentiment(ticker: str) -> dict:
 
             elif provider == "gemini" and settings.gemini_api_key:
                 from app.ai.gemini_client import analyze_sentiment as gemini_sent
-                result = await gemini_sent(ticker)
+                result = await gemini_sent(ticker, market_cap=market_cap)
                 if not result.get("error"):
                     result["_provider"] = "gemini"
                     await budget.record_call("gemini", "sentiment", ticker, success=True)

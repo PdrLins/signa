@@ -321,6 +321,14 @@ async def get_fundamentals(ticker: str) -> dict:
             "pre_market_change_pct": info.get("preMarketChangePercent"),
             "short_percent_of_float": _fraction(info.get("shortPercentOfFloat")),
         }
+        # Richer equity data (estimate revisions, relative-strength
+        # benchmarks, short-interest trend, insider buying). Cached ~12h
+        # per ticker inside enrichment; never fails the fundamentals call.
+        try:
+            from app.scanners.enrichment import get_enrichment
+            result.update(await get_enrichment(ticker, info))
+        except Exception as e:
+            logger.debug(f"Enrichment skipped for {ticker}: {e}")
         price_cache.set(cache_key, result, ttl=300)
         return result
     except Exception as e:

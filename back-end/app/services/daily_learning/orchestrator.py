@@ -230,6 +230,75 @@ def _insert_suggestions(
     return suggestions
 
 
+def _compute_outcome_report() -> dict | None:
+    """Counterfactual candidate-outcome analysis (migration 008).
+
+    Returns None when disabled, {"error": ...} when the table is missing
+    or the query fails — the rest of the daily report still renders.
+    """
+    if not settings.outcomes_enabled:
+        return None
+    from app.db import queries
+    from app.services.daily_learning.outcomes import build_outcome_report
+
+    since = datetime.now(timezone.utc) - timedelta(days=settings.outcomes_report_lookback_days)
+    try:
+        rows = queries.get_candidate_outcomes(since.isoformat())
+    except Exception as e:
+        logger.warning(f"daily_learning: candidate_outcomes read failed: {e}")
+        return {"error": str(e)[:200]}
+    try:
+        return build_outcome_report(rows)
+    except Exception as e:
+        logger.warning(f"daily_learning: outcome analysis failed: {e}")
+        return {"error": str(e)[:200]}
+
+
+def _insert_outcome_suggestions(outcomes: dict | None, metrics: dict) -> list[dict]:
+    """INVESTIGATE rows for outcome findings whose CI excludes zero.
+
+    Skips a rule_name that already has a PENDING suggestion so the same
+    finding isn't re-filed every day. Never changes a rule.
+    """
+    if not outcomes or outcomes.get("error"):
+        return []
+    from app.services.daily_learning.outcomes import outcome_suggestions
+
+    proposals = outcome_suggestions(outcomes)
+    if not proposals:
+        return []
+    db = get_client()
+    inserted: list[dict] = []
+    for p in proposals:
+        try:
+            pending = (
+                db.table("brain_suggestions").select("id")
+                .eq("rule_name", p["rule_name"]).eq("status", "PENDING")
+                .limit(1).execute()
+            ).data
+            if pending:
+                continue
+            row = {
+                "analysis_date": datetime.now(timezone.utc).isoformat(),
+                "trades_analyzed": metrics.get("total_closes_all_time") or 0,
+                "rule_name": p["rule_name"],
+                "suggestion_type": "INVESTIGATE",
+                "current_value": None,
+                "proposed_value": p["proposed"],
+                "reasoning": p["reasoning"],
+                "confidence": 50,
+                "expected_impact": "Counterfactual outcome finding; Pedro investigates manually. Never auto-applied.",
+                "status": "PENDING",
+            }
+            r = db.table("brain_suggestions").insert(row).execute()
+            if r.data:
+                row["id"] = r.data[0].get("id")
+                inserted.append(row)
+        except Exception as e:
+            logger.warning(f"daily_learning: outcome suggestion insert failed: {e}")
+    return inserted
+
+
 async def _enqueue_telegram(digest_text: str) -> None:
     """Best-effort Telegram enqueue. Failures are logged, not raised."""
     chat_id = settings.telegram_chat_id
@@ -376,6 +445,11 @@ async def run_daily_learning(
                 target_date, cohort_findings, pattern_findings, metrics
             )
 
+        # ── 6a'. Counterfactual candidate outcomes (migration 008) ───
+        outcomes_report = await asyncio.to_thread(_compute_outcome_report)
+        if not dry_run:
+            suggestions = suggestions + _insert_outcome_suggestions(outcomes_report, metrics)
+
         # ── 6b. Render + write MD report ────────────────────────────
         completed_at = datetime.now(timezone.utc)
         md_text = render_md_report(
@@ -388,6 +462,7 @@ async def run_daily_learning(
             run_id=str(run_id),
             started_at=started_at,
             completed_at=completed_at,
+            outcomes=outcomes_report,
         )
         md_path: Path | None = None
         if not dry_run:
@@ -411,6 +486,7 @@ async def run_daily_learning(
             findings=all_findings,
             top_findings_count=2,
             md_relative_path=rel_path,
+            outcomes=outcomes_report,
         )
         if send_telegram and not dry_run:
             await _enqueue_telegram(digest_text)
