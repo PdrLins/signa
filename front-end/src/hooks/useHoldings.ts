@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { holdingsApi, CheckApiError } from '@/lib/api'
 import { ApiAccessError } from '@/lib/access'
+import { isMarketOpen } from '@/lib/utils'
 import type { HoldingsResponse, ReviewJob } from '@/types/holdings'
+import type { Scope } from '@/types/tracker'
 
 export const HOLDINGS_KEY = ['holdings'] as const
 export const ALLOCATE_KEY = ['holdings', 'allocate'] as const
@@ -33,14 +35,21 @@ export function toHoldingsError(e: unknown): HoldingsError {
 
 /** GET /holdings (optionally one account) — polls every 5s while the
  *  monitor (price refresh) runs. */
-export function useHoldings(accountId: string | null = null) {
+export function useHoldings(scope: Scope = {}) {
+  const accountId = scope.account_id ?? null
+  const personId = scope.person_id ?? null
   return useQuery<HoldingsResponse, unknown>({
-    queryKey: [...HOLDINGS_KEY, 'list', accountId ?? 'all'],
-    queryFn: () => holdingsApi.list(accountId ? { account_id: accountId } : undefined),
+    queryKey: [...HOLDINGS_KEY, 'list', accountId ?? 'all', personId ?? 'all'],
+    queryFn: () => holdingsApi.list(accountId || personId
+      ? { ...(accountId ? { account_id: accountId } : {}), ...(personId ? { person_id: personId } : {}) }
+      : undefined),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
     retry: (count, err) => !(err instanceof CheckApiError && err.status === 503) && count < 2,
-    refetchInterval: (q) => (q.state.data?.monitor_running ? 5_000 : false),
+    // 5s while the monitor refreshes; else live prices every 60s in market
+    // hours / 5 min outside (paused while the tab is hidden).
+    refetchInterval: (q) => (q.state.data?.monitor_running ? 5_000 : isMarketOpen() ? 60_000 : 5 * 60_000),
+    refetchIntervalInBackground: false,
   })
 }
 

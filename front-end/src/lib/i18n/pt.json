@@ -2413,7 +2413,18 @@
       "invalid_input": "Alguns valores são inválidos — confira o formulário.",
       "rate_limited": "Muitas requisições — aguarde um momento.",
       "network": "Erro de rede — verifique sua conexão.",
-      "internal": "Algo deu errado — tente novamente."
+      "internal": "Algo deu errado — tente novamente.",
+      "account_not_found": "Essa conta não foi encontrada.",
+      "person_not_found": "Essa pessoa não foi encontrada.",
+      "invalid_scope": "Essa conta não pertence a essa pessoa.",
+      "invalid_range": "Esse período não está disponível.",
+      "invalid_compare": "Escolha um índice da lista.",
+      "invalid_period": "Esse período não está disponível.",
+      "invalid_days": "Escolha entre 1 e 90 dias.",
+      "invalid_targets": "Esses alvos não são válidos.",
+      "targets_sum": "Os alvos devem somar 100.",
+      "invalid_amount": "Informe um valor maior que 0.",
+      "no_targets": "Defina primeiro sua composição alvo."
     }
   },
   "home": {
@@ -2424,74 +2435,165 @@
     "searchPlaceholder": "Busque uma ação ou ETF pelo nome ou ticker",
     "closeSearch": "Fechar busca",
     "openProfile": "Abrir seu perfil",
-    "intro": "Sua carteira num relance está a caminho. Enquanto isso, seus ativos e dividendos estão a um toque.",
-    "cards": [
-      {
-        "key": "value",
-        "title": "Valor da carteira",
-        "body": "Valor total, variação de hoje e seu ganho desde o início."
-      },
-      {
-        "key": "income",
-        "title": "Renda de dividendos",
-        "body": "Quanto seus ativos pagam neste mês e neste ano."
-      },
-      {
-        "key": "movers",
-        "title": "Destaques de hoje",
-        "body": "Os ativos que mais se moveram hoje."
-      },
-      {
-        "key": "next",
-        "title": "Próximos",
-        "body": "Próximas datas ex-dividendo, pagamentos e resultados."
-      }
-    ],
-    "goHoldings": "Abrir carteira",
-    "goDividends": "Abrir dividendos"
+    "valueTitle": "Sua carteira",
+    "openHoldings": "Carteira",
+    "dividendsTitle": "Dividendos",
+    "seeDividends": "Detalhes",
+    "noDividends": "Nenhum dos seus ativos deve pagar dividendos nos próximos 12 meses.",
+    "next12m": "Esperado nos próximos 12 meses",
+    "next12mAfterTax": "Esperado nos próximos 12 meses, após impostos",
+    "perMonth": "por mês",
+    "perDay": "por dia",
+    "splitAria": "{steady} de renda estável, {variable} de renda de opções ou variável",
+    "steadyShare": "Estável {pct}",
+    "variableShare": "Opções ou variável {pct}",
+    "worthALook": "Vale uma olhada",
+    "allGood": "Nada precisa da sua atenção agora.",
+    "tips": {
+      "taxLost": "Cerca de {amount} por ano em dividendos se perde em imposto retido por causa da conta onde o ativo está. Veja contas e impostos.",
+      "taxUntyped": "Algumas contas não têm tipo fiscal, então nenhum imposto é estimado para elas. Defina o tipo para ver a renda após impostos.",
+      "taxRecoverable": "Cerca de {amount} por ano é retido na fonte, mas pode ser recuperado como crédito de imposto estrangeiro.",
+      "payerCut": "{symbol} cortou o dividendo. {detail}",
+      "payerWatch": "O dividendo de {symbol} merece atenção. {detail}"
+    },
+    "comingUp": "Próximos",
+    "seeAll": "Ver tudo",
+    "seeAllComingUp": "Ver todos os próximos eventos",
+    "nothingSoon": "Nada nos próximos 30 dias."
   },
   "insightsPage": {
     "title": "Análises",
     "subtitle": "Como sua carteira está montada e como está indo.",
-    "cards": [
-      {
-        "key": "allocation",
-        "title": "Alocação",
-        "body": "Por ação, setor, país, moeda e conta."
-      },
-      {
-        "key": "performance",
-        "title": "Desempenho",
-        "body": "Seu retorno ao longo do tempo, com um índice de comparação opcional."
-      },
-      {
-        "key": "income",
-        "title": "Renda",
-        "body": "Dividendos recebidos por mês e por ano."
-      }
-    ]
+    "tabsLabel": "Seções de análises",
+    "tabs": {
+      "performance": "Desempenho",
+      "allocation": "Alocação"
+    },
+    "performance": {
+      "pts": "pts",
+      "driverLine": "{weight} da carteira · retorno de {ret}",
+      "noDrivers": "Dados insuficientes para mostrar o que moveu seu retorno.",
+      "helped": "Mais ajudaram",
+      "hurt": "Mais atrapalharam",
+      "aheadOfIndex": "Foram melhor que o índice",
+      "behindIndex": "Foram pior que o índice",
+      "none": "Nenhum",
+      "compare": "Comparar com",
+      "compareOff": "Desligado",
+      "returnTitle": "Seu retorno",
+      "period": "{start} a {end}",
+      "you": "Você",
+      "index": "Índice",
+      "difference": "Diferença",
+      "gain": "Ganho",
+      "dividends": "Dividendos recebidos",
+      "netFlows": "Dinheiro adicionado",
+      "methodDeposits": "Considera seus depósitos e saques, então adicionar dinheiro não conta como ganho.",
+      "methodTrades": "Considera suas compras e vendas como entradas e saídas de dinheiro, então adicionar dinheiro não conta como ganho.",
+      "methodEstimate": "Uma estimativa baseada nas suas cotas de hoje, porque não há transações neste período.",
+      "driversVs": "O que fez a diferença vs {symbol}",
+      "driversVsHelp": "O efeito de cada ativo na sua vantagem ou desvantagem, em pontos percentuais.",
+      "driversTitle": "O que moveu seu retorno",
+      "driversHelp": "A parte de cada ativo no seu retorno, em pontos percentuais."
+    },
+    "allocation": {
+      "tileAria": "{symbol}: {weight} da carteira, {change}",
+      "mapAria": "Mapa de ativos, por peso",
+      "mixAria": "Composição da carteira: {mix}",
+      "mixTitle": "Sua composição",
+      "mapTitle": "Mapa de ativos",
+      "mapHelp": "Quanto maior o bloco, maior a parte da sua carteira.",
+      "colorBy": "Colorir blocos por",
+      "byDay": "Hoje",
+      "byTotal": "Ganho total",
+      "noTiles": "Nenhum ativo com preço para mostrar.",
+      "unpriced": "Sem preço disponível, por isso ficaram de fora: {symbols}.",
+      "warningsTitle": "Concentração",
+      "noWarnings": "Nenhum alerta de concentração.",
+      "targetsTitle": "Composição alvo",
+      "targetsHelp": "A composição que você quer. Os seis números devem somar 100.",
+      "nowPct": "hoje {pct}",
+      "targetsInvalid": "Use números entre 0 e 100.",
+      "sumOk": "Soma 100%.",
+      "sumUnder": "Soma {sum}. Faltam {diff}.",
+      "sumOver": "Soma {sum}. Tire {diff}.",
+      "saveTargets": "Salvar composição alvo",
+      "clearTargets": "Limpar alvos",
+      "targetsSaved": "Composição alvo salva",
+      "targetsCleared": "Alvos removidos",
+      "planTitle": "Para onde deve ir seu próximo aporte",
+      "planHelp": "Divide o dinheiro novo entre as partes abaixo do alvo. Nunca sugere vender.",
+      "planNoTargets": "Defina primeiro sua composição alvo.",
+      "planAmount": "Valor do aporte",
+      "planOnTarget": "Você está no alvo ou acima em tudo, então não há nada a completar.",
+      "planLine": "{now} hoje → {after} depois (alvo {target})",
+      "buyLargest": "Seu maior ativo aqui:",
+      "buyDefault": "Uma escolha comum:",
+      "buyYours": "Qual comprar é decisão sua.",
+      "planLeft": "Sobram {amount} depois que cada parte chega ao alvo.",
+      "planNote": "Conta feita sobre seus próprios alvos, não é recomendação.",
+      "emptyScope": "Nada nesta conta ainda."
+    }
   },
   "comingUpPage": {
     "title": "Próximos",
     "subtitle": "Dividendos, resultados e eventos das ações que você tem.",
-    "cards": [
-      {
-        "key": "dividends",
-        "title": "Dividendos",
-        "body": "Datas ex-dividendo e de pagamento dos seus ativos."
+    "daysChip": "{n} dias",
+    "daysLabel": "Até quando",
+    "todayLabel": "Hoje · {date}",
+    "sources": {
+      "dividends": "dividendos",
+      "earnings": "resultados",
+      "analyst": "avaliações de analistas",
+      "check_changed": "verificações do Signa",
+      "economy": "economia"
+    },
+    "emptyBody": "Adicione uma ação que você tem para ver aqui as datas de dividendos e resultados.",
+    "sourcesFailed": "Alguns dados não puderam ser carregados agora: {sources}.",
+    "none": "Nada nos próximos {n} dias.",
+    "recentTitle": "Recentes",
+    "recentHelp": "Já aconteceu nos últimos 7 dias.",
+    "economyNote": "As datas de economia (decisões de juros, inflação) são mantidas manualmente e podem mudar.",
+    "tags": {
+      "recent": "Recente",
+      "estimated": "Estimado",
+      "watchlist": "Observação"
+    },
+    "events": {
+      "perShare": "{amount} por cota",
+      "forShares": "{amount} pelas suas {shares} cotas",
+      "paysOn": "Paga em {date}",
+      "exDiv": "{symbol} fica ex-dividendo",
+      "exDivSpecial": "{symbol} fica ex-dividendo (pagamento especial)",
+      "payment": "{symbol} paga {amount} a você",
+      "paymentNoCash": "{symbol} paga seu dividendo",
+      "earnings": "{symbol} divulga resultados",
+      "avgMove": "Moveu {pct}% em média, para cima ou para baixo, após os últimos {n} resultados.",
+      "typicalMove": "Nas suas cotas, isso é cerca de {amount}.",
+      "checkChanged": "{symbol}: uma verificação do Signa mudou",
+      "checkChange": "{check}: {from} → {to}",
+      "analyst": "{symbol}: {firm} {action}",
+      "gradeChange": "Avaliação {from} → {to}",
+      "grade": "Avaliação {grade}",
+      "targetChange": "Preço-alvo {from} → {to}",
+      "target": "Preço-alvo {to}",
+      "targetsFollow": "Preços-alvo costumam seguir o preço, não antecipá-lo.",
+      "actions": {
+        "rating": "atualizou a avaliação",
+        "up": "elevou a avaliação",
+        "down": "rebaixou a avaliação",
+        "main": "manteve a avaliação",
+        "init": "iniciou a cobertura",
+        "reit": "reiterou a avaliação"
       },
-      {
-        "key": "earnings",
-        "title": "Resultados",
-        "body": "Quando suas empresas divulgam resultados."
+      "economy": {
+        "boc_rate": "Decisão de juros do Banco do Canadá",
+        "fed_rate": "Decisão de juros do Federal Reserve (EUA)",
+        "us_cpi": "Inflação dos EUA (CPI)",
+        "ca_cpi": "Inflação do Canadá (CPI)"
       },
-      {
-        "key": "events",
-        "title": "Eventos",
-        "body": "Desdobramentos e outros eventos que mudam seus ativos."
-      }
-    ],
-    "seeCalendar": "Ver o calendário de dividendos"
+      "provisional": "Data provisória."
+    }
   },
   "profile": {
     "title": "Perfil",
@@ -2735,5 +2837,255 @@
       "another": "Importar outro arquivo",
       "cancel": "Cancelar"
     }
+  },
+  "trackerUi": {
+    "hideAmounts": "Ocultar valores",
+    "showAmounts": "Mostrar valores",
+    "scope": {
+      "label": "Mostrar",
+      "all": "Todas as contas",
+      "people": "Pessoas",
+      "accounts": "Contas"
+    },
+    "asOf": "Atualizado às {time}",
+    "asOfDelayed": "Atualizado às {time} · atraso de {min} min",
+    "premiumBody": "Isto precisa do plano Premium.",
+    "premiumRange": "Precisa do plano Premium",
+    "empty": {
+      "title": "Nenhum ativo ainda",
+      "body": "Adicione uma ação que você tem para ver sua carteira aqui.",
+      "addStock": "Adicionar uma ação",
+      "accounts": "Configurar contas"
+    },
+    "safety": {
+      "growing": "Crescendo",
+      "steady": "Estável",
+      "variable": "Variável",
+      "watch": "Atenção",
+      "cut": "Cortado",
+      "unknown": "Sem nota"
+    },
+    "safetyHelp": "Uma nota simples de quão confiável este pagamento tem sido. Descreve o passado, não é uma previsão.",
+    "ranges": {
+      "1D": "1D",
+      "1W": "1S",
+      "1M": "1M",
+      "3M": "3M",
+      "YTD": "Ano",
+      "1Y": "1A",
+      "5Y": "5A",
+      "ALL": "Tudo"
+    },
+    "rangeLong": {
+      "1D": "hoje",
+      "1W": "última semana",
+      "1M": "último mês",
+      "3M": "últimos 3 meses",
+      "YTD": "neste ano",
+      "1Y": "último ano",
+      "5Y": "últimos 5 anos",
+      "ALL": "desde o início"
+    },
+    "classes": {
+      "stocks": "Ações",
+      "broad_etfs": "ETFs amplos",
+      "option_income_etfs": "ETFs de renda com opções",
+      "cash_like": "Caixa e equivalentes",
+      "crypto": "Cripto",
+      "other": "Outros"
+    },
+    "warnings": {
+      "top3_concentration": "Seus 3 maiores ativos ({symbols}) são {pct} da carteira (acima de {limit}).",
+      "single_holding": "{symbol} sozinho é {pct} da carteira (acima de {limit}).",
+      "cash_like_high": "Caixa e fundos equivalentes são {pct} da carteira (acima de {limit}).",
+      "option_income_high": "ETFs de renda com opções são {pct} da carteira (acima de {limit})."
+    },
+    "value": {
+      "marketValue": "Valor de mercado",
+      "totalGain": "Ganho total",
+      "totalGainDivs": "Ganho total (inclui dividendos)",
+      "includesDividends": "Inclui dividendos",
+      "excludesDividends": "Só ganho de preço. Adicione transações para incluir dividendos.",
+      "today": "hoje",
+      "rangeLabel": "Período do gráfico",
+      "compare": "Comparar",
+      "compareLabel": "Comparar com um índice",
+      "vs": "vs {symbol}",
+      "removeCompare": "Remover a comparação com {symbol}",
+      "compareUnavailable": "Sem dados do índice para este período.",
+      "fullHistory": "5 anos e o histórico completo precisam do plano Premium.",
+      "noSeries": "Ainda não há dados suficientes para este período.",
+      "chartAria": "Valor da carteira, {range}: {change}",
+      "you": "Você",
+      "expand": "Mostrar o gráfico em tela cheia",
+      "estimated": "Baseado nas suas cotas de hoje; adicione transações para o passado exato.",
+      "addTransactions": "Adicionar transações",
+      "noIntraday": "Ainda sem preços intradiários hoje. Mostrando o fechamento anterior e o valor mais recente."
+    }
+  },
+  "divSummary": {
+    "title": "Dividendos",
+    "backToDividends": "Dividendos",
+    "periodLabel": "Período",
+    "periods": {
+      "next12m": "Próx. 12m"
+    },
+    "emptyBody": "Adicione uma ação que você tem para ver os dividendos que ela paga.",
+    "monthsTitle": "Mês a mês",
+    "monthsReceived": "O que você registrou como recebido, pelas suas transações.",
+    "monthsExpected": "O que seus ativos devem pagar, por mês de pagamento.",
+    "fullCalendar": "Calendário completo de dividendos",
+    "noBars": "Sem renda de dividendos neste período.",
+    "barsAria": "Renda de dividendos por mês, estável e variável",
+    "barLabel": "{month}: {total} ({steady} estável, {variable} variável)",
+    "steady": "Estável",
+    "variable": "Opções ou variável",
+    "receivedIn": "Recebido em {year}",
+    "expected12m": "Esperado, próximos 12 meses",
+    "afterTax": "após impostos",
+    "beforeTax": "antes dos impostos",
+    "asRecorded": "como registrado",
+    "perMonthDay": "{month} por mês · {day} por dia",
+    "forwardNote": "Seus ativos de hoje devem pagar {amount} nos próximos 12 meses.",
+    "stats": {
+      "yield": "Rendimento",
+      "onCost": "Rendimento sobre o custo",
+      "growth5y": "Crescimento, 5 anos",
+      "growth1y": "Crescimento, 1 ano",
+      "coverage": "cobre {pct} da renda"
+    },
+    "tax": {
+      "open": "Abrir contas e impostos",
+      "withheldLine": "{amount} retidos na fonte, de {gross} antes dos impostos. Contas e impostos"
+    },
+    "noTransactions": "Nenhuma transação de dividendo registrada para este ano.",
+    "addTransactions": "Adicionar transações",
+    "unconverted": "Não convertidos para sua moeda, por isso ficaram de fora: {symbols}.",
+    "upcoming": {
+      "title": "Próximos pagamentos",
+      "subtitle": "Os próximos 60 dias.",
+      "none": "Nenhum pagamento esperado nos próximos 60 dias.",
+      "pays": "Paga em {date}",
+      "ex": "Ex-dividendo em {date}",
+      "estimated": "Estimado",
+      "estimatedHelp": "Projetado a partir do histórico de pagamentos; ainda não anunciado",
+      "locked": "Data ex passou",
+      "lockedHelp": "Você tem direito a este pagamento; ele ainda não foi pago"
+    },
+    "change": {
+      "title": "Por que sua renda mudou",
+      "subtitle": "Renda anual esperada, comparada com {days} dias atrás.",
+      "unavailable": "Ainda não disponível.",
+      "wholeOnly": "Disponível só para a carteira inteira. Mude para todas as contas para ver.",
+      "availableFrom": "O Signa começou a registrar sua renda esperada há pouco tempo. Isto estará disponível a partir de {date}.",
+      "partial": "Comparado com {date}, o registro mais antigo até agora.",
+      "noChange": "Sem mudanças neste período.",
+      "components": {
+        "raises": "Aumentos de dividendo",
+        "cuts": "Cortes de dividendo",
+        "new_shares": "Cotas que você adicionou",
+        "removed_shares": "Cotas que você vendeu",
+        "fx": "Câmbio"
+      },
+      "kinds": {
+        "raise": "aumentou o dividendo",
+        "cut": "cortou o dividendo",
+        "new_position": "nova posição",
+        "removed_position": "posição encerrada",
+        "more_shares": "mais cotas",
+        "fewer_shares": "menos cotas"
+      }
+    },
+    "payers": {
+      "title": "Quem paga você",
+      "subtitle": "{n} pagadores, do maior para o menor.",
+      "none": "Nenhum dos seus ativos paga dividendos.",
+      "monthsAria": "Paga em: {months}",
+      "line": "{share} da renda · rende {yield}",
+      "details": {
+        "suspended": "O dividendo está suspenso.",
+        "recent_cut": "Foi cortado nos últimos 24 meses.",
+        "volatile_distributions": "As distribuições mudam muito de um pagamento para outro.",
+        "distribution_growing": "As distribuições cresceram no último ano.",
+        "steady_distributions": "As distribuições têm sido estáveis.",
+        "payout_over_100": "Paga mais do que lucra.",
+        "yield_trap": "O rendimento está muito acima da própria média de 5 anos.",
+        "rating_poor": "A avaliação de saúde do dividendo é ruim.",
+        "volatile_payouts": "Os pagamentos mudam muito de um para outro.",
+        "grows_5y": "Cresce há 5 anos sem cortes.",
+        "steady_payer": "Os pagamentos têm sido estáveis."
+      },
+      "quality": "Qualidade da renda",
+      "qualityAria": "Abrir a qualidade da renda de {symbol}",
+      "nonPayers": "Sem dividendos: {symbols}."
+    }
+  },
+  "divTax": {
+    "title": "Contas e impostos",
+    "subtitle": "Quanto dos seus dividendos esperados é retido na fonte, por tipo de conta. Próximos 12 meses.",
+    "gross": "Antes dos impostos {amount}",
+    "lost": "Perdido {amount}",
+    "recoverable": "Recuperável {amount}",
+    "insideFund": "Dentro de fundos {amount}",
+    "reasons": {
+      "not_eligible": "A visão dos dividendos após impostos precisa do plano Premium.",
+      "country_not_supported": "Dividendos após impostos estão disponíveis só para Canadá e Estados Unidos. Defina seu país no perfil.",
+      "view_before": "Seu perfil mostra dividendos antes dos impostos. Mude para após impostos no perfil para ver este detalhamento.",
+      "ledger_as_recorded": "Os valores recebidos aparecem como você registrou, então nenhum imposto é estimado."
+    },
+    "openProfile": "Abrir seu perfil",
+    "summaryTitle": "Próximos 12 meses",
+    "summarySubtitle": "Só imposto retido na fonte: o que um governo estrangeiro fica antes do dividendo chegar a você.",
+    "stats": {
+      "gross": "Antes dos impostos",
+      "lost": "Perdido",
+      "lostHelp": "não pode ser recuperado",
+      "recoverable": "Recuperável",
+      "recoverableHelp": "como crédito de imposto estrangeiro",
+      "afterTax": "Após impostos"
+    },
+    "cashReceived": "Dinheiro que realmente entra nas suas contas: {amount}.",
+    "byTypeTitle": "Por tipo de conta",
+    "noTypes": "Nenhuma das suas contas com dividendos tem tipo fiscal ainda.",
+    "insideTitle": "Imposto pago dentro dos fundos",
+    "insideBody": "Cerca de {amount} por ano é retido dentro de fundos listados no Canadá que têm ações dos EUA, antes de pagarem você. Isso já está refletido no que o fundo distribui, vale em qualquer conta e não pode ser evitado, por isso não é subtraído de novo.",
+    "untypedTitle": "Contas sem tipo fiscal",
+    "untypedBody": "Nenhum imposto é estimado para: {names}. Defina o tipo da conta para incluí-las.",
+    "setTypes": "Definir tipos de conta",
+    "disclaimer": "Estimativas por regras simples de tratado (15% de retenção). O imposto de renda na sua alíquota não está incluído. Apenas informação, não é orientação fiscal."
+  },
+  "incomeQuality": {
+    "title": "Qualidade da renda de {symbol}",
+    "noPayouts": "Nenhum pagamento nos últimos 12 meses.",
+    "payoutsAria": "Pagamentos dos últimos 12 meses",
+    "payoutBar": "{date}: {amount} por cota ({change} vs o anterior)",
+    "variability": "De um pagamento para o outro, o valor mudou entre {min} e {max}.",
+    "variabilityUnknown": "Pagamentos insuficientes para medir quanto variam.",
+    "sourceTitle": "De onde vem o rendimento",
+    "yield": "Rendimento",
+    "kind": "Tipo de renda",
+    "classes": {
+      "steady": "Dividendos",
+      "option_income": "Renda de opções",
+      "cash_like": "Juros"
+    },
+    "sources": {
+      "dividends_from_earnings": "Dividendos pagos com o lucro da empresa.",
+      "dividends_exceed_earnings": "Dividendos maiores que o lucro da empresa. Isso não se sustenta a menos que o lucro suba.",
+      "fund_distributions": "Distribuições do que os ativos do fundo pagam.",
+      "option_premiums": "Principalmente prêmios de opções: o fundo vende opções de compra sobre o que tem. Isso paga dinheiro agora e abre mão de parte da alta.",
+      "interest": "Juros de aplicações de curto prazo, equivalentes a caixa."
+    },
+    "roc": "Com um rendimento tão alto, parte de cada pagamento provavelmente é seu próprio capital voltando, não renda.",
+    "returnTitle": "Retorno total vs o ativo de base",
+    "returnPeriod": "{start} a {end}, com dividendos.",
+    "noReturn": "Sem comparação disponível para este fundo.",
+    "underlying": "{symbol} (ativo de base)",
+    "ahead": "{pts} pontos à frente de {symbol} no período.",
+    "behind": "{pts} pontos atrás de {symbol} no período.",
+    "currencyMismatch": "Os dois são negociados em moedas diferentes, então parte da diferença é câmbio.",
+    "returnNote": "Rendimento alto não significa retorno alto: o que conta é a variação de preço mais os pagamentos.",
+    "payoutsTitle": "Quanto os pagamentos variam",
+    "payoutsHelp": "Cada pagamento por cota nos últimos 12 meses."
   }
 }

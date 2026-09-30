@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Search, UserRound, X } from 'lucide-react'
@@ -13,7 +13,7 @@ import type { SymbolMatch } from '@/types/symbols'
 
 /** Tracker page header: title + today's date, a search button that opens
  *  the stock search (→ the free stock page) and a person icon → /profile. */
-export function HomeHeader({ title, greeting }: { title: string; greeting?: string | null }) {
+export function HomeHeader({ title, greeting, actions }: { title: string; greeting?: string | null; actions?: ReactNode }) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const locale = useI18nStore((s) => s.locale)
@@ -53,6 +53,7 @@ export function HomeHeader({ title, greeting }: { title: string; greeting?: stri
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {actions}
           {can('area.stock') && (
             <button type="button" onClick={() => setSearchOpen((o) => !o)} aria-expanded={searchOpen}
               aria-controls={searchOpen ? inputId : undefined}

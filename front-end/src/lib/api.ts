@@ -35,6 +35,10 @@ import type {
   PositionUpdateRequest,
   PositionCloseRequest,
 } from '@/types/portfolio'
+import type {
+  Allocation, AllocationPlan, AllocationTargets, DividendSummary, HistoryRange, IncomeQuality,
+  PortfolioHistory, PortfolioPerformance, PortfolioSummary, Scope, UpcomingEvents,
+} from '@/types/tracker'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
@@ -529,6 +533,44 @@ export const transactionsApi = {
   },
   undoImport: (batchId: string) =>
     holdingsCall<{ deleted: number; import_batch_id: string }>('delete', `/transactions/import/${encodeURIComponent(batchId)}`),
+}
+
+// ── Portfolio insights (migration 014; scope = ?account_id= / ?person_id=) ──
+
+function scopeParams(scope: Scope, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const p: Record<string, unknown> = { ...extra }
+  if (scope.account_id) p.account_id = scope.account_id
+  if (scope.person_id) p.person_id = scope.person_id
+  for (const k of Object.keys(p)) if (p[k] === undefined || p[k] === null || p[k] === '') delete p[k]
+  return p
+}
+
+export const portfolioInsightsApi = {
+  summary: (scope: Scope) =>
+    holdingsCall<PortfolioSummary>('get', '/portfolio/summary', undefined, { params: scopeParams(scope) }),
+  history: (scope: Scope, range: HistoryRange, compare?: string | null) =>
+    holdingsCall<PortfolioHistory>('get', '/portfolio/history', undefined,
+      { params: scopeParams(scope, { range, compare }), timeout: 45_000 }),
+  performance: (scope: Scope, range: HistoryRange, compare?: string | null) =>
+    holdingsCall<PortfolioPerformance>('get', '/portfolio/performance', undefined,
+      { params: scopeParams(scope, { range, compare }), timeout: 45_000 }),
+  allocation: (scope: Scope) =>
+    holdingsCall<Allocation>('get', '/portfolio/allocation', undefined, { params: scopeParams(scope) }),
+  targets: () => holdingsCall<AllocationTargets>('get', '/portfolio/allocation/targets'),
+  /** Sum must be 100 (422 targets_sum); null clears. */
+  putTargets: (targets: AllocationTargets['targets']) =>
+    holdingsCall<AllocationTargets>('put', '/portfolio/allocation/targets', { targets }),
+  /** 409 no_targets before any target is set. */
+  plan: (scope: Scope, amount: number) =>
+    holdingsCall<AllocationPlan>('get', '/portfolio/allocation/plan', undefined, { params: scopeParams(scope, { amount }) }),
+  incomeQuality: (symbol: string) =>
+    holdingsCall<IncomeQuality>('get', `/portfolio/income-quality/${encodeURIComponent(symbol)}`, undefined, { timeout: 45_000 }),
+  dividendSummary: (scope: Scope, period: string) =>
+    holdingsCall<DividendSummary>('get', '/dividends/summary', undefined,
+      { params: scopeParams(scope, { period }), timeout: 60_000 }),
+  upcomingEvents: (scope: Scope, days: number) =>
+    holdingsCall<UpcomingEvents>('get', '/events/upcoming', undefined,
+      { params: scopeParams(scope, { days }), timeout: 60_000 }),
 }
 
 export const healthApi = {

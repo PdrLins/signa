@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useCallback, useMemo, useState } from 'react'
+import { Suspense, useCallback, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useQueryClient } from '@tanstack/react-query'
 import { Landmark, Plus, RefreshCw, Wallet } from 'lucide-react'
@@ -18,57 +18,33 @@ import { errorText } from '@/components/holdings/format'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useAccess } from '@/hooks/useAccess'
 import { useAccounts } from '@/hooks/useAccounts'
-import type { Account } from '@/types/accounts'
-
-/** "All" + one chip per user account; aria-pressed toggle buttons. */
-const AccountChips = memo(function AccountChips({ accounts, value, onChange }: {
-  accounts: Account[]
-  value: string | null
-  onChange: (id: string | null) => void
-}) {
-  const theme = useTheme()
-  const t = useI18nStore((s) => s.t)
-  const tha = t.holdings.accounts
-  const chip = 'min-h-[44px] px-3.5 rounded-full text-[13px] font-medium whitespace-nowrap focus-visible:outline focus-visible:outline-2'
-  const style = (on: boolean) => ({
-    backgroundColor: on ? theme.colors.primary + '1F' : theme.colors.surfaceAlt,
-    color: on ? theme.colors.primary : theme.colors.text,
-    border: `1px solid ${on ? theme.colors.primary : theme.colors.border}`,
-    outlineColor: theme.colors.primary,
-  })
-  return (
-    <div className="flex items-center gap-2 min-w-0">
-      <div role="group" aria-label={tha.filterLabel} className="flex gap-2 overflow-x-auto min-w-0 pb-1 -mb-1">
-        <button type="button" aria-pressed={value === null} onClick={() => onChange(null)} className={chip} style={style(value === null)}>
-          {tha.all}
-        </button>
-        {accounts.map((a) => (
-          <button key={a.id} type="button" aria-pressed={value === a.id} onClick={() => onChange(a.id)} className={chip} style={style(value === a.id)}>
-            {a.name}
-          </button>
-        ))}
-      </div>
-      <Link href="/profile/accounts" aria-label={tha.manage} title={tha.manage}
-        className="shrink-0 min-h-[44px] min-w-[44px] rounded-full inline-flex items-center justify-center focus-visible:outline focus-visible:outline-2"
-        style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.textSub, outlineColor: theme.colors.primary }}>
-        <Landmark size={16} aria-hidden="true" />
-      </Link>
-    </div>
-  )
-})
+import { usePortfolioSummary, useScope } from '@/hooks/usePortfolioInsights'
+import { PortfolioValueCard } from '@/components/tracker/PortfolioValueCard'
+import { HideAmountsButton, QueryError, ScopeSelect, isUpgrade } from '@/components/tracker/ui'
+import { isMigrationRequired } from '@/lib/trackerErrors'
 
 export default function HoldingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <HoldingsInner />
+    </Suspense>
+  )
+}
+
+function HoldingsInner() {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const locale = useI18nStore((s) => s.locale)
   const th = t.holdings
   const toast = useToast()
   const qc = useQueryClient()
-  const [accountId, setAccountId] = useState<string | null>(null)
-  const q = useHoldings(accountId)
+  const { scope, setScope, scoped } = useScope()
+  const accountId = scope.account_id ?? null
+  const q = useHoldings(scope)
   const { can, slots } = useAccess()
   const accountsQ = useAccounts()
   const accounts = useMemo(() => accountsQ.data?.items ?? [], [accountsQ.data])
+  const summary = usePortfolioSummary(scope, can('area.home'))
   const canEdit = can('action.holdings.edit')
   const review = useHoldingsReview(can('action.holdings.review'))
   // How to add: one stock via search (default) or a pasted list / CSV.
@@ -107,9 +83,11 @@ export default function HoldingsPage() {
 
   const loadError = q.error ? toHoldingsError(q.error) : null
   // "empty" = no holdings at all (not just none in the filtered account)
-  const empty = !!data && items.length === 0 && !accountId
-  const emptyInAccount = !!data && items.length === 0 && !!accountId
-  const hasAny = !!data && (items.length > 0 || !!accountId)
+  const empty = !!data && items.length === 0 && !scoped
+  const emptyInAccount = !!data && items.length === 0 && scoped
+  const hasAny = !!data && (items.length > 0 || scoped)
+  const summaryError = summary.error && !summary.data && !isMigrationRequired(summary.error) && !isUpgrade(summary.error)
+    ? summary.error : null
   const showAdd = canEdit && (empty || addOpen)
   const closeAdd = () => { setAddOpen(false); setAddMode('search') }
   const monitorRunning = !!data?.monitor_running
@@ -132,6 +110,7 @@ export default function HoldingsPage() {
         </div>
         {hasAny && (
           <div className="flex flex-wrap gap-2">
+            <HideAmountsButton />
             {canEdit && <button type="button" onClick={() => { setAddOpen((o) => !o); setAddMode('search') }} aria-expanded={addOpen}
               className="min-h-[44px] px-4 rounded-xl text-[14px] font-semibold flex items-center gap-2 focus-visible:outline focus-visible:outline-2"
               style={{ backgroundColor: theme.colors.primary, color: theme.colors.surface, outlineColor: theme.colors.primary }}>
@@ -148,8 +127,18 @@ export default function HoldingsPage() {
       </header>
 
       {accounts.length > 0 && (hasAny || q.isLoading) && (
-        <AccountChips accounts={accounts} value={accountId} onChange={setAccountId} />
+        <div className="flex items-center gap-2 min-w-0">
+          <ScopeSelect scope={scope} onChange={setScope} />
+          <Link href="/profile/accounts" aria-label={t.holdings.accounts.manage} title={t.holdings.accounts.manage}
+            className="shrink-0 min-h-[44px] min-w-[44px] rounded-full inline-flex items-center justify-center focus-visible:outline focus-visible:outline-2"
+            style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.textSub, outlineColor: theme.colors.primary }}>
+            <Landmark size={16} aria-hidden="true" />
+          </Link>
+        </div>
       )}
+
+      {summary.data && hasAny && items.length > 0 && <PortfolioValueCard scope={scope} summary={summary.data} />}
+      {summaryError && <QueryError error={summaryError} onRetry={() => summary.refetch()} />}
 
       {q.isLoading && (
         <div className="space-y-3" aria-busy="true">

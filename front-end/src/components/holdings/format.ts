@@ -1,5 +1,6 @@
 // Formatting + chip builders for My holdings. Pure (plus theme hooks).
 import { useTheme } from '@/hooks/useTheme'
+import { usePrivacyStore } from '@/store/privacyStore'
 import { DASH, fill } from '@/lib/insights'
 import { pct, spct } from '@/components/check/long/format'
 import type en from '@/lib/i18n/en.json'
@@ -16,6 +17,16 @@ export function money(v: number | null | undefined, currency: string | null | un
   const prefix = ccy === 'CAD' ? 'C$' : ccy === 'USD' ? 'US$' : ccy ? `${ccy} ` : '$'
   const n = Math.abs(v).toLocaleString(LOCALES[locale] ?? 'en-CA', { minimumFractionDigits: digits, maximumFractionDigits: digits })
   return `${v < 0 ? '−' : ''}${prefix}${n}`
+}
+
+/** Placeholder shown for money while "hide amounts" is on. */
+export const MASK = '••••'
+
+/** money() that respects the hide-amounts (eye) toggle. */
+export function useMaskedMoney() {
+  const hidden = usePrivacyStore((s) => s.hidden)
+  return (v: number | null | undefined, currency: string | null | undefined, locale = 'en', digits = 2) =>
+    hidden ? MASK : money(v, currency, locale, digits)
 }
 
 export function num(v: number | null | undefined, locale = 'en', maxDigits = 4): string {

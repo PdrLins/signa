@@ -13,7 +13,7 @@ import { checkHref } from '@/lib/check'
 import { DASH, fill, shortDate } from '@/lib/insights'
 import { HOLDINGS_KEY, toHoldingsError } from '@/hooks/useHoldings'
 import {
-  errorText, holdingChips, money, num, pct, spct, useToneColor, verdictTone, type Chip,
+  errorText, holdingChips, money, num, pct, spct, useMaskedMoney, useToneColor, verdictTone, type Chip,
 } from './format'
 import { AccountSelect } from '@/components/holdings/AccountSelect'
 import type { Holding } from '@/types/holdings'
@@ -241,15 +241,16 @@ function PositionLine({ h }: { h: Holding }) {
   const locale = useI18nStore((s) => s.locale)
   const th = t.holdings
   const p = h.position
+  const mm = useMaskedMoney()
   if (!h.shares) return <p className="text-[12px]" style={{ color: theme.colors.textHint }}>{th.list.noShares}</p>
   const ccy = h.currency ?? p?.currency ?? 'USD'
   return (
     <p className="text-[12px] tabular-nums flex flex-wrap gap-x-3 gap-y-0.5" style={{ color: theme.colors.textSub }}>
-      <span>{fill(th.list.shares, { n: num(h.shares, locale) })}{h.avg_cost ? ` · ${fill(th.list.avgCost, { cost: money(h.avg_cost, ccy, locale) })}` : ''}</span>
-      {p?.value != null && <span>{th.list.value}: {money(p.value, ccy, locale)}{ccy !== 'CAD' && p.value_cad != null ? ` (${money(p.value_cad, 'CAD', locale, 0)})` : ''}</span>}
+      <span>{fill(th.list.shares, { n: num(h.shares, locale) })}{h.avg_cost ? ` · ${fill(th.list.avgCost, { cost: mm(h.avg_cost, ccy, locale) })}` : ''}</span>
+      {p?.value != null && <span>{th.list.value}: {mm(p.value, ccy, locale)}{ccy !== 'CAD' && p.value_cad != null ? ` (${mm(p.value_cad, 'CAD', locale, 0)})` : ''}</span>}
       {p?.unrealized != null && (
         <span style={{ color: changeColor(p.unrealized, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>
-          {th.list.gain}: {money(p.unrealized, ccy, locale)} ({spct(p.unrealized_pct, 1)})
+          {th.list.gain}: {mm(p.unrealized, ccy, locale)} ({spct(p.unrealized_pct, 1)})
         </span>
       )}
       {p?.weight_pct != null && (

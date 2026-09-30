@@ -8,7 +8,7 @@ import { fill, shortDate } from '@/lib/insights'
 import { Panel } from '@/components/insights/Panel'
 import { ProgressBar } from '@/components/ui/ProgressBar'
 import { useAllocateIdeas, type HoldingsError } from '@/hooks/useHoldings'
-import { errorText, ideaReason, money, noteText, pct, spct, useToneColor, verdictTone } from './format'
+import { errorText, ideaReason, noteText, pct, spct, useMaskedMoney, useToneColor, verdictTone } from './format'
 import type { AllocateIdea, HoldingsResponse, ReviewJob } from '@/types/holdings'
 
 const btnCls = 'min-h-[44px] px-4 rounded-xl text-[14px] font-semibold flex items-center justify-center gap-2 transition-opacity disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2'
@@ -21,6 +21,7 @@ export function TotalsCard({ data }: { data: HoldingsResponse }) {
   const locale = useI18nStore((s) => s.locale)
   const th = t.holdings
   const tot = data.totals
+  const mm = useMaskedMoney()
   const gainColor = (tot.unrealized_cad ?? 0) >= 0 ? theme.colors.up : theme.colors.down
   return (
     <Panel title={th.totals.title}>
@@ -28,10 +29,10 @@ export function TotalsCard({ data }: { data: HoldingsResponse }) {
         <p className="text-[13px]" style={{ color: theme.colors.textSub }}>{th.totals.noShares}</p>
       ) : (
         <div className="flex flex-col gap-2">
-          <p className="text-[26px] font-bold tabular-nums" style={{ color: theme.colors.text }}>{money(tot.value_cad, 'CAD', locale)}</p>
+          <p className="text-[26px] font-bold tabular-nums" style={{ color: theme.colors.text }}>{mm(tot.value_cad, 'CAD', locale)}</p>
           {tot.unrealized_cad != null && (
             <p className="text-[13px] tabular-nums" style={{ color: gainColor }}>
-              {th.totals.gain}: {money(tot.unrealized_cad, 'CAD', locale)} ({spct(tot.unrealized_pct, 1)})
+              {th.totals.gain}: {mm(tot.unrealized_cad, 'CAD', locale)} ({spct(tot.unrealized_pct, 1)})
             </p>
           )}
           <p className="text-[12px]" style={{ color: theme.colors.textSub }}>

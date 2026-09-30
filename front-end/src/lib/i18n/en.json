@@ -2413,7 +2413,18 @@
       "invalid_input": "Some values are invalid — check the form.",
       "rate_limited": "Too many requests — wait a moment.",
       "network": "Network error — check your connection.",
-      "internal": "Something went wrong — please try again."
+      "internal": "Something went wrong — please try again.",
+      "account_not_found": "That account wasn't found.",
+      "person_not_found": "That person wasn't found.",
+      "invalid_scope": "That account doesn't belong to that person.",
+      "invalid_range": "That range isn't available.",
+      "invalid_compare": "Pick a benchmark from the list.",
+      "invalid_period": "That period isn't available.",
+      "invalid_days": "Pick between 1 and 90 days.",
+      "invalid_targets": "Those targets aren't valid.",
+      "targets_sum": "The targets must add up to 100.",
+      "invalid_amount": "Enter an amount greater than 0.",
+      "no_targets": "Set your target mix first."
     }
   },
   "home": {
@@ -2424,74 +2435,165 @@
     "searchPlaceholder": "Search a stock or ETF by name or ticker",
     "closeSearch": "Close search",
     "openProfile": "Open your profile",
-    "intro": "Your portfolio at a glance is on its way. Meanwhile, your holdings and dividends are one tap away.",
-    "cards": [
-      {
-        "key": "value",
-        "title": "Portfolio value",
-        "body": "Total value, today's change and your gain since you started."
-      },
-      {
-        "key": "income",
-        "title": "Dividend income",
-        "body": "What your holdings pay this month and this year."
-      },
-      {
-        "key": "movers",
-        "title": "Today's movers",
-        "body": "Your holdings that moved the most today."
-      },
-      {
-        "key": "next",
-        "title": "Coming up",
-        "body": "Next ex-dividend dates, payments and earnings."
-      }
-    ],
-    "goHoldings": "Open holdings",
-    "goDividends": "Open dividends"
+    "valueTitle": "Your portfolio",
+    "openHoldings": "Holdings",
+    "dividendsTitle": "Dividends",
+    "seeDividends": "Details",
+    "noDividends": "None of your holdings is expected to pay a dividend in the next 12 months.",
+    "next12m": "Expected over the next 12 months",
+    "next12mAfterTax": "Expected over the next 12 months, after tax",
+    "perMonth": "per month",
+    "perDay": "per day",
+    "splitAria": "{steady} steady income, {variable} option or variable income",
+    "steadyShare": "Steady {pct}",
+    "variableShare": "Option or variable {pct}",
+    "worthALook": "Worth a look",
+    "allGood": "Nothing needs your attention right now.",
+    "tips": {
+      "taxLost": "About {amount} a year of dividends is lost to withholding tax because of the account it sits in. See accounts and tax.",
+      "taxUntyped": "Some accounts have no tax type, so no tax is estimated for them. Set the type to see after-tax income.",
+      "taxRecoverable": "About {amount} a year is withheld at the source but can be claimed back as a foreign tax credit.",
+      "payerCut": "{symbol} cut its dividend. {detail}",
+      "payerWatch": "{symbol}'s dividend is worth watching. {detail}"
+    },
+    "comingUp": "Coming up",
+    "seeAll": "See all",
+    "seeAllComingUp": "See everything coming up",
+    "nothingSoon": "Nothing in the next 30 days."
   },
   "insightsPage": {
     "title": "Insights",
     "subtitle": "How your portfolio is built and how it's doing.",
-    "cards": [
-      {
-        "key": "allocation",
-        "title": "Allocation",
-        "body": "By stock, sector, country, currency and account."
-      },
-      {
-        "key": "performance",
-        "title": "Performance",
-        "body": "Your return over time, with an optional benchmark."
-      },
-      {
-        "key": "income",
-        "title": "Income",
-        "body": "Dividends received by month and year."
-      }
-    ]
+    "tabsLabel": "Insights sections",
+    "tabs": {
+      "performance": "Performance",
+      "allocation": "Allocation"
+    },
+    "performance": {
+      "pts": "pts",
+      "driverLine": "{weight} of the portfolio · returned {ret}",
+      "noDrivers": "Not enough data to show what moved your return.",
+      "helped": "Helped most",
+      "hurt": "Hurt most",
+      "aheadOfIndex": "Did better than the index",
+      "behindIndex": "Did worse than the index",
+      "none": "None",
+      "compare": "Compare with",
+      "compareOff": "Off",
+      "returnTitle": "Your return",
+      "period": "{start} to {end}",
+      "you": "You",
+      "index": "Index",
+      "difference": "Difference",
+      "gain": "Gain",
+      "dividends": "Dividends received",
+      "netFlows": "Money added",
+      "methodDeposits": "Counts your deposits and withdrawals, so adding money is not counted as a gain.",
+      "methodTrades": "Counts your buys and sells as money in and out, so adding money is not counted as a gain.",
+      "methodEstimate": "An estimate based on today's shares, because there are no transactions for this period.",
+      "driversVs": "What made the difference vs {symbol}",
+      "driversVsHelp": "Each holding's effect on your lead or gap, in percentage points.",
+      "driversTitle": "What moved your return",
+      "driversHelp": "Each holding's share of your return, in percentage points."
+    },
+    "allocation": {
+      "tileAria": "{symbol}: {weight} of the portfolio, {change}",
+      "mapAria": "Holdings map, sized by weight",
+      "mixAria": "Portfolio mix: {mix}",
+      "mixTitle": "Your mix",
+      "mapTitle": "Holdings map",
+      "mapHelp": "Bigger tile, bigger share of your portfolio.",
+      "colorBy": "Colour tiles by",
+      "byDay": "Today",
+      "byTotal": "Total gain",
+      "noTiles": "No priced holdings to show.",
+      "unpriced": "No price available, so left out: {symbols}.",
+      "warningsTitle": "Concentration",
+      "noWarnings": "No concentration warnings.",
+      "targetsTitle": "Target mix",
+      "targetsHelp": "The mix you want. The six numbers must add up to 100.",
+      "nowPct": "now {pct}",
+      "targetsInvalid": "Use numbers between 0 and 100.",
+      "sumOk": "Adds up to 100%.",
+      "sumUnder": "Adds up to {sum}. Add {diff} more.",
+      "sumOver": "Adds up to {sum}. Remove {diff}.",
+      "saveTargets": "Save target mix",
+      "clearTargets": "Clear targets",
+      "targetsSaved": "Target mix saved",
+      "targetsCleared": "Targets cleared",
+      "planTitle": "Where your next deposit should go",
+      "planHelp": "Splits new money across the parts that are below target. It never suggests selling.",
+      "planNoTargets": "Set your target mix first.",
+      "planAmount": "Deposit amount",
+      "planOnTarget": "You are at or above target everywhere, so there is nothing to top up.",
+      "planLine": "{now} now → {after} after (target {target})",
+      "buyLargest": "Your largest holding here:",
+      "buyDefault": "A common choice:",
+      "buyYours": "Which one to buy is your call.",
+      "planLeft": "{amount} is left over once every part reaches its target.",
+      "planNote": "Arithmetic on your own targets, not a recommendation.",
+      "emptyScope": "Nothing in this account yet."
+    }
   },
   "comingUpPage": {
     "title": "Coming up",
     "subtitle": "Dividends, earnings and events for the stocks you own.",
-    "cards": [
-      {
-        "key": "dividends",
-        "title": "Dividends",
-        "body": "Ex-dividend and payment dates for your holdings."
+    "daysChip": "{n} days",
+    "daysLabel": "How far ahead",
+    "todayLabel": "Today · {date}",
+    "sources": {
+      "dividends": "dividends",
+      "earnings": "earnings",
+      "analyst": "analyst ratings",
+      "check_changed": "Signa checks",
+      "economy": "economy"
+    },
+    "emptyBody": "Add a stock you own to see its dividends and earnings dates here.",
+    "sourcesFailed": "Some data could not be loaded right now: {sources}.",
+    "none": "Nothing in the next {n} days.",
+    "recentTitle": "Recent",
+    "recentHelp": "Already happened in the last 7 days.",
+    "economyNote": "Economy dates (rate decisions, inflation) are kept by hand and can change.",
+    "tags": {
+      "recent": "Recent",
+      "estimated": "Estimated",
+      "watchlist": "Watchlist"
+    },
+    "events": {
+      "perShare": "{amount} per share",
+      "forShares": "{amount} for your {shares} shares",
+      "paysOn": "Pays {date}",
+      "exDiv": "{symbol} goes ex-dividend",
+      "exDivSpecial": "{symbol} goes ex-dividend (special payment)",
+      "payment": "{symbol} pays you {amount}",
+      "paymentNoCash": "{symbol} pays its dividend",
+      "earnings": "{symbol} reports earnings",
+      "avgMove": "It moved {pct}% on average, up or down, after its last {n} reports.",
+      "typicalMove": "On your shares that is about {amount}.",
+      "checkChanged": "{symbol}: a Signa check changed",
+      "checkChange": "{check}: {from} → {to}",
+      "analyst": "{symbol}: {firm} {action}",
+      "gradeChange": "Rating {from} → {to}",
+      "grade": "Rating {grade}",
+      "targetChange": "Price target {from} → {to}",
+      "target": "Price target {to}",
+      "targetsFollow": "Price targets tend to follow the price, not lead it.",
+      "actions": {
+        "rating": "updated its rating",
+        "up": "upgraded it",
+        "down": "downgraded it",
+        "main": "kept its rating",
+        "init": "started covering it",
+        "reit": "repeated its rating"
       },
-      {
-        "key": "earnings",
-        "title": "Earnings",
-        "body": "When your companies report results."
+      "economy": {
+        "boc_rate": "Bank of Canada rate decision",
+        "fed_rate": "US Federal Reserve rate decision",
+        "us_cpi": "US inflation report (CPI)",
+        "ca_cpi": "Canada inflation report (CPI)"
       },
-      {
-        "key": "events",
-        "title": "Events",
-        "body": "Splits and other events that change your holdings."
-      }
-    ],
-    "seeCalendar": "See the dividend calendar"
+      "provisional": "Provisional date."
+    }
   },
   "profile": {
     "title": "Profile",
@@ -2735,5 +2837,255 @@
       "another": "Import another file",
       "cancel": "Cancel"
     }
+  },
+  "trackerUi": {
+    "hideAmounts": "Hide amounts",
+    "showAmounts": "Show amounts",
+    "scope": {
+      "label": "Show",
+      "all": "All accounts",
+      "people": "People",
+      "accounts": "Accounts"
+    },
+    "asOf": "As of {time}",
+    "asOfDelayed": "As of {time} · delayed {min} min",
+    "premiumBody": "This needs the Premium plan.",
+    "premiumRange": "Needs the Premium plan",
+    "empty": {
+      "title": "No holdings yet",
+      "body": "Add a stock you own to see your portfolio here.",
+      "addStock": "Add a stock",
+      "accounts": "Set up accounts"
+    },
+    "safety": {
+      "growing": "Growing",
+      "steady": "Steady",
+      "variable": "Variable",
+      "watch": "Watch",
+      "cut": "Cut",
+      "unknown": "No grade"
+    },
+    "safetyHelp": "A simple grade of how dependable this payout has been. It describes the past, it is not a forecast.",
+    "ranges": {
+      "1D": "1D",
+      "1W": "1W",
+      "1M": "1M",
+      "3M": "3M",
+      "YTD": "YTD",
+      "1Y": "1Y",
+      "5Y": "5Y",
+      "ALL": "All"
+    },
+    "rangeLong": {
+      "1D": "today",
+      "1W": "past week",
+      "1M": "past month",
+      "3M": "past 3 months",
+      "YTD": "this year",
+      "1Y": "past year",
+      "5Y": "past 5 years",
+      "ALL": "all time"
+    },
+    "classes": {
+      "stocks": "Stocks",
+      "broad_etfs": "Broad ETFs",
+      "option_income_etfs": "Option-income ETFs",
+      "cash_like": "Cash and cash-like",
+      "crypto": "Crypto",
+      "other": "Other"
+    },
+    "warnings": {
+      "top3_concentration": "Your 3 largest holdings ({symbols}) are {pct} of the portfolio (above {limit}).",
+      "single_holding": "{symbol} alone is {pct} of the portfolio (above {limit}).",
+      "cash_like_high": "Cash and cash-like funds are {pct} of the portfolio (above {limit}).",
+      "option_income_high": "Option-income ETFs are {pct} of the portfolio (above {limit})."
+    },
+    "value": {
+      "marketValue": "Market value",
+      "totalGain": "Total gain",
+      "totalGainDivs": "Total gain (includes dividends)",
+      "includesDividends": "Includes dividends",
+      "excludesDividends": "Price gain only. Add transactions to include dividends.",
+      "today": "today",
+      "rangeLabel": "Chart range",
+      "compare": "Compare",
+      "compareLabel": "Compare with a benchmark",
+      "vs": "vs {symbol}",
+      "removeCompare": "Remove the comparison with {symbol}",
+      "compareUnavailable": "No benchmark data for this range.",
+      "fullHistory": "5 years and the full history need the Premium plan.",
+      "noSeries": "Not enough data to draw this range yet.",
+      "chartAria": "Portfolio value, {range}: {change}",
+      "you": "You",
+      "expand": "Show the chart full screen",
+      "estimated": "Based on today's shares; add transactions for the exact past.",
+      "addTransactions": "Add transactions",
+      "noIntraday": "No intraday prices yet today. Showing the previous close and the latest value."
+    }
+  },
+  "divSummary": {
+    "title": "Dividends",
+    "backToDividends": "Dividends",
+    "periodLabel": "Period",
+    "periods": {
+      "next12m": "Next 12m"
+    },
+    "emptyBody": "Add a stock you own to see the dividends it pays.",
+    "monthsTitle": "Month by month",
+    "monthsReceived": "What you recorded as received, from your transactions.",
+    "monthsExpected": "What your holdings are expected to pay, by payment month.",
+    "fullCalendar": "Full dividend calendar",
+    "noBars": "No dividend income in this period.",
+    "barsAria": "Dividend income by month, steady and variable",
+    "barLabel": "{month}: {total} ({steady} steady, {variable} variable)",
+    "steady": "Steady",
+    "variable": "Option or variable",
+    "receivedIn": "Received in {year}",
+    "expected12m": "Expected, next 12 months",
+    "afterTax": "after tax",
+    "beforeTax": "before tax",
+    "asRecorded": "as recorded",
+    "perMonthDay": "{month} per month · {day} per day",
+    "forwardNote": "Your holdings today are expected to pay {amount} over the next 12 months.",
+    "stats": {
+      "yield": "Yield",
+      "onCost": "Yield on cost",
+      "growth5y": "Growth, 5 years",
+      "growth1y": "Growth, 1 year",
+      "coverage": "covers {pct} of income"
+    },
+    "tax": {
+      "open": "Open accounts and tax",
+      "withheldLine": "{amount} withheld at the source, of {gross} before tax. Accounts and tax"
+    },
+    "noTransactions": "No dividend transactions recorded for this year.",
+    "addTransactions": "Add transactions",
+    "unconverted": "Not converted to your currency, so left out: {symbols}.",
+    "upcoming": {
+      "title": "Upcoming payments",
+      "subtitle": "The next 60 days.",
+      "none": "No payments expected in the next 60 days.",
+      "pays": "Pays {date}",
+      "ex": "Ex-dividend {date}",
+      "estimated": "Estimated",
+      "estimatedHelp": "Projected from the payment history; not announced yet",
+      "locked": "Ex-date passed",
+      "lockedHelp": "You are entitled to this payment; it has not been paid yet"
+    },
+    "change": {
+      "title": "Why your income changed",
+      "subtitle": "Expected yearly income, compared with {days} days ago.",
+      "unavailable": "Not available yet.",
+      "wholeOnly": "Available for the whole portfolio only. Switch to all accounts to see it.",
+      "availableFrom": "Signa started recording your expected income recently. This will be available from {date}.",
+      "partial": "Compared with {date}, the oldest record so far.",
+      "noChange": "No change in this period.",
+      "components": {
+        "raises": "Dividend raises",
+        "cuts": "Dividend cuts",
+        "new_shares": "Shares you added",
+        "removed_shares": "Shares you sold",
+        "fx": "Exchange rate"
+      },
+      "kinds": {
+        "raise": "raised its dividend",
+        "cut": "cut its dividend",
+        "new_position": "new position",
+        "removed_position": "position closed",
+        "more_shares": "more shares",
+        "fewer_shares": "fewer shares"
+      }
+    },
+    "payers": {
+      "title": "Who pays you",
+      "subtitle": "{n} payers, largest first.",
+      "none": "None of your holdings pays a dividend.",
+      "monthsAria": "Pays in: {months}",
+      "line": "{share} of income · yields {yield}",
+      "details": {
+        "suspended": "The dividend is suspended.",
+        "recent_cut": "It was cut in the last 24 months.",
+        "volatile_distributions": "Distributions change a lot from one payment to the next.",
+        "distribution_growing": "Distributions grew over the last year.",
+        "steady_distributions": "Distributions have been steady.",
+        "payout_over_100": "It pays out more than it earns.",
+        "yield_trap": "The yield is far above its own 5-year average.",
+        "rating_poor": "Its dividend health check is poor.",
+        "volatile_payouts": "Payments change a lot from one to the next.",
+        "grows_5y": "It has grown for 5 years with no cut.",
+        "steady_payer": "Payments have been steady."
+      },
+      "quality": "Income quality",
+      "qualityAria": "Open the income quality of {symbol}",
+      "nonPayers": "No dividend: {symbols}."
+    }
+  },
+  "divTax": {
+    "title": "Accounts and tax",
+    "subtitle": "How much of your expected dividends is withheld at the source, by account type. Next 12 months.",
+    "gross": "Before tax {amount}",
+    "lost": "Lost {amount}",
+    "recoverable": "Recoverable {amount}",
+    "insideFund": "Inside funds {amount}",
+    "reasons": {
+      "not_eligible": "The after-tax view of your dividends needs the Premium plan.",
+      "country_not_supported": "After-tax dividends are available for Canada and the United States only. Set your country in your profile.",
+      "view_before": "Your profile shows dividends before tax. Switch to after tax in your profile to see this breakdown.",
+      "ledger_as_recorded": "Received amounts are shown as you recorded them, so no tax is estimated."
+    },
+    "openProfile": "Open your profile",
+    "summaryTitle": "Next 12 months",
+    "summarySubtitle": "Withholding tax only: what a foreign government keeps before the dividend reaches you.",
+    "stats": {
+      "gross": "Before tax",
+      "lost": "Lost",
+      "lostHelp": "cannot be claimed back",
+      "recoverable": "Recoverable",
+      "recoverableHelp": "as a foreign tax credit",
+      "afterTax": "After tax"
+    },
+    "cashReceived": "Cash that actually lands in your accounts: {amount}.",
+    "byTypeTitle": "By account type",
+    "noTypes": "None of your accounts with dividends has a tax type yet.",
+    "insideTitle": "Tax paid inside funds",
+    "insideBody": "About {amount} a year is withheld inside Canadian-listed funds that hold US stocks, before they pay you. It is already reflected in what the fund distributes, it applies in every account and it cannot be avoided, so it is not subtracted again.",
+    "untypedTitle": "Accounts without a tax type",
+    "untypedBody": "No tax is estimated for: {names}. Set the account type to include them.",
+    "setTypes": "Set account types",
+    "disclaimer": "Estimates from simple treaty rules (15% withholding). Income tax at your own rate is not included. Information only, not tax advice."
+  },
+  "incomeQuality": {
+    "title": "{symbol} income quality",
+    "noPayouts": "No payments in the last 12 months.",
+    "payoutsAria": "Payments of the last 12 months",
+    "payoutBar": "{date}: {amount} per share ({change} vs the previous one)",
+    "variability": "From one payment to the next, the amount changed between {min} and {max}.",
+    "variabilityUnknown": "Not enough payments to measure how much they vary.",
+    "sourceTitle": "Where the yield comes from",
+    "yield": "Yield",
+    "kind": "Kind of income",
+    "classes": {
+      "steady": "Dividends",
+      "option_income": "Option income",
+      "cash_like": "Interest"
+    },
+    "sources": {
+      "dividends_from_earnings": "Dividends paid out of the company's profits.",
+      "dividends_exceed_earnings": "Dividends larger than the company's profits. That can't last unless profits rise.",
+      "fund_distributions": "Distributions from what the fund's holdings pay.",
+      "option_premiums": "Mostly option premiums: the fund sells call options on what it holds. That pays cash now and gives up part of the upside.",
+      "interest": "Interest on short-term, cash-like holdings."
+    },
+    "roc": "With a yield this high, part of each payment is likely your own capital coming back, not income.",
+    "returnTitle": "Total return vs what it is built on",
+    "returnPeriod": "{start} to {end}, dividends included.",
+    "noReturn": "No comparison available for this fund.",
+    "underlying": "{symbol} (underlying)",
+    "ahead": "{pts} points ahead of {symbol} over the period.",
+    "behind": "{pts} points behind {symbol} over the period.",
+    "currencyMismatch": "The two trade in different currencies, so part of the gap is the exchange rate.",
+    "returnNote": "A high yield does not mean a high return: what counts is price change plus payments.",
+    "payoutsTitle": "How much the payments vary",
+    "payoutsHelp": "Each payment per share over the last 12 months."
   }
 }
