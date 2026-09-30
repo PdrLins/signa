@@ -1,6 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios'
 import { TOKEN_KEY } from '@/lib/constants'
 import { useAuthStore } from '@/store/authStore'
+import { useViewAsStore } from '@/store/viewAsStore'
 import type { SignalsResponse, SignalFilters, DailyStats, ScanTodayRecord } from '@/types/signal'
 import type { WatchlistItem, WatchlistResponse, WatchlistAddRequest } from '@/types/watchlist'
 import type { ScansResponse } from '@/types/scan'
@@ -83,6 +84,10 @@ client.interceptors.request.use((config) => {
       return Promise.reject(new Error('Not authenticated'))
     }
     config.headers.Authorization = `Bearer ${token}`
+    // Dev tools "View as" (only honoured by the back-end for owners with
+    // DEV_TOOLS_ENABLED).
+    const viewAs = useViewAsStore.getState().viewAs
+    if (viewAs) config.headers['X-View-As'] = viewAs
   }
   return config
 })

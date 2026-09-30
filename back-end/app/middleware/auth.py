@@ -70,22 +70,34 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Access level comes from the DB (cached 60s), not the token, so a
         # change applies without logging out.
         access = get_user_access(payload.get("sub"))
+        level = effective_level(access["level"], request.headers.get("X-View-As"))
         request.state.user = {
             "user_id": payload.get("sub"),
             "username": payload.get("username"),
             "jti": jti,
-            "access_level": access["level"],
+            "access_level": level,
+            "real_access_level": access["level"],
             "slot_bonus": access["slot_bonus"],
         }
 
         _touch_last_seen(payload.get("sub"))
 
         # The AI layer reads this to refuse calls for users without system.ai.
-        level_token = set_request_level(access["level"])
+        level_token = set_request_level(level)
         try:
             return await call_next(request)
         finally:
             reset_request_level(level_token)
+
+
+def effective_level(real_level: str, view_as: str | None) -> str:
+    """Dev tools: an owner may preview the app as a lower level with the
+    X-View-As header when settings.dev_tools_enabled. Everyone else, and
+    every request in production, gets their real level."""
+    if (settings.dev_tools_enabled and real_level == "owner"
+            and view_as in ("free", "premium", "owner")):
+        return view_as
+    return real_level
 
 
 def _touch_last_seen(user_id: str | None) -> None:

@@ -120,7 +120,7 @@ app.add_middleware(                      # outermost
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Brain-Token"],
+    allow_headers=["Authorization", "Content-Type", "X-Brain-Token", "X-View-As"],
 )
 
 register_exception_handlers(app)

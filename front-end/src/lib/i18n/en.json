@@ -3283,5 +3283,14 @@
       "Premium isn't on sale yet; we'll announce the price before it is."
     ],
     "seePlans": "See plans"
+  },
+  "devTools": {
+    "title": "View as",
+    "levels": {
+      "free": "Free",
+      "premium": "Premium",
+      "owner": "Owner"
+    },
+    "note": "Dev only. Previews what each plan sees; nothing is saved to the database."
   }
 }

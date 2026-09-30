@@ -245,3 +245,32 @@ def test_chart_hides_signal_markers_from_free(monkeypatch):
         tickers._chart_cache.clear() if hasattr(tickers, "_chart_cache") else None
         body = _client(monkeypatch, tickers.router).get("/api/v1/tickers/MSFT/chart").json()
         assert len(body["signal_markers"]) == expected, (level, body)
+
+
+def test_view_as_only_for_owner_with_dev_tools(monkeypatch):
+    from app.core.config import settings
+    from app.middleware.auth import effective_level
+    monkeypatch.setattr(settings, "dev_tools_enabled", False)
+    assert effective_level("owner", "free") == "owner"          # production: ignored
+    monkeypatch.setattr(settings, "dev_tools_enabled", True)
+    assert effective_level("owner", "free") == "free"
+    assert effective_level("owner", "premium") == "premium"
+    assert effective_level("owner", "admin") == "owner"         # unknown value ignored
+    assert effective_level("free", "owner") == "free"           # never an escalation
+    assert effective_level("premium", "owner") == "premium"
+
+
+def test_me_reports_view_as(monkeypatch):
+    from app.api.v1 import auth
+    from app.core.config import settings
+    from app.services import slots
+    monkeypatch.setattr(settings, "dev_tools_enabled", True)
+    monkeypatch.setattr(slots, "followed_symbols", lambda _uid: set())
+    _as(monkeypatch, "owner")
+    c = _client(monkeypatch, auth.router)
+    body = c.get("/api/v1/auth/me", headers={"X-View-As": "free"}).json()
+    assert body["access_level"] == "free" and body["real_access_level"] == "owner" and body["dev_tools"] is True
+    assert "area.brain" not in body["features"]
+    _as(monkeypatch, "free")
+    body = c.get("/api/v1/auth/me", headers={"X-View-As": "owner"}).json()
+    assert body["access_level"] == "free" and body["dev_tools"] is False

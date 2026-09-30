@@ -613,6 +613,10 @@ class Settings(BaseSettings):
     # --- App ---
     app_name: str = "Signa"
     debug: bool = False
+    # Dev tools: lets an OWNER preview the app as free / premium via the
+    # X-View-As request header (web "View as" switch). Never enable in
+    # production. Nothing is written to the database.
+    dev_tools_enabled: bool = False
 
     # extra="ignore": tolerate retired keys (e.g. AUTH_ENABLED) left in old .env files
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}

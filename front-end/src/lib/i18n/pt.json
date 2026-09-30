@@ -3283,5 +3283,14 @@
       "O Premium ainda não está à venda; anunciaremos o preço antes."
     ],
     "seePlans": "Ver planos"
+  },
+  "devTools": {
+    "title": "Ver como",
+    "levels": {
+      "free": "Grátis",
+      "premium": "Premium",
+      "owner": "Dono"
+    },
+    "note": "Só em desenvolvimento. Mostra o que cada plano vê; nada é salvo no banco."
   }
 }

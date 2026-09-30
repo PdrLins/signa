@@ -23,4 +23,7 @@ export interface MeResponse {
   /** Every known key with its minimum level (for "Needs premium" badges). */
   catalog: FeatureInfo[]
   slots: SlotSummary
+  /** Dev tools ("View as"): the real level, and whether the switch may be shown. */
+  real_access_level?: AccessLevel
+  dev_tools?: boolean
 }

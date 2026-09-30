@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.access import FEATURE_CATALOG, allowed_features, get_feature_levels
+from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.core.utils import get_client_ip
 from app.models.auth import (
@@ -107,6 +108,11 @@ async def me(user: dict = Depends(get_current_user)):
         "user_id": user["user_id"],
         "username": user.get("username"),
         "access_level": level,
+        # Dev tools ("View as"): the real level and whether the switch may be
+        # shown (owner + DEV_TOOLS_ENABLED). Clients ignore these otherwise.
+        "real_access_level": user.get("real_access_level") or level,
+        "dev_tools": bool(settings.dev_tools_enabled
+                          and (user.get("real_access_level") or level) == "owner"),
         "features": allowed_features(level),
         "catalog": [
             {"key": k, "min_level": levels[k], "description": FEATURE_CATALOG.get(k, ("", ""))[1]}
