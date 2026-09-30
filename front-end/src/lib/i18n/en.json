@@ -2691,8 +2691,8 @@
     "plan": "Plan",
     "language": "Language",
     "languages": {
-      "en": "English",
-      "pt": "Português"
+      "en": "EN",
+      "pt": "PT"
     },
     "homeCurrency": "Home currency",
     "homeCurrencyHelp": "Totals are shown in this currency. Today only {list} convert automatically.",

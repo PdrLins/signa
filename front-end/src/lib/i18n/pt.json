@@ -2691,8 +2691,8 @@
     "plan": "Plano",
     "language": "Idioma",
     "languages": {
-      "en": "English",
-      "pt": "Português"
+      "en": "EN",
+      "pt": "PT"
     },
     "homeCurrency": "Moeda principal",
     "homeCurrencyHelp": "Os totais aparecem nesta moeda. Por enquanto só {list} são convertidas automaticamente.",

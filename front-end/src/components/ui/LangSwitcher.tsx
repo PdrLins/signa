@@ -53,14 +53,16 @@ export function LangSwitcher({ variant = 'segmented' }: { variant?: 'rail' | 'se
             role="radio"
             aria-checked={active}
             onClick={() => setLocale(o.code)}
-            className="min-h-[44px] px-3 rounded-lg text-[13px] font-medium transition-all focus-visible:outline focus-visible:outline-2"
+            aria-label={o.label}
+            title={o.label}
+            className="min-h-[44px] min-w-[44px] px-3 rounded-lg text-[13px] font-semibold tracking-wide transition-all focus-visible:outline focus-visible:outline-2"
             style={{
               backgroundColor: active ? theme.colors.primary + '1f' : 'transparent',
               color: active ? theme.colors.primary : theme.colors.textSub,
               outlineColor: theme.colors.primary,
             }}
           >
-            {o.label}
+            {o.short}
           </button>
         )
       })}

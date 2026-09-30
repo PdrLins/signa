@@ -799,7 +799,7 @@ export default function SettingsPage() {
           {t.settings.languageLabel}
         </p>
         <div className="flex gap-3">
-          {([['en', 'English (Canada)', 'EN-CA'], ['pt', 'Português (Brasil)', 'PT-BR']] as const).map(([code, label, badge]) => {
+          {([['en', 'English (Canada)', 'EN'], ['pt', 'Português (Brasil)', 'PT']] as const).map(([code, label, badge]) => {
             const isActive = locale === code
             return (
               <button
@@ -812,8 +812,7 @@ export default function SettingsPage() {
                   color: isActive ? theme.colors.primary : theme.colors.text,
                 }}
               >
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: isActive ? theme.colors.primary + '20' : theme.colors.border, color: isActive ? theme.colors.primary : theme.colors.textSub }}>{badge}</span>
-                <span className="text-sm font-medium">{label}</span>
+                <span className="text-sm font-semibold tracking-wide" aria-label={label} title={label}>{badge}</span>
                 {isActive && <Check size={16} className="ml-auto" />}
               </button>
             )
