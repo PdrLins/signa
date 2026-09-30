@@ -42,7 +42,7 @@ KINDS: dict[str, tuple[str, str, str]] = {
 
 # (code, ISO date, provisional)
 _EVENTS: tuple[tuple[str, str, bool], ...] = (
-    # ---- Bank of Canada 2026 (published)
+    # ---- Bank of Canada 2026 (published; checked 2026-09-30)
     ("boc_rate", "2026-01-28", False), ("boc_rate", "2026-03-18", False), ("boc_rate", "2026-04-29", False),
     ("boc_rate", "2026-06-10", False), ("boc_rate", "2026-07-15", False), ("boc_rate", "2026-09-02", False),
     ("boc_rate", "2026-10-28", False), ("boc_rate", "2026-12-09", False),
@@ -50,7 +50,7 @@ _EVENTS: tuple[tuple[str, str, bool], ...] = (
     ("boc_rate", "2027-01-27", True), ("boc_rate", "2027-03-10", True), ("boc_rate", "2027-04-14", True),
     ("boc_rate", "2027-06-02", True), ("boc_rate", "2027-07-14", True), ("boc_rate", "2027-09-08", True),
     ("boc_rate", "2027-10-27", True), ("boc_rate", "2027-12-08", True),
-    # ---- FOMC 2026 (published; decision day = second meeting day)
+    # ---- FOMC 2026 (published, checked 2026-09-30; decision day = second meeting day)
     ("fed_rate", "2026-01-28", False), ("fed_rate", "2026-03-18", False), ("fed_rate", "2026-04-29", False),
     ("fed_rate", "2026-06-17", False), ("fed_rate", "2026-07-29", False), ("fed_rate", "2026-09-16", False),
     ("fed_rate", "2026-10-28", False), ("fed_rate", "2026-12-09", False),
@@ -58,23 +58,23 @@ _EVENTS: tuple[tuple[str, str, bool], ...] = (
     ("fed_rate", "2027-01-27", True), ("fed_rate", "2027-03-17", True), ("fed_rate", "2027-04-28", True),
     ("fed_rate", "2027-06-16", True), ("fed_rate", "2027-07-28", True), ("fed_rate", "2027-09-22", True),
     ("fed_rate", "2027-10-27", True), ("fed_rate", "2027-12-08", True),
-    # ---- US CPI 2026 (BLS schedule)
+    # ---- US CPI 2026 (BLS schedule, checked 2026-09-30)
     ("us_cpi", "2026-01-13", False), ("us_cpi", "2026-02-11", False), ("us_cpi", "2026-03-11", False),
     ("us_cpi", "2026-04-10", False), ("us_cpi", "2026-05-12", False), ("us_cpi", "2026-06-10", False),
     ("us_cpi", "2026-07-14", False), ("us_cpi", "2026-08-12", False), ("us_cpi", "2026-09-11", False),
-    ("us_cpi", "2026-10-14", True), ("us_cpi", "2026-11-10", True), ("us_cpi", "2026-12-10", True),
+    ("us_cpi", "2026-10-14", False), ("us_cpi", "2026-11-10", False), ("us_cpi", "2026-12-10", False),
     # ---- US CPI 2027 (provisional)
     ("us_cpi", "2027-01-13", True), ("us_cpi", "2027-02-10", True), ("us_cpi", "2027-03-10", True),
     ("us_cpi", "2027-04-13", True), ("us_cpi", "2027-05-12", True), ("us_cpi", "2027-06-10", True),
     ("us_cpi", "2027-07-14", True), ("us_cpi", "2027-08-11", True), ("us_cpi", "2027-09-14", True),
     ("us_cpi", "2027-10-13", True), ("us_cpi", "2027-11-10", True), ("us_cpi", "2027-12-10", True),
-    # ---- Canada CPI 2026 (Statistics Canada)
-    ("ca_cpi", "2026-01-20", False), ("ca_cpi", "2026-02-17", False), ("ca_cpi", "2026-03-16", False),
-    ("ca_cpi", "2026-04-21", False), ("ca_cpi", "2026-05-19", False), ("ca_cpi", "2026-06-16", False),
-    ("ca_cpi", "2026-07-21", False), ("ca_cpi", "2026-08-18", False), ("ca_cpi", "2026-09-15", False),
-    ("ca_cpi", "2026-10-20", True), ("ca_cpi", "2026-11-17", True), ("ca_cpi", "2026-12-15", True),
-    # ---- Canada CPI 2027 (provisional)
-    ("ca_cpi", "2027-01-19", True), ("ca_cpi", "2027-02-16", True), ("ca_cpi", "2027-03-16", True),
+    # ---- Canada CPI (Statistics Canada "2026-2027 release dates", checked 2026-09-30)
+    ("ca_cpi", "2026-01-19", False), ("ca_cpi", "2026-02-17", False), ("ca_cpi", "2026-03-16", False),
+    ("ca_cpi", "2026-04-20", False), ("ca_cpi", "2026-05-19", False), ("ca_cpi", "2026-06-22", False),
+    ("ca_cpi", "2026-07-20", False), ("ca_cpi", "2026-08-17", False), ("ca_cpi", "2026-09-14", False),
+    ("ca_cpi", "2026-10-19", False), ("ca_cpi", "2026-11-16", False), ("ca_cpi", "2026-12-14", False),
+    ("ca_cpi", "2027-01-18", False), ("ca_cpi", "2027-02-16", False), ("ca_cpi", "2027-03-15", False),
+    # ---- Canada CPI Apr-Dec 2027 (provisional: not yet published)
     ("ca_cpi", "2027-04-20", True), ("ca_cpi", "2027-05-18", True), ("ca_cpi", "2027-06-15", True),
     ("ca_cpi", "2027-07-20", True), ("ca_cpi", "2027-08-17", True), ("ca_cpi", "2027-09-21", True),
     ("ca_cpi", "2027-10-19", True), ("ca_cpi", "2027-11-16", True), ("ca_cpi", "2027-12-14", True),

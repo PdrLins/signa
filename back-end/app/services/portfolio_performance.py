@@ -72,7 +72,9 @@ from app.services import portfolio_context as pc
 from app.services.price_cache import native_currency
 
 ET = ZoneInfo("America/New_York")
-RANGES: tuple[str, ...] = ("1D", "1W", "1M", "YTD", "1Y", "ALL")
+RANGES: tuple[str, ...] = ("1D", "1W", "1M", "3M", "YTD", "1Y", "5Y", "ALL")
+# Ranges beyond one year need feature.full_history (premium).
+LONG_RANGES: frozenset[str] = frozenset({"5Y", "ALL"})
 INTRADAY_TTL = 180
 INTRADAY_MISS_TTL = 120
 ALL_FALLBACK_YEARS = 5
@@ -132,10 +134,14 @@ def range_start(rng: str, today: date) -> date | None:
         return today - timedelta(days=7)
     if rng == "1M":
         return (pd.Timestamp(today) - pd.DateOffset(months=1)).date()
+    if rng == "3M":
+        return (pd.Timestamp(today) - pd.DateOffset(months=3)).date()
     if rng == "YTD":
         return date(today.year, 1, 1) - timedelta(days=1)
     if rng == "1Y":
         return (pd.Timestamp(today) - pd.DateOffset(years=1)).date()
+    if rng == "5Y":
+        return (pd.Timestamp(today) - pd.DateOffset(years=5)).date()
     return None
 
 
@@ -143,7 +149,7 @@ def closes_period(start: date, today: date) -> str:
     days = (today - start).days
     if days <= 360:
         return "1y"
-    if days <= 5 * 365:
+    if days <= 5 * 366:
         return "5y"
     return "max"
 

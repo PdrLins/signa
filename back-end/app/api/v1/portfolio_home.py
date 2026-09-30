@@ -23,7 +23,7 @@ GET /api/v1/portfolio/summary?account_id=&person_id=            area.home
   "usdcad": 1.39 | null
 }
 
-GET /api/v1/portfolio/history?range=1D|1W|1M|YTD|1Y|ALL&account_id=&person_id=&compare=   area.home
+GET /api/v1/portfolio/history?range=1D|1W|1M|3M|YTD|1Y|5Y|ALL&account_id=&person_id=&compare=   area.home
 {
   "range": "1M", "interval": "1d" | "5m" | "15m", "currency": "CAD",
   "start": "2026-08-29", "end": "2026-09-30",
@@ -82,7 +82,7 @@ def _s(v: Optional[UUID]) -> Optional[str]:
 
 def _check_range(user: dict, rng: str) -> str:
     r = perf.validate_range(rng)
-    if r == "ALL" and not can(user.get("access_level") or "free", "feature.full_history"):
+    if r in perf.LONG_RANGES and not can(user.get("access_level") or "free", "feature.full_history"):
         raise upgrade_required("feature.full_history")
     return r
 

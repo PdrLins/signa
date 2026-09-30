@@ -326,3 +326,20 @@ def test_parse_intraday_frame():
     out = perf.parse_intraday(df, ["A", "B", "C"])
     assert [v for _, v in out["A"]] == [1.0, 2.0] and len(out["B"]) == 1 and "C" not in out
     assert out["A"][0][0] == datetime(2026, 9, 30, 13, 30, tzinfo=timezone.utc)
+
+
+def test_range_starts_for_3m_and_5y():
+    from datetime import date
+    d = date(2026, 9, 30)
+    assert perf.range_start("3M", d) == date(2026, 6, 30)
+    assert perf.range_start("5Y", d) == date(2021, 9, 30)
+    assert perf.closes_period(perf.range_start("5Y", d), d) == "5y"
+    assert perf.closes_period(perf.range_start("3M", d), d) == "1y"
+
+
+def test_history_5y_needs_full_history_3m_is_free(monkeypatch, db):
+    _one_holding(db)
+    r = _client(monkeypatch, "free").get("/api/v1/portfolio/history?range=5Y")
+    assert r.status_code == 403 and r.json()["detail"]["feature"] == "feature.full_history"
+    assert _client(monkeypatch, "free").get("/api/v1/portfolio/history?range=3M").status_code == 200
+    assert _client(monkeypatch, "premium").get("/api/v1/portfolio/history?range=5Y").status_code == 200

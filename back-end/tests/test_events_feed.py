@@ -99,7 +99,11 @@ def test_economy_calendar_window_and_provisional():
     assert codes == {"boc_rate", "fed_rate", "us_cpi", "ca_cpi"}
     assert [e["date"] for e in evs] == sorted(e["date"] for e in evs)
     assert all(e["date"].startswith("2026-10") for e in evs)
-    assert all(e["provisional"] for e in economic_calendar.events_between(date(2027, 1, 1), date(2027, 12, 31)))
+    ev_2027 = economic_calendar.events_between(date(2027, 1, 1), date(2027, 12, 31))
+    # StatCan has published Canada CPI through March 2027; everything else in 2027 is provisional.
+    confirmed = {e["date"] for e in ev_2027 if not e["provisional"]}
+    assert confirmed == {"2027-01-18", "2027-02-16", "2027-03-15"}
+    assert all(e["code"] == "ca_cpi" for e in ev_2027 if not e["provisional"])
     assert economic_calendar.COVERED_UNTIL.year == 2027
 
 
