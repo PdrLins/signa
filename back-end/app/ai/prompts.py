@@ -181,7 +181,7 @@ def normalize_synthesis_result(data: object, current_price: float | None = None)
       - `signal` missing or not in VALID_SIGNALS → error is set, signal=HOLD,
         confidence=0 (the router treats it as a failed provider call).
       - `confidence` missing/unparseable → 0 (never a neutral-looking 50).
-      - `p_win` (probability price is higher in 5 trading days) → float in
+      - `p_win` (probability price is higher in ai_pwin_horizon_days trading days) → float in
         [0, 1] or None.
       - target/stop are validated against `current_price` and the R:R is
         computed in code (`validate_trade_levels`); the LLM's own
@@ -375,7 +375,8 @@ def normalize_red_flag(flag: object) -> dict | None:
 
 CLAUDE_SYNTHESIS_PROMPT = """You are an investment analyst producing a trading decision for {ticker}.
 Today is {today} (UTC). Decisions are evaluated on what the price does over the
-next 5 trading days, so be calibrated: most setups do NOT have a real edge.
+next {pwin_horizon} trading days (positions are held 5-20 trading days), so be
+calibrated: most setups do NOT have a real edge.
 
 {untrusted_notice}
 
@@ -416,15 +417,19 @@ veto — weigh them with everything else.
 - Default to HOLD (no edge) or AVOID (red flags / hostile conditions). Choose
   BUY only when several independent pieces of evidence agree and the downside
   is defined; choose SELL only when deterioration is clear and well-supported.
-- Missing data is not evidence. Sentiment with low confidence, few mentions or
-  no sources should carry little weight.
+- Missing data is not evidence either way. Sentiment with low confidence, few
+  mentions or no sources should carry little weight; unavailable news is a data
+  gap, not a reason to HOLD by itself.
+- A dated catalyst is NOT required for BUY. Strong, independent fundamental
+  evidence (recent earnings beat, upward estimate revisions, insider buying,
+  reasonable valuation) plus an intact uptrend can justify BUY over this horizon.
 - Treat fraud allegations, SEC/legal actions and earnings misses as serious only
   when they come from cited sources.
 - VOLATILE regime: raise the bar for BUY. CRISIS regime: BUY only defensive /
   income names.
 - If sentiment and options flow disagree, say so and lower confidence.
 - `p_win`: your probability (0.0-1.0) that the price is HIGHER than today's
-  close 5 trading days from now. 0.5 means no edge. Be calibrated — values far
+  close {pwin_horizon} trading days from now. 0.5 means no edge. Be calibrated — values far
   from 0.5 require strong evidence.
 - `confidence` (0-100): how strongly the evidence supports the chosen signal.
 - Price levels: for BUY give stop_loss < current price < target_price; for SELL
@@ -633,6 +638,8 @@ def format_fundamentals(fund_data: dict) -> str:
         lines.append(f"- Dividend Yield: {fund_data['dividend_yield']:.2%}")
     if fund_data.get("payout_ratio") is not None:
         lines.append(f"- Payout Ratio: {fund_data['payout_ratio']:.1%}")
+    if fund_data.get("_dividend_summary"):  # Check a stock only (services/dividends.ai_summary)
+        lines.append(f"- {str(fund_data['_dividend_summary'])[:300]}")
     if fund_data.get("debt_to_equity") is not None:
         lines.append(f"- Debt/Equity: {fund_data['debt_to_equity']:.2f}")
     if fund_data.get("market_cap") is not None:
@@ -959,9 +966,12 @@ def build_synthesis_prompt(
         "risk_reward": None,
     }
 
+    from app.core.config import settings
+
     now = datetime.now(timezone.utc)
     return CLAUDE_SYNTHESIS_PROMPT.format(
         ticker=ticker,
+        pwin_horizon=settings.ai_pwin_horizon_days,
         today=f"{now.date().isoformat()} ({now.strftime('%A')})",
         price_context=format_price_context(technical_data, fundamental_data),
         technicals=format_technicals(technical_data),
@@ -1028,6 +1038,9 @@ Today: {today}
 
 ## Rule-based scorecard (deterministic heuristics; use as input, you may disagree with reasons)
 {scorecard}
+
+## Dividend (computed by Signa from the payment history; brain rules)
+{dividend}
 
 ## Cited red flags (material only; from a live news/X search)
 {red_flags}

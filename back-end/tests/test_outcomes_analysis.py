@@ -188,7 +188,8 @@ def test_ai_status_cohorts_and_suggestion():
 def test_report_and_digest_render():
     rows = ([mk(i, brain_decision="SKIP", skip_reason="rr_below_min_1.4", ai_status="rejected",
                 p_win=0.62, fwd_ret_5d=0.02, excess_ret_5d=0.01, excess_ret_10d=0.03 + (i % 3) * 0.01,
-                decision_overturned=bool(i % 2), fwd_ret_10d=0.03)
+                decision_overturned=bool(i % 2), fwd_ret_10d=0.03,
+                fwd_ret_20d=0.04, excess_ret_20d=0.02)  # p_win is graded at 20d
              for i in range(40)])
     report = oc.build_outcome_report(rows)
     md = render_outcomes_section(report)

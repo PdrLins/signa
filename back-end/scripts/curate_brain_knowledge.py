@@ -308,12 +308,17 @@ def build_plan(snapshot: dict[str, list[dict]]) -> dict:
 
     plan["left"] = list(REVISE_LEFT_AS_IS)
 
-    existing_concepts = {r.get("key_concept") for r in snapshot["signal_knowledge"]}
+    existing_by_concept = {r.get("key_concept"): r for r in snapshot["signal_knowledge"]}
     for row in build_prompt_core_rows():
-        if row["key_concept"] in existing_concepts:
-            plan["skipped"].append(("signal_knowledge", "-", row["key_concept"], "PROMPT_CORE row exists"))
-        else:
+        current = existing_by_concept.get(row["key_concept"])
+        if current is None:
             plan["insert"].append(row)
+        elif current.get("explanation") != row["explanation"]:
+            # PROMPT_CORE text changed in code: refresh the stored row.
+            plan["revise"].append(("signal_knowledge", current["id"], row["key_concept"],
+                                   ["explanation"], {"explanation": row["explanation"]}))
+        else:
+            plan["skipped"].append(("signal_knowledge", "-", row["key_concept"], "PROMPT_CORE row up to date"))
 
     for rid, short, reason in RETIRE_THINKING:
         assert rid != KEEP_THINKING_ID

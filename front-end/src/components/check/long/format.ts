@@ -83,6 +83,9 @@ const PARAM_FORMAT: Record<string, (v: number) => string> = {
   operating_margin: (v) => v.toFixed(0),
   debt_to_equity: (v) => (v / 100).toFixed(1),
   current_ratio: (v) => v.toFixed(1),
+  yield: (v) => v.toFixed(2),
+  payout: (v) => v.toFixed(0),
+  years: (v) => v.toFixed(0),
 }
 
 /** Scorecard reason through t.check.long.reasons[key][code]; falls back to

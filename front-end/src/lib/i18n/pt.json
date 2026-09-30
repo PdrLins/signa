@@ -1389,7 +1389,10 @@
       "no_equity": "A carteira do brain não tem patrimônio, então não há tamanho sugerido.",
       "ai_cached": "O veredito da IA foi reaproveitado de uma checagem ou varredura das últimas horas.",
       "ai_skipped": "A IA não foi consultada: o setup já falha numa checagem estrutural (economiza custo).",
-      "ai_skipped_disabled": "A análise de IA está desativada nas configurações."
+      "ai_skipped_disabled": "A análise de IA está desativada nas configurações.",
+      "ex_dividend_in_window": "Data ex-dividendo {date}, daqui a {days} pregões: cerca de {pct}% do preço é pago como dividendo. A queda do preço na data ex não é perda no retorno total.",
+      "ex_dividend_stop_risk": "O dividendo equivale a {pct_of_risk}% da distância até o stop — só a queda da data ex pode levar o preço para perto do stop.",
+      "ex_dividend_just_passed": "A data ex-dividendo é hoje — quem compra agora não recebe este pagamento."
     },
     "cached": "Em cache",
     "checkedAt": "checado às {time}",
@@ -1510,7 +1513,8 @@
         "track_record": "Histórico",
         "valuation": "Valuation",
         "risk": "Risco",
-        "quality": "Qualidade do negócio"
+        "quality": "Qualidade do negócio",
+        "dividend": "Dividendos"
       },
       "ratings": {
         "good": "Bom",
@@ -1550,6 +1554,13 @@
           "not_applicable": "Vale só para empresas individuais.",
           "missing": "Dados de rentabilidade e balanço indisponíveis.",
           "measured": "ROE {roe}% · margem operacional {operating_margin}% · dívida/PL {debt_to_equity}x · liquidez corrente {current_ratio} (bancos e seguradoras se leem diferente)."
+        },
+        "dividend": {
+          "not_applicable": "Criptoativos não pagam dividendos.",
+          "suspended": "Dividendo suspenso nos últimos 24 meses — um corte para zero.",
+          "none": "Não paga dividendos: o retorno depende só da valorização.",
+          "etf_distribution": "Distribui cerca de {yield}% ao ano; as distribuições do fundo variam com as posições, então as regras de corte e crescimento não se aplicam.",
+          "measured": "Yield {yield}%, payout {payout}%, crescimento em 5 anos {cagr}%/ano, {years} anos sem corte (bom: crescente, sem corte há 5+ anos, payout ≤ 75%)."
         }
       },
       "returnsTitle": "Retornos vs {benchmark}",
@@ -1637,7 +1648,8 @@
         "ai_unavailable": "A avaliação da IA não estava disponível — o veredito vem da pontuação por regras.",
         "ai_disabled": "A análise por IA está desligada — o veredito vem da pontuação por regras.",
         "benchmark_unavailable": "Os dados do índice de comparação não estavam disponíveis.",
-        "benchmark_currency_not_adjusted": "Os retornos do índice estão na moeda dele (câmbio indisponível)."
+        "benchmark_currency_not_adjusted": "Os retornos do índice estão na moeda dele (câmbio indisponível).",
+        "dividend_cap": "Corte recente de dividendo e payout acima de 100%: a regra de dividendos do brain limita o veredito a “Razoável, com ressalvas”."
       },
       "caveatsTitle": "Tenha em mente",
       "caveats": {
@@ -1732,7 +1744,8 @@
         "returns": "Retornos",
         "cost": "Custo",
         "valuation": "Valuation",
-        "scorecard": "Scorecard"
+        "scorecard": "Scorecard",
+        "dividend": "Dividendos"
       },
       "metrics": {
         "verdict": "Veredito",
@@ -1762,7 +1775,11 @@
         "rating_track_record": "Nota de histórico",
         "rating_valuation": "Nota de valuation",
         "rating_risk": "Nota de risco",
-        "rating_quality": "Nota de qualidade do negócio"
+        "rating_quality": "Nota de qualidade do negócio",
+        "dividend_yield": "Dividend yield",
+        "next_ex_date": "Próxima data ex-dividendo",
+        "dividend_growth_5y": "Crescimento do dividendo em 5 anos",
+        "rating_dividend": "Nota de dividendos"
       },
       "pass": "Passou",
       "fail": "Não passou",
@@ -1782,6 +1799,77 @@
         "compare_not_found": "Essa comparação expirou — rode de novo.",
         "daily_limit": "Esta comparação precisa de {needed} novas verificações, mas só restam {remaining} hoje. O limite zera à meia-noite (ET).",
         "resolve_failed": "Não foi possível consultar um dos tickers — tente de novo."
+      },
+      "estimatedTag": "estimada",
+      "cutTag": "corte recente"
+    },
+    "dividend": {
+      "title": "Dividendos",
+      "subtitle": "Com base no histórico de pagamentos. Datas projetadas aparecem como “estimada”.",
+      "pays": "Paga dividendos",
+      "yes": "Sim",
+      "no": "Não",
+      "yield": "Dividend yield",
+      "annual": "Valor anual",
+      "annualValue": "{amount} por ação",
+      "frequency": "Frequência",
+      "frequencies": {
+        "monthly": "Mensal",
+        "quarterly": "Trimestral",
+        "semiannual": "Semestral",
+        "annual": "Anual",
+        "irregular": "Irregular"
+      },
+      "payout": "Payout",
+      "fiveYearYield": "Yield médio de 5 anos",
+      "nextEx": "Próxima data ex-dividendo",
+      "nextPay": "Próximo pagamento",
+      "estimated": "estimada",
+      "estimatedHelp": "Datas estimadas são projetadas a partir do último pagamento e do intervalo habitual; a empresa ainda não as anunciou. Os valores são projetados a partir do último pagamento regular.",
+      "growth": "Crescimento do dividendo em 5 anos",
+      "growthValue": "{pct}/ano",
+      "yearsNoCut": "Anos sem corte",
+      "yearsValue": "{n} anos",
+      "badgeGrowing": "Dividendo crescente",
+      "badgeNoCut": "Sem corte há {n}+ anos",
+      "badgeCut": "Corte em {date}",
+      "badgeSuspended": "Suspenso",
+      "upcomingTitle": "Agenda de pagamentos (próximos 12 meses)",
+      "upcomingCaption": "Próximas datas ex-dividendo e de pagamento de {symbol}",
+      "upcomingNone": "Não foi possível projetar datas futuras.",
+      "lastTitle": "Últimos pagamentos",
+      "lastCaption": "Últimos pagamentos de dividendos de {symbol}",
+      "exDate": "Data ex",
+      "payDate": "Pagamento",
+      "amount": "Valor",
+      "special": "extra",
+      "none": "{symbol} não paga dividendos regulares.",
+      "crypto": "Criptoativos não pagam dividendos.",
+      "suspended": "O dividendo de {symbol} parece suspenso: nenhum pagamento no calendário habitual.",
+      "unavailable": "Os dados de dividendos não estão disponíveis agora.",
+      "exDateHelp": "Para receber o dividendo é preciso ter as ações antes da data ex-dividendo. Nessa data o preço costuma cair mais ou menos o valor do dividendo.",
+      "rulesTitle": "O que dizem as regras de dividendos do brain",
+      "rrWithDividend": "Retorno : risco incluindo o dividendo: {rr}",
+      "effects": {
+        "positive": "Positivo",
+        "negative": "Negativo",
+        "caution": "Atenção",
+        "info": "Nota"
+      },
+      "rules": {
+        "ex_dividend_in_window": "Data ex-dividendo em {date} (daqui a {days} pregões): o preço deve cair mais ou menos o valor do dividendo ({amount} por ação, {pct}% do preço) nesse dia. Essa queda não é perda no retorno total — você recebe o dividendo, que soma ao retorno esperado.",
+        "ex_dividend_stop_risk": "O dividendo equivale a {pct_of_risk}% da distância até o stop: só a queda da data ex pode levar o preço para perto do stop (os stops do brain consideram só o preço).",
+        "ex_dividend_just_passed": "A data ex-dividendo é hoje ({date}): quem compra agora não recebe este pagamento.",
+        "consistent_grower": "O dividendo cresceu {cagr}%/ano em 5 anos, sem corte há {years} anos.",
+        "sustainable_payout": "Payout de {payout}% do lucro (sustentável ≤ {max}%).",
+        "context_reit": "Para FIIs/REITs o payout sobre o lucro exagera o peso: eles são avaliados pelo FFO (fluxo de caixa operacional).",
+        "context_midstream": "Para dutos (midstream) o payout sobre o lucro exagera o peso: eles são avaliados pelo fluxo de caixa distribuível.",
+        "recent_cut": "Dividendo cortado em {date} (nos últimos {months} meses).",
+        "payout_unsustainable": "Payout de {payout}% do lucro: o dividendo é maior que o lucro e pode ser insustentável.",
+        "payout_high": "Payout de {payout}% deixa pouca margem para aumentar ou proteger o dividendo.",
+        "yield_trap": "Yield de {yield}% bem acima da média de 5 anos ({avg}%): o mercado pode esperar um corte (possível armadilha de yield).",
+        "cap_verdict": "Corte recente e payout acima de 100%: o veredito fica limitado a “Razoável, com ressalvas”.",
+        "suspended": "O dividendo parece suspenso (último pagamento em {date})."
       }
     }
   },

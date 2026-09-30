@@ -22,6 +22,9 @@ Pipeline (mirrors scan_service._process_candidate + the brain entry gate):
                confirmed a BUY (verdict in grok_data["_codex"] → trail.codex)
   risk         score, blockers, earnings blackout, levels, R:R, sizing,
                portfolio limits, correlation, drawdown breaker
+  dividends    services/dividends.py profile (fetched with market data);
+               trade rules T1-T3 add notes + levels.dividend (the verdict
+               is unchanged: the brain's levels are price-only)
 
 AI is skipped (as the scan skips it) when the verdict is already AVOID on
 structure: trend filter failed, illiquid, a material blocker, or a
@@ -57,7 +60,7 @@ from app.core.config import settings
 from app.core.utils import validate_ticker
 from app.scanners import barchart_scanner, indicators, macro_scanner, market_scanner
 from app.scanners.universe import get_all_tickers, get_asset_class, get_exchange
-from app.services import insights_service
+from app.services import dividends, insights_service
 from app.services import scan_service as sv
 from app.services import virtual_portfolio as vp
 from app.signals.earnings import get_earnings_context
@@ -433,6 +436,7 @@ async def run_check(resolved: dict, progress: ProgressFn | None = None) -> dict:
         _macro_snapshot(),
         _knowledge_block(),
     ]
+    coros.append(dividends.get_dividend_profile(symbol, price=_num(resolved.get("price"))))
     if fetch_earnings:
         coros.append(get_earnings_context(symbol))
     fetched = await asyncio.gather(*coros, return_exceptions=True)
@@ -440,13 +444,16 @@ async def run_check(resolved: dict, progress: ProgressFn | None = None) -> dict:
     fund = dict(fetched[1]) if isinstance(fetched[1], dict) else {}
     macro = fetched[2] if isinstance(fetched[2], dict) else {}
     knowledge = fetched[3] if isinstance(fetched[3], str) else ""
-    earnings_ctx = fetched[4] if fetch_earnings and isinstance(fetched[4], dict) else None
+    div_profile = fetched[4] if isinstance(fetched[4], dict) else dividends.empty_profile(symbol, "unavailable")
+    earnings_ctx = fetched[5] if fetch_earnings and isinstance(fetched[5], dict) else None
 
     asset_class = sv._asset_class(symbol, fund)
     if symbol.endswith("-USD"):
         asset_class = "CRYPTO"
     if asset_class == "STOCK":
         sv._merge_earnings(fund, earnings_ctx, exchange)
+    # Factual dividend line for the synthesis prompt (prompts.format_fundamentals).
+    fund["_dividend_summary"] = dividends.ai_summary(div_profile)
     bucket = classify_bucket_readonly(symbol, fund)
     tech = indicators.compute_indicators(price_df, exchange=exchange) if price_df is not None else {}
     if not tech or _num(tech.get("current_price")) is None:
@@ -601,6 +608,14 @@ async def run_check(resolved: dict, progress: ProgressFn | None = None) -> dict:
         trail["routine"] = None
         trail["decision_model"] = None
 
+    # ── dividend rules (trade mode; informational, the verdict is unchanged) ──
+    plan_levels = plan.get("levels") or {}
+    div_rules, div_levels = dividends.trade_dividend_rules(
+        div_profile, price, plan.get("fill") or price, plan_levels.get("stop"), plan_levels.get("target"),
+        exchange)
+    for rule in div_rules:
+        notes.append(_hint(rule["code"], rule["params"], rule["text"]))
+
     fx = plan.get("fx")
     size = None
     if plan.get("shares"):
@@ -644,7 +659,10 @@ async def run_check(resolved: dict, progress: ProgressFn | None = None) -> dict:
             "min_rr": settings.brain_min_rr,
             "source": (plan.get("levels") or {}).get("source"),
             "atr": _num(tech.get("atr")),
+            "dividend": div_levels,
         },
+        "dividend": div_profile,
+        "dividend_rules": div_rules,
         "size": size,
         "earnings": _earnings_info(fund, asset_class, blackout),
         "ai": {"status": ai_status, "provider": sig.get("ai_provider"), "called": run_ai},

@@ -15,6 +15,9 @@ Pipeline:
                for material, cited red flags
   assessment   one decision-tier Claude call (provider.assess_long_term);
                on failure a deterministic verdict from the scorecard
+  dividends    services/dividends.py: a "dividend" scorecard category (counts
+               in the rule-based verdict) + a cap (recent cut AND payout > 100%
+               -> at most REASONABLE_WITH_CAVEATS, AI verdict included)
 
 yfinance sources (verified against the installed yfinance 1.7.0):
   * Ticker.history(period="max", auto_adjust=True)
@@ -57,6 +60,7 @@ from loguru import logger
 
 from app.core.cache import TTLCache
 from app.core.config import settings
+from app.services import dividends
 from app.services import stock_check as sc
 
 ProgressFn = Callable[[str, int], None]
@@ -881,7 +885,7 @@ def _fmt(v, suffix="") -> str:
 
 
 def build_prompt(symbol: str, name: str | None, asset_type: str, currency: str, identity_extra: dict,
-                 metrics: dict, scorecard: list[dict], red_flags: list[dict]) -> str:
+                 metrics: dict, scorecard: list[dict], red_flags: list[dict], dividend: str = "") -> str:
     from app.ai.prompts import LONG_TERM_PROMPT, UNTRUSTED_NOTICE, wrap_untrusted
 
     identity = wrap_untrusted("yfinance_profile", json.dumps(
@@ -895,7 +899,7 @@ def build_prompt(symbol: str, name: str | None, asset_type: str, currency: str, 
     return LONG_TERM_PROMPT.format(
         symbol=symbol, today=now.date().isoformat(), untrusted_notice=UNTRUSTED_NOTICE,
         identity=identity, metrics=json.dumps(metrics, default=str, ensure_ascii=False, indent=1)[:9000],
-        scorecard=sc_lines, red_flags=flags,
+        scorecard=sc_lines, red_flags=flags, dividend=dividend or "(not available)",
     )
 
 
@@ -932,7 +936,10 @@ async def run_long_check(resolved: dict, progress: ProgressFn | None = None) -> 
     # ── benchmark ──
     p("benchmark", 30)
     bench = select_benchmark(symbol, asset_type, info, category)
-    bench_closes, bench_note = await _benchmark_series(bench, currency)
+    (bench_closes, bench_note), div_profile = await asyncio.gather(
+        _benchmark_series(bench, currency),
+        dividends.get_dividend_profile(symbol, info=info or None, price=_num(resolved.get("price"))),
+    )
 
     per_year = CRYPTO_DAYS if asset_type == "CRYPTO" else TRADING_DAYS
     rows = returns_table(closes, bench_closes)
@@ -975,6 +982,11 @@ async def run_long_check(resolved: dict, progress: ProgressFn | None = None) -> 
             logger.warning(f"long_term: sentiment failed for {symbol}: {e}")
 
     scorecard = build_scorecard(asset_type, fund, fundamentals, rows, bench, mdd, vol)
+    # Dividend rules (services/dividends.py, P1-P2 / N1-N4): a scorecard
+    # category that counts in the rule-based verdict + a hard cap applied
+    # to the final verdict below.
+    div = dividends.long_term_dividend_assessment(div_profile, asset_type, info.get("sector"), info.get("industry"))
+    scorecard.append(div["item"])
     fb_verdict = fallback_verdict(scorecard, asset_type, red_flags)
 
     # ── AI assessment ──
@@ -993,7 +1005,8 @@ async def run_long_check(resolved: dict, progress: ProgressFn | None = None) -> 
             "fund": {k: v for k, v in (fund or {}).items() if k not in ("top_holdings", "family", "category")} or None,
             "fundamentals": fundamentals,
         }
-        prompt = build_prompt(symbol, name, asset_type, currency, extra, metrics, scorecard, red_flags)
+        div_text = "\n".join([dividends.ai_summary(div_profile)] + [f"- [{r['effect']}] {r['text']}" for r in div["rules"]])
+        prompt = build_prompt(symbol, name, asset_type, currency, extra, metrics, scorecard, red_flags, div_text)
         try:
             ai = await ai_provider.assess_long_term(symbol, prompt)
         except Exception as e:
@@ -1019,6 +1032,13 @@ async def run_long_check(resolved: dict, progress: ProgressFn | None = None) -> 
                            "Most individual stocks underperform a broad index fund over long periods."})
 
     ai_provider_name = (ai or {}).pop("_provider", None) if ai else None
+    verdict, adj = dividends.apply_verdict_cap((ai or {}).get("verdict") or fb_verdict, div["cap"])
+    fb_capped, _ = dividends.apply_verdict_cap(fb_verdict, div["cap"])
+    adjustments = [adj] if adj else []
+    if adj:
+        notes.append({"code": "dividend_cap", "params": {},
+                      "text": "Recent dividend cut and a payout above 100%: the verdict is capped at "
+                              "'Reasonable, with caveats' by the brain's dividend rule."})
     result = {
         "mode": "long",
         "input": resolved.get("input") or symbol,
@@ -1028,9 +1048,10 @@ async def run_long_check(resolved: dict, progress: ProgressFn | None = None) -> 
         "asset_type": asset_type,
         "currency": currency,
         "price": resolved.get("price") or float(closes.iloc[-1]),
-        "verdict": (ai or {}).get("verdict") or fb_verdict,
+        "verdict": verdict,
         "verdict_source": "ai" if ai else "scorecard",
-        "scorecard_verdict": fb_verdict,
+        "scorecard_verdict": fb_capped,
+        "verdict_adjustments": adjustments,
         "ai_assessment": ai,
         "ai": {"called": settings.ai_enabled, "provider": ai_provider_name, "sentiment_called": grok_called,
                "status": "ok" if ai else ("disabled" if not settings.ai_enabled else "failed")},
@@ -1041,6 +1062,8 @@ async def run_long_check(resolved: dict, progress: ProgressFn | None = None) -> 
         "fund": fund,
         "fundamentals": fundamentals,
         "red_flags": red_flags,
+        "dividend": div_profile,
+        "dividend_rules": div["rules"],
         "notes": notes,
         "data_as_of": closes.index[-1].date().isoformat(),
         "caveats": caveats,

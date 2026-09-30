@@ -80,7 +80,7 @@ REVIEWER_OUTPUT = """
 Return ONE JSON object and nothing else:
   signal      BUY | HOLD | AVOID | SELL — your own verdict
   confidence  integer 0-100 in YOUR verdict
-  p_win       0-1, probability the price is higher in 5 trading days
+  p_win       0-1, probability the price is higher in {pwin_horizon} trading days
   reasoning   at most 600 characters, the decisive evidence
   key_risks   up to 5 short strings
 """
@@ -176,7 +176,7 @@ def build_review_prompt(ticker: str, technical_data: dict, fundamental_data: dic
                         macro_data: dict, grok_data: dict) -> str:
     return REVIEWER_PREFACE + build_synthesis_prompt(
         ticker, technical_data, fundamental_data, macro_data, grok_data,
-    ) + REVIEWER_OUTPUT
+    ) + REVIEWER_OUTPUT.format(pwin_horizon=settings.ai_pwin_horizon_days)
 
 
 def error_review(reason: str, provider: str | None = None) -> dict:

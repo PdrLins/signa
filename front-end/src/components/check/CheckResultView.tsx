@@ -9,6 +9,7 @@ import { Panel, mono } from '@/components/insights/Panel'
 import { DecisionTrail } from '@/components/signals/DecisionTrail'
 import { fill, formatReason, money, nativePrice, num, shortDate, etTime, DASH } from '@/lib/insights'
 import { formatCheckText } from '@/lib/check'
+import { DividendPanel } from './DividendPanel'
 import type { CheckResult, CheckVerdict } from '@/types/check'
 
 export function useVerdictStyle() {
@@ -158,6 +159,14 @@ export const CheckResultView = forwardRef<HTMLHeadingElement, {
           ))}
         </dl>
       </section>
+
+      {r.dividend !== undefined && <DividendPanel
+        profile={r.dividend}
+        rules={r.dividend_rules}
+        symbol={r.symbol}
+        currency={r.currency}
+        rrWithDividend={lv.dividend?.rr_with_dividend ?? null}
+      />}
 
       <DecisionTrail
         trail={r.trail}

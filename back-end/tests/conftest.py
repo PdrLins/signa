@@ -22,6 +22,17 @@ def _no_live_codex(monkeypatch):
     monkeypatch.setattr(settings, "codex_enabled", False)
 
 
+@pytest.fixture(autouse=True)
+def _no_live_dividends(monkeypatch):
+    """Check a stock fetches a dividend profile: never let a test reach
+    yfinance for it (empty data -> "no dividend"). Tests that need data
+    patch dividends._fetch_raw themselves."""
+    from app.services import dividends
+    monkeypatch.setattr(dividends, "_fetch_raw", lambda symbol, info=None: {"info": info or {}, "dividends": None,
+                                                                             "calendar": {}})
+    dividends._cache.clear()
+
+
 @pytest.fixture
 def sample_indicators():
     """Sample technical indicators for a healthy stock."""
@@ -105,3 +116,10 @@ def _clear_ai_caches():
     clear_ai_caches()
     yield
     clear_ai_caches()
+
+
+@pytest.fixture(autouse=True)
+def _reset_grok_account_block(monkeypatch):
+    """A faked 401/403 pauses Grok module-wide; never leak that across tests."""
+    from app.ai import grok_client
+    monkeypatch.setattr(grok_client, "_account_blocked_until", None)

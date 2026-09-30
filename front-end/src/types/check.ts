@@ -12,6 +12,62 @@ export interface CheckText {
 
 export type CheckVerdict = 'BUY_NOW' | 'WAIT' | 'AVOID'
 
+// ── Dividends (back-end/app/services/dividends.py) ──────────────────
+
+export type DividendFrequency = 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'irregular'
+
+export interface DividendScheduleRow {
+  ex_date: string
+  pay_date: string | null
+  /** per share, in the listing currency (projected) */
+  amount: number | null
+  /** the ex-date is projected, not announced */
+  estimated: boolean
+  pay_estimated: boolean
+}
+
+export interface DividendProfile {
+  symbol: string
+  pays_dividend: boolean
+  suspended: boolean
+  /** why pays_dividend is false: no_dividend | crypto | suspended | unavailable */
+  reason: string | null
+  currency: string | null
+  /** per share per year */
+  annual_rate: number | null
+  /** FRACTION (0.03 == 3%) */
+  yield: number | null
+  /** FRACTION of earnings */
+  payout_ratio: number | null
+  /** FRACTION */
+  five_year_avg_yield: number | null
+  frequency: DividendFrequency | null
+  interval_days: number | null
+  next_ex_date: string | null
+  next_pay_date: string | null
+  next_amount: number | null
+  next_estimated: boolean | null
+  next_pay_estimated: boolean | null
+  upcoming: DividendScheduleRow[]
+  /** newest first */
+  last_payments: { ex_date: string; amount: number; special: boolean }[]
+  /** FRACTION per year */
+  growth_5y_cagr: number | null
+  years_without_cut: number | null
+  last_cut_date: string | null
+  recent_cut: boolean
+  is_fund: boolean
+}
+
+/** One deterministic dividend rule outcome; the UI renders
+ *  t.check.dividend.rules[code] with `params`, `text` is the English fallback. */
+export interface DividendRule {
+  code: string
+  effect: 'positive' | 'negative' | 'caution' | 'info'
+  text: string
+  params: Record<string, string | number | boolean | null>
+}
+
 /** "short" = is the next days/weeks a good swing entry; "long" = is this a
  *  sound long-term holding (back-end/app/services/long_term_check.py). */
 export type CheckMode = 'short' | 'long'
@@ -51,6 +107,17 @@ export interface CheckResult {
     min_rr: number
     source: string | null
     atr: number | null
+    /** set when an ex-dividend date falls inside the trade window */
+    dividend?: {
+      ex_date: string
+      trading_days: number
+      amount: number | null
+      /** percent of the price */
+      pct: number | null
+      estimated: boolean
+      pay_date: string | null
+      rr_with_dividend: number | null
+    } | null
   }
   size: {
     shares: number
@@ -72,6 +139,9 @@ export interface CheckResult {
   ai: { status: string; provider: string | null; called: boolean }
   score: number | null
   trail: SignalTrail
+  /** absent on results cached before dividends were added */
+  dividend?: DividendProfile | null
+  dividend_rules?: DividendRule[]
   caveats: CheckText[]
   checked_at: string
   cached: boolean
@@ -104,7 +174,7 @@ export type LongVerdict = 'SOLID' | 'REASONABLE_WITH_CAVEATS' | 'NOT_A_GOOD_FIT'
 export type Rating = 'good' | 'fair' | 'poor' | 'n/a'
 
 export interface ScorecardItem {
-  key: 'cost' | 'diversification' | 'track_record' | 'valuation' | 'risk' | 'quality' | string
+  key: 'cost' | 'diversification' | 'track_record' | 'valuation' | 'risk' | 'quality' | 'dividend' | string
   /** stable reason-template id (t.check.long.reasons[key][code]) */
   code: string
   rating: Rating
@@ -217,6 +287,11 @@ export interface LongCheckResult {
   fund: FundInfo | null
   fundamentals: StockFundamentals | null
   red_flags: { text: string; url: string | null; severity: string | null; category: string | null }[]
+  /** absent on results cached before dividends were added */
+  dividend?: DividendProfile | null
+  dividend_rules?: DividendRule[]
+  /** deterministic caps applied over the AI / scorecard verdict */
+  verdict_adjustments?: { code: string; from: LongVerdict; to: LongVerdict }[]
   notes: CheckText[]
   data_as_of: string
   caveats: CheckText[]
@@ -246,7 +321,7 @@ export interface CompareItem {
 }
 
 export type CompareFormat =
-  | 'verdict' | 'bool' | 'num' | 'signal' | 'int' | 'prob' | 'ratio' | 'days' | 'corr' | 'pct' | 'rating'
+  | 'verdict' | 'bool' | 'num' | 'signal' | 'int' | 'prob' | 'ratio' | 'days' | 'corr' | 'pct' | 'rating' | 'date'
 
 export interface CompareMetric {
   key: string

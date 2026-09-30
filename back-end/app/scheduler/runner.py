@@ -31,7 +31,13 @@ _SCAN_HANDLERS = {
     "AFTER_CLOSE": after_close_scan,
 }
 
-scheduler = AsyncIOScheduler(timezone=settings.timezone)
+# APScheduler's default misfire grace is 1 second: if the event loop is busy
+# (a scan running) when a job is due, the job is silently skipped. Allow 15
+# minutes late, and run a job that missed several times only once.
+scheduler = AsyncIOScheduler(
+    timezone=settings.timezone,
+    job_defaults={"misfire_grace_time": 15 * 60, "coalesce": True, "max_instances": 1},
+)
 
 
 def get_scheduler() -> AsyncIOScheduler:

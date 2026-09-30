@@ -12,7 +12,7 @@ from loguru import logger
 from app.core.cache import TTLCache
 from app.core.config import settings
 
-_pulse_cache = TTLCache(max_size=1, default_ttl=1800)
+_pulse_cache = TTLCache(max_size=1, default_ttl=1800)  # TTL set per call from settings
 
 
 MACRO_PULSE_PROMPT = (
@@ -30,7 +30,7 @@ MACRO_PULSE_PROMPT = (
 
 
 async def get_macro_pulse() -> dict:
-    """Fetch trending market topics from Grok. Cached for 30 min.
+    """Fetch trending market topics from Grok. Cached for settings.macro_pulse_cache_hours.
 
     Returns dict with:
     - trends: list of {topic, impact, sectors}
@@ -41,11 +41,27 @@ async def get_macro_pulse() -> dict:
     if cached is not None:
         return cached
 
+    from app.services.budget_service import BudgetService
+
+    budget = await BudgetService.get_instance()
+    allowed, reason = await budget.can_call("grok", "macro_pulse")
+    if not allowed:
+        logger.info(f"Macro pulse skipped — {reason}")
+        return _unavailable(f"Grok budget: {reason}")
+
+    from app.ai.grok_client import account_block
+
+    blocked = account_block()
+    if blocked:
+        return _unavailable(blocked)
+
+    recorded = False
     try:
         from app.ai.grok_client import (
             _get_client,
             build_search_request,
             extract_citations,
+            extract_cost_usd,
             extract_output_text,
             search_window,
         )
@@ -64,8 +80,16 @@ async def get_macro_pulse() -> dict:
             },
             json=body,
         )
+        if resp.status_code >= 400:
+            from app.ai.grok_client import _note_account_error
+            _note_account_error(resp.status_code, resp.text)
+            recorded = True  # rejected before any work: not billed
         resp.raise_for_status()
         data = resp.json()
+        cost = extract_cost_usd(data)
+        await budget.record_call("grok", "macro_pulse", "", success=True,
+                                 **({"cost_usd": cost} if cost is not None else {}))
+        recorded = True
         content = extract_output_text(data)
         citations = extract_citations(data)
         if not citations or not content.strip():
@@ -123,17 +147,24 @@ async def get_macro_pulse() -> dict:
         }
 
         logger.info(f"Macro pulse: {mood} ({bullish} bullish, {bearish} bearish, {len(trends)} trends)")
-        _pulse_cache.set("pulse", result)
+        _pulse_cache.set("pulse", result, ttl=settings.macro_pulse_cache_hours * 3600)
         return result
 
     except Exception as e:
         logger.warning(f"Macro pulse failed: {e}")
-        return {
-            "trends": [],
-            "summary": "Macro pulse unavailable",
-            "bullish_count": 0,
-            "bearish_count": 0,
-            "raw": "",
-            "citations": [],
-            "error": str(e)[:200],
-        }
+        if not recorded:
+            # A timeout may still be billed: count the estimate.
+            await budget.record_call("grok", "macro_pulse", "", success=False)
+        return _unavailable(str(e))
+
+
+def _unavailable(error: str) -> dict:
+    return {
+        "trends": [],
+        "summary": "Macro pulse unavailable",
+        "bullish_count": 0,
+        "bearish_count": 0,
+        "raw": "",
+        "citations": [],
+        "error": error[:200],
+    }

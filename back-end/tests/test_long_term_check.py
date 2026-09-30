@@ -88,7 +88,8 @@ def test_etf_result_shape_and_no_grok():
     # VT converted to CAD with a flat FX: excess ~ 9% - 8.5%
     assert r["returns"][-1]["excess_cagr"] == pytest.approx(0.5, abs=0.1)
     assert r["fund"]["expense_ratio"] == pytest.approx(0.2) and r["fundamentals"] is None
-    assert {s["key"] for s in r["scorecard"]} == {"cost", "diversification", "track_record", "valuation", "risk", "quality"}
+    assert {s["key"] for s in r["scorecard"]} == {"cost", "diversification", "track_record", "valuation", "risk", "quality",
+                                               "dividend"}
     assert r["drawdowns"]["max"] is not None and r["data_as_of"]
     assert any(c["code"] == "not_advice" for c in r["caveats"])
     h.sent.assert_not_called()          # no Grok for ETFs

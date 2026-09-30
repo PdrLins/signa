@@ -857,7 +857,7 @@ def build_performance(rows: list[dict], snapshots: list[dict], closed_trades: in
         ("rejected", [r for r in rows if r.get("ai_status") == "rejected" and r.get("decision_overturned") is not True]),
         ("ai_not_called", [r for r in rows if r.get("ai_status") == "skipped"]),
     ]
-    cal = calibration_table(rows, 5)
+    cal = calibration_table(rows, settings.ai_pwin_horizon_days)
     overall = cal.get("overall") or {}
     ov = ((overturn_stats(rows, h).get("metrics") or {}).get("excess_ret") or {})
     skips = skip_reason_effectiveness(rows, h)

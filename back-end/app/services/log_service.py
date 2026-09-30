@@ -102,6 +102,27 @@ def init_log_capture():
         format="<level>{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {module}:{function}:{line} - {message}</level>",
         colorize=True,
     )
+    # Persistent log file (daily rotation, 14 days kept) so a missed
+    # scheduled job can be diagnosed after a restart. Messages are already
+    # scrubbed by the patcher; diagnose=False keeps variable values out of
+    # tracebacks.
+    from app.core.config import settings
+    if settings.log_file_dir:
+        from pathlib import Path
+        log_dir = Path(settings.log_file_dir)
+        if not log_dir.is_absolute():
+            log_dir = Path(__file__).resolve().parents[2] / log_dir
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logger.add(
+            str(log_dir / "signa_{time:YYYY-MM-DD}.log"),
+            level="INFO",
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {module}:{function}:{line} - {message}",
+            rotation="00:00",
+            retention="14 days",
+            enqueue=True,
+            backtrace=False,
+            diagnose=False,
+        )
     logger.info("Log capture initialized — streaming available")
 
 

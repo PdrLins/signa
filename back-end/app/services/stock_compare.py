@@ -31,7 +31,7 @@ SHORT_VERDICT_RANK = {"BUY_NOW": 3, "WAIT": 2, "AVOID": 1}
 LONG_VERDICT_RANK = {"SOLID": 3, "REASONABLE_WITH_CAVEATS": 2, "NOT_A_GOOD_FIT": 1}
 SIGNAL_RANK = {"BUY": 3, "HOLD": 2, "WAIT": 2, "SELL": 1, "AVOID": 1}
 RATING_RANK = {"good": 3, "fair": 2, "poor": 1}
-SCORECARD_KEYS = ("cost", "diversification", "track_record", "valuation", "risk", "quality")
+SCORECARD_KEYS = ("cost", "diversification", "track_record", "valuation", "risk", "quality", "dividend")
 SUMMARY_MAX = 700
 
 
@@ -102,6 +102,39 @@ def _metric(key: str, group: str, values: dict, better: str | None, rank: dict |
 
 
 # ============================================================
+# Dividend rows (both modes; result["dividend"] from services/dividends.py)
+# ============================================================
+
+def _dividend_metrics(results: dict[str, dict]) -> list[dict]:
+    """Yield and next ex-date are informational (a higher yield is not
+    "better" by itself); 5-year dividend growth is higher-is-better.
+    Omitted entirely when no result carries a dividend profile."""
+    syms = list(results)
+    if not any(isinstance(results[s].get("dividend"), dict) for s in syms):
+        return []
+
+    def prof(r):
+        d = r.get("dividend")
+        return d if isinstance(d, dict) and d.get("pays_dividend") else {}
+
+    def pct(v):
+        f = _num(v)
+        return round(f * 100, 2) if f is not None else None
+
+    return [
+        _metric("dividend_yield", "dividend", {s: pct(prof(results[s]).get("yield")) for s in syms}, None, None,
+                "pct", detail={s: {"frequency": prof(results[s]).get("frequency"),
+                                   "pays": bool(prof(results[s]))} for s in syms}),
+        _metric("next_ex_date", "dividend", {s: prof(results[s]).get("next_ex_date") for s in syms}, None, None,
+                "date", detail={s: {"estimated": prof(results[s]).get("next_estimated")} for s in syms}),
+        _metric("dividend_growth_5y", "dividend",
+                {s: pct(prof(results[s]).get("growth_5y_cagr")) for s in syms}, "higher", None, "pct",
+                detail={s: {"recent_cut": bool((results[s].get("dividend") or {}).get("recent_cut"))}
+                        for s in syms}),
+    ]
+
+
+# ============================================================
 # Short mode (swing entry)
 # ============================================================
 
@@ -156,7 +189,7 @@ def _short_metrics(results: dict[str, dict]) -> list[dict]:
         _metric("position_pct", "size", col(lambda r: _num(_get(r, "size", "position_pct"))), None, None, "pct",
                 detail={s: {"shares": _get(results[s], "size", "shares"),
                             "risk_pct": _get(results[s], "size", "risk_pct")} for s in syms}),
-    ]
+    ] + _dividend_metrics(results)
 
 
 # ============================================================
@@ -221,7 +254,7 @@ def _long_metrics(results: dict[str, dict]) -> list[dict]:
     for key in SCORECARD_KEYS:
         out.append(_metric(f"rating_{key}", "scorecard", col(lambda r, k=key: _rating(r, k)), "higher",
                            RATING_RANK, "rating"))
-    return out
+    return out + _dividend_metrics(results)
 
 
 # ============================================================

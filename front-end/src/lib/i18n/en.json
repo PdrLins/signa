@@ -1389,7 +1389,10 @@
       "no_equity": "The brain wallet has no equity, so no position size could be suggested.",
       "ai_cached": "The AI verdict was reused from a check or scan in the last few hours.",
       "ai_skipped": "The AI wasn't asked: the setup already fails a structural check (saves cost).",
-      "ai_skipped_disabled": "AI analysis is disabled in settings."
+      "ai_skipped_disabled": "AI analysis is disabled in settings.",
+      "ex_dividend_in_window": "Ex-dividend {date}, {days} trading days away: about {pct}% of the price is paid as a dividend. The ex-date price drop isn't a loss in total return.",
+      "ex_dividend_stop_risk": "The dividend is {pct_of_risk}% of the distance to the stop — the ex-date drop alone could bring the price near the stop.",
+      "ex_dividend_just_passed": "It goes ex-dividend today — buying now doesn't get this payment."
     },
     "cached": "Cached",
     "checkedAt": "checked at {time}",
@@ -1510,7 +1513,8 @@
         "track_record": "Track record",
         "valuation": "Valuation",
         "risk": "Risk",
-        "quality": "Business quality"
+        "quality": "Business quality",
+        "dividend": "Dividend"
       },
       "ratings": {
         "good": "Good",
@@ -1550,6 +1554,13 @@
           "not_applicable": "Applies to individual companies only.",
           "missing": "Profitability and balance-sheet data not available.",
           "measured": "ROE {roe}% · operating margin {operating_margin}% · debt/equity {debt_to_equity}x · current ratio {current_ratio} (banks and insurers read differently)."
+        },
+        "dividend": {
+          "not_applicable": "Crypto assets pay no dividends.",
+          "suspended": "Dividend suspended in the last 24 months — a cut to zero.",
+          "none": "Pays no dividend: returns rely on price growth only.",
+          "etf_distribution": "Distributes about {yield}% a year; fund distributions vary with the holdings, so the cut and growth rules don't apply.",
+          "measured": "Yield {yield}%, payout {payout}%, 5-year growth {cagr}%/yr, {years} years without a cut (good: growing, no cut for 5+ years, payout ≤ 75%)."
         }
       },
       "returnsTitle": "Returns vs {benchmark}",
@@ -1637,7 +1648,8 @@
         "ai_unavailable": "The AI assessment was unavailable — the verdict comes from the rule-based scorecard.",
         "ai_disabled": "AI analysis is disabled — the verdict comes from the rule-based scorecard.",
         "benchmark_unavailable": "Benchmark data was unavailable.",
-        "benchmark_currency_not_adjusted": "Benchmark returns are in its own currency (exchange-rate data unavailable)."
+        "benchmark_currency_not_adjusted": "Benchmark returns are in its own currency (exchange-rate data unavailable).",
+        "dividend_cap": "Recent dividend cut and a payout above 100%: the brain's dividend rule caps the verdict at “Reasonable, with caveats”."
       },
       "caveatsTitle": "Keep in mind",
       "caveats": {
@@ -1732,7 +1744,8 @@
         "returns": "Returns",
         "cost": "Cost",
         "valuation": "Valuation",
-        "scorecard": "Scorecard"
+        "scorecard": "Scorecard",
+        "dividend": "Dividend"
       },
       "metrics": {
         "verdict": "Verdict",
@@ -1762,7 +1775,11 @@
         "rating_track_record": "Track record rating",
         "rating_valuation": "Valuation rating",
         "rating_risk": "Risk rating",
-        "rating_quality": "Business quality rating"
+        "rating_quality": "Business quality rating",
+        "dividend_yield": "Dividend yield",
+        "next_ex_date": "Next ex-dividend date",
+        "dividend_growth_5y": "5-year dividend growth",
+        "rating_dividend": "Dividend rating"
       },
       "pass": "Pass",
       "fail": "Fail",
@@ -1782,6 +1799,77 @@
         "compare_not_found": "That comparison expired — run it again.",
         "daily_limit": "This comparison needs {needed} new checks, but only {remaining} are left today. The limit resets at midnight ET.",
         "resolve_failed": "Couldn't look up one of the tickers — please try again."
+      },
+      "estimatedTag": "estimated",
+      "cutTag": "recent cut"
+    },
+    "dividend": {
+      "title": "Dividend",
+      "subtitle": "From the payment history. Projected dates are marked “estimated”.",
+      "pays": "Pays a dividend",
+      "yes": "Yes",
+      "no": "No",
+      "yield": "Yield",
+      "annual": "Annual amount",
+      "annualValue": "{amount} per share",
+      "frequency": "Frequency",
+      "frequencies": {
+        "monthly": "Monthly",
+        "quarterly": "Quarterly",
+        "semiannual": "Twice a year",
+        "annual": "Yearly",
+        "irregular": "Irregular"
+      },
+      "payout": "Payout ratio",
+      "fiveYearYield": "5-year average yield",
+      "nextEx": "Next ex-dividend date",
+      "nextPay": "Next payment date",
+      "estimated": "estimated",
+      "estimatedHelp": "Estimated dates are projected from the last payment and the usual interval; the company hasn't announced them yet. Amounts are projected from the latest regular payment.",
+      "growth": "5-year dividend growth",
+      "growthValue": "{pct}/yr",
+      "yearsNoCut": "Years without a cut",
+      "yearsValue": "{n} years",
+      "badgeGrowing": "Growing dividend",
+      "badgeNoCut": "No cut in {n}+ years",
+      "badgeCut": "Cut on {date}",
+      "badgeSuspended": "Suspended",
+      "upcomingTitle": "Payment agenda (next 12 months)",
+      "upcomingCaption": "Upcoming ex-dividend and payment dates for {symbol}",
+      "upcomingNone": "No upcoming dates could be projected.",
+      "lastTitle": "Last payments",
+      "lastCaption": "Last dividend payments of {symbol}",
+      "exDate": "Ex-date",
+      "payDate": "Pays",
+      "amount": "Amount",
+      "special": "special",
+      "none": "{symbol} pays no regular dividend.",
+      "crypto": "Crypto assets pay no dividends.",
+      "suspended": "{symbol}'s dividend appears suspended: no payment on the usual schedule.",
+      "unavailable": "Dividend data is unavailable right now.",
+      "exDateHelp": "To receive a dividend you must own the shares before the ex-dividend date. On that date the price usually drops by about the dividend.",
+      "rulesTitle": "What the brain's dividend rules say",
+      "rrWithDividend": "Reward : risk including the dividend: {rr}",
+      "effects": {
+        "positive": "Positive",
+        "negative": "Negative",
+        "caution": "Caution",
+        "info": "Note"
+      },
+      "rules": {
+        "ex_dividend_in_window": "Ex-dividend on {date} ({days} trading days away): the price should drop by about the dividend ({amount} per share, {pct}% of the price) that day. That drop isn't a loss in total return — you receive the dividend, which adds to the expected return.",
+        "ex_dividend_stop_risk": "The dividend is {pct_of_risk}% of the distance to the stop: the ex-date drop alone could push the price close to the stop (the brain's stops are price-only).",
+        "ex_dividend_just_passed": "It goes ex-dividend today ({date}): buying now doesn't get this payment.",
+        "consistent_grower": "The dividend grew {cagr}%/yr over 5 years with no cut for {years} years.",
+        "sustainable_payout": "Payout ratio {payout}% of earnings (sustainable ≤ {max}%).",
+        "context_reit": "For REITs the payout on earnings overstates the burden: they're judged on funds from operations (FFO).",
+        "context_midstream": "For pipelines the payout on earnings overstates the burden: they're judged on distributable cash flow.",
+        "recent_cut": "Dividend cut on {date} (within the last {months} months).",
+        "payout_unsustainable": "Payout ratio {payout}% of earnings: the dividend is larger than profits and may be unsustainable.",
+        "payout_high": "Payout ratio {payout}% leaves little room to raise or protect the dividend.",
+        "yield_trap": "Yield {yield}% is far above its 5-year average of {avg}%: the market may expect a cut (possible yield trap).",
+        "cap_verdict": "Recent cut and a payout above 100%: the verdict is capped at “Reasonable, with caveats”.",
+        "suspended": "The dividend appears suspended (last payment {date})."
       }
     }
   },

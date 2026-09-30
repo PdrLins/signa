@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
+from app.core.config import settings
 from app.services.daily_learning.stats import MIN_OBSERVATIONS, bootstrap_mean_ci, wilson_interval
 
 ET = ZoneInfo("America/New_York")
@@ -344,7 +345,7 @@ def build_outcome_report(rows: Iterable[Mapping], horizon: int = DEFAULT_HORIZON
         "filled": len(filled),
         "horizon": horizon,
         "skip_reasons": skip_reason_effectiveness(rows, horizon),
-        "calibration": calibration_table(rows, 5),
+        "calibration": calibration_table(rows, settings.ai_pwin_horizon_days),
         "overturn": overturn_stats(rows, horizon),
         "ai_status": ai_status_cohorts(rows),
     }

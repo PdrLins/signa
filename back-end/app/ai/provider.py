@@ -309,12 +309,13 @@ async def _route_sentiment(ticker: str, market_cap: float | None = None,
             try:
                 from app.ai.grok_client import analyze_sentiment as grok_sent
                 result = await grok_sent(ticker, market_cap=market_cap)
+                cost_kw = {"cost_usd": result.pop("_cost_usd")} if "_cost_usd" in result else {}
                 if not result.get("error"):
                     result["_provider"] = "grok"
-                    await budget.record_call("grok", "sentiment", ticker, success=True)
+                    await budget.record_call("grok", "sentiment", ticker, success=True, **cost_kw)
                     return result
                 logger.debug(f"Grok failed for {ticker}: {result.get('error')}")
-                await budget.record_call("grok", "sentiment", ticker, success=False)
+                await budget.record_call("grok", "sentiment", ticker, success=False, **cost_kw)
             except Exception as e:
                 logger.warning(f"Provider grok sentiment error for {ticker}: {e}")
     finally:

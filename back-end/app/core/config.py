@@ -110,7 +110,10 @@ class Settings(BaseSettings):
     # per call at 4 turns). 3 turns (one X + one web search + a follow-up)
     # is enough for a 48h window; a timed-out request is not retried
     # (sentiment is then marked unavailable). Results are cached 24h per ticker.
-    grok_max_turns: int = 3  # cap on server-side search tool turns per request
+    # Cost: xAI bills ~$5 per 1K X posts fetched plus the search results as
+    # prompt tokens; on 2026-09-29 that was ~$0.25 per call at 3 turns. 2 turns
+    # (one X + one web search) caps the fetch.
+    grok_max_turns: int = 2  # cap on server-side search tool turns per request
     grok_timeout_s: int = 75
 
     # --- Codex (OpenAI) — independent second opinion on decision-model BUYs ---
@@ -212,6 +215,9 @@ class Settings(BaseSettings):
 
     # --- Virtual Portfolio ---
     virtual_trade_max_days: int = 30  # Auto-close virtual trades after N days
+    # p_win = P(price higher N trading days after entry). Matches the 5-20 day
+    # holding period; also the horizon p_win calibration is graded at.
+    ai_pwin_horizon_days: int = 20
     brain_max_open: int = 20          # Max simultaneous brain positions
 
     # --- Wallet ---
@@ -519,6 +525,11 @@ class Settings(BaseSettings):
 
     # --- AI call caching (cuts repeat calls across the day's scans) ---
     sentiment_cache_hours: int = 24     # X/news sentiment reused per ticker
+    # Market-wide Grok "macro pulse": one live-search call, reused across
+    # scans for this long so the Grok budget goes to per-stock news.
+    macro_pulse_cache_hours: int = 6
+    # Back-end log files (relative to back-end/); "" disables file logging.
+    log_file_dir: str = "logs"
     # Scans are Grok-first (live X + web, cached 24h per ticker). PASS 2
     # reserves the daily Grok budget in candidate-rank order, so the best
     # candidates get sentiment first; the rest proceed with sentiment marked

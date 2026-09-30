@@ -1,5 +1,5 @@
 // Formatting for the "Compare" view of Check a stock. Pure.
-import { DASH, fill } from '@/lib/insights'
+import { DASH, fill, shortDate } from '@/lib/insights'
 import { intlLocale } from '@/store/i18nStore'
 import type en from '@/lib/i18n/en.json'
 import type { CompareMetric } from '@/types/check'
@@ -47,8 +47,10 @@ export function formatMetricValue(m: CompareMetric, sym: string, t: T): string {
       return typeof v === 'number' ? n(v, 2) : String(v)
     case 'pct':
       if (typeof v !== 'number') return String(v)
-      if (m.key.startsWith('cagr_') || m.key === 'max_drawdown') return signedPct(v)
-      return `${n(v, m.key === 'expense_ratio' ? 2 : 1)}%`
+      if (m.key.startsWith('cagr_') || m.key === 'max_drawdown' || m.key === 'dividend_growth_5y') return signedPct(v)
+      return `${n(v, m.key === 'expense_ratio' || m.key === 'dividend_yield' ? 2 : 1)}%`
+    case 'date':
+      return typeof v === 'string' ? shortDate(v, '', true) : String(v)
     default:
       return typeof v === 'number' ? n(v, 0) : String(v)
   }
@@ -62,6 +64,13 @@ export function formatMetricSub(m: CompareMetric, sym: string, t: T): string | n
   if (m.key.startsWith('cagr_')) {
     const bc = d.benchmark_cagr
     return d.benchmark && typeof bc === 'number' ? fill(tc.vsBench, { bench: String(d.benchmark), cagr: signedPct(bc) }) : null
+  }
+  if (m.key === 'next_ex_date' && m.values[sym] != null) {
+    return d.estimated ? tc.estimatedTag : null
+  }
+  if (m.key === 'dividend_growth_5y' && d.recent_cut) return tc.cutTag
+  if (m.key === 'dividend_yield' && typeof d.frequency === 'string' && m.values[sym] != null) {
+    return (t.check.dividend.frequencies as Record<string, string>)[d.frequency] ?? d.frequency
   }
   if (m.key === 'position_pct' && typeof d.shares === 'number') {
     const s = d.shares >= 10 ? n(d.shares, 0) : n(d.shares, 3)

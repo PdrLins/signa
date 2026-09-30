@@ -66,7 +66,7 @@ def build_prompt_core_rows() -> list[dict]:
         "prompt_horizon": (
             "Signa trades a 5-20 trading-day horizon; positions auto-close after at most "
             f"{s.virtual_trade_max_days} days. p_win means the probability that the price is higher "
-            "5 trading days after entry. Judge the next 1-4 weeks, not the long-term story."
+            f"{s.ai_pwin_horizon_days} trading days after entry. Judge the next 1-4 weeks, not the long-term story."
         ),
         "prompt_enforced_by_code": (
             "Code already enforces these; do not penalize them again. Judge what code cannot see. "
@@ -85,7 +85,9 @@ def build_prompt_core_rows() -> list[dict]:
             "A 2021-2026 backtest of the technical layer (8,996 trades, survivorship-biased universe) found "
             "no edge vs SPY from the technical score or the technical filter: about 40% of trades beat SPY in "
             "every score band. Names failing the filter on RSI > 75 did best (+2.4pp vs SPY, n=104, small sample). "
-            "Most setups have no edge. Default to HOLD unless there is specific, cited, near-term evidence."
+            "Most setups have no edge: HOLD unless independent, cited evidence agrees. No dated catalyst "
+            "is needed: strong recent fundamentals (earnings beat, rising estimates, insider buying) in an "
+            "intact uptrend can justify BUY. Missing news is a data gap, not evidence against."
         ),
         "prompt_factor_independence": (
             "RSI, MACD, moving-average trend and short-term momentum all come from the same price series: "

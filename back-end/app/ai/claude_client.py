@@ -33,7 +33,7 @@ so the router can swap between them transparently:
   {
     "signal": "BUY" | "HOLD" | "SELL" | "AVOID",
     "confidence": int (0-100),
-    "p_win": float (0-1) | None,  # P(price higher in 5 trading days)
+    "p_win": float (0-1) | None,  # P(price higher in ai_pwin_horizon_days trading days)
     "reasoning": str (2-3 sentences),
     "risk_factors": list[str],
     "catalyst": str | None,

@@ -33,6 +33,33 @@ from app.core.config import settings
 _client: Optional[httpx.AsyncClient] = None
 _client_lock = asyncio.Lock()
 
+# xAI answers 403 when the account is out of credits / at its spending
+# limit. Every call would fail the same way, so pause Grok for a while
+# instead of failing once per candidate.
+_ACCOUNT_BLOCK_S = 3600
+_account_blocked_until: Optional[datetime] = None
+_account_block_reason = ""
+
+
+def account_block() -> str | None:
+    """The xAI account-level error while Grok is paused, else None."""
+    if _account_blocked_until and datetime.now(timezone.utc) < _account_blocked_until:
+        return _account_block_reason
+    return None
+
+
+def _note_account_error(status_code: int, text: str) -> None:
+    global _account_blocked_until, _account_block_reason
+    lowered = text.lower()
+    if status_code in (401, 403) and ("credit" in lowered or "spending limit" in lowered
+                                      or "permission-denied" in lowered or status_code == 401):
+        _account_blocked_until = datetime.now(timezone.utc) + timedelta(seconds=_ACCOUNT_BLOCK_S)
+        _account_block_reason = (
+            "xAI account out of credits or at its spending limit — top up at console.x.ai"
+            if status_code == 403 else "xAI API key rejected (401)"
+        )
+        logger.error(f"Grok paused for {_ACCOUNT_BLOCK_S // 60} min: {_account_block_reason}")
+
 
 async def _get_client() -> httpx.AsyncClient:
     """Get or create the shared HTTP client (async-safe)."""
@@ -74,6 +101,24 @@ def build_search_request(prompt: str, system: str | None = None, max_output_toke
         "max_turns": settings.grok_max_turns,
         "max_output_tokens": max_output_tokens,
     }
+
+
+# xAI reports the billed cost of a request in usage.cost_in_usd_ticks
+# (1 USD = 10^10 ticks), tool/search fees included.
+_USD_TICKS = 10_000_000_000
+
+
+def extract_cost_usd(data: dict) -> float | None:
+    """Real USD cost of a Responses API call, or None if not reported."""
+    usage = data.get("usage") if isinstance(data, dict) else None
+    if not isinstance(usage, dict):
+        return None
+    ticks = usage.get("cost_in_usd_ticks")
+    try:
+        ticks = float(ticks)
+    except (TypeError, ValueError):
+        return None
+    return ticks / _USD_TICKS if ticks >= 0 else None
 
 
 def extract_output_text(data: dict) -> str:
@@ -227,6 +272,11 @@ async def analyze_sentiment(
     provider router falls through to the next sentiment provider.
     Successful results are cached 24h per ticker by the router.
     """
+    blocked = account_block()
+    if blocked:
+        result = _error_response(ticker, f"API error (paused): {blocked}")
+        result["_cost_usd"] = 0.0
+        return result
     client = await _get_client()
     from_date, to_date = search_window()
     prompt = GROK_SENTIMENT_PROMPT.format(
@@ -240,6 +290,15 @@ async def analyze_sentiment(
     }
     last_error = ""
     parse_retry_used = False
+    # Real cost across attempts; None until a response reports it (a
+    # timed-out request may still be billed, so it stays an estimate).
+    cost_usd: float | None = None
+
+    def _add_cost(data: dict) -> None:
+        nonlocal cost_usd
+        c = extract_cost_usd(data)
+        if c is not None:
+            cost_usd = (cost_usd or 0.0) + c
 
     for attempt in range(1, max_retries + 1):
         try:
@@ -252,17 +311,21 @@ async def analyze_sentiment(
                     await asyncio.sleep(wait)
                 continue
             if resp.status_code >= 400:
+                _note_account_error(resp.status_code, resp.text)
                 last_error = f"API error {resp.status_code}: {resp.text[:300]}"
                 logger.error(f"Grok API status error for {ticker}: {last_error}")
                 break
 
             data = resp.json()
+            _add_cost(data)
             text = extract_output_text(data)
             citations = extract_citations(data)
             parsed = json.loads(clean_json_response(text))
             if not isinstance(parsed, dict):
                 raise json.JSONDecodeError("not an object", text, 0)
             result = _validate_sentiment(parsed, ticker, citations)
+            if cost_usd is not None:
+                result["_cost_usd"] = cost_usd
             logger.debug(
                 f"Grok [{ticker}] → {result['label']} score={result['score']} "
                 f"conf={result['confidence']} mentions={result['mention_count']} "
@@ -296,4 +359,9 @@ async def analyze_sentiment(
             break
 
     logger.warning(f"Grok returning neutral fallback for {ticker} — {last_error}")
-    return _error_response(ticker, last_error or "Grok failed")
+    result = _error_response(ticker, last_error or "Grok failed")
+    if cost_usd is not None:
+        result["_cost_usd"] = cost_usd
+    elif last_error.startswith(("API error", "HTTP 4")):
+        result["_cost_usd"] = 0.0  # rejected before any work: not billed
+    return result

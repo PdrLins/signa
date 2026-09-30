@@ -65,7 +65,9 @@ STORAGE MODEL
 COST ESTIMATES
 ============================================================
 
-Estimated per-call costs (validated against real usage):
+Estimated per-call costs. When the API reports the real cost of a call
+(Grok does, via usage.cost_in_usd_ticks), that is recorded instead and the
+average of the last 20 real costs replaces the static estimate:
 
   Claude routine synthesis (Sonnet 5.5, effort=medium):
                                 ~$0.025 (~4K in @ $2/M + ~1.5K out @ $10/M)
@@ -129,6 +131,7 @@ COST_ESTIMATES: dict[str, dict[str, float]] = {
     },
     "grok": {
         "sentiment": 0.15,    # grok-4.7 + x_search/web_search tool fees → ~$0.15/call (estimate)
+        "macro_pulse": 0.15,  # one market-wide live-search call, cached macro_pulse_cache_hours
     },
     "openai": {
         "review": 0.05,       # Codex second opinion via the OpenAI API (estimate)
@@ -138,6 +141,10 @@ COST_ESTIMATES: dict[str, dict[str, float]] = {
 # Local CLIs run on the owner's subscriptions: recorded in ai_usage for the
 # usage breakdown, always at $0, never counted toward budgets or totals.
 LOCAL_PROVIDERS = {"claude-local", "codex-cli"}
+
+# Once a provider reports the real cost of a call (Grok: usage.cost_in_usd_ticks),
+# the average of the last N real costs replaces the static estimate above.
+_OBSERVED_COST_WINDOW = 20
 
 # OpenAI API path with no configured monthly budget -> this hard cap.
 OPENAI_DEFAULT_MONTHLY_CAP_USD = 5.0
@@ -170,8 +177,10 @@ class BudgetService:
         # so we don't spam Telegram on every call. Resets at start of new month.
         # Format: {f"{provider}:{month_str}": set([70, 90, 100])}
         self._alert_sent: dict[str, set[int]] = {}
-        # {provider: estimated cost of reserved, not-yet-recorded calls}
-        self._reserved: dict[str, float] = {}
+        # {(provider, call_type): number of reserved, not-yet-recorded calls}
+        self._reserved_calls: dict[tuple[str, str], int] = {}
+        # {(provider, call_type): last real per-call costs reported by the API}
+        self._observed_costs: dict[tuple[str, str], list[float]] = {}
         self._data_lock = asyncio.Lock()
         self._initialized = False
 
@@ -198,7 +207,7 @@ class BudgetService:
             page = 1000
             while True:
                 batch = (
-                    client.table("ai_usage").select("provider,estimated_cost,created_at")
+                    client.table("ai_usage").select("provider,call_type,estimated_cost,created_at")
                     .gte("created_at", month_start.isoformat())
                     .order("created_at")
                     .range(len(rows), len(rows) + page - 1)
@@ -234,6 +243,17 @@ class BudgetService:
                     self._daily_calls[provider].get(created, 0) + 1
                 )
 
+            # Rows whose cost differs from the static estimate were real,
+            # API-reported costs: seed the running estimate from them.
+            for row in rows:
+                provider, call_type = row["provider"], row.get("call_type") or ""
+                cost = float(row.get("estimated_cost") or 0)
+                static = COST_ESTIMATES.get(provider, {}).get(call_type)
+                if static is not None and cost > 0 and abs(cost - static) > 1e-9:
+                    window = self._observed_costs.setdefault((provider, call_type), [])
+                    window.append(cost)
+                    del window[:-_OBSERVED_COST_WINDOW]
+
             self._initialized = True
             logger.info(f"Budget service loaded — {len(rows)} usage records this month")
         except Exception as e:
@@ -254,6 +274,20 @@ class BudgetService:
         """Get this month's spend for a provider in USD."""
         return self._monthly_usage.get(provider, {}).get(self._month(), 0.0)
 
+    def estimate_cost(self, provider: str, call_type: str) -> float:
+        """Expected USD cost of one call: the average of recent real costs
+        when the provider reports them, else the static COST_ESTIMATES."""
+        if provider in LOCAL_PROVIDERS:
+            return 0.0
+        observed = self._observed_costs.get((provider, call_type))
+        if observed:
+            return sum(observed) / len(observed)
+        return COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
+
+    def _pending_locked(self, provider: str) -> float:
+        return sum(n * self.estimate_cost(p, ct)
+                   for (p, ct), n in self._reserved_calls.items() if p == provider and n > 0)
+
     def get_daily_calls(self, provider: str) -> int:
         """Get today's call count for a provider."""
         return self._daily_calls.get(provider, {}).get(self._today(), 0)
@@ -264,11 +298,11 @@ class BudgetService:
             settings, f"budget_{provider}_daily_usd", settings.budget_daily_limit_usd
         )
         provider_limit = provider_monthly_limit(provider)  # 0 = unlimited
-        pending = self._reserved.get(provider, 0.0)
+        pending = self._pending_locked(provider)
         daily_spend = self.get_daily_spend(provider) + pending
         monthly_spend = self.get_monthly_spend(provider) + pending
 
-        cost = 0.0 if provider in LOCAL_PROVIDERS else COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
+        cost = self.estimate_cost(provider, call_type)
         if cost == 0:
             return True, "free_tier", cost
         if daily_limit > 0 and daily_spend + cost > daily_limit:
@@ -289,17 +323,32 @@ class BudgetService:
         async with self._data_lock:
             allowed, reason, cost = self._check_locked(provider, call_type)
             if allowed and cost > 0:
-                self._reserved[provider] = self._reserved.get(provider, 0.0) + cost
+                key = (provider, call_type)
+                self._reserved_calls[key] = self._reserved_calls.get(key, 0) + 1
             return allowed, reason
 
     async def release(self, provider: str, call_type: str) -> None:
-        cost = 0.0 if provider in LOCAL_PROVIDERS else COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
+        key = (provider, call_type)
         async with self._data_lock:
-            self._reserved[provider] = max(0.0, self._reserved.get(provider, 0.0) - cost)
+            if self._reserved_calls.get(key, 0) > 0:
+                self._reserved_calls[key] -= 1
 
-    async def record_call(self, provider: str, call_type: str, ticker: str = "", success: bool = True):
-        """Record an AI call and its estimated cost. Thread-safe."""
-        cost = 0.0 if provider in LOCAL_PROVIDERS else COST_ESTIMATES.get(provider, {}).get(call_type, 0.01)
+    async def record_call(self, provider: str, call_type: str, ticker: str = "", success: bool = True,
+                          cost_usd: float | None = None):
+        """Record an AI call and its cost. Thread-safe.
+
+        cost_usd: the real cost when the provider reported it (it also
+        updates the running estimate); None = use the estimate."""
+        if provider in LOCAL_PROVIDERS:
+            cost = 0.0
+        elif cost_usd is not None and cost_usd >= 0:
+            cost = float(cost_usd)
+            if cost > 0:
+                window = self._observed_costs.setdefault((provider, call_type), [])
+                window.append(cost)
+                del window[:-_OBSERVED_COST_WINDOW]
+        else:
+            cost = self.estimate_cost(provider, call_type)
         today = self._today()
         month = self._month()
 

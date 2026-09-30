@@ -13,6 +13,7 @@ import { DrawdownCard } from './DrawdownCard'
 import { FundPanel } from './FundPanel'
 import { FundamentalsPanel } from './FundamentalsPanel'
 import { longText } from './format'
+import { DividendPanel } from '../DividendPanel'
 
 /** Long-term hold result: verdict + AI assessment, scorecard, returns vs
  *  benchmark, drawdowns, fund or company data, red flags, caveats.
@@ -39,6 +40,8 @@ export const LongResultView = forwardRef<HTMLHeadingElement, {
 
       {r.fund && <FundPanel fund={r.fund} currency={r.currency} />}
       {r.fundamentals && <FundamentalsPanel data={r.fundamentals} currency={r.currency} />}
+
+      {r.dividend !== undefined && <DividendPanel profile={r.dividend} rules={r.dividend_rules} symbol={r.symbol} currency={r.currency} />}
 
       {(r.asset_type === 'STOCK' || r.red_flags.length > 0) && (
         <Panel title={tl.redFlagsTitle}>
