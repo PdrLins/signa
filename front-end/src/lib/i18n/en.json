@@ -476,7 +476,9 @@
     "add": "Add",
     "addFailed": "Failed to add ticker",
     "empty": "Your watchlist is empty. Add tickers to track them.",
-    "loadFailed": "Failed to load watchlist"
+    "loadFailed": "Failed to load watchlist",
+    "countOne": "1 stock",
+    "countMany": "{n} stocks"
   },
   "portfolio": {
     "title": "Portfolio",
@@ -2166,7 +2168,10 @@
     "slotLimit": "Your plan follows up to {limit} stocks. Remove one to add another.",
     "slots": "{used} of {limit} stocks followed",
     "slotsUnlimited": "{used} stocks followed",
-    "plan": "Plan"
+    "plan": "Plan",
+    "slotMeter": "{used} of {limit} stocks",
+    "slotMeterAria": "You follow {used} of {limit} stocks on the free plan",
+    "slotMeterFull": "Free limit reached"
   },
   "dividendsPage": {
     "title": "Dividends",
@@ -2337,7 +2342,74 @@
       "removed": "{symbol} removed from your watchlist",
       "failed": "Couldn't update the watchlist. Try again.",
       "openSignals": "Open in Signals",
-      "checkAi": "Check with AI"
+      "checkAi": "Check with AI",
+      "follow": "Follow",
+      "following": "Following",
+      "followAria": "Follow {symbol}",
+      "unfollowAria": "Stop following {symbol}",
+      "followed": "You now follow {symbol}",
+      "unfollowed": "You no longer follow {symbol}",
+      "addHoldings": "Add to holdings",
+      "addHoldingsAria": "Add {symbol} to your holdings",
+      "closeAdd": "Close"
+    },
+    "position": {
+      "title": "Your position",
+      "shares": "Shares",
+      "avgCost": "Average cost",
+      "value": "Market value",
+      "share": "Share of portfolio",
+      "shareAria": "{pct} of your portfolio",
+      "today": "Today",
+      "open": "Open gain",
+      "dividends": "Dividends received",
+      "dividendsNone": "Add dividend transactions to track this.",
+      "total": "Total gain",
+      "totalHint": "Open gain plus dividends and realized gains.",
+      "accounts": "By account",
+      "showAccounts": "Show {n} accounts",
+      "hideAccounts": "Hide accounts",
+      "noAccount": "No account",
+      "lastClose": "Uses the last close price.",
+      "sharesIn": "{shares} shares"
+    },
+    "alerts": {
+      "title": "Your alerts",
+      "subtitle": "Get told when the price crosses a level.",
+      "empty": "No alerts on this stock yet.",
+      "direction": "When the price",
+      "above": "Rises above",
+      "below": "Falls below",
+      "aboveShort": "Above",
+      "belowShort": "Below",
+      "price": "Price ({ccy})",
+      "save": "Add alert",
+      "saving": "Adding…",
+      "deleteAria": "Delete the alert: {dir} {price}",
+      "distance": "{pct} from now",
+      "distanceAria": "The price must move {pct} to reach it",
+      "triggered": "Triggered {date} at {price}",
+      "off": "Off",
+      "invalidPrice": "Enter a price above 0.",
+      "alreadyCrossed": "The price is already {price}. Pick a level it hasn't reached.",
+      "created": "Alert added for {symbol}",
+      "deleted": "Alert deleted",
+      "failed": "Couldn't save the alert. Try again.",
+      "limitNote": "{active} of {limit} free alerts in use",
+      "deliveryNote": "A triggered alert shows in Coming up for 7 days. Phone notifications are coming.",
+      "unavailable": "Price alerts need a database update and will be ready soon."
+    },
+    "stats": {
+      "title": "Statistics",
+      "dayRange": "Day range",
+      "range52w": "52-week range",
+      "marketCap": "Market cap",
+      "pe": "P/E (trailing)",
+      "forwardPe": "Forward P/E",
+      "yield": "Dividend yield",
+      "avgVolume": "Avg. volume (3 mo)",
+      "volume": "Volume",
+      "beta": "Beta"
     }
   },
   "tracker": {
@@ -2557,7 +2629,8 @@
     "tags": {
       "recent": "Recent",
       "estimated": "Estimated",
-      "watchlist": "Watchlist"
+      "watchlist": "Watchlist",
+      "alert": "Your alert"
     },
     "events": {
       "perShare": "{amount} per share",
@@ -2592,7 +2665,10 @@
         "us_cpi": "US inflation report (CPI)",
         "ca_cpi": "Canada inflation report (CPI)"
       },
-      "provisional": "Provisional date."
+      "provisional": "Provisional date.",
+      "priceAlertAbove": "{symbol} rose above {price}",
+      "priceAlertBelow": "{symbol} fell below {price}",
+      "priceAlertAt": "Price {price} when your alert triggered."
     }
   },
   "profile": {
@@ -2605,7 +2681,6 @@
       "portfolios": "Portfolios",
       "notifications": "Notifications",
       "data": "Your data",
-      "invite": "Invite friends",
       "about": "About",
       "account": "Account"
     },
@@ -2644,7 +2719,6 @@
     "importDesc": "Bring your history from a spreadsheet",
     "export": "Export your data",
     "exportDesc": "Download everything as CSV",
-    "inviteBody": "Invite links are coming soon.",
     "privacy": "Privacy policy",
     "terms": "Terms and disclaimer",
     "signOut": "Sign out",
@@ -3087,5 +3161,46 @@
     "returnNote": "A high yield does not mean a high return: what counts is price change plus payments.",
     "payoutsTitle": "How much the payments vary",
     "payoutsHelp": "Each payment per share over the last 12 months."
+  },
+  "upgrade": {
+    "slotTitle": "You follow {limit} stocks — the free limit",
+    "alertTitle": "You have {limit} active price alerts — the free limit",
+    "body": "Premium lifts the limits and adds more:",
+    "perks": {
+      "stocks": "Unlimited stocks to follow",
+      "alerts": "Unlimited price alerts",
+      "prices": "Prices refreshed every minute",
+      "charts": "Intraday and full-history charts",
+      "tax": "After-tax dividends in Canada and the US"
+    },
+    "cta": "Upgrade to Premium",
+    "soon": "Premium is coming soon. Nothing changes on your plan until you choose it.",
+    "manage": "Manage followed stocks",
+    "notNow": "Not now",
+    "close": "Close"
+  },
+  "search": {
+    "open": "Search stocks",
+    "shortcut": "Ctrl K",
+    "shortcutMac": "⌘K",
+    "title": "Find a stock",
+    "placeholder": "Search by name or ticker",
+    "hint": "Type a company name or a ticker like ENB.TO, AAPL or BTC-USD.",
+    "searching": "Searching…",
+    "noResults": "No matches for “{q}”.",
+    "error": "Search is unavailable right now. Try again.",
+    "inHoldings": "In your holdings",
+    "following": "Following",
+    "follow": "Follow",
+    "add": "Add to holdings",
+    "followAria": "Follow {symbol}",
+    "unfollowAria": "Stop following {symbol}",
+    "addAria": "Add {symbol} to your holdings",
+    "openAria": "Open {symbol}: {name}",
+    "followed": "You now follow {symbol}",
+    "unfollowed": "You no longer follow {symbol}",
+    "failed": "Couldn't update. Try again.",
+    "close": "Close search",
+    "results": "Results"
   }
 }

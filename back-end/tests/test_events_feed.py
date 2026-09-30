@@ -160,7 +160,7 @@ def test_upcoming_merges_all_sources(monkeypatch, db, fakes):
     body = r.json()
     assert body["delayed_minutes"] == 15 and body["as_of"] == "2026-09-30T14:00:00+00:00"
     assert body["sources"] == {"dividends": "ok", "earnings": "ok", "analyst": "ok",
-                               "check_changed": "ok", "economy": "ok"}
+                               "check_changed": "ok", "economy": "ok", "price_alerts": "ok"}
     assert body["symbols"] == {"held": ["NVDA"], "watched": ["AAPL"]}
     items = body["items"]
     assert [i["date"] for i in items] == sorted(i["date"] for i in items)

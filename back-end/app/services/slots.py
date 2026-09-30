@@ -2,7 +2,7 @@
 
 A slot is one symbol in the user's holdings or watchlist (a symbol in both
 counts once). The limit comes from the user's access level
-(app.core.access.slot_limit); owner is unlimited.
+(app.core.access.slot_limit): free 10, premium and owner unlimited.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Iterable, Optional
 
 from fastapi import HTTPException, status
 
-from app.core.access import slot_limit
+from app.core.access import slot_limit, upgrade_hint
 from app.db.supabase import get_client
 
 
@@ -36,8 +36,11 @@ def slot_summary(user: dict) -> dict:
 
 
 def check_new_symbols(user: dict, symbols: Iterable[str]) -> None:
-    """403 {"code": "slot_limit"} if following `symbols` would exceed the limit.
-    Symbols the user already follows don't need a slot."""
+    """403 if following `symbols` would exceed the limit. Symbols the user
+    already follows don't need a slot. Body:
+    {"detail": {"code": "slot_limit", "limit": 10, "used": 10, "requested": 1,
+                "message": str,
+                "upgrade": {"feature": "system.unlimited_slots", "plan": "premium"}}}"""
     limit: Optional[int] = slot_limit(user.get("access_level") or "free", int(user.get("slot_bonus") or 0))
     if limit is None:
         return
@@ -48,7 +51,8 @@ def check_new_symbols(user: dict, symbols: Iterable[str]) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "slot_limit", "limit": limit, "used": len(current),
                     "requested": len(new),
-                    "message": f"Your plan follows up to {limit} stocks."},
+                    "message": f"Your plan follows up to {limit} stocks.",
+                    "upgrade": upgrade_hint("system.unlimited_slots")},
         )
 
 

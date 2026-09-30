@@ -476,7 +476,9 @@
     "add": "Adicionar",
     "addFailed": "Falha ao adicionar ticker",
     "empty": "Sua lista está vazia. Adicione tickers para acompanhá-los.",
-    "loadFailed": "Falha ao carregar favoritos"
+    "loadFailed": "Falha ao carregar favoritos",
+    "countOne": "1 ação",
+    "countMany": "{n} ações"
   },
   "portfolio": {
     "title": "Carteira",
@@ -2166,7 +2168,10 @@
     "slotLimit": "Seu plano acompanha até {limit} ações. Remova uma para adicionar outra.",
     "slots": "{used} de {limit} ações acompanhadas",
     "slotsUnlimited": "{used} ações acompanhadas",
-    "plan": "Plano"
+    "plan": "Plano",
+    "slotMeter": "{used} de {limit} ações",
+    "slotMeterAria": "Você acompanha {used} de {limit} ações no plano gratuito",
+    "slotMeterFull": "Limite gratuito atingido"
   },
   "dividendsPage": {
     "title": "Dividendos",
@@ -2337,7 +2342,74 @@
       "removed": "{symbol} removida da sua watchlist",
       "failed": "Não foi possível atualizar a watchlist. Tente de novo.",
       "openSignals": "Abrir em Sinais",
-      "checkAi": "Verificar com IA"
+      "checkAi": "Verificar com IA",
+      "follow": "Acompanhar",
+      "following": "Acompanhando",
+      "followAria": "Acompanhar {symbol}",
+      "unfollowAria": "Deixar de acompanhar {symbol}",
+      "followed": "Agora você acompanha {symbol}",
+      "unfollowed": "Você deixou de acompanhar {symbol}",
+      "addHoldings": "Adicionar à carteira",
+      "addHoldingsAria": "Adicionar {symbol} à sua carteira",
+      "closeAdd": "Fechar"
+    },
+    "position": {
+      "title": "Sua posição",
+      "shares": "Cotas",
+      "avgCost": "Preço médio",
+      "value": "Valor de mercado",
+      "share": "Peso na carteira",
+      "shareAria": "{pct} da sua carteira",
+      "today": "Hoje",
+      "open": "Ganho em aberto",
+      "dividends": "Dividendos recebidos",
+      "dividendsNone": "Adicione transações de dividendos para acompanhar.",
+      "total": "Ganho total",
+      "totalHint": "Ganho em aberto mais dividendos e ganhos realizados.",
+      "accounts": "Por conta",
+      "showAccounts": "Mostrar {n} contas",
+      "hideAccounts": "Ocultar contas",
+      "noAccount": "Sem conta",
+      "lastClose": "Usa o último preço de fechamento.",
+      "sharesIn": "{shares} cotas"
+    },
+    "alerts": {
+      "title": "Seus alertas",
+      "subtitle": "Seja avisado quando o preço cruzar um nível.",
+      "empty": "Nenhum alerta nesta ação ainda.",
+      "direction": "Quando o preço",
+      "above": "Subir acima de",
+      "below": "Cair abaixo de",
+      "aboveShort": "Acima",
+      "belowShort": "Abaixo",
+      "price": "Preço ({ccy})",
+      "save": "Adicionar alerta",
+      "saving": "Adicionando…",
+      "deleteAria": "Excluir o alerta: {dir} {price}",
+      "distance": "{pct} de agora",
+      "distanceAria": "O preço precisa variar {pct} para chegar lá",
+      "triggered": "Disparou em {date} a {price}",
+      "off": "Desligado",
+      "invalidPrice": "Informe um preço acima de 0.",
+      "alreadyCrossed": "O preço já está em {price}. Escolha um nível que ainda não foi atingido.",
+      "created": "Alerta criado para {symbol}",
+      "deleted": "Alerta excluído",
+      "failed": "Não foi possível salvar o alerta. Tente de novo.",
+      "limitNote": "{active} de {limit} alertas gratuitos em uso",
+      "deliveryNote": "Um alerta disparado aparece em Próximos eventos por 7 dias. Notificações no celular estão chegando.",
+      "unavailable": "Os alertas de preço precisam de uma atualização do banco de dados e ficam prontos em breve."
+    },
+    "stats": {
+      "title": "Estatísticas",
+      "dayRange": "Variação do dia",
+      "range52w": "Variação em 52 semanas",
+      "marketCap": "Valor de mercado",
+      "pe": "P/L (últimos 12 meses)",
+      "forwardPe": "P/L projetado",
+      "yield": "Dividend yield",
+      "avgVolume": "Volume médio (3 meses)",
+      "volume": "Volume",
+      "beta": "Beta"
     }
   },
   "tracker": {
@@ -2557,7 +2629,8 @@
     "tags": {
       "recent": "Recente",
       "estimated": "Estimado",
-      "watchlist": "Observação"
+      "watchlist": "Observação",
+      "alert": "Seu alerta"
     },
     "events": {
       "perShare": "{amount} por cota",
@@ -2592,7 +2665,10 @@
         "us_cpi": "Inflação dos EUA (CPI)",
         "ca_cpi": "Inflação do Canadá (CPI)"
       },
-      "provisional": "Data provisória."
+      "provisional": "Data provisória.",
+      "priceAlertAbove": "{symbol} subiu acima de {price}",
+      "priceAlertBelow": "{symbol} caiu abaixo de {price}",
+      "priceAlertAt": "Preço de {price} quando seu alerta disparou."
     }
   },
   "profile": {
@@ -2605,7 +2681,6 @@
       "portfolios": "Carteiras",
       "notifications": "Notificações",
       "data": "Seus dados",
-      "invite": "Convide amigos",
       "about": "Sobre",
       "account": "Conta"
     },
@@ -2644,7 +2719,6 @@
     "importDesc": "Traga seu histórico de uma planilha",
     "export": "Exportar seus dados",
     "exportDesc": "Baixe tudo em CSV",
-    "inviteBody": "Os links de convite chegam em breve.",
     "privacy": "Política de privacidade",
     "terms": "Termos e aviso legal",
     "signOut": "Sair",
@@ -3087,5 +3161,46 @@
     "returnNote": "Rendimento alto não significa retorno alto: o que conta é a variação de preço mais os pagamentos.",
     "payoutsTitle": "Quanto os pagamentos variam",
     "payoutsHelp": "Cada pagamento por cota nos últimos 12 meses."
+  },
+  "upgrade": {
+    "slotTitle": "Você acompanha {limit} ações — o limite gratuito",
+    "alertTitle": "Você tem {limit} alertas de preço ativos — o limite gratuito",
+    "body": "O Premium remove os limites e traz mais:",
+    "perks": {
+      "stocks": "Ações acompanhadas sem limite",
+      "alerts": "Alertas de preço sem limite",
+      "prices": "Preços atualizados a cada minuto",
+      "charts": "Gráficos intradiários e de todo o histórico",
+      "tax": "Dividendos após impostos no Canadá e nos EUA"
+    },
+    "cta": "Assinar o Premium",
+    "soon": "O Premium chega em breve. Nada muda no seu plano até você escolher.",
+    "manage": "Gerenciar ações acompanhadas",
+    "notNow": "Agora não",
+    "close": "Fechar"
+  },
+  "search": {
+    "open": "Buscar ações",
+    "shortcut": "Ctrl K",
+    "shortcutMac": "⌘K",
+    "title": "Encontrar uma ação",
+    "placeholder": "Busque por nome ou ticker",
+    "hint": "Digite o nome de uma empresa ou um ticker como ENB.TO, AAPL ou BTC-USD.",
+    "searching": "Buscando…",
+    "noResults": "Nada encontrado para “{q}”.",
+    "error": "A busca está indisponível agora. Tente de novo.",
+    "inHoldings": "Na sua carteira",
+    "following": "Acompanhando",
+    "follow": "Acompanhar",
+    "add": "Adicionar à carteira",
+    "followAria": "Acompanhar {symbol}",
+    "unfollowAria": "Deixar de acompanhar {symbol}",
+    "addAria": "Adicionar {symbol} à sua carteira",
+    "openAria": "Abrir {symbol}: {name}",
+    "followed": "Agora você acompanha {symbol}",
+    "unfollowed": "Você deixou de acompanhar {symbol}",
+    "failed": "Não foi possível atualizar. Tente de novo.",
+    "close": "Fechar a busca",
+    "results": "Resultados"
   }
 }

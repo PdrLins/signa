@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import {
-  Bell, Download, FileText, Gift, Landmark, LogOut, ReceiptText, Shield, Trash2, Upload,
+  Bell, Download, FileText, Landmark, LogOut, ReceiptText, Shield, Trash2, Upload,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTheme } from '@/hooks/useTheme'
@@ -19,6 +19,7 @@ import {
   useButtonStyles, useFieldStyle,
 } from '@/components/profile/ui'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { SlotMeter } from '@/components/upgrade/SlotMeter'
 import type { ProfileUpdate, TaxView } from '@/types/profile'
 
 export default function ProfilePage() {
@@ -30,7 +31,7 @@ export default function ProfilePage() {
   const logout = useAuthStore((s) => s.logout)
   const toast = useToast()
   const qc = useQueryClient()
-  const { can, slots } = useAccess()
+  const { can } = useAccess()
   const q = useProfile()
   const opts = useProfileOptions()
   const update = useUpdateProfile()
@@ -124,6 +125,7 @@ export default function ProfilePage() {
               <div className="min-w-0"><dt style={{ color: theme.colors.textSub }}>{tp.plan}</dt>
                 <dd style={{ color: theme.colors.text }}>{t.access.levels[profile.access_level]}</dd></div>
             </dl>
+            <SlotMeter />
             <div className="flex flex-col gap-1">
               <span className="text-[12px]" style={{ color: theme.colors.textSub }}>{tp.language}</span>
               <Segmented<Locale> label={tp.language} value={locale} disabled={busy}
@@ -204,23 +206,6 @@ export default function ProfilePage() {
             <LinkRow href="/profile/transactions?import=1" icon={Upload} label={tp.import} desc={tp.importDesc} />
           )}
           <StaticRow icon={Download} label={tp.export} desc={tp.exportDesc} badge={t.tracker.comingSoon} />
-        </div>
-      </SectionCard>
-
-      <SectionCard title={tp.sections.invite}>
-        <div className="flex items-start gap-3">
-          <Gift size={18} aria-hidden="true" style={{ color: theme.colors.primary }} className="mt-0.5 shrink-0" />
-          <div className="min-w-0 text-[13px]" style={{ color: theme.colors.textSub }}>
-            {slots && (
-              <p className="tabular-nums" style={{ color: theme.colors.text }}>
-                {slots.limit !== null
-                  ? fill(t.access.slots, { used: slots.used, limit: slots.limit })
-                  : fill(t.access.slotsUnlimited, { used: slots.used })}
-              </p>
-            )}
-            <p className="mt-0.5">{tp.inviteBody}</p>
-          </div>
-          <SoonBadge label={t.tracker.comingSoon} />
         </div>
       </SectionCard>
 

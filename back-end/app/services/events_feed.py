@@ -38,6 +38,11 @@ reported in `sources` and never breaks the feed):
                     "unavailable", no items.
   economy           economic_calendar (manually maintained BoC / Fed rate
                     decisions, US / CA CPI releases).
+  price_alert       the user's price alerts that fired in the last 7 days
+                    (price_alerts, migration 015; services/price_alerts.feed_items),
+                    whole-portfolio scope only (like the watchlist: an alert
+                    belongs to no account). Before 015: sources.price_alerts =
+                    "unavailable", no items.
 
 Dates: forward-looking items are dated today..today+days. analyst and
 check_changed look BACK (today-7..today): they are in the same list with
@@ -58,7 +63,7 @@ from loguru import logger
 from app.core.cache import TTLCache
 from app.services import economic_calendar, portfolio_context as pc
 
-TYPE_ORDER = ("economy", "ex_dividend", "dividend_payment", "earnings", "analyst", "check_changed")
+TYPE_ORDER = ("economy", "ex_dividend", "dividend_payment", "earnings", "analyst", "check_changed", "price_alert")
 MIN_DAYS, MAX_DAYS, DEFAULT_DAYS = 1, 90, 30
 RECENT_DAYS = 7
 EARNINGS_REPORTS = 8
@@ -357,9 +362,11 @@ def validate_days(days: Any) -> int:
     return n
 
 
-async def build_upcoming(scope: dict, watchlist: list[dict] | None, days: int, today: date | None = None) -> dict:
+async def build_upcoming(scope: dict, watchlist: list[dict] | None, days: int, today: date | None = None,
+                         price_alerts: tuple[list[dict], str] | None = None) -> dict:
     """The /events/upcoming response for a loaded scope. Never raises for a
-    failing source (see `sources`)."""
+    failing source (see `sources`). `price_alerts` = (triggered alert rows of
+    the last 7 days, source status) or None (not in this scope)."""
     from app.core.api_errors import is_missing_schema
     from app.db import queries
     from app.services import dividends, usage_metrics
@@ -441,6 +448,12 @@ async def build_upcoming(scope: dict, watchlist: list[dict] | None, days: int, t
 
     items += economy_items(today, end)
     sources["economy"] = "ok"
+
+    if price_alerts is not None:
+        from app.services.price_alerts import feed_items
+        rows, alert_status = price_alerts
+        items += feed_items(rows, every)
+        sources["price_alerts"] = alert_status
 
     meta = pc.price_meta(positions)
     items = sort_items(items)

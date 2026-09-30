@@ -9,6 +9,7 @@ import { useToast } from '@/hooks/useToast'
 import { holdingsApi } from '@/lib/api'
 import { fill } from '@/lib/insights'
 import { HOLDINGS_KEY, toHoldingsError } from '@/hooks/useHoldings'
+import { useLimitHandler } from '@/hooks/useLimitHandler'
 import { SymbolCombobox } from '@/components/check/SymbolCombobox'
 import { errorText } from '@/components/holdings/format'
 import { AccountSelect } from '@/components/holdings/AccountSelect'
@@ -25,13 +26,16 @@ function guessCurrency(symbol: string): string {
 /** Add one holding: search by name or ticker, pick a match, optionally
  *  enter shares / average cost / account, save. The bulk paste import is
  *  one click away (`onPasteList`). */
-export function AddHoldingForm({ existing, defaultAccountId = '', onDone, onCancel, onPasteList }: {
+export function AddHoldingForm({ existing, defaultAccountId = '', onDone, onCancel, onPasteList, initialPick = null }: {
   existing: Holding[]
   /** preselected account (e.g. the holdings page's account filter) */
   defaultAccountId?: string
   onDone: () => void
   onCancel?: () => void
-  onPasteList: () => void
+  /** bulk paste / CSV; omitted where the form is for one known stock */
+  onPasteList?: () => void
+  /** start with this stock already picked (the stock page's "Add to holdings") */
+  initialPick?: SymbolMatch | null
 }) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
@@ -41,8 +45,9 @@ export function AddHoldingForm({ existing, defaultAccountId = '', onDone, onCanc
   const qc = useQueryClient()
   const ids = { q: useId(), s: useId(), c: useId(), hint: useId() }
 
+  const handleLimit = useLimitHandler()
   const [query, setQuery] = useState('')
-  const [picked, setPicked] = useState<SymbolMatch | null>(null)
+  const [picked, setPicked] = useState<SymbolMatch | null>(initialPick)
   const [shares, setShares] = useState('')
   const [cost, setCost] = useState('')
   const [accountId, setAccountId] = useState(defaultAccountId)
@@ -69,7 +74,7 @@ export function AddHoldingForm({ existing, defaultAccountId = '', onDone, onCanc
   const label = 'flex flex-col gap-1 min-w-0 text-[12px]'
 
   const reset = () => {
-    setPicked(null); setQuery(''); setShares(''); setCost(''); setAccountId(defaultAccountId); setError(null)
+    setPicked(initialPick); setQuery(''); setShares(''); setCost(''); setAccountId(defaultAccountId); setError(null)
   }
 
   const save = async (e: React.FormEvent) => {
@@ -95,6 +100,7 @@ export function AddHoldingForm({ existing, defaultAccountId = '', onDone, onCanc
       reset()
       onDone()
     } catch (err) {
+      if (handleLimit(err)) return   // slot_limit -> the upgrade sheet
       const he = toHoldingsError(err)
       setError(errorText(he.code, th, { limit: he.limit ?? null }))
     } finally {
@@ -107,11 +113,13 @@ export function AddHoldingForm({ existing, defaultAccountId = '', onDone, onCanc
       style={{ backgroundColor: theme.colors.surface, border: `1px solid ${theme.colors.border}` }}>
       <div className="flex items-center justify-between gap-3">
         <h2 id={`${ids.q}-title`} className="text-[17px] font-semibold" style={{ color: theme.colors.text }}>{ta.title}</h2>
-        <button type="button" onClick={onPasteList}
-          className="min-h-[44px] px-3 rounded-lg text-[13px] font-medium flex items-center gap-1.5 focus-visible:outline focus-visible:outline-2"
-          style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}>
-          <ClipboardList size={15} aria-hidden="true" />{ta.pasteList}
-        </button>
+        {onPasteList && (
+          <button type="button" onClick={onPasteList}
+            className="min-h-[44px] px-3 rounded-lg text-[13px] font-medium flex items-center gap-1.5 focus-visible:outline focus-visible:outline-2"
+            style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}>
+            <ClipboardList size={15} aria-hidden="true" />{ta.pasteList}
+          </button>
+        )}
       </div>
 
       {!picked ? (
@@ -142,12 +150,14 @@ export function AddHoldingForm({ existing, defaultAccountId = '', onDone, onCanc
               </p>
               {picked.name && <p className="text-[13px] truncate" style={{ color: theme.colors.textSub }}>{picked.name}</p>}
             </div>
-            <button type="button" onClick={reset}
-              className="min-h-[44px] px-3 rounded-lg text-[13px] font-medium flex items-center gap-1 shrink-0 focus-visible:outline focus-visible:outline-2"
-              style={{ color: theme.colors.textSub, outlineColor: theme.colors.primary }}
-              aria-label={`${ta.change} ${picked.symbol}`}>
-              <X size={14} aria-hidden="true" />{ta.change}
-            </button>
+            {!initialPick && (
+              <button type="button" onClick={reset}
+                className="min-h-[44px] px-3 rounded-lg text-[13px] font-medium flex items-center gap-1 shrink-0 focus-visible:outline focus-visible:outline-2"
+                style={{ color: theme.colors.textSub, outlineColor: theme.colors.primary }}
+                aria-label={`${ta.change} ${picked.symbol}`}>
+                <X size={14} aria-hidden="true" />{ta.change}
+              </button>
+            )}
           </div>
 
           {already && <p className="text-[12px]" style={{ color: theme.colors.textSub }}>{fill(ta.already, { symbol: picked.symbol })}</p>}

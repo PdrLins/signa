@@ -142,13 +142,16 @@ INFO = {"quoteType": "EQUITY", "longName": "Microsoft Corporation", "exchange": 
 
 
 class Fakes:
-    def __init__(self, monkeypatch, data=None):
+    def __init__(self, monkeypatch, data=None, real_user_db=False):
         self.data = data if data is not None else {"MSFT": {"history": _history(), "info": dict(INFO)}}
         self.fetches: list[str] = []
         self.followed_calls = 0
         self.ai_calls: list[str] = []
         monkeypatch.setattr(sp, "_fetch_market", self.fetch)
         monkeypatch.setattr(sp, "followed", self.followed)
+        if not real_user_db:   # the user's DB part (position, slots) is faked too
+            monkeypatch.setattr(sp, "position", lambda user, symbols: None)
+            monkeypatch.setattr(sp, "slots", lambda user: {"used": 3, "limit": 10, "remaining": 7})
         monkeypatch.setattr(hm, "earnings_info", self.earnings)
         monkeypatch.setattr(access, "assert_ai_allowed", lambda what="": self.ai_calls.append(what))
 
@@ -210,6 +213,13 @@ def test_free_user_gets_the_full_page(monkeypatch):
     checks = _by_key(body["checks"])
     assert checks["uptrend"]["status"] == "pass" and checks["liquidity"]["status"] == "pass"
     assert body["followed"] == {"in_holdings": True, "in_watchlist": False}
+    assert body["position"] is None and body["slots"] == {"used": 3, "limit": 10, "remaining": 7}
+    st = body["statistics"]
+    assert set(st) == {"day_low", "day_high", "low_52w", "high_52w", "market_cap", "pe_ratio", "forward_pe",
+                       "dividend_yield", "avg_volume", "volume", "beta"}
+    assert (st["low_52w"], st["high_52w"], st["market_cap"]) == (98.0, 125.0, 3.1e12)
+    assert st["volume"] == 2_000_000 and st["avg_volume"] == 2_000_000   # from the bars (no info keys)
+    assert st["day_high"] > st["day_low"] and st["pe_ratio"] is None
     assert fakes.ai_calls == []  # never reached an @ai_guarded entry point
 
 
@@ -267,3 +277,77 @@ def test_partial_data_degrades_to_nulls(monkeypatch):
     assert checks["uptrend"]["status"] == "na"  # 30 bars: no SMA200
     assert checks["earnings_soon"]["status"] == "na"
     assert fakes.ai_calls == []
+
+
+# ---------------------------------------------------------------- statistics / position
+
+def test_statistics_prefer_info_and_drop_negative_pe():
+    info = {"regularMarketDayLow": 118.5, "regularMarketDayHigh": 122.25, "trailingPE": -3.0, "forwardPE": 28.456,
+            "averageVolume": 1_500_000, "regularMarketVolume": 900_000, "beta": 0.912}
+    quote = {"low_52w": 98.0, "high_52w": 125.0, "market_cap": 3.1e12}
+    st = sp.build_statistics(_history(), info, quote, {"yield": 0.0312})
+    assert (st["day_low"], st["day_high"]) == (118.5, 122.25)
+    assert st["pe_ratio"] is None and st["forward_pe"] == 28.46
+    assert (st["avg_volume"], st["volume"], st["beta"]) == (1_500_000, 900_000, 0.91)
+    assert st["dividend_yield"] == 0.0312
+    empty = sp.build_statistics(None, {}, {}, None)
+    assert all(v is None for v in empty.values())
+
+
+def _scope(holdings, txs=None, quotes=None, accounts=None):
+    return {"home_currency": "CAD", "usdcad": 1.4, "holdings": holdings, "transactions": txs or [],
+            "quotes": quotes or {}, "all_accounts": accounts or [], "accounts": accounts or []}
+
+
+def test_position_none_when_not_held():
+    assert sp.build_position({"MSFT"}, _scope([{"symbol": "NVDA", "shares": 1, "avg_cost": 1}])) is None
+    assert sp.build_position({"MSFT"}, _scope([{"symbol": "MSFT", "shares": 0}])) is None
+
+
+def test_position_sums_accounts_weighted_cost_weight_and_ledger():
+    accounts = [{"id": "a1", "name": "TFSA"}, {"id": "a2", "name": "Margin"}]
+    holdings = [
+        {"symbol": "MSFT", "account_id": "a1", "shares": 10, "avg_cost": 100, "currency": "USD"},
+        {"symbol": "MSFT", "account_id": "a2", "shares": 30, "avg_cost": 120, "currency": "USD"},
+        {"symbol": "ENB.TO", "account_id": "a1", "shares": 100, "avg_cost": 50, "currency": "CAD"},
+    ]
+    quotes = {"MSFT": {"price": 150.0, "prev_close": 140.0, "currency": "USD", "as_of": "2026-09-30T14:00:00Z"},
+              "ENB.TO": {"price": 56.0, "prev_close": 56.0, "currency": "CAD"}}
+    txs = [
+        {"account_id": "a1", "symbol": "MSFT", "type": "buy", "quantity": 10, "amount": 1000, "trade_date": "2026-01-02"},
+        {"account_id": "a1", "symbol": "MSFT", "type": "dividend", "amount": 8.3, "trade_date": "2026-06-12"},
+        {"account_id": "a1", "symbol": "ENB.TO", "type": "dividend", "amount": 90, "trade_date": "2026-06-01"},
+    ]
+    p = sp.build_position({"MSFT"}, _scope(holdings, txs, quotes, accounts))
+    assert p["shares"] == 40 and p["avg_cost"] == 115.0 and p["currency"] == "USD"
+    assert p["market_value"] == 6000.0 and p["market_value_home"] == 8400.0
+    # portfolio = 8400 (MSFT, CAD) + 5600 (ENB) = 14000
+    assert p["weight_pct"] == 60.0
+    assert p["today_pl"] == {"abs": 400.0, "pct": 7.14, "abs_home": 560.0}
+    assert p["open_pl"] == {"abs": 1400.0, "pct": 30.43, "abs_home": 1960.0}
+    assert p["dividends_received"] == 8.3 and p["realized_pl"] == 0.0 and p["has_transactions"] is True
+    assert p["total_gain"]["abs"] == 1408.3
+    assert [(a["account_name"], a["shares"], a["value"]) for a in p["per_account"]] == [
+        ("Margin", 30, 4500.0), ("TFSA", 10, 1500.0)]
+
+
+def test_position_without_transactions_has_no_ledger_numbers():
+    p = sp.build_position({"MSFT"}, _scope([{"symbol": "MSFT", "shares": 2, "avg_cost": None}],
+                                           quotes={"MSFT": {"price": 10.0, "currency": "USD"}}))
+    assert p["dividends_received"] is None and p["realized_pl"] is None and p["has_transactions"] is False
+    assert p["avg_cost"] is None and p["open_pl"]["abs"] is None and p["total_gain"]["abs"] is None
+    assert p["market_value"] == 20.0 and p["today_pl"]["abs"] is None
+
+
+@pytest.mark.real_access
+def test_api_position_and_slots_from_the_users_db(monkeypatch):
+    from tests.portfolio_fakes import FakePortfolioDB
+    db = FakePortfolioDB(monkeypatch)
+    acc = db.add_account(U1, "TFSA")
+    db.add_holding(U1, "MSFT", account_id=acc, shares=5, avg_cost=100, currency="USD")
+    db.quotes["MSFT"] = {"symbol": "MSFT", "price": 121.0, "prev_close": 120.0, "currency": "USD"}
+    Fakes(monkeypatch, real_user_db=True)
+    body = _client(monkeypatch, "free").get("/api/v1/stocks/MSFT").json()
+    assert body["position"]["shares"] == 5 and body["position"]["weight_pct"] == 100.0
+    assert body["position"]["per_account"][0]["account_name"] == "TFSA"
+    assert body["slots"] == {"used": 1, "limit": 10, "remaining": 9}

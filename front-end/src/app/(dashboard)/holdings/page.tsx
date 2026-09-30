@@ -22,6 +22,8 @@ import { usePortfolioSummary, useScope } from '@/hooks/usePortfolioInsights'
 import { PortfolioValueCard } from '@/components/tracker/PortfolioValueCard'
 import { HideAmountsButton, QueryError, ScopeSelect, isUpgrade } from '@/components/tracker/ui'
 import { isMigrationRequired } from '@/lib/trackerErrors'
+import { SearchButton } from '@/components/search/GlobalSearch'
+import { SlotMeter } from '@/components/upgrade/SlotMeter'
 
 export default function HoldingsPage() {
   return (
@@ -41,7 +43,7 @@ function HoldingsInner() {
   const { scope, setScope, scoped } = useScope()
   const accountId = scope.account_id ?? null
   const q = useHoldings(scope)
-  const { can, slots } = useAccess()
+  const { can } = useAccess()
   const accountsQ = useAccounts()
   const accounts = useMemo(() => accountsQ.data?.items ?? [], [accountsQ.data])
   const summary = usePortfolioSummary(scope, can('area.home'))
@@ -102,14 +104,11 @@ function HoldingsInner() {
           </h1>
           <p className="text-[13px] md:text-sm mt-1 max-w-2xl" style={{ color: theme.colors.textSub }}>{th.subtitle}</p>
           <p className="text-[12px] mt-1" style={{ color: theme.colors.textHint }}>{th.paperNote}</p>
-          {slots && slots.limit !== null && (
-            <p className="text-[12px] mt-1 tabular-nums" style={{ color: theme.colors.textSub }}>
-              {fill(t.access.slots, { used: slots.used, limit: slots.limit })}
-            </p>
-          )}
+          <SlotMeter className="mt-2" />
         </div>
-        {hasAny && (
-          <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
+          <SearchButton />
+          {hasAny && <>
             <HideAmountsButton />
             {canEdit && <button type="button" onClick={() => { setAddOpen((o) => !o); setAddMode('search') }} aria-expanded={addOpen}
               className="min-h-[44px] px-4 rounded-xl text-[14px] font-semibold flex items-center gap-2 focus-visible:outline focus-visible:outline-2"
@@ -122,8 +121,8 @@ function HoldingsInner() {
               <RefreshCw size={16} aria-hidden="true" className={monitorRunning ? 'animate-spin' : undefined} />
               {monitorRunning ? th.list.refreshing : th.list.refresh}
             </button>}
-          </div>
-        )}
+          </>}
+        </div>
       </header>
 
       {accounts.length > 0 && (hasAny || q.isLoading) && (

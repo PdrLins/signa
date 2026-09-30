@@ -10,6 +10,7 @@ import { holdingsApi } from '@/lib/api'
 import { fill } from '@/lib/insights'
 import { Panel } from '@/components/insights/Panel'
 import { HOLDINGS_KEY, toHoldingsError } from '@/hooks/useHoldings'
+import { useLimitHandler } from '@/hooks/useLimitHandler'
 import { errorText, money, useToneColor, type Tone } from './format'
 import { AccountSelect } from './AccountSelect'
 import type { HoldingUpsertItem, Listing, ResolvedLine } from '@/types/holdings'
@@ -42,6 +43,7 @@ export function ImportPanel({ onDone, onCancel, showCancel, defaultAccountId = '
   const th = t.holdings
   const toast = useToast()
   const qc = useQueryClient()
+  const handleLimit = useLimitHandler()
   const tone = useToneColor()
   const textId = useId()
   const hintId = useId()
@@ -109,6 +111,8 @@ export function ImportPanel({ onDone, onCancel, showCancel, defaultAccountId = '
       onDone()
     } catch (e) {
       const he = toHoldingsError(e)
+      // slot_limit: the upgrade sheet opens; the inline text stays so the list can be trimmed
+      handleLimit(e)
       setError(errorText(he.code, th, { limit: he.limit ?? null }))
       setPhase('confirm')
     }

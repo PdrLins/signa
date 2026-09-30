@@ -17,6 +17,9 @@
                                settings.quotes_refresh_seconds_free (900s)
                            force=True (16:05 ET, after the close) refreshes
                            every active-followed symbol once. Nothing per user.
+                           Symbols of active price alerts count as followed;
+                           after storing, price_alerts.evaluate_refreshed fires
+                           the alerts whose target was crossed (migration 015).
 
 Quote shape: {symbol, price, prev_close, change_pct, currency, day_high,
 day_low, as_of (ISO), as_of_source, updated_at (ISO)}. The price is the last
@@ -275,8 +278,11 @@ def refresh_followed_quotes(force: bool = False, now: datetime | None = None) ->
     now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
     if not force and not in_market_session(now):
         return {"status": "closed"}
+    from app.services import price_alerts
     try:
-        levels = follower_levels(queries.get_follow_rows(), queries.get_users_activity(), now,
+        # active price alerts need fresh quotes too (at their owner's tier)
+        follows = queries.get_follow_rows() + price_alerts.alert_follow_rows()
+        levels = follower_levels(follows, queries.get_users_activity(), now,
                                  settings.quotes_active_user_days)
     except Exception as e:
         logger.warning(f"quotes: followed symbols unavailable: {e}")
@@ -292,4 +298,8 @@ def refresh_followed_quotes(force: bool = False, now: datetime | None = None) ->
         _last_refresh[sym] = now_ts
     quotes = refresh_quotes(symbols)
     usage_metrics.record("symbols_refreshed", len(quotes))
-    return {"status": "ok", "followed": len(levels), "symbols": len(symbols), "quotes": len(quotes)}
+    out = {"status": "ok", "followed": len(levels), "symbols": len(symbols), "quotes": len(quotes)}
+    fired = price_alerts.evaluate_refreshed(quotes, now)   # price alerts (015); never raises
+    if fired:
+        out["alerts_triggered"] = fired
+    return out

@@ -10,8 +10,9 @@ It must cost nothing per user:
     every user: the page body for 15 minutes (PAGE_TTL), the dividend
     profile ~12h (services/dividends.py), earnings dates ~12h
     (signals/earnings.py).
-  * The per-user part ("followed": holdings / watchlist) is read from the
-    DB on every request and never cached.
+  * The per-user part ("followed": holdings / watchlist, "position": the
+    user's shares across accounts, "slots") is read from the DB on every
+    request and never cached.
 
 Blocking yfinance calls run in a thread (`_fetch_market`, replaced by the
 tests). Data errors degrade to partial data with nulls; only an unknown
@@ -192,6 +193,60 @@ def build_quote(history, info: dict | None) -> dict:
     change_pct = round((price / prev - 1) * 100, 2) if price and prev else None
     return {"price": _r(price, 4), "change_pct": change_pct, "high_52w": _r(hi, 4), "low_52w": _r(lo, 4),
             "market_cap": _num(info.get("marketCap")), "as_of": as_of}
+
+
+def _last_bar(history) -> dict:
+    try:
+        if history is None or not len(history):
+            return {}
+        row = history.iloc[-1]
+        return {k: _num(row.get(k)) for k in ("High", "Low", "Volume")}
+    except Exception:
+        return {}
+
+
+def _avg_volume(history, n: int = 63) -> float | None:
+    try:
+        v = history["Volume"].dropna().tail(n)
+        return _num(v.mean()) if len(v) else None
+    except Exception:
+        return None
+
+
+def build_statistics(history, info: dict | None, quote: dict, dividend_profile: dict | None) -> dict:
+    """Key statistics, each nullable. Pure.
+
+    day_low/day_high     today's session range (Yahoo info, else the last daily bar)
+    low_52w/high_52w     same as quote
+    market_cap           listing currency
+    pe_ratio             trailing P/E; forward_pe: forward P/E
+    dividend_yield       FRACTION (0.035 = 3.5%), from the dividend profile
+    avg_volume           ~3-month average daily volume (shares); volume: today's
+    beta                 5-year monthly beta (Yahoo)"""
+    info = info or {}
+    bar = _last_bar(history)
+
+    def first(*keys):
+        for k in keys:
+            v = _num(info.get(k))
+            if v is not None:
+                return v
+        return None
+
+    pe, fpe = first("trailingPE"), first("forwardPE")
+    return {
+        "day_low": _r(first("regularMarketDayLow", "dayLow") or bar.get("Low"), 4),
+        "day_high": _r(first("regularMarketDayHigh", "dayHigh") or bar.get("High"), 4),
+        "low_52w": quote.get("low_52w"),
+        "high_52w": quote.get("high_52w"),
+        "market_cap": quote.get("market_cap"),
+        "pe_ratio": _r(pe) if pe is not None and pe > 0 else None,
+        "forward_pe": _r(fpe) if fpe is not None and fpe > 0 else None,
+        "dividend_yield": _r((dividend_profile or {}).get("yield"), 5),
+        "avg_volume": _r(first("averageVolume", "averageDailyVolume3Month") or _avg_volume(history), 0),
+        "volume": _r(first("regularMarketVolume", "volume") or bar.get("Volume"), 0),
+        "beta": _r(first("beta")),
+    }
 
 
 def _dollar_volume(tech: dict, crypto: bool) -> float | None:
@@ -396,6 +451,7 @@ async def _build(symbol: str, raw: dict) -> tuple[dict, bool]:
             "rules": div["rules"],
         },
         "events": build_events(earnings, profile),
+        "statistics": build_statistics(history, info, quote, profile),
         "checks": build_checks(tech, asset_type, earnings, div["item"], currency),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -448,8 +504,117 @@ def followed(user_id: str, symbols: set[str]) -> dict:
     return out
 
 
-async def get_stock_page(raw_symbol: str, user_id: str) -> dict:
+def _wavg(pairs: list[tuple[float | None, float | None]]) -> float | None:
+    """Share-weighted average of (shares, avg_cost), lots without a cost skipped."""
+    known = [(sh, c) for sh, c in pairs if sh and c is not None]
+    total = sum(sh for sh, _ in known)
+    return sum(sh * c for sh, c in known) / total if total else None
+
+
+def _pl(abs_: float | None, base: float | None) -> dict:
+    return {"abs": _r(abs_), "pct": _r(abs_ / base * 100) if abs_ is not None and base else None}
+
+
+def build_position(symbols: set[str], scope: dict) -> dict | None:
+    """This user's position in the symbol (all accounts), or None when not held. Pure.
+
+    `scope` is portfolio_context.load_scope (whole portfolio, with quotes
+    and transactions). Native money is in the position `currency`; *_home
+    in the user's home currency (USD/CAD only, else null)."""
+    from app.services import portfolio_context as pc
+    from app.services.portfolio_ledger import derive_positions
+
+    home, usdcad = scope["home_currency"], scope.get("usdcad")
+    rows = pc.value_positions(scope["holdings"], scope.get("quotes") or {}, home, usdcad)
+    mine = [r for r in rows if r["symbol"] in symbols and (r.get("shares") or 0) > 0]
+    if not mine:
+        return None
+    total_home = sum(r["value_home"] for r in rows if r.get("value_home") is not None)
+    names = {str(a.get("id")): a.get("name") for a in scope.get("all_accounts") or scope.get("accounts") or []}
+
+    def total(key: str) -> float | None:
+        vals = [r.get(key) for r in mine]
+        return sum(v for v in vals if v is not None) if any(v is not None for v in vals) else None
+
+    shares = sum(r["shares"] for r in mine)
+    avg_cost = _wavg([(r["shares"], r.get("avg_cost")) for r in mine])
+    ccy = mine[0]["currency"]
+    price = next((r["price"] for r in mine if r.get("price") is not None), None)
+    prev = next((r["prev_close"] for r in mine if r.get("prev_close") is not None), None)
+    value = shares * price if price is not None else None
+    value_home = total("value_home")
+    cost = shares * avg_cost if avg_cost is not None else None
+    open_abs = value - cost if value is not None and cost is not None else None
+    today_abs = shares * (price - prev) if price is not None and prev is not None else None
+
+    txs = [t for t in scope.get("transactions") or [] if str(t.get("symbol") or "").upper() in symbols]
+    dividends_received = realized = None
+    if txs:
+        led = [p for p in derive_positions(txs)["positions"] if p["symbol"] in symbols]
+        dividends_received = sum(p["dividends_total"] for p in led)
+        realized = sum(p["realized_pl"] for p in led)
+    gain_abs = None
+    if open_abs is not None:
+        gain_abs = open_abs + (dividends_received or 0) + (realized or 0)
+
+    def home_of(v):
+        return _r(pc.to_home(v, ccy, home, usdcad))
+
+    return {
+        "shares": _r(shares, 6),
+        "avg_cost": _r(avg_cost, 4),
+        "currency": ccy,
+        "price": _r(price, 4),
+        "home_currency": home,
+        "market_value": _r(value),
+        "market_value_home": _r(value_home),
+        "weight_pct": _r(value_home / total_home * 100) if value_home is not None and total_home else None,
+        "today_pl": {**_pl(today_abs, shares * prev if prev else None), "abs_home": home_of(today_abs)},
+        "open_pl": {**_pl(open_abs, cost), "abs_home": home_of(open_abs)},
+        "dividends_received": _r(dividends_received),
+        "realized_pl": _r(realized),
+        "total_gain": {**_pl(gain_abs, cost), "abs_home": home_of(gain_abs)},
+        "has_transactions": bool(txs),
+        "price_source": mine[0].get("price_source"),
+        "as_of": mine[0].get("as_of"),
+        "per_account": [
+            {"account_id": r.get("account_id"),
+             "account_name": names.get(str(r.get("account_id"))) if r.get("account_id") else None,
+             "shares": _r(r["shares"], 6), "avg_cost": _r(r.get("avg_cost"), 4),
+             "value": _r(r.get("value")), "value_home": _r(r.get("value_home"))}
+            for r in sorted(mine, key=lambda r: -(r.get("value") or 0))
+        ],
+    }
+
+
+def position(user: dict, symbols: set[str]) -> dict | None:
+    """build_position for this user (DB + shared quotes). Errors -> None."""
+    from app.services import portfolio_context as pc
+    try:
+        scope = pc.load_scope(user, None, None, True, True)
+    except Exception as e:
+        logger.debug(f"stock_page: position unavailable: {e}")
+        return None
+    return build_position({s.upper() for s in symbols}, scope)
+
+
+def slots(user: dict) -> dict | None:
+    from app.services import slots as slot_service
+    try:
+        return slot_service.slot_summary(user)
+    except Exception as e:
+        logger.debug(f"stock_page: slots unavailable: {e}")
+        return None
+
+
+async def get_stock_page(raw_symbol: str, user: dict) -> dict:
+    """Shared body + this user's part (never cached): followed, position, slots."""
     body = await get_shared_page(raw_symbol)
     sym = normalize(raw_symbol)
-    fol = await asyncio.to_thread(followed, user_id, {body["symbol"], sym})
-    return {**body, "followed": fol}
+    symbols = {body["symbol"], sym}
+    fol, pos, slot = await asyncio.gather(
+        asyncio.to_thread(followed, user["user_id"], symbols),
+        asyncio.to_thread(position, user, symbols),
+        asyncio.to_thread(slots, user),
+    )
+    return {**body, "followed": fol, "position": pos, "slots": slot}

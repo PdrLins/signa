@@ -1,18 +1,17 @@
 'use client'
 
-import { useCallback, useMemo } from 'react'
+import { Suspense, useCallback, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Briefcase, ExternalLink, SearchX, Star } from 'lucide-react'
+import { ArrowLeft, Briefcase, ExternalLink, Plus, SearchX, Star, X } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
-import { useToast } from '@/hooks/useToast'
 import { useAccess } from '@/hooks/useAccess'
 import { useStock, stockKey } from '@/hooks/useStock'
-import { useAddTicker, useRemoveTicker } from '@/hooks/useWatchlist'
+import { useFollow } from '@/hooks/useFollow'
+import { useHoldings } from '@/hooks/useHoldings'
 import { CheckApiError } from '@/lib/api'
-import { ApiAccessError } from '@/lib/access'
 import { checkHref } from '@/lib/check'
 import { DASH, etTime, fill, nativePrice, shortDate, signedPct } from '@/lib/insights'
 import { Panel } from '@/components/insights/Panel'
@@ -21,6 +20,11 @@ import { PriceChart } from '@/components/charts/PriceChart'
 import { DividendPanel } from '@/components/check/DividendPanel'
 import { StockChecks, compactMoney } from '@/components/stock/StockChecks'
 import { StockEvents } from '@/components/stock/StockEvents'
+import { StockPosition } from '@/components/stock/StockPosition'
+import { StockStatistics } from '@/components/stock/StockStatistics'
+import { StockAlerts } from '@/components/stock/StockAlerts'
+import { AddHoldingForm } from '@/components/holdings/AddHoldingForm'
+import type { SymbolMatch } from '@/types/symbols'
 import type { StockPage } from '@/types/stock'
 
 const BTN = 'min-h-[44px] px-4 rounded-xl text-[14px] font-medium flex items-center justify-center gap-2 focus-visible:outline focus-visible:outline-2 disabled:opacity-60'
@@ -123,54 +127,42 @@ function Header({ data }: { data: StockPage }) {
   )
 }
 
-function Actions({ data }: { data: StockPage }) {
+function Actions({ data, adding, onToggleAdd }: { data: StockPage; adding: boolean; onToggleAdd: () => void }) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const ta = t.stock.actions
-  const toast = useToast()
-  const qc = useQueryClient()
   const { can } = useAccess()
-  const add = useAddTicker()
-  const remove = useRemoveTicker()
+  const { follow, unfollow, busy } = useFollow()
   const symbol = data.symbol
-  const inWatchlist = data.followed.in_watchlist
-  const busy = add.isPending || remove.isPending
+  const following = data.followed.in_watchlist
 
-  const onError = useCallback((err: unknown) => {
-    if (err instanceof ApiAccessError && err.code === 'slot_limit') {
-      toast.show(fill(t.access.slotLimit, { limit: err.limit ?? null }), 'error')
-    } else if (err instanceof ApiAccessError && err.code === 'upgrade_required') {
-      toast.show(t.access.upgradeRequired, 'error')
-    } else {
-      toast.show(ta.failed, 'error')
-    }
-  }, [t, ta, toast])
-
-  const toggle = useCallback(() => {
-    const done = (msg: string) => () => {
-      toast.show(fill(msg, { symbol }), inWatchlist ? 'info' : 'success')
-      qc.invalidateQueries({ queryKey: stockKey(symbol) })
-    }
-    if (inWatchlist) remove.mutate(symbol, { onSuccess: done(ta.removed), onError })
-    else add.mutate(symbol, { onSuccess: done(ta.added), onError })
-  }, [inWatchlist, symbol, add, remove, ta, toast, qc, onError])
+  const toggle = useCallback(() => (following ? unfollow(symbol) : follow(symbol)), [following, symbol, follow, unfollow])
 
   const canWatch = can('action.watchlist.edit')
+  const canAdd = can('action.holdings.edit')
   const canSignals = can('area.signals')
   const canCheck = can('area.check')
-  if (!canWatch && !canSignals && !canCheck) return null
+  if (!canWatch && !canAdd && !canSignals && !canCheck) return null
 
+  const primary = { backgroundColor: theme.colors.primary, color: theme.colors.surface, outlineColor: theme.colors.primary }
   const secondary = { backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text, outlineColor: theme.colors.primary }
   return (
     <div className="flex flex-wrap gap-2">
       {canWatch && (
-        <button type="button" onClick={toggle} disabled={busy} aria-pressed={inWatchlist}
-          aria-label={`${inWatchlist ? ta.removeWatchlist : ta.addWatchlist} ${symbol}`}
-          className={BTN}
-          style={inWatchlist ? secondary : { backgroundColor: theme.colors.primary, color: theme.colors.surface, outlineColor: theme.colors.primary }}>
-          <Star size={16} aria-hidden="true" fill={inWatchlist ? theme.colors.warning : 'none'}
-            style={{ color: inWatchlist ? theme.colors.warning : theme.colors.surface }} />
-          {inWatchlist ? ta.inWatchlist : ta.addWatchlist}
+        <button type="button" onClick={toggle} disabled={busy} aria-pressed={following}
+          aria-label={fill(following ? ta.unfollowAria : ta.followAria, { symbol })}
+          className={BTN} style={following ? secondary : primary}>
+          <Star size={16} aria-hidden="true" fill={following ? theme.colors.warning : 'none'}
+            style={{ color: following ? theme.colors.warning : theme.colors.surface }} />
+          {following ? ta.following : ta.follow}
+        </button>
+      )}
+      {canAdd && (
+        <button type="button" onClick={onToggleAdd} aria-expanded={adding}
+          aria-label={adding ? ta.closeAdd : fill(ta.addHoldingsAria, { symbol })}
+          className={BTN} style={secondary}>
+          {adding ? <X size={16} aria-hidden="true" /> : <Plus size={16} aria-hidden="true" />}
+          {adding ? ta.closeAdd : ta.addHoldings}
         </button>
       )}
       {canSignals && (
@@ -188,8 +180,35 @@ function Actions({ data }: { data: StockPage }) {
   )
 }
 
+/** The existing AddHoldingForm, prefilled with this stock (account select included). */
+function AddToHoldings({ data, onClose }: { data: StockPage; onClose: () => void }) {
+  const qc = useQueryClient()
+  const holdings = useHoldings()
+  const pick = useMemo<SymbolMatch>(() => ({
+    symbol: data.symbol, name: data.name, exchange: data.exchange, exchange_label: data.exchange,
+    type: data.asset_type, source: 'signa',
+  }), [data.symbol, data.name, data.exchange, data.asset_type])
+  const done = useCallback(() => {
+    qc.invalidateQueries({ queryKey: stockKey(data.symbol) })
+    onClose()
+  }, [qc, data.symbol, onClose])
+  return <AddHoldingForm existing={holdings.data?.items ?? []} initialPick={pick} onDone={done} onCancel={onClose} />
+}
+
 export default function StockPageView() {
+  return (
+    <Suspense fallback={null}>
+      <StockPageInner />
+    </Suspense>
+  )
+}
+
+function StockPageInner() {
   const params = useParams()
+  const search = useSearchParams()
+  const [adding, setAdding] = useState(search.get('add') === '1')
+  const toggleAdd = useCallback(() => setAdding((a) => !a), [])
+  const closeAdd = useCallback(() => setAdding(false), [])
   const router = useRouter()
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
@@ -239,10 +258,16 @@ export default function StockPageView() {
     <div className="space-y-4 pb-4 min-w-0">
       {back}
       <Header data={data} />
-      <Actions data={data} />
+      <Actions data={data} adding={adding} onToggleAdd={toggleAdd} />
+      {adding && <AddToHoldings data={data} onClose={closeAdd} />}
+      {data.position && <StockPosition position={data.position} symbol={data.symbol} />}
       <Panel>
         <PriceChart symbol={data.symbol} defaultRange="3M" title={ts.chartTitle} />
       </Panel>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start min-w-0">
+        <StockStatistics stats={data.statistics} symbol={data.symbol} currency={data.currency} />
+        <StockAlerts symbol={data.symbol} currency={data.currency} price={data.quote.price} />
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start min-w-0">
         <StockChecks checks={data.checks} symbol={data.symbol} currency={data.currency} />
         <StockEvents events={data.events} symbol={data.symbol} currency={data.currency} />

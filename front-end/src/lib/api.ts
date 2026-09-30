@@ -8,6 +8,7 @@ import type { TodayInsights, PerformanceInsights, BacktestInsights, SignalTrail,
 import type { CheckJob, CheckMode, CompareJob } from '@/types/check'
 import type { SymbolSearchResponse } from '@/types/symbols'
 import type { StockPage } from '@/types/stock'
+import type { AlertInput, AlertPatch, AlertsResponse, PriceAlert } from '@/types/alerts'
 import type { LoginRequest, LoginResponse, OtpVerifyRequest, AuthResponse } from '@/types/auth'
 import type { MeResponse } from '@/types/access'
 import type { DividendCalendarResponse } from '@/types/dividends'
@@ -179,8 +180,10 @@ client.interceptors.response.use(
       // Plan limits come back as {detail: {code, feature | limit, message}};
       // components switch on `code` to show a translated message.
       const detail = error.response.data?.detail
-      if (detail && typeof detail === 'object' && (detail.code === 'upgrade_required' || detail.code === 'slot_limit')) {
-        throw new ApiAccessError(String(detail.message ?? 'Not available on your plan.'), detail.code, detail.feature, detail.limit)
+      if (detail && typeof detail === 'object'
+        && (detail.code === 'upgrade_required' || detail.code === 'slot_limit' || detail.code === 'alert_limit')) {
+        throw new ApiAccessError(String(detail.message ?? 'Not available on your plan.'), detail.code,
+          detail.feature ?? detail.upgrade?.feature, detail.limit, detail.upgrade)
       }
       throw new ApiAccessError(typeof detail === 'string' ? detail : 'Access denied.', 'forbidden')
     }
@@ -422,7 +425,7 @@ export const stocksApi = {
 // as CheckApiError (same {detail: {code, message, ...}} shape as /check) so
 // pages can translate them; the rest of the detail object is in `extra`
 // (e.g. account_has_holdings.holdings, import_has_errors.errors). 403 still
-// goes through the interceptor (ApiAccessError upgrade_required / slot_limit).
+// goes through the interceptor (ApiAccessError upgrade_required / slot_limit / alert_limit).
 async function holdingsCall<T>(
   method: 'get' | 'post' | 'put' | 'patch' | 'delete',
   url: string,
@@ -468,6 +471,16 @@ export const holdingsApi = {
   allocate: (includeWatchlist = false) =>
     holdingsCall<AllocateResponse>('get', '/holdings/allocate-ideas', undefined,
       { params: includeWatchlist ? { include_watchlist: true } : undefined, timeout: 45_000 }),
+}
+
+// Price alerts (migration 015) — 403 alert_limit comes back as ApiAccessError
+// (interceptor); 422 already_crossed etc. as CheckApiError with `extra`.
+export const alertsApi = {
+  list: (symbol?: string) =>
+    holdingsCall<AlertsResponse>('get', '/alerts', undefined, symbol ? { params: { symbol } } : undefined),
+  create: (body: AlertInput) => holdingsCall<PriceAlert>('post', '/alerts', body),
+  update: (id: string, body: AlertPatch) => holdingsCall<PriceAlert>('patch', `/alerts/${encodeURIComponent(id)}`, body),
+  remove: (id: string) => holdingsCall<{ deleted: true; id: string }>('delete', `/alerts/${encodeURIComponent(id)}`),
 }
 
 // Dividend calendar (free, no AI) — same coded-error handling as holdings

@@ -1693,3 +1693,83 @@ def get_data_usage(since: str) -> list[dict]:
     client = get_client()
     return _select_all_pages(lambda: (client.table("data_usage_daily").select("usage_date, metric, count")
                                       .gte("usage_date", since).order("usage_date")))
+
+
+# ---- price alerts (migration 015) ----
+
+PRICE_ALERT_COLUMNS = ("id, user_id, symbol, direction, target_price, currency, note, active, "
+                       "triggered_at, last_price, created_at")
+
+
+def list_price_alerts(user_id: str, symbol: str | None = None) -> list[dict]:
+    client = get_client()
+    q = client.table("price_alerts").select(PRICE_ALERT_COLUMNS).eq("user_id", user_id)
+    if symbol:
+        q = q.eq("symbol", symbol)
+    return q.order("created_at", desc=True).limit(1000).execute().data or []
+
+
+def get_price_alert(alert_id: str, user_id: str) -> dict | None:
+    client = get_client()
+    rows = (client.table("price_alerts").select(PRICE_ALERT_COLUMNS).eq("id", alert_id)
+            .eq("user_id", user_id).limit(1).execute().data or [])
+    return rows[0] if rows else None
+
+
+def count_active_price_alerts(user_id: str) -> int:
+    client = get_client()
+    rows = (client.table("price_alerts").select("id").eq("user_id", user_id).eq("active", True)
+            .limit(10000).execute().data or [])
+    return len(rows)
+
+
+def insert_price_alert(user_id: str, data: dict) -> dict:
+    client = get_client()
+    rows = client.table("price_alerts").insert({**data, "user_id": user_id}).execute().data or []
+    return rows[0] if rows else {}
+
+
+def update_price_alert(alert_id: str, user_id: str, data: dict) -> dict | None:
+    client = get_client()
+    rows = (client.table("price_alerts").update(data).eq("id", alert_id).eq("user_id", user_id)
+            .execute().data or [])
+    return rows[0] if rows else None
+
+
+def delete_price_alert(alert_id: str, user_id: str) -> bool:
+    client = get_client()
+    rows = client.table("price_alerts").delete().eq("id", alert_id).eq("user_id", user_id).execute().data or []
+    return bool(rows)
+
+
+def get_active_price_alerts(symbols: list[str]) -> list[dict]:
+    """Active alerts of every user for `symbols` (quotes job)."""
+    if not symbols:
+        return []
+    client = get_client()
+    out: list[dict] = []
+    for i in range(0, len(symbols), 200):
+        out.extend(client.table("price_alerts").select(PRICE_ALERT_COLUMNS).eq("active", True)
+                   .in_("symbol", symbols[i:i + 200]).limit(10000).execute().data or [])
+    return out
+
+
+def mark_price_alert_triggered(alert_id: str, triggered_at: str, last_price: float) -> None:
+    """Deactivate an alert that fired. Only an still-active row is updated
+    (two overlapping job runs can't fire it twice)."""
+    client = get_client()
+    (client.table("price_alerts").update({"active": False, "triggered_at": triggered_at,
+                                          "last_price": last_price})
+     .eq("id", alert_id).eq("active", True).execute())
+
+
+def get_triggered_price_alerts(user_id: str, since_iso: str) -> list[dict]:
+    client = get_client()
+    return (client.table("price_alerts").select(PRICE_ALERT_COLUMNS).eq("user_id", user_id)
+            .gte("triggered_at", since_iso).order("triggered_at", desc=True).limit(500).execute().data or [])
+
+
+def get_active_alert_follow_rows() -> list[dict]:
+    """[{user_id, symbol}] of active alerts: their symbols need fresh quotes."""
+    client = get_client()
+    return _select_all_pages(lambda: client.table("price_alerts").select("user_id, symbol").eq("active", True))

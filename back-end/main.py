@@ -20,6 +20,7 @@ from app.api.v1 import notifications as notifications_api
 from app.api.v1 import profile as profile_api
 from app.api.v1 import transactions as transactions_api
 from app.api.v1 import admin_usage as admin_usage_api
+from app.api.v1 import alerts as alerts_api
 from app.api.v1 import allocation as allocation_api
 from app.api.v1 import dividend_summary as dividend_summary_api
 from app.api.v1 import events as events_api
@@ -156,6 +157,7 @@ app.include_router(dividend_summary_api.router, prefix=api_prefix)
 app.include_router(dividend_summary_api.income_router, prefix=api_prefix)
 app.include_router(events_api.router, prefix=api_prefix)
 app.include_router(admin_usage_api.router, prefix=api_prefix)
+app.include_router(alerts_api.router, prefix=api_prefix)
 
 
 @app.post("/api/v1/telegram/webhook")

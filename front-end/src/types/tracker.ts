@@ -259,7 +259,7 @@ export interface IncomeQuality {
 
 // ── /events/upcoming ──
 
-export type EventType = 'ex_dividend' | 'dividend_payment' | 'earnings' | 'analyst' | 'check_changed' | 'economy'
+export type EventType = 'ex_dividend' | 'dividend_payment' | 'earnings' | 'analyst' | 'check_changed' | 'economy' | 'price_alert'
 
 export interface EventItem {
   type: EventType
@@ -301,6 +301,12 @@ export interface EventItem {
   // economy
   code?: 'boc_rate' | 'fed_rate' | 'us_cpi' | 'ca_cpi'
   country?: 'CA' | 'US'
+  // price_alert (a user's alert that fired in the last 7 days; recent=true)
+  alert_id?: string
+  direction?: 'above' | 'below'
+  target_price?: number | null
+  last_price?: number | null
+  triggered_at?: string | null
 }
 
 export interface UpcomingEvents extends Freshness {

@@ -10,6 +10,8 @@ import { useAuthStore } from '@/store/authStore'
 import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { LeftNav } from '@/components/layout/LeftNav'
 import { BottomNav } from '@/components/layout/BottomNav'
+import { GlobalSearch } from '@/components/search/GlobalSearch'
+import { UpgradeSheet } from '@/components/upgrade/UpgradeSheet'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -62,6 +64,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </main>
       </div>
       <BottomNav />
+      {/* App-wide overlays: ⌘K / Ctrl+K stock search and the upgrade sheet
+          (403 slot_limit / alert_limit anywhere). */}
+      {ready && <GlobalSearch />}
+      <UpgradeSheet />
       {/* Last login — fixed bottom right */}
       {lastLogin && (
         <div className="hidden md:block fixed bottom-4 right-6 z-40">

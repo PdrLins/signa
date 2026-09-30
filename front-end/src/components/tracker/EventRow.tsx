@@ -2,7 +2,7 @@
 
 import { memo } from 'react'
 import Link from 'next/link'
-import { BarChart3, CalendarCheck, Coins, Landmark, Megaphone, ShieldCheck, type LucideIcon } from 'lucide-react'
+import { BarChart3, BellRing, CalendarCheck, Coins, Landmark, Megaphone, ShieldCheck, type LucideIcon } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useMoney } from '@/hooks/usePortfolioInsights'
@@ -20,6 +20,7 @@ const ICONS: Record<EventType, LucideIcon> = {
   analyst: BarChart3,
   check_changed: ShieldCheck,
   economy: Landmark,
+  price_alert: BellRing,
 }
 
 function statusText(v: string, t: T): string {
@@ -78,6 +79,11 @@ export function eventText(ev: EventItem, t: T, locale: string, fmtHome: (v: numb
       const action = ev.action ? (te.actions as Record<string, string>)[ev.action] ?? ev.action : te.actions.rating
       return { title: fill(te.analyst, { symbol: sym, firm: ev.firm ?? DASH, action }), lines }
     }
+    case 'price_alert': {
+      const price = nativePrice(ev.target_price, sym, ev.currency)
+      const lines = ev.last_price != null ? [fill(te.priceAlertAt, { price: nativePrice(ev.last_price, sym, ev.currency) })] : []
+      return { title: fill(ev.direction === 'below' ? te.priceAlertBelow : te.priceAlertAbove, { symbol: sym, price }), lines }
+    }
     case 'economy': {
       const title = ev.code ? (te.economy as Record<string, string>)[ev.code] ?? ev.title : ev.title
       return { title, lines: ev.estimated ? [te.provisional] : [] }
@@ -96,8 +102,10 @@ export const EventRow = memo(function EventRow({ ev, currency, showDate }: { ev:
   const { fmt, hidden } = useMoney(currency)
   const { title, lines } = eventText(ev, t, locale, fmt, hidden)
   const Icon = ICONS[ev.type] ?? CalendarCheck
-  const muted = !ev.owned && ev.type !== 'economy'
-  const iconColor = ev.type === 'dividend_payment' ? theme.colors.up : ev.type === 'check_changed' ? theme.colors.warning : theme.colors.primary
+  const personal = ev.type === 'economy' || ev.type === 'price_alert'   // not "watchlist"-only news
+  const muted = !ev.owned && !personal
+  const iconColor = ev.type === 'dividend_payment' ? theme.colors.up
+    : ev.type === 'check_changed' || ev.type === 'price_alert' ? theme.colors.warning : theme.colors.primary
   return (
     <li className="flex gap-3 py-3 min-w-0" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
       <span className="shrink-0 w-9 h-9 rounded-full inline-flex items-center justify-center" aria-hidden="true"
@@ -117,11 +125,12 @@ export const EventRow = memo(function EventRow({ ev, currency, showDate }: { ev:
         {lines.map((l, i) => (
           <p key={i} className="text-[12.5px] tabular-nums break-words" style={{ color: theme.colors.textSub }}>{l}</p>
         ))}
-        {(ev.estimated || ev.recent || (!ev.owned && ev.type !== 'economy')) && (
+        {(ev.estimated || ev.recent || (!ev.owned && !personal)) && (
           <div className="flex flex-wrap gap-1.5 mt-0.5">
             {ev.recent && <Tag label={te.tags.recent} color={theme.colors.textSub} />}
             {ev.estimated && ev.type !== 'economy' && <Tag label={te.tags.estimated} color={theme.colors.warning} />}
-            {!ev.owned && ev.type !== 'economy' && <Tag label={te.tags.watchlist} color={theme.colors.textSub} />}
+            {!ev.owned && !personal && <Tag label={te.tags.watchlist} color={theme.colors.textSub} />}
+            {ev.type === 'price_alert' && <Tag label={te.tags.alert} color={theme.colors.primary} />}
           </div>
         )}
       </div>

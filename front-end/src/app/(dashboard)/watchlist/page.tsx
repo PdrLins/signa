@@ -12,6 +12,10 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Search } from 'lucide-react'
+import { fill } from '@/lib/insights'
+import { useLimitHandler } from '@/hooks/useLimitHandler'
+import { SearchButton } from '@/components/search/GlobalSearch'
+import { SlotMeter } from '@/components/upgrade/SlotMeter'
 
 interface SearchResult {
   symbol: string
@@ -31,6 +35,7 @@ export default function WatchlistPage() {
   const [searching, setSearching] = useState(false)
   const [showDropdown, setShowDropdown] = useState(false)
   const addTicker = useAddTicker()
+  const handleLimit = useLimitHandler()
   const canEdit = useAccess().can('action.watchlist.edit')
   const dropdownRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<NodeJS.Timeout>()
@@ -74,7 +79,8 @@ export default function WatchlistPage() {
     setQuery('')
     addTicker.mutate(symbol, {
       onSuccess: () => toast.show(`${symbol} ${t.signal.addedToWatchlist}`, 'success'),
-      onError: (err) => toast.show(err?.message || t.watchlist.addFailed, 'error'),
+      // slot_limit -> the upgrade sheet, not a toast
+      onError: (err) => { if (!handleLimit(err)) toast.show(err?.message || t.watchlist.addFailed, 'error') },
     })
   }
 
@@ -91,14 +97,18 @@ export default function WatchlistPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>{t.watchlist.title}</h1>
-        {items && (
-          <p className="text-sm mt-1" style={{ color: theme.colors.textSub }}>
-            {items.length} {items.length === 1 ? 'ticker' : 'tickers'}
-          </p>
-        )}
-      </div>
+      <header className="flex items-start justify-between gap-3 min-w-0">
+        <div className="min-w-0 flex flex-col gap-1">
+          <h1 className="text-2xl font-bold" style={{ color: theme.colors.text }}>{t.watchlist.title}</h1>
+          {items && (
+            <p className="text-sm" style={{ color: theme.colors.textSub }}>
+              {items.length === 1 ? t.watchlist.countOne : fill(t.watchlist.countMany, { n: items.length })}
+            </p>
+          )}
+          <SlotMeter className="mt-1" />
+        </div>
+        <SearchButton />
+      </header>
 
       {/* Search + Add */}
       <div className="relative" ref={dropdownRef} hidden={!canEdit}>

@@ -157,5 +157,14 @@ def _owner_access_by_default(monkeypatch, request):
     monkeypatch.setattr(access, "get_feature_levels", lambda: dict(defaults))
 
 
+@pytest.fixture(autouse=True)
+def _no_price_alert_db(monkeypatch):
+    """The quotes job reads price alerts (migration 015): never reach the real
+    DB from a test. Alert tests replace these with fakes."""
+    from app.db import queries
+    monkeypatch.setattr(queries, "get_active_alert_follow_rows", lambda: [])
+    monkeypatch.setattr(queries, "get_active_price_alerts", lambda symbols: [])
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_access: use real access-level resolution (no owner default)")

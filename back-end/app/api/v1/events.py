@@ -24,7 +24,7 @@ Response:
                                                   # S = "ok" | "partial" | "failed" | "unavailable"
   "economy_calendar": {"last_reviewed": "2026-09-30", "covered_until": "2027-12-14", "maintained": "manually"}
 }
-Item (common): {"type": "ex_dividend" | "dividend_payment" | "earnings" | "analyst" | "check_changed" | "economy",
+Item (common): {"type": "ex_dividend" | "dividend_payment" | "earnings" | "analyst" | "check_changed" | "economy" | "price_alert",
                 "date": "YYYY-MM-DD", "symbol": str | null, "name": str | null, "title": str, "detail": str,
                 "cash": float | null (native), "cash_home": float | null, "currency": str | null,
                 "estimated": bool, "owned": bool, "recent": bool (analyst / check_changed: a past date)}
@@ -36,6 +36,10 @@ Item (common): {"type": "ex_dividend" | "dividend_payment" | "earnings" | "analy
   check_changed + {"changes": [{"key", "from", "to"}], "previous_date"}
   economy     + {"code": "boc_rate" | "fed_rate" | "us_cpi" | "ca_cpi", "country": "CA" | "US"}
                 (estimated=true = provisional date in the manually maintained list)
+  price_alert + {"alert_id", "direction": "above" | "below", "target_price", "last_price",
+                 "triggered_at" (ISO)}   recent=true, dated the day it fired (last 7 days);
+                 currency = the alert's. Whole-portfolio scope only;
+                 sources.price_alerts = "ok" | "failed" | "unavailable" (before migration 015).
 
 Errors ({"detail": {"code", "message", ...}}): 422 invalid_days | invalid_scope ·
 404 account_not_found | person_not_found · 403 upgrade_required · 503 migration_required |
@@ -44,6 +48,7 @@ storage_unavailable. A failing data source never fails the request (see `sources
 
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
 from uuid import UUID
 
@@ -55,6 +60,15 @@ from app.core.dependencies import get_current_user
 from app.services import events_feed, portfolio_context
 
 router = APIRouter(prefix="/events", tags=["Events"])
+
+
+def _triggered_alerts(user_id: str) -> tuple[list[dict], str]:
+    from app.core.api_errors import is_missing_schema
+    from app.services import price_alerts
+    try:
+        return price_alerts.recent_triggered(user_id), "ok"
+    except Exception as e:
+        return [], ("unavailable" if is_missing_schema(e) else "failed")
 
 
 def _watchlist(user_id: str) -> list[dict]:
@@ -75,5 +89,7 @@ async def upcoming(
     days = events_feed.validate_days(days)
     scope = await run_db(portfolio_context.load_scope, user, str(account_id) if account_id else None,
                          str(person_id) if person_id else None, False, True)
-    watchlist = await run_db(_watchlist, user["user_id"]) if scope["account_ids"] is None else []
-    return await events_feed.build_upcoming(scope, watchlist, days)
+    whole = scope["account_ids"] is None
+    watchlist = await run_db(_watchlist, user["user_id"]) if whole else []
+    alerts = await asyncio.to_thread(_triggered_alerts, user["user_id"]) if whole else None
+    return await events_feed.build_upcoming(scope, watchlist, days, price_alerts=alerts)

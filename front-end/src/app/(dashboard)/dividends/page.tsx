@@ -11,6 +11,7 @@ import { useAllocation, useDividendSummary, useMoney, useScope } from '@/hooks/u
 import { DASH, fill, shortDate } from '@/lib/insights'
 import { pct, spct } from '@/components/holdings/format'
 import { HomeHeader } from '@/components/home/HomeHeader'
+import { SymbolLink, SymbolListText } from '@/components/tracker/SymbolLink'
 import { SectionCard, SoonBadge, useButtonStyles } from '@/components/profile/ui'
 import { MonthlyBars } from '@/components/tracker/MonthlyBars'
 import { Tag } from '@/components/tracker/EventRow'
@@ -151,7 +152,7 @@ function Headline({ d, td, taxView }: { d: DividendSummary; td: TD; taxView: 'be
         </p>
       )}
       {d.unconverted.length > 0 && (
-        <p className="text-[12px]" style={{ color: theme.colors.warning }}>{fill(td.unconverted, { symbols: d.unconverted.join(', ') })}</p>
+        <p className="text-[12px]" style={{ color: theme.colors.warning }}><SymbolListText template={td.unconverted} symbols={d.unconverted} /></p>
       )}
     </section>
   )
@@ -256,7 +257,7 @@ function IncomeChangeCard({ d, td }: { d: DividendSummary; td: TD }) {
             {items.map((it) => (
               <li key={`${it.symbol}-${it.kind}`} className="flex items-center justify-between gap-2 text-[12.5px]">
                 <span style={{ color: theme.colors.text }}>
-                  <span className="font-semibold">{it.symbol}</span>{' '}
+                  <SymbolLink symbol={it.symbol} />{' '}
                   <span style={{ color: theme.colors.textSub }}>{(tc.kinds as Record<string, string>)[it.kind] ?? it.kind}</span>
                 </span>
                 <span className="tabular-nums" style={{ color: signColor(it.amount) }}>{signed(it.amount)}</span>
@@ -344,7 +345,7 @@ function PayersCard({ d, td, optionIncome, canQuality, scopeQuery }: {
         </ul>
       )}
       {d.non_payers.length > 0 && (
-        <p className="text-[12px]" style={{ color: theme.colors.textHint }}>{fill(td.payers.nonPayers, { symbols: d.non_payers.join(', ') })}</p>
+        <p className="text-[12px]" style={{ color: theme.colors.textHint }}><SymbolListText template={td.payers.nonPayers} symbols={d.non_payers} /></p>
       )}
     </SectionCard>
   )

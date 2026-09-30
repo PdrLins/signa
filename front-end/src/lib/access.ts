@@ -52,15 +52,24 @@ export function homePath(can: (feature: string) => boolean): string {
   return HOME_CANDIDATES.find(([, f]) => can(f))?.[0] ?? '/settings'
 }
 
-/** Error thrown by the API client for 403 upgrade_required / slot_limit. */
+/** 403 codes a client turns into an upgrade moment (the upgrade sheet). */
+export type LimitCode = 'slot_limit' | 'alert_limit'
+
+/** Error thrown by the API client for 403 upgrade_required / slot_limit / alert_limit. */
 export class ApiAccessError extends Error {
   constructor(
     message: string,
-    public code: 'upgrade_required' | 'slot_limit' | 'forbidden',
+    public code: 'upgrade_required' | LimitCode | 'forbidden',
     public feature?: string,
     public limit?: number,
+    /** slot_limit / alert_limit: what lifts the limit ({feature, plan: "premium"}) */
+    public upgrade?: { feature: string; plan: string },
   ) {
     super(message)
     this.name = 'ApiAccessError'
   }
+}
+
+export function isLimitError(e: unknown): e is ApiAccessError & { code: LimitCode } {
+  return e instanceof ApiAccessError && (e.code === 'slot_limit' || e.code === 'alert_limit')
 }

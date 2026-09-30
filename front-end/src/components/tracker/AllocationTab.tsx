@@ -8,6 +8,7 @@ import { useI18nStore } from '@/store/i18nStore'
 import { useToast } from '@/hooks/useToast'
 import { useAllocation, useAllocationPlan, useMoney, useSaveTargets } from '@/hooks/usePortfolioInsights'
 import { toHoldingsError } from '@/hooks/useHoldings'
+import { SymbolListText } from '@/components/tracker/SymbolLink'
 import { fill } from '@/lib/insights'
 import { trackerErrorText } from '@/lib/trackerErrors'
 import { pct } from '@/components/holdings/format'
@@ -229,7 +230,7 @@ export function AllocationTab({ scope, scoped }: { scope: Scope; scoped: boolean
             ? <p className="text-[13px]" style={{ color: theme.colors.textSub }}>{ta.noTiles}</p>
             : <Treemap tiles={a.tiles} by={by} />}
           {a.unpriced.length > 0 && (
-            <p className="text-[12px]" style={{ color: theme.colors.textHint }}>{fill(ta.unpriced, { symbols: a.unpriced.join(', ') })}</p>
+            <p className="text-[12px]" style={{ color: theme.colors.textHint }}><SymbolListText template={ta.unpriced} symbols={a.unpriced} /></p>
           )}
         </SectionCard>
         <SectionCard title={ta.warningsTitle}>

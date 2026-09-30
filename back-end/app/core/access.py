@@ -73,6 +73,7 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "action.accounts.edit": ("free", "Create, edit and delete accounts and people"),
     "action.accounts.type": ("premium", "Tag accounts with a tax type (TFSA, RRSP, IRA ...)"),
     "action.transactions.edit": ("free", "Add, edit and delete transactions"),
+    "action.alerts.edit": ("free", "Create, edit and delete price alerts"),
     "action.import.csv": ("free", "Import transactions from a CSV file"),
     "action.positions.manage": ("owner", "Open, edit and close positions"),
     "action.wallet.manage": ("owner", "Deposit to / withdraw from the paper wallet"),
@@ -83,14 +84,33 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "feature.tax_view": ("premium", "After-tax dividend view"),
     "feature.intraday_chart": ("premium", "5-minute intraday chart (free: 15-minute bars)"),
     "feature.full_history": ("premium", "Full portfolio history (ALL range; free: up to 1 year)"),
+    "feature.unlimited_alerts": ("premium", "No limit on active price alerts (free: FREE_ALERT_LIMIT)"),
     # --- System capabilities ---
     "system.ai": ("owner", "Trigger AI calls (Grok, Claude, Codex)"),
-    "system.unlimited_slots": ("owner", "No limit on followed stocks"),
+    "system.unlimited_slots": ("premium", "No limit on followed stocks"),
 }
 
 # Slots = stocks a user follows (holdings + watchlist). None = unlimited.
-SLOT_BASE: dict[str, Optional[int]] = {"free": 5, "premium": 50, "owner": None}
-SLOT_MAX: dict[str, Optional[int]] = {"free": 25, "premium": 100, "owner": None}
+# Business rule: followed symbols are what users pay for. Free follows
+# FREE_SLOT_LIMIT (10) flat; premium and owner are unlimited
+# (system.unlimited_slots, migration 015). `users.slot_bonus` (invites) is
+# kept in the DB and still read, but it no longer raises the free limit:
+# SLOT_MAX caps free at the base. To bring invite rewards back, raise
+# SLOT_MAX["free"] above SLOT_BASE["free"].
+FREE_SLOT_LIMIT = 10
+SLOT_BASE: dict[str, Optional[int]] = {"free": FREE_SLOT_LIMIT, "premium": None, "owner": None}
+SLOT_MAX: dict[str, Optional[int]] = {"free": FREE_SLOT_LIMIT, "premium": None, "owner": None}
+
+# Active price alerts (app/services/price_alerts.py). None = unlimited
+# (feature.unlimited_alerts, premium).
+FREE_ALERT_LIMIT = 3
+
+
+# What a 403 slot_limit / alert_limit body carries so a client can open
+# its upgrade screen: {"feature": key that lifts the limit, "plan": level}.
+def upgrade_hint(feature: str) -> dict:
+    return {"feature": feature, "plan": "premium"}
+
 
 _level_cache = TTLCache(max_size=500, default_ttl=60)
 _features_cache = TTLCache(max_size=1, default_ttl=60)
@@ -191,6 +211,11 @@ def slot_limit(level: str, slot_bonus: int = 0) -> Optional[int]:
         return None
     total = base + max(0, slot_bonus)
     return min(total, cap) if cap is not None else total
+
+
+def alert_limit(level: str) -> Optional[int]:
+    """Max ACTIVE price alerts; None = unlimited (feature.unlimited_alerts)."""
+    return None if can(normalize_level(level), "feature.unlimited_alerts") else FREE_ALERT_LIMIT
 
 
 # ---------------------------------------------------------------- request API

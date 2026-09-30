@@ -39,6 +39,7 @@ class FakePortfolioDB:
         self.watchlist: dict[str, list[dict]] = {}
         self.quotes: dict[str, dict] = {}          # SYMBOL -> quote row (no network)
         self.closes: dict[str, object] = {}        # SYMBOL -> pandas Series of daily closes
+        self.alerts: dict[str, dict] = {}          # price_alerts rows (migration 015)
         for name in (
             "get_profile_settings", "upsert_profile_settings", "get_user_email",
             "get_people", "insert_person", "update_person", "delete_person",
@@ -51,6 +52,10 @@ class FakePortfolioDB:
             "get_all_transactions", "get_portfolio_snapshot_rows", "get_income_snapshots",
             "upsert_income_snapshot", "get_check_status_rows", "upsert_check_status_rows",
             "get_allocation_targets", "set_allocation_targets",
+            # price alerts (migration 015)
+            "list_price_alerts", "get_price_alert", "count_active_price_alerts", "insert_price_alert",
+            "update_price_alert", "delete_price_alert", "get_active_price_alerts",
+            "mark_price_alert_triggered", "get_triggered_price_alerts", "get_active_alert_follow_rows",
         ):
             monkeypatch.setattr(queries, name, self._wrap(getattr(self, name)))
         monkeypatch.setattr(queries, "get_holdings_review_all_at", lambda uid: None)
@@ -271,6 +276,54 @@ class FakePortfolioDB:
     def set_allocation_targets(self, uid, targets):
         self.settings.setdefault(uid, {"user_id": uid})["allocation_targets"] = targets
         return targets
+
+    # ---- price alerts (migration 015)
+    def list_price_alerts(self, uid, symbol=None):
+        rows = [dict(a) for a in self.alerts.values() if a["user_id"] == uid and (symbol is None or a["symbol"] == symbol)]
+        return sorted(rows, key=lambda a: a["created_at"], reverse=True)
+
+    def get_price_alert(self, aid, uid):
+        a = self.alerts.get(aid)
+        return dict(a) if a and a["user_id"] == uid else None
+
+    def count_active_price_alerts(self, uid):
+        return sum(1 for a in self.alerts.values() if a["user_id"] == uid and a["active"])
+
+    def insert_price_alert(self, uid, data):
+        aid = self._id()
+        self.alerts[aid] = {"id": aid, "user_id": uid, "note": None, "active": True, "triggered_at": None,
+                            "last_price": None, "created_at": f"2026-09-30T00:00:{len(self.alerts):02d}Z", **data}
+        return dict(self.alerts[aid])
+
+    def update_price_alert(self, aid, uid, data):
+        a = self.alerts.get(aid)
+        if not a or a["user_id"] != uid:
+            return None
+        a.update(data)
+        return dict(a)
+
+    def delete_price_alert(self, aid, uid):
+        a = self.alerts.get(aid)
+        if not a or a["user_id"] != uid:
+            return False
+        del self.alerts[aid]
+        return True
+
+    def get_active_price_alerts(self, symbols):
+        return [dict(a) for a in self.alerts.values() if a["active"] and a["symbol"] in symbols]
+
+    def mark_price_alert_triggered(self, aid, triggered_at, last_price):
+        a = self.alerts.get(aid)
+        if a and a["active"]:
+            a.update({"active": False, "triggered_at": triggered_at, "last_price": last_price})
+
+    def get_triggered_price_alerts(self, uid, since_iso):
+        rows = [dict(a) for a in self.alerts.values()
+                if a["user_id"] == uid and a.get("triggered_at") and a["triggered_at"] >= since_iso]
+        return sorted(rows, key=lambda a: a["triggered_at"], reverse=True)
+
+    def get_active_alert_follow_rows(self):
+        return [{"user_id": a["user_id"], "symbol": a["symbol"]} for a in self.alerts.values() if a["active"]]
 
     # ---- notification prefs
     def get_notification_prefs(self, uid):

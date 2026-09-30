@@ -54,10 +54,18 @@ def test_db_override_moves_a_feature(monkeypatch):
 
 
 def test_slot_limits():
-    assert access.slot_limit("free") == 5
-    assert access.slot_limit("free", 10) == 15
-    assert access.slot_limit("free", 999) == 25  # capped
+    assert access.slot_limit("free") == 10
+    assert access.slot_limit("free", 10) == 10   # invite bonus no longer raises the free limit
+    assert access.slot_limit("free", 999) == 10
+    assert access.slot_limit("premium") is None
     assert access.slot_limit("owner") is None
+    assert DEFAULTS["system.unlimited_slots"] == "premium"
+
+
+def test_alert_limits():
+    assert access.alert_limit("free") == access.FREE_ALERT_LIMIT == 3
+    assert access.alert_limit("premium") is None and access.alert_limit("owner") is None
+    assert DEFAULTS["feature.unlimited_alerts"] == "premium" and DEFAULTS["action.alerts.edit"] == "free"
 
 
 # ---------------------------------------------------------------- DB lookup
@@ -139,12 +147,15 @@ def test_slot_limit_blocks_only_new_symbols(monkeypatch):
     from fastapi import HTTPException
 
     from app.services import slots
-    monkeypatch.setattr(slots, "followed_symbols", lambda _uid: {f"S{i}" for i in range(5)})
-    free = {"user_id": "u", "access_level": "free", "slot_bonus": 0}
+    monkeypatch.setattr(slots, "followed_symbols", lambda _uid: {f"S{i}" for i in range(10)})
+    free = {"user_id": "u", "access_level": "free", "slot_bonus": 5}
     slots.check_new_symbols(free, ["S1", "s2"])  # already followed: fine
     with pytest.raises(HTTPException) as e:
         slots.check_new_symbols(free, ["NEW"])
     assert e.value.status_code == 403 and e.value.detail["code"] == "slot_limit"
+    assert e.value.detail["limit"] == 10 and e.value.detail["used"] == 10
+    assert e.value.detail["upgrade"] == {"feature": "system.unlimited_slots", "plan": "premium"}
+    slots.check_new_symbols({**free, "access_level": "premium"}, ["NEW"])
     slots.check_new_symbols({**free, "access_level": "owner"}, ["NEW"])
 
 
