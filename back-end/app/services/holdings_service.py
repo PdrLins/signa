@@ -737,3 +737,26 @@ def public_holding(h: dict, weight: dict | None) -> dict[str, Any]:
     out["position"] = weight
     out["flags"] = fund_flags(str(h.get("symbol") or ""))
     return out
+
+
+def merge_by_symbol(holdings: list[dict]) -> list[dict]:
+    """One row per symbol (the same stock can sit in several accounts since
+    migration 013): shares added, avg_cost weighted when every lot has one,
+    account/account_id kept only when all lots agree. Order = first seen."""
+    out: dict[str, dict] = {}
+    for h in holdings or []:
+        sym = str(h.get("symbol") or "").upper()
+        if sym not in out:
+            out[sym] = dict(h)
+            continue
+        m = out[sym]
+        a, b = _num(m.get("shares")), _num(h.get("shares"))
+        ca, cb = _num(m.get("avg_cost")), _num(h.get("avg_cost"))
+        shares = (a or 0) + (b or 0) if (a or b) else None
+        m["avg_cost"] = (a * ca + b * cb) / shares if a and b and ca and cb and shares else (
+            None if (a and b) else ca or cb)
+        m["shares"] = shares
+        for k in ("account", "account_id"):
+            if m.get(k) != h.get(k):
+                m[k] = None
+    return list(out.values())

@@ -2108,6 +2108,21 @@
       "internal": "Algo deu errado — tente novamente.",
       "slot_limit": "Seu plano acompanha até {limit} ações. Remova uma para adicionar outra.",
       "upgrade_required": "Isso não está disponível no seu plano."
+    },
+    "add": {
+      "title": "Adicionar uma ação",
+      "search": "Buscar por nome ou ticker",
+      "searchPlaceholder": "ex.: Enbridge, XEQT, NVDA",
+      "change": "Trocar",
+      "sharesOptional": "Quantidade (opcional)",
+      "costOptional": "Custo médio ({ccy}, opcional)",
+      "add": "Adicionar à carteira",
+      "adding": "Adicionando…",
+      "added": "{symbol} adicionada à sua carteira.",
+      "already": "{symbol} já está na sua carteira. Salvar atualiza a quantidade e o custo.",
+      "pasteList": "Tem uma lista? Cole aqui",
+      "searchInstead": "Adicionar uma ação por vez",
+      "hint": "Deixe quantidade e custo em branco se só quer acompanhar a ação; adicione depois para ver valor e dividendos em dinheiro."
     }
   },
   "access": {

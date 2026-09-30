@@ -57,6 +57,9 @@ async def dividend_calendar(
         logger.warning(f"dividends: holdings unavailable: {e}")
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={
             "code": "holdings_unavailable", "message": "Holdings storage is unavailable."})
+    # the same symbol can be held in several accounts (migration 013): one position per symbol
+    from app.services.holdings_service import merge_by_symbol
+    holdings = merge_by_symbol(holdings)
     watchlist = None
     if include_watchlist:
         try:

@@ -10,6 +10,7 @@ import { holdingsApi } from '@/lib/api'
 import { etTime, fill, shortDate } from '@/lib/insights'
 import { HOLDINGS_KEY, toHoldingsError, useHoldings, useHoldingsReview } from '@/hooks/useHoldings'
 import { ImportPanel } from '@/components/holdings/ImportPanel'
+import { AddHoldingForm } from '@/components/holdings/AddHoldingForm'
 import { HoldingsList } from '@/components/holdings/HoldingsList'
 import { AllocatePanel, ReviewPanel, TotalsCard } from '@/components/holdings/SidePanels'
 import { errorText } from '@/components/holdings/format'
@@ -27,7 +28,9 @@ export default function HoldingsPage() {
   const { can, slots } = useAccess()
   const canEdit = can('action.holdings.edit')
   const review = useHoldingsReview(can('action.holdings.review'))
-  const [importOpen, setImportOpen] = useState(false)
+  // How to add: one stock via search (default) or a pasted list / CSV.
+  const [addOpen, setAddOpen] = useState(false)
+  const [addMode, setAddMode] = useState<'search' | 'paste'>('search')
   const [refreshing, setRefreshing] = useState(false)
 
   const data = q.data
@@ -61,7 +64,8 @@ export default function HoldingsPage() {
 
   const loadError = q.error ? toHoldingsError(q.error) : null
   const empty = !!data && items.length === 0
-  const showImport = canEdit && (empty || importOpen)
+  const showAdd = canEdit && (empty || addOpen)
+  const closeAdd = () => { setAddOpen(false); setAddMode('search') }
   const monitorRunning = !!data?.monitor_running
 
   return (
@@ -82,7 +86,7 @@ export default function HoldingsPage() {
         </div>
         {data && items.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            {canEdit && <button type="button" onClick={() => setImportOpen((o) => !o)} aria-expanded={importOpen}
+            {canEdit && <button type="button" onClick={() => { setAddOpen((o) => !o); setAddMode('search') }} aria-expanded={addOpen}
               className="min-h-[44px] px-4 rounded-xl text-[14px] font-semibold flex items-center gap-2 focus-visible:outline focus-visible:outline-2"
               style={{ backgroundColor: theme.colors.primary, color: theme.colors.surface, outlineColor: theme.colors.primary }}>
               <Plus size={16} aria-hidden="true" />{th.import.addMore}
@@ -119,8 +123,19 @@ export default function HoldingsPage() {
         </section>
       )}
 
-      {data && showImport && (
-        <ImportPanel showCancel={!empty} onCancel={() => setImportOpen(false)} onDone={() => setImportOpen(false)} />
+      {data && showAdd && addMode === 'search' && (
+        <AddHoldingForm existing={items} onDone={closeAdd} onCancel={empty ? undefined : closeAdd}
+          onPasteList={() => setAddMode('paste')} />
+      )}
+      {data && showAdd && addMode === 'paste' && (
+        <div className="flex flex-col gap-2">
+          <button type="button" onClick={() => setAddMode('search')}
+            className="self-start min-h-[44px] px-3 rounded-lg text-[13px] font-medium focus-visible:outline focus-visible:outline-2"
+            style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}>
+            {th.add.searchInstead}
+          </button>
+          <ImportPanel showCancel onCancel={() => setAddMode('search')} onDone={closeAdd} />
+        </div>
       )}
 
       {data && items.length > 0 && (

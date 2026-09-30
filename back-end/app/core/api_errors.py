@@ -1,0 +1,63 @@
+"""Structured API errors and the DB-call wrapper for the portfolio endpoints.
+
+Every error body is {"detail": {"code": ..., "message": ..., **extra}} so web
+and iOS clients can branch on `code` and show `message`.
+
+`run_db(fn, *args)` runs a blocking query/service in a thread and maps DB
+failures:
+  * missing table / column (a migration not applied yet)
+        -> 503 {"code": "migration_required", "migration": "013_portfolio_foundation.sql"}
+  * anything else -> 503 {"code": "storage_unavailable"}
+HTTPExceptions raised inside `fn` pass through untouched.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any, Callable
+
+from fastapi import HTTPException, status
+from loguru import logger
+
+PORTFOLIO_MIGRATION = "013_portfolio_foundation.sql"
+
+_MISSING_MARKERS = (
+    "does not exist", "could not find the table", "could not find the", "42p01", "42703",
+    "pgrst204", "pgrst205", "schema cache",
+)
+
+
+def api_error(code: str, message: str, http: int, **extra: Any) -> HTTPException:
+    return HTTPException(status_code=http, detail={"code": code, "message": message, **extra})
+
+
+def is_missing_schema(err: BaseException) -> bool:
+    """True when a DB error means a table/column doesn't exist (migration missing)."""
+    text = str(err).lower()
+    return any(m in text for m in _MISSING_MARKERS)
+
+
+def migration_required(migration: str = PORTFOLIO_MIGRATION) -> HTTPException:
+    return api_error("migration_required",
+                     f"This feature needs a database update — apply migration {migration}.",
+                     status.HTTP_503_SERVICE_UNAVAILABLE, migration=migration)
+
+
+class MigrationRequired(RuntimeError):
+    """Raised by queries that detected the portfolio schema is missing."""
+
+
+async def run_db(fn: Callable, *args: Any, **kwargs: Any) -> Any:
+    try:
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    except HTTPException:
+        raise
+    except MigrationRequired:
+        raise migration_required()
+    except Exception as e:
+        if is_missing_schema(e):
+            logger.warning(f"portfolio: schema missing in {getattr(fn, '__name__', fn)}: {e}")
+            raise migration_required()
+        logger.warning(f"portfolio: DB call {getattr(fn, '__name__', fn)} failed: {e}")
+        raise api_error("storage_unavailable", "Storage is unavailable, try again shortly.",
+                        status.HTTP_503_SERVICE_UNAVAILABLE)

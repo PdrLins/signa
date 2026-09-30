@@ -2108,6 +2108,21 @@
       "internal": "Something went wrong — please try again.",
       "slot_limit": "Your plan follows up to {limit} stocks. Remove one to add another.",
       "upgrade_required": "That isn't available on your plan."
+    },
+    "add": {
+      "title": "Add a stock",
+      "search": "Search by name or ticker",
+      "searchPlaceholder": "e.g. Enbridge, XEQT, NVDA",
+      "change": "Change",
+      "sharesOptional": "Shares (optional)",
+      "costOptional": "Average cost ({ccy}, optional)",
+      "add": "Add to holdings",
+      "adding": "Adding…",
+      "added": "{symbol} added to your holdings.",
+      "already": "{symbol} is already in your holdings. Saving updates its shares and cost.",
+      "pasteList": "Have a list? Paste it instead",
+      "searchInstead": "Add one stock instead",
+      "hint": "Leave shares and cost empty if you only want to follow the stock; add them later to see value and dividend cash."
     }
   },
   "access": {

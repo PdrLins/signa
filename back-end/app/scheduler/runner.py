@@ -16,7 +16,10 @@ from app.scheduler.jobs import (
     midday_scan,
     morning_scan,
     pre_close_scan,
+    portfolio_snapshots,
     pre_market_scan,
+    quotes_refresh,
+    quotes_refresh_after_close,
     virtual_portfolio_snapshot,
 )
 
@@ -118,6 +121,37 @@ def init_scheduler() -> AsyncIOScheduler:
             replace_existing=True,
         )
 
+    # Portfolio tracker (no AI, nothing per user): shared quotes every 60s
+    # in the session (the job itself skips outside 09:30-16:00 ET and on
+    # days both NYSE and TSX are closed), one refresh after the close, and
+    # daily snapshots. A 60s job must not pile up: short grace, coalesced.
+    if settings.quotes_refresh_enabled:
+        scheduler.add_job(
+            quotes_refresh,
+            CronTrigger(minute="*", hour="9-15", day_of_week="mon-fri", timezone=settings.timezone),
+            id="quotes_refresh",
+            name="Quotes refresh (every 60s, 9:30-4:00 PM ET)",
+            replace_existing=True,
+            misfire_grace_time=30,
+            coalesce=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            quotes_refresh_after_close,
+            CronTrigger(hour=16, minute=5, day_of_week="mon-fri", timezone=settings.timezone),
+            id="quotes_refresh_after_close",
+            name="Quotes refresh after close (4:05 PM ET)",
+            replace_existing=True,
+        )
+    if settings.portfolio_snapshots_enabled:
+        scheduler.add_job(
+            portfolio_snapshots,
+            CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone=settings.timezone),
+            id="portfolio_snapshots",
+            name="Portfolio snapshots (4:30 PM ET)",
+            replace_existing=True,
+        )
+
     # Every 15 min during market hours (9 AM - 5 PM ET, Mon-Fri)
     if settings.watchdog_enabled:
         scheduler.add_job(
@@ -150,7 +184,7 @@ def init_scheduler() -> AsyncIOScheduler:
     watchdog_status = "enabled" if settings.watchdog_enabled else "disabled"
     logger.info(
         f"Scheduler configured: {len(SCAN_SCHEDULE)} scans + cleanup + snapshot "
-        f"+ outcomes + daily-learning + holdings + watchdog ({watchdog_status}) "
+        f"+ outcomes + daily-learning + holdings + quotes + portfolio snapshots + watchdog ({watchdog_status}) "
         f"(timezone: {settings.timezone})"
     )
 

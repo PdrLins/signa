@@ -521,51 +521,106 @@ HOLDING_COLUMNS = (
     "account, notes, holding_status, status_updated_at, alert_state, last_review, last_reviewed_at, "
     "created_at, updated_at"
 )
+# account_id arrives with migration 013. Until it is applied the column is
+# missing: selects retry without it (re-probed every 5 minutes, so applying
+# the migration takes effect without a restart).
+_ACCOUNT_ID_RETRY_S = 300
+_holdings_no_account_id_at: float | None = None
+
+
+def _missing_schema(err: Exception) -> bool:
+    from app.core.api_errors import is_missing_schema
+    return is_missing_schema(err)
+
+
+def holdings_have_account_id() -> bool:
+    """False while migration 013 is known to be missing (re-probed every 5 min)."""
+    import time
+    at = _holdings_no_account_id_at
+    return at is None or time.time() - at > _ACCOUNT_ID_RETRY_S
+
+
+def _select_holdings(build) -> list[dict]:
+    """Run `build(columns)` with account_id, falling back to the 010 columns."""
+    global _holdings_no_account_id_at
+    import time
+    if holdings_have_account_id():
+        try:
+            rows = build(HOLDING_COLUMNS + ", account_id").execute().data or []
+            _holdings_no_account_id_at = None
+            return rows
+        except Exception as e:
+            if not (_missing_schema(e) and "account_id" in str(e).lower()):
+                raise
+            logger.warning("holdings.account_id missing — apply migration 013_portfolio_foundation.sql")
+            _holdings_no_account_id_at = time.time()
+    rows = build(HOLDING_COLUMNS).execute().data or []
+    return [{**r, "account_id": None} for r in rows]
 
 
 def get_holdings(user_id: str) -> list[dict]:
-    """All holdings for a user, oldest first (import order)."""
+    """All holdings for a user, oldest first (import order). Rows carry
+    account_id (None before migration 013)."""
     client = get_client()
-    result = (
-        client.table("holdings")
-        .select(HOLDING_COLUMNS)
-        .eq("user_id", user_id)
-        .order("created_at")
-        .limit(500)
-        .execute()
-    )
-    return result.data or []
+    return _select_holdings(lambda cols: (
+        client.table("holdings").select(cols).eq("user_id", user_id).order("created_at").limit(2000)
+    ))
 
 
 def get_all_holdings() -> list[dict]:
-    """Every user's holdings (scheduler monitor — single-tenant today)."""
+    """Every user's holdings (scheduler monitor)."""
     client = get_client()
-    result = client.table("holdings").select(HOLDING_COLUMNS).order("created_at").limit(2000).execute()
-    return result.data or []
+    return _select_holdings(lambda cols: client.table("holdings").select(cols).order("created_at").limit(5000))
 
 
 def get_holding(holding_id: str, user_id: str) -> dict | None:
     client = get_client()
-    result = (
-        client.table("holdings")
-        .select(HOLDING_COLUMNS)
-        .eq("id", holding_id)
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    return result.data[0] if result.data else None
+    rows = _select_holdings(lambda cols: (
+        client.table("holdings").select(cols).eq("id", holding_id).eq("user_id", user_id).limit(1)
+    ))
+    return rows[0] if rows else None
 
 
 def upsert_holdings(user_id: str, rows: list[dict]) -> list[dict]:
-    """Insert or update (user_id, symbol) rows. Every row must carry the
-    same keys (PostgREST bulk upsert); `user_id` is forced."""
+    """Insert or update holdings keyed on (user_id, account_id, symbol).
+
+    Every row must carry the same keys; `user_id` is forced. After
+    migration 013 the unique key is an expression index (COALESCE on
+    account_id), which PostgREST's on_conflict can't target, so existing
+    rows are matched here and updated by id; the rest are inserted in one
+    call. Before 013 (no account_id column) the 010 upsert on
+    (user_id, symbol) is used and account_id must be empty.
+    """
     if not rows:
         return []
     client = get_client()
-    payload = [{**r, "user_id": user_id} for r in rows]
-    result = client.table("holdings").upsert(payload, on_conflict="user_id,symbol").execute()
-    return result.data or []
+    try:
+        existing = (client.table("holdings").select("id, symbol, account_id")
+                    .eq("user_id", user_id).limit(5000).execute().data or [])
+    except Exception as e:
+        if not _missing_schema(e):
+            raise
+        if any(r.get("account_id") for r in rows):
+            from app.core.api_errors import MigrationRequired
+            raise MigrationRequired("holdings.account_id missing (013)")
+        payload = [{**{k: v for k, v in r.items() if k != "account_id"}, "user_id": user_id} for r in rows]
+        result = client.table("holdings").upsert(payload, on_conflict="user_id,symbol").execute()
+        return result.data or []
+    index = {(str(x.get("account_id") or ""), x["symbol"]): x["id"] for x in existing}
+    out: list[dict] = []
+    inserts: list[dict] = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for r in rows:
+        hid = index.get((str(r.get("account_id") or ""), r["symbol"]))
+        if hid:
+            res = (client.table("holdings").update({**r, "updated_at": now_iso})
+                   .eq("id", hid).eq("user_id", user_id).execute())
+            out.extend(res.data or [])
+        else:
+            inserts.append({**r, "user_id": user_id})
+    if inserts:
+        out.extend(client.table("holdings").insert(inserts).execute().data or [])
+    return out
 
 
 def update_holding(holding_id: str, user_id: str, data: dict) -> dict | None:
@@ -1216,3 +1271,263 @@ def get_ai_usage_breakdown(since_iso: str) -> dict[str, dict]:
         if len(rows) < page:
             return out
         start += page
+
+
+# ============================================================
+# PORTFOLIO TRACKER (migration 013): profile, people, accounts,
+# transactions, quotes, snapshots, notification prefs
+# ============================================================
+
+PROFILE_COLUMNS = (
+    "user_id, language, display_name, country, home_currency, dividend_tax_view, "
+    "compare_index, holdings_native_currency"
+)
+
+
+def get_profile_settings(user_id: str) -> dict | None:
+    """The profile columns of user_settings (None when the user has no row).
+    Raises when migration 013 is missing (unknown columns)."""
+    client = get_client()
+    result = client.table("user_settings").select(PROFILE_COLUMNS).eq("user_id", user_id).limit(1).execute()
+    return result.data[0] if result.data else None
+
+
+def upsert_profile_settings(user_id: str, data: dict) -> dict:
+    client = get_client()
+    result = client.table("user_settings").upsert({**data, "user_id": user_id}, on_conflict="user_id").execute()
+    return result.data[0] if result.data else {"user_id": user_id, **data}
+
+
+def get_user_email(user_id: str) -> str | None:
+    """users.email when that column exists (it doesn't in schema.sql yet)."""
+    client = get_client()
+    try:
+        rows = client.table("users").select("*").eq("id", user_id).limit(1).execute().data or []
+    except Exception:
+        return None
+    email = (rows[0] if rows else {}).get("email")
+    return email if isinstance(email, str) and email else None
+
+
+def get_user_home_currencies(user_ids: list[str]) -> dict[str, str]:
+    """user_id -> home_currency for the given users (missing -> not in dict)."""
+    if not user_ids:
+        return {}
+    client = get_client()
+    out: dict[str, str] = {}
+    for i in range(0, len(user_ids), 200):
+        chunk = user_ids[i:i + 200]
+        rows = (client.table("user_settings").select("user_id, home_currency")
+                .in_("user_id", chunk).execute().data or [])
+        out.update({str(r["user_id"]): r.get("home_currency") or "CAD" for r in rows})
+    return out
+
+
+# ---- people ----
+
+PERSON_COLUMNS = "id, user_id, name, color, created_at"
+
+
+def get_people(user_id: str) -> list[dict]:
+    client = get_client()
+    return (client.table("portfolio_people").select(PERSON_COLUMNS).eq("user_id", user_id)
+            .order("created_at").limit(200).execute().data or [])
+
+
+def insert_person(user_id: str, data: dict) -> dict:
+    client = get_client()
+    result = client.table("portfolio_people").insert({**data, "user_id": user_id}).execute()
+    return result.data[0] if result.data else {}
+
+
+def update_person(person_id: str, user_id: str, data: dict) -> dict | None:
+    client = get_client()
+    result = (client.table("portfolio_people").update(data).eq("id", person_id)
+              .eq("user_id", user_id).execute())
+    return result.data[0] if result.data else None
+
+
+def delete_person(person_id: str, user_id: str) -> bool:
+    client = get_client()
+    result = client.table("portfolio_people").delete().eq("id", person_id).eq("user_id", user_id).execute()
+    return bool(result.data)
+
+
+# ---- accounts ----
+
+ACCOUNT_COLUMNS = "id, user_id, person_id, name, account_type, currency, cash_balance, created_at, updated_at"
+
+
+def get_accounts(user_id: str) -> list[dict]:
+    client = get_client()
+    return (client.table("accounts").select(ACCOUNT_COLUMNS).eq("user_id", user_id)
+            .order("created_at").limit(500).execute().data or [])
+
+
+def get_all_accounts() -> list[dict]:
+    client = get_client()
+    return _select_all_pages(lambda: client.table("accounts").select(ACCOUNT_COLUMNS).order("created_at"))
+
+
+def insert_accounts(user_id: str, rows: list[dict]) -> list[dict]:
+    if not rows:
+        return []
+    client = get_client()
+    result = client.table("accounts").insert([{**r, "user_id": user_id} for r in rows]).execute()
+    return result.data or []
+
+
+def update_account(account_id: str, user_id: str, data: dict) -> dict | None:
+    client = get_client()
+    result = client.table("accounts").update(data).eq("id", account_id).eq("user_id", user_id).execute()
+    return result.data[0] if result.data else None
+
+
+def delete_account(account_id: str, user_id: str) -> bool:
+    client = get_client()
+    result = client.table("accounts").delete().eq("id", account_id).eq("user_id", user_id).execute()
+    return bool(result.data)
+
+
+def move_account_transactions(user_id: str, from_account_id: str, to_account_id: str | None) -> None:
+    client = get_client()
+    (client.table("transactions").update({"account_id": to_account_id})
+     .eq("user_id", user_id).eq("account_id", from_account_id).execute())
+
+
+# ---- transactions ----
+
+TRANSACTION_COLUMNS = (
+    "id, user_id, account_id, symbol, type, trade_date, quantity, price, amount, currency, fee, note, "
+    "source, import_batch_id, created_at"
+)
+
+
+def list_transactions(user_id: str, filters: dict, limit: int, offset: int) -> tuple[list[dict], int]:
+    """Newest first. filters: account_id, symbol, type, from, to (ISO dates)."""
+    client = get_client()
+    q = client.table("transactions").select(TRANSACTION_COLUMNS, count="exact").eq("user_id", user_id)
+    if filters.get("account_id"):
+        q = q.eq("account_id", filters["account_id"])
+    if filters.get("symbol"):
+        q = q.eq("symbol", filters["symbol"])
+    if filters.get("type"):
+        q = q.eq("type", filters["type"])
+    if filters.get("from"):
+        q = q.gte("trade_date", filters["from"])
+    if filters.get("to"):
+        q = q.lte("trade_date", filters["to"])
+    result = (q.order("trade_date", desc=True).order("created_at", desc=True)
+              .range(offset, offset + limit - 1).execute())
+    rows = result.data or []
+    total = result.count if isinstance(getattr(result, "count", None), int) else offset + len(rows)
+    return rows, total
+
+
+def get_all_transactions(user_id: str) -> list[dict]:
+    """Every transaction of a user, oldest first (position derivation)."""
+    client = get_client()
+    return _select_all_pages(lambda: (client.table("transactions").select(TRANSACTION_COLUMNS)
+                                      .eq("user_id", user_id).order("trade_date").order("created_at")))
+
+
+def get_transaction(tx_id: str, user_id: str) -> dict | None:
+    client = get_client()
+    rows = (client.table("transactions").select(TRANSACTION_COLUMNS).eq("id", tx_id)
+            .eq("user_id", user_id).limit(1).execute().data or [])
+    return rows[0] if rows else None
+
+
+def insert_transactions(user_id: str, rows: list[dict], chunk: int = 500) -> list[dict]:
+    """Insert in chunks of `chunk`; every row must carry the same keys."""
+    client = get_client()
+    out: list[dict] = []
+    for i in range(0, len(rows), chunk):
+        part = [{**r, "user_id": user_id} for r in rows[i:i + chunk]]
+        out.extend(client.table("transactions").insert(part).execute().data or [])
+    return out
+
+
+def update_transaction(tx_id: str, user_id: str, data: dict) -> dict | None:
+    client = get_client()
+    result = client.table("transactions").update(data).eq("id", tx_id).eq("user_id", user_id).execute()
+    return result.data[0] if result.data else None
+
+
+def delete_transaction(tx_id: str, user_id: str) -> bool:
+    client = get_client()
+    result = client.table("transactions").delete().eq("id", tx_id).eq("user_id", user_id).execute()
+    return bool(result.data)
+
+
+def delete_transaction_batch(user_id: str, batch_id: str) -> int:
+    client = get_client()
+    result = (client.table("transactions").delete().eq("user_id", user_id)
+              .eq("import_batch_id", batch_id).execute())
+    return len(result.data or [])
+
+
+# ---- quotes (shared by all users) ----
+
+QUOTE_COLUMNS = "symbol, price, prev_close, change_pct, currency, day_high, day_low, as_of, updated_at"
+
+
+def get_quote_rows(symbols: list[str]) -> list[dict]:
+    if not symbols:
+        return []
+    client = get_client()
+    out: list[dict] = []
+    for i in range(0, len(symbols), 200):
+        out.extend(client.table("quotes").select(QUOTE_COLUMNS).in_("symbol", symbols[i:i + 200])
+                   .execute().data or [])
+    return out
+
+
+def upsert_quotes(rows: list[dict], chunk: int = 500) -> int:
+    client = get_client()
+    n = 0
+    for i in range(0, len(rows), chunk):
+        n += len(client.table("quotes").upsert(rows[i:i + chunk], on_conflict="symbol").execute().data or [])
+    return n
+
+
+def get_all_followed_symbols() -> set[str]:
+    """Distinct symbols in every user's holdings and watchlist (quote refresh)."""
+    client = get_client()
+    out: set[str] = set()
+    for table in ("holdings", "watchlist"):
+        try:
+            rows = _select_all_pages(lambda t=table: client.table(t).select("symbol"))
+        except Exception as e:
+            logger.debug(f"followed symbols: {table} unavailable: {e}")
+            rows = []
+        out.update(str(r["symbol"]).upper() for r in rows if r.get("symbol"))
+    return out
+
+
+# ---- snapshots ----
+
+def replace_portfolio_snapshots(user_id: str, snapshot_date: str, rows: list[dict]) -> int:
+    """Idempotent: delete the user's rows for that date, insert the new ones."""
+    client = get_client()
+    client.table("portfolio_snapshots").delete().eq("user_id", user_id).eq("snapshot_date", snapshot_date).execute()
+    if not rows:
+        return 0
+    payload = [{**r, "user_id": user_id, "snapshot_date": snapshot_date} for r in rows]
+    return len(client.table("portfolio_snapshots").insert(payload).execute().data or [])
+
+
+# ---- notification prefs ----
+
+def get_notification_prefs(user_id: str) -> dict | None:
+    client = get_client()
+    rows = (client.table("notification_prefs").select("prefs, updated_at").eq("user_id", user_id)
+            .limit(1).execute().data or [])
+    return rows[0] if rows else None
+
+
+def upsert_notification_prefs(user_id: str, prefs: dict) -> dict:
+    client = get_client()
+    row = {"user_id": user_id, "prefs": prefs, "updated_at": datetime.now(timezone.utc).isoformat()}
+    result = client.table("notification_prefs").upsert(row, on_conflict="user_id").execute()
+    return result.data[0] if result.data else row

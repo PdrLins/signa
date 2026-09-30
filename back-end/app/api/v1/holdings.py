@@ -1,9 +1,10 @@
 """My holdings — the owner's REAL long-term positions (migration 010).
 
   GET    /api/v1/holdings                   list + position math (CAD totals)
+                                            ?account_id=<uuid> | ?person_id=<uuid> filter
   POST   /api/v1/holdings/resolve           {text} -> parsed lines + candidate listings
   POST   /api/v1/holdings                   {items:[...]} bulk upsert (confirmed rows)
-  PATCH  /api/v1/holdings/{id}              shares / avg_cost / account / notes
+  PATCH  /api/v1/holdings/{id}              shares / avg_cost / notes / account_id (move)
   DELETE /api/v1/holdings/{id}
   POST   /api/v1/holdings/refresh           run the monitor now for this user
   POST   /api/v1/holdings/review            {ids:[...]} | {all:true} -> background review job
@@ -17,6 +18,17 @@ no user input reaches a file path. Reviews reuse services/long_term_check.py
 and the /check long-mode result cache, do NOT consume the /check daily
 limit, and "review all" is allowed once per settings.holdings_review_all_days.
 Before migration 010 is applied every route answers 503 holdings_unavailable.
+
+Accounts (migration 013): a holding belongs to one of the user's accounts
+(account_id, null = no account) and the same symbol can be held in several
+accounts; upserts are keyed on (account_id, symbol). Every item carries
+"account_id" and "account_name" (null before 013). The legacy `account`
+field (TFSA/RRSP/...) is still accepted for old clients but is deprecated
+and no longer written. Slots count distinct symbols across all accounts +
+the watchlist, so a second account holding the same stock needs no slot.
+Using account_id before 013 -> 503 migration_required; an account that
+isn't the user's -> 422 invalid_account; moving a holding into an account
+that already holds that symbol -> 409 duplicate_holding.
 """
 
 from __future__ import annotations
@@ -35,6 +47,7 @@ from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.access import require_feature
+from app.core.api_errors import MigrationRequired, migration_required
 from app.services import slots
 from app.core.config import settings
 from app.core.dependencies import get_current_user
@@ -75,7 +88,8 @@ class HoldingIn(BaseModel):
     asset_type: Optional[AssetType] = None
     shares: Optional[float] = Field(None, gt=0, lt=1e9)
     avg_cost: Optional[float] = Field(None, gt=0, lt=1e7)
-    account: Optional[Account] = None
+    account: Optional[Account] = None   # deprecated (013): accepted, not written
+    account_id: Optional[UUID] = None
     notes: Optional[str] = Field(None, max_length=500)
 
     @field_validator("symbol")
@@ -101,7 +115,8 @@ class UpsertRequest(BaseModel):
 class HoldingPatch(BaseModel):
     shares: Optional[float] = Field(None, gt=0, lt=1e9)
     avg_cost: Optional[float] = Field(None, gt=0, lt=1e7)
-    account: Optional[Account] = None
+    account: Optional[Account] = None   # deprecated (013): accepted, not written
+    account_id: Optional[UUID] = None
     notes: Optional[str] = Field(None, max_length=500)
 
 
@@ -124,11 +139,41 @@ async def _db(fn, *args):
         return await asyncio.to_thread(fn, *args)
     except HTTPException:
         raise
+    except MigrationRequired:
+        raise migration_required()
     except Exception as e:
         logger.warning(f"holdings: DB call {getattr(fn, '__name__', fn)} failed: {e}")
         raise _err("holdings_unavailable",
                    "Holdings storage is unavailable — apply migration 010_holdings.sql.",
                    status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+async def _accounts(user_id: str) -> list[dict] | None:
+    """The user's accounts; None before migration 013 (no accounts table)."""
+    try:
+        return await asyncio.to_thread(queries.get_accounts, user_id)
+    except Exception as e:
+        logger.debug(f"holdings: accounts unavailable ({e})")
+        return None
+
+
+async def _check_account_ids(user_id: str, ids: set[str]) -> list[dict] | None:
+    accounts = await _accounts(user_id)
+    if ids and accounts is None:
+        raise migration_required()
+    known = {str(a["id"]) for a in accounts or []}
+    bad = ids - known
+    if bad:
+        raise _err("invalid_account", "Account not found.", 422,
+                   account_id=sorted(bad)[0])
+    return accounts
+
+
+def _with_account(item: dict, accounts: list[dict] | None) -> dict:
+    aid = item.get("account_id")
+    acct = next((a for a in accounts or [] if str(a.get("id")) == str(aid)), None) if aid else None
+    return {**item, "account_id": str(aid) if aid else None, "account_name": (acct or {}).get("name"),
+            "person_id": (acct or {}).get("person_id")}
 
 
 async def _usdcad() -> float | None:
@@ -184,11 +229,26 @@ def _review_all_info(last_at: str | None) -> dict:
 # ============================================================
 
 @router.get("", dependencies=[Depends(require_feature("area.holdings"))])
-async def list_holdings(user: dict = Depends(get_current_user)):
+async def list_holdings(
+    account_id: Optional[UUID] = Query(None),
+    person_id: Optional[UUID] = Query(None),
+    user: dict = Depends(get_current_user),
+):
+    """Response: {"items": [Holding + "account_id", "account_name", "person_id"], "count",
+    "totals", "monitor_running", "review_running", "review_all", "settings",
+    "filter": {"account_id", "person_id"}}. Totals/weights cover the filtered items."""
     rows = await _db(queries.get_holdings, user["user_id"])
+    accounts = await _accounts(user["user_id"])
+    if (account_id or person_id) and accounts is None:
+        raise migration_required()
+    if account_id:
+        rows = [h for h in rows if str(h.get("account_id")) == str(account_id)]
+    if person_id:
+        mine = {str(a["id"]) for a in accounts or [] if str(a.get("person_id")) == str(person_id)}
+        rows = [h for h in rows if str(h.get("account_id")) in mine]
     usdcad = await _usdcad()
     per, totals = hs.portfolio_math(rows, usdcad)
-    items = [hs.public_holding(h, per.get(str(h.get("id")))) for h in rows]
+    items = [_with_account(hs.public_holding(h, per.get(str(h.get("id")))), accounts) for h in rows]
     last_all = await _review_all_last(user["user_id"])
     return {
         "items": items,
@@ -202,6 +262,8 @@ async def list_holdings(user: dict = Depends(get_current_user)):
             "alerts_enabled": settings.holdings_alerts_enabled,
             "review_max_ids": settings.holdings_review_max_ids,
         },
+        "filter": {"account_id": str(account_id) if account_id else None,
+                   "person_id": str(person_id) if person_id else None},
     }
 
 
@@ -222,14 +284,17 @@ async def resolve_holdings(body: ResolveRequest, user: dict = Depends(get_curren
 @router.post("", dependencies=[Depends(require_feature("action.holdings.edit"))], status_code=status.HTTP_201_CREATED)
 async def upsert_holdings(body: UpsertRequest, user: dict = Depends(get_current_user)):
     uid = user["user_id"]
+    accounts = await _check_account_ids(uid, {str(it.account_id) for it in body.items if it.account_id})
     await slots.check_new_symbols_async(user, [it.symbol for it in body.items])
-    existing = {h["symbol"]: h for h in await _db(queries.get_holdings, uid)}
-    merged: dict[str, dict] = {}
+    existing = {(str(h.get("account_id") or ""), h["symbol"]): h for h in await _db(queries.get_holdings, uid)}
+    merged: dict[tuple[str, str], dict] = {}
     for it in body.items:
-        prev = existing.get(it.symbol) or merged.get(it.symbol) or {}
+        key = (str(it.account_id or ""), it.symbol)
+        prev = existing.get(key) or merged.get(key) or {}
         pick = lambda k, v: v if v is not None else prev.get(k)  # noqa: E731 — never wipe known values
-        merged[it.symbol] = {
+        merged[key] = {
             "symbol": it.symbol,
+            "account_id": str(it.account_id) if it.account_id else None,
             "input_symbol": pick("input_symbol", it.input_symbol),
             "name": pick("name", it.name),
             "exchange": pick("exchange", it.exchange),
@@ -237,25 +302,42 @@ async def upsert_holdings(body: UpsertRequest, user: dict = Depends(get_current_
             "asset_type": pick("asset_type", it.asset_type),
             "shares": pick("shares", it.shares),
             "avg_cost": pick("avg_cost", it.avg_cost),
-            "account": pick("account", it.account),
             "notes": pick("notes", it.notes),
         }
     saved = await _db(queries.upsert_holdings, uid, list(merged.values()))
     created = sum(1 for s in merged if s not in existing)
     refreshing = _kick_refresh(uid)
-    return {"items": [hs.public_holding(h, None) for h in saved], "count": len(saved),
+    return {"items": [_with_account(hs.public_holding(h, None), accounts) for h in saved], "count": len(saved),
             "created": created, "updated": len(merged) - created, "refreshing": refreshing}
 
 
 @router.patch("/{holding_id}", dependencies=[Depends(require_feature("action.holdings.edit"))])
 async def patch_holding(holding_id: UUID, body: HoldingPatch, user: dict = Depends(get_current_user)):
-    data = {k: getattr(body, k) for k in body.model_fields_set}
+    uid = user["user_id"]
+    data = {k: getattr(body, k) for k in body.model_fields_set if k != "account"}
     if not data:
         raise _err("nothing_to_update", "No fields to update.", status.HTTP_400_BAD_REQUEST)
-    item = await _db(queries.update_holding, str(holding_id), user["user_id"], data)
+    accounts = None
+    if "account_id" in data:
+        target = str(data["account_id"]) if data["account_id"] else None
+        accounts = await _check_account_ids(uid, {target} if target else set())
+        if accounts is None:
+            raise migration_required()
+        rows = await _db(queries.get_holdings, uid)
+        me = next((h for h in rows if str(h.get("id")) == str(holding_id)), None)
+        if me is None:
+            raise _err("not_found", "Holding not found.", status.HTTP_404_NOT_FOUND)
+        if any(h.get("symbol") == me.get("symbol") and str(h.get("account_id") or "") == str(target or "")
+               and str(h.get("id")) != str(holding_id) for h in rows):
+            raise _err("duplicate_holding", f"That account already holds {me.get('symbol')} — edit that "
+                       "holding instead.", status.HTTP_409_CONFLICT)
+        data["account_id"] = target
+    item = await _db(queries.update_holding, str(holding_id), uid, data)
     if not item:
         raise _err("not_found", "Holding not found.", status.HTTP_404_NOT_FOUND)
-    return hs.public_holding(item, None)
+    if accounts is None:
+        accounts = await _accounts(uid)
+    return _with_account(hs.public_holding(item, None), accounts)
 
 
 @router.delete("/{holding_id}", dependencies=[Depends(require_feature("action.holdings.edit"))])

@@ -83,6 +83,7 @@ def db(monkeypatch):
     monkeypatch.setattr(queries, "get_holdings_review_all_at", d.get_review_all)
     monkeypatch.setattr(queries, "set_holdings_review_all_at", d.set_review_all)
     monkeypatch.setattr(queries, "get_watchlist", lambda uid: [])
+    monkeypatch.setattr(queries, "get_accounts", lambda uid: [])
     monkeypatch.setattr("app.services.price_cache.get_usdcad_rate", lambda: 1.4)
     return d
 

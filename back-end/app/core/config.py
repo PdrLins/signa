@@ -589,6 +589,13 @@ class Settings(BaseSettings):
     holdings_review_all_days: int = 7
     holdings_review_max_ids: int = 10
 
+    # --- Portfolio tracker (migration 013; no AI) ---
+    # Shared quotes: every 60s during the 09:30-16:00 ET session (plus one
+    # refresh after the close) for the distinct symbols in all holdings and
+    # watchlists. Daily snapshots per user/account at 16:30 ET.
+    quotes_refresh_enabled: bool = True
+    portfolio_snapshots_enabled: bool = True
+
     # --- Language ---
     language: str = "en"  # "en" or "pt"
 

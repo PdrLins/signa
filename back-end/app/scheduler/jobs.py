@@ -235,3 +235,44 @@ async def holdings_monitor():
         logger.info(f"Holdings monitor: {result}")
     except Exception as e:
         logger.error(f"Holdings monitor failed: {e}")
+
+
+async def quotes_refresh(force: bool = False):
+    """Every 60s in the 09:30-16:00 ET session (force=True after the close):
+    refresh the shared `quotes` table for every followed symbol (one batched
+    yfinance call; nothing per user). See app/services/quotes.py."""
+    import asyncio
+
+    from app.core.config import settings
+
+    if not settings.quotes_refresh_enabled:
+        return
+    try:
+        from app.services.quotes import refresh_followed_quotes
+        result = await asyncio.to_thread(refresh_followed_quotes, force)
+        if result.get("status") != "closed":
+            logger.debug(f"Quotes refresh: {result}")
+    except Exception as e:
+        logger.error(f"Quotes refresh failed: {e}")
+
+
+async def quotes_refresh_after_close():
+    """16:05 ET weekdays — one last refresh so quotes hold the closing prices."""
+    await quotes_refresh(force=True)
+
+
+async def portfolio_snapshots():
+    """16:30 ET weekdays — per-user / per-account value, cash and cost basis
+    in the user's home currency (app/services/portfolio_snapshots.py)."""
+    import asyncio
+
+    from app.core.config import settings
+
+    if not settings.portfolio_snapshots_enabled:
+        return
+    try:
+        from app.services.portfolio_snapshots import run_snapshots
+        result = await asyncio.to_thread(run_snapshots)
+        logger.info(f"Portfolio snapshots: {result}")
+    except Exception as e:
+        logger.error(f"Portfolio snapshots failed: {e}")

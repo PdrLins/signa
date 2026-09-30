@@ -15,6 +15,10 @@ from loguru import logger
 from app.api.v1 import auth, brain, health, holdings, insights, learning, logs, portfolio, positions, scans, signals, stats, stock_check, symbols, tickers, wallet, watchlist
 from app.api.v1 import dividends as dividends_api
 from app.api.v1 import stocks as stocks_api
+from app.api.v1 import accounts as accounts_api
+from app.api.v1 import notifications as notifications_api
+from app.api.v1 import profile as profile_api
+from app.api.v1 import transactions as transactions_api
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.middleware.audit import AuditMiddleware
@@ -136,6 +140,11 @@ app.include_router(holdings.router, prefix=api_prefix)
 app.include_router(symbols.router, prefix=api_prefix)
 app.include_router(dividends_api.router, prefix=api_prefix)
 app.include_router(stocks_api.router, prefix=api_prefix)
+app.include_router(profile_api.router, prefix=api_prefix)
+app.include_router(notifications_api.router, prefix=api_prefix)
+app.include_router(accounts_api.people_router, prefix=api_prefix)
+app.include_router(accounts_api.router, prefix=api_prefix)
+app.include_router(transactions_api.router, prefix=api_prefix)
 
 
 @app.post("/api/v1/telegram/webhook")

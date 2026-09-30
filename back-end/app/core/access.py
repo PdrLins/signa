@@ -55,6 +55,10 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "area.watchlist": ("free", "Watchlist"),
     "area.how_it_works": ("free", "How it works"),
     "area.settings": ("free", "Settings"),
+    "area.home": ("free", "Home: portfolio overview"),
+    "area.insights": ("free", "Portfolio insights (allocation, performance)"),
+    "area.coming_up": ("free", "Coming up: dividends, earnings and events"),
+    "area.profile": ("free", "Profile, preferences and notifications"),
     "area.integrations": ("owner", "Integrations, AI config and budgets"),
     "area.logs": ("owner", "Live logs"),
     # --- Actions (buttons / operations) ---
@@ -66,11 +70,17 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "action.holdings.review": ("owner", "AI review of holdings"),
     "action.holdings.allocate": ("owner", "Where could new cash go? (AI)"),
     "action.watchlist.edit": ("free", "Add and remove watchlist stocks"),
+    "action.accounts.edit": ("free", "Create, edit and delete accounts and people"),
+    "action.accounts.type": ("premium", "Tag accounts with a tax type (TFSA, RRSP, IRA ...)"),
+    "action.transactions.edit": ("free", "Add, edit and delete transactions"),
+    "action.import.csv": ("free", "Import transactions from a CSV file"),
     "action.positions.manage": ("owner", "Open, edit and close positions"),
     "action.wallet.manage": ("owner", "Deposit to / withdraw from the paper wallet"),
     "action.brain.edit": ("owner", "Edit brain rules and knowledge"),
     "action.learning.manage": ("owner", "Approve / apply learning suggestions"),
     "action.settings.ai": ("owner", "Change AI config and budgets"),
+    # --- Features (behaviour inside an area) ---
+    "feature.tax_view": ("premium", "After-tax dividend view"),
     # --- System capabilities ---
     "system.ai": ("owner", "Trigger AI calls (Grok, Claude, Codex)"),
     "system.unlimited_slots": ("owner", "No limit on followed stocks"),
