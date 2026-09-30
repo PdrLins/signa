@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from loguru import logger
 
+from app.core.access import require_feature
 from app.core.dependencies import get_current_user
 from app.scanners import market_scanner
 from app.scanners.universe import get_exchange
@@ -24,7 +25,7 @@ _PERIOD_CONFIG = {
 }
 
 
-@router.get("/{ticker}")
+@router.get("/{ticker}", dependencies=[Depends(require_feature("area.signals"))])
 async def get_ticker_detail(
     ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10}$"),
     user: dict = Depends(get_current_user),
@@ -163,7 +164,7 @@ async def get_ticker_chart(
     }
 
 
-@router.get("/{ticker}/signals")
+@router.get("/{ticker}/signals", dependencies=[Depends(require_feature("area.signals"))])
 async def get_ticker_signals(
     ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10}$"),
     limit: int = Query(20, ge=1, le=100),

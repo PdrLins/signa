@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from app.core.access import require_feature
 from app.core.dependencies import get_current_user
 from app.db import queries
 from app.models.stats import DailyStatsResponse
@@ -37,26 +38,26 @@ async def update_user_settings(body: UserSettingsUpdate, user: dict = Depends(ge
     return await asyncio.to_thread(queries.update_user_settings, user["user_id"], updates)
 
 
-@router.get("/daily", response_model=DailyStatsResponse)
+@router.get("/daily", dependencies=[Depends(require_feature("area.today"))], response_model=DailyStatsResponse)
 async def get_daily_stats(user: dict = Depends(get_current_user)):
     """Get aggregated daily statistics."""
     return await asyncio.to_thread(stats_service.get_daily_stats)
 
 
-@router.get("/recent-alerts")
+@router.get("/recent-alerts", dependencies=[Depends(require_feature("area.today"))])
 async def get_recent_alerts(user: dict = Depends(get_current_user)):
     """Get the most recent Telegram alerts."""
     return await asyncio.to_thread(queries.get_recent_alerts, user["user_id"], 5)
 
 
-@router.get("/virtual-portfolio")
+@router.get("/virtual-portfolio", dependencies=[Depends(require_feature("area.positions"))])
 async def get_virtual_portfolio(user: dict = Depends(get_current_user)):
     """Get virtual portfolio performance — brain accuracy tracking."""
     from app.services.virtual_portfolio import get_virtual_summary
     return await asyncio.to_thread(get_virtual_summary)
 
 
-@router.get("/brain-tier-breakdown")
+@router.get("/brain-tier-breakdown", dependencies=[Depends(require_feature("area.positions"))])
 async def get_brain_tier_breakdown_route(user: dict = Depends(get_current_user)):
     """Get brain trade performance grouped by entry tier (1/2/3).
 
@@ -67,7 +68,7 @@ async def get_brain_tier_breakdown_route(user: dict = Depends(get_current_user))
     return await asyncio.to_thread(get_brain_tier_breakdown)
 
 
-@router.get("/virtual-portfolio/charts")
+@router.get("/virtual-portfolio/charts", dependencies=[Depends(require_feature("area.positions"))])
 async def get_virtual_portfolio_charts(user: dict = Depends(get_current_user)):
     """Get chart data for brain performance page.
 
@@ -77,7 +78,7 @@ async def get_virtual_portfolio_charts(user: dict = Depends(get_current_user)):
     return await asyncio.to_thread(get_virtual_charts)
 
 
-@router.get("/virtual-portfolio/equity-curve")
+@router.get("/virtual-portfolio/equity-curve", dependencies=[Depends(require_feature("area.positions"))])
 async def get_equity_curve(user: dict = Depends(get_current_user)):
     """Get daily equity curve snapshots for charting performance over time."""
     def _fetch():
@@ -95,7 +96,7 @@ async def get_equity_curve(user: dict = Depends(get_current_user)):
     return await asyncio.to_thread(_fetch)
 
 
-@router.get("/watchdog-events")
+@router.get("/watchdog-events", dependencies=[Depends(require_feature("area.positions"))])
 async def get_watchdog_events(
     limit: int = Query(10, ge=1, le=50),
     user: dict = Depends(get_current_user),
@@ -115,7 +116,7 @@ async def get_watchdog_events(
     return await asyncio.to_thread(_fetch)
 
 
-@router.get("/positions-summary")
+@router.get("/positions-summary", dependencies=[Depends(require_feature("area.positions"))])
 async def get_positions_summary(user: dict = Depends(get_current_user)):
     """Get a summary of open positions for the dashboard."""
     positions = await asyncio.to_thread(queries.get_open_positions, user["user_id"])

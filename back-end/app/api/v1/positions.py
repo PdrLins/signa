@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
+from app.core.access import require_feature
 from app.core.dependencies import get_current_user
 from app.models.positions import PositionCloseRequest, PositionCreateRequest, PositionUpdateRequest
 from app.services import position_service
@@ -11,14 +12,14 @@ from app.services import position_service
 router = APIRouter(prefix="/positions", tags=["Positions"])
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_feature("area.positions"))])
 async def get_positions(user: dict = Depends(get_current_user)):
     """Get all open positions."""
     positions = position_service.get_open_positions(user["user_id"])
     return {"positions": positions, "count": len(positions)}
 
 
-@router.get("/history")
+@router.get("/history", dependencies=[Depends(require_feature("area.positions"))])
 async def get_position_history(
     limit: int = Query(50, ge=1, le=200),
     user: dict = Depends(get_current_user),
@@ -28,7 +29,7 @@ async def get_position_history(
     return {"positions": positions, "count": len(positions)}
 
 
-@router.get("/{position_id}")
+@router.get("/{position_id}", dependencies=[Depends(require_feature("area.positions"))])
 async def get_position(
     position_id: UUID,
     user: dict = Depends(get_current_user),
@@ -40,7 +41,7 @@ async def get_position(
     return position
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", dependencies=[Depends(require_feature("area.positions")), Depends(require_feature("action.positions.manage"))], status_code=status.HTTP_201_CREATED)
 async def create_position(
     body: PositionCreateRequest,
     user: dict = Depends(get_current_user),
@@ -61,7 +62,7 @@ async def create_position(
     return position
 
 
-@router.put("/{position_id}")
+@router.put("/{position_id}", dependencies=[Depends(require_feature("area.positions")), Depends(require_feature("action.positions.manage"))])
 async def update_position(
     position_id: UUID,
     body: PositionUpdateRequest,
@@ -80,7 +81,7 @@ async def update_position(
     return position
 
 
-@router.post("/{position_id}/close")
+@router.post("/{position_id}/close", dependencies=[Depends(require_feature("area.positions")), Depends(require_feature("action.positions.manage"))])
 async def close_position(
     position_id: UUID,
     body: PositionCloseRequest,

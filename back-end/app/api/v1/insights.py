@@ -9,6 +9,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 
+from app.core.access import require_feature
 from app.core.cache import TTLCache
 from app.core.dependencies import get_current_user
 from app.core.utils import validate_ticker
@@ -35,7 +36,7 @@ async def _ai_spend() -> dict | None:
         return None
 
 
-@router.get("/today")
+@router.get("/today", dependencies=[Depends(require_feature("area.today"))])
 async def get_today(user: dict = Depends(get_current_user)):
     # Key the cache on the newest scan's id + status: a scan finishing (or
     # starting) changes the key, so the page sees fresh results immediately
@@ -51,7 +52,7 @@ async def get_today(user: dict = Depends(get_current_user)):
     return {**data, "running_scan": insights_service.running_scan_ref(newest)}
 
 
-@router.get("/performance")
+@router.get("/performance", dependencies=[Depends(require_feature("area.performance"))])
 async def get_performance(user: dict = Depends(get_current_user)):
     cached = _cache.get("performance")
     if cached is not None:
@@ -61,7 +62,7 @@ async def get_performance(user: dict = Depends(get_current_user)):
     return data
 
 
-@router.get("/backtest")
+@router.get("/backtest", dependencies=[Depends(require_feature("area.performance"))])
 async def get_backtest(user: dict = Depends(get_current_user)):
     cached = _cache.get("backtest")
     if cached is not None:
@@ -71,7 +72,7 @@ async def get_backtest(user: dict = Depends(get_current_user)):
     return data
 
 
-@router.get("/signal/{ticker}")
+@router.get("/signal/{ticker}", dependencies=[Depends(require_feature("area.signals"))])
 async def get_signal_trail(ticker: str, user: dict = Depends(get_current_user)):
     if not ticker or len(ticker) > 20 or not validate_ticker(ticker):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid ticker")
@@ -92,7 +93,7 @@ _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F
 MAX_VERDICT_IDS = 200
 
 
-@router.get("/verdicts")
+@router.get("/verdicts", dependencies=[Depends(require_feature("area.performance"))])
 async def get_signal_verdicts(
     ids: str = Query(..., max_length=MAX_VERDICT_IDS * 37),
     user: dict = Depends(get_current_user),

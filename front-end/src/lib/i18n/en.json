@@ -2104,7 +2104,25 @@
       "invalid_input": "Some values are invalid — check the numbers.",
       "rate_limited": "Too many requests — wait a moment.",
       "network": "Network error — check your connection.",
-      "internal": "Something went wrong — please try again."
+      "internal": "Something went wrong — please try again.",
+      "slot_limit": "Your plan follows up to {limit} stocks. Remove one to add another.",
+      "upgrade_required": "That isn't available on your plan."
     }
+  },
+  "access": {
+    "levels": {
+      "free": "Free",
+      "premium": "Premium",
+      "owner": "Owner"
+    },
+    "lockedTitle": "Not on your plan",
+    "lockedBody": "This part of Signa needs the {level} plan.",
+    "goHome": "Go to your home page",
+    "locked": "Needs {level}",
+    "upgradeRequired": "That isn't available on your plan.",
+    "slotLimit": "Your plan follows up to {limit} stocks. Remove one to add another.",
+    "slots": "{used} of {limit} stocks followed",
+    "slotsUnlimited": "{used} stocks followed",
+    "plan": "Plan"
   }
 }

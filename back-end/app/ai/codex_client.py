@@ -45,6 +45,7 @@ from app.ai.prompts import (
     build_synthesis_prompt,
     clean_json_response,
 )
+from app.core.access import ai_guarded
 from app.core.cache import TTLCache
 from app.core.config import settings
 
@@ -337,6 +338,7 @@ def _cached(ticker: str, current_price) -> dict | None:
     return {**verdict, "cached": True}
 
 
+@ai_guarded("review_buy")
 async def review_buy(ticker: str, technical_data: dict, fundamental_data: dict,
                      macro_data: dict, grok_data: dict) -> dict | None:
     """Codex's independent verdict on a proposed BUY.

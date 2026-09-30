@@ -34,6 +34,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.access import require_feature
+from app.services import slots
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.core.utils import validate_ticker
@@ -181,7 +183,7 @@ def _review_all_info(last_at: str | None) -> dict:
 # List / resolve / upsert / patch / delete
 # ============================================================
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_feature("area.holdings"))])
 async def list_holdings(user: dict = Depends(get_current_user)):
     rows = await _db(queries.get_holdings, user["user_id"])
     usdcad = await _usdcad()
@@ -203,7 +205,7 @@ async def list_holdings(user: dict = Depends(get_current_user)):
     }
 
 
-@router.post("/resolve")
+@router.post("/resolve", dependencies=[Depends(require_feature("action.holdings.edit"))])
 async def resolve_holdings(body: ResolveRequest, user: dict = Depends(get_current_user)):
     rows = hs.parse_holdings_text(body.text)
     if not rows:
@@ -217,9 +219,10 @@ async def resolve_holdings(body: ResolveRequest, user: dict = Depends(get_curren
     return {"lines": lines, "count": len(lines), "counts": counts}
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", dependencies=[Depends(require_feature("action.holdings.edit"))], status_code=status.HTTP_201_CREATED)
 async def upsert_holdings(body: UpsertRequest, user: dict = Depends(get_current_user)):
     uid = user["user_id"]
+    await slots.check_new_symbols_async(user, [it.symbol for it in body.items])
     existing = {h["symbol"]: h for h in await _db(queries.get_holdings, uid)}
     merged: dict[str, dict] = {}
     for it in body.items:
@@ -244,7 +247,7 @@ async def upsert_holdings(body: UpsertRequest, user: dict = Depends(get_current_
             "created": created, "updated": len(merged) - created, "refreshing": refreshing}
 
 
-@router.patch("/{holding_id}")
+@router.patch("/{holding_id}", dependencies=[Depends(require_feature("action.holdings.edit"))])
 async def patch_holding(holding_id: UUID, body: HoldingPatch, user: dict = Depends(get_current_user)):
     data = {k: getattr(body, k) for k in body.model_fields_set}
     if not data:
@@ -255,7 +258,7 @@ async def patch_holding(holding_id: UUID, body: HoldingPatch, user: dict = Depen
     return hs.public_holding(item, None)
 
 
-@router.delete("/{holding_id}")
+@router.delete("/{holding_id}", dependencies=[Depends(require_feature("action.holdings.edit"))])
 async def delete_holding(holding_id: UUID, user: dict = Depends(get_current_user)):
     ok = await _db(queries.delete_holding, str(holding_id), user["user_id"])
     if not ok:
@@ -263,7 +266,7 @@ async def delete_holding(holding_id: UUID, user: dict = Depends(get_current_user
     return {"message": "Holding deleted"}
 
 
-@router.post("/refresh", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/refresh", dependencies=[Depends(require_feature("action.holdings.refresh"))], status_code=status.HTTP_202_ACCEPTED)
 async def refresh_holdings(user: dict = Depends(get_current_user)):
     started = _kick_refresh(user["user_id"])
     return {"status": "started" if started else "running"}
@@ -375,7 +378,7 @@ async def _run_review(job: ReviewJob, holdings: list[dict]) -> None:
             await _set_review_all(job.user_id, job.prev_review_all_at)   # nothing reviewed: don't count
 
 
-@router.post("/review", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/review", dependencies=[Depends(require_feature("action.holdings.review"))], status_code=status.HTTP_202_ACCEPTED)
 async def start_review(body: ReviewRequest, user: dict = Depends(get_current_user)):
     _purge()
     uid = user["user_id"]
@@ -417,7 +420,7 @@ async def start_review(body: ReviewRequest, user: dict = Depends(get_current_use
     return job.public()
 
 
-@router.get("/review/current")
+@router.get("/review/current", dependencies=[Depends(require_feature("action.holdings.review"))])
 async def current_review(user: dict = Depends(get_current_user)):
     _purge()
     mine = [j for j in _jobs.values() if j.user_id == user["user_id"]]
@@ -426,7 +429,7 @@ async def current_review(user: dict = Depends(get_current_user)):
     return {"job": max(mine, key=lambda j: j.created).public()}
 
 
-@router.get("/review/{job_id}")
+@router.get("/review/{job_id}", dependencies=[Depends(require_feature("action.holdings.review"))])
 async def get_review(job_id: str, user: dict = Depends(get_current_user)):
     job = _jobs.get(job_id) if _JOB_ID.match(job_id or "") else None
     if job is None or job.user_id != user["user_id"]:
@@ -438,7 +441,7 @@ async def get_review(job_id: str, user: dict = Depends(get_current_user)):
 # "Where could new cash go?"
 # ============================================================
 
-@router.get("/allocate-ideas")
+@router.get("/allocate-ideas", dependencies=[Depends(require_feature("action.holdings.allocate"))])
 async def allocate_ideas(
     include_watchlist: bool = Query(False),
     user: dict = Depends(get_current_user),

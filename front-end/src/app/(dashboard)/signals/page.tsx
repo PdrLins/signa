@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useTheme } from '@/hooks/useTheme'
+import { useAccess } from '@/hooks/useAccess'
 import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { useAllSignals } from '@/hooks/useSignals'
 import { useScanTrigger } from '@/hooks/useScanTrigger'
@@ -32,6 +33,7 @@ export default function SignalsPage() {
   }, [search])
 
   const { scanning, progress, cooldown: scanCooldown, trigger: handleScanNow, phaseLabel } = useScanTrigger()
+  const canScan = useAccess().can('action.scan.trigger')
 
   const filters: SignalFilters = {}
   if (bucket === 'SAFE_INCOME' || bucket === 'HIGH_RISK') filters.bucket = bucket
@@ -141,9 +143,9 @@ export default function SignalsPage() {
             </p>
           )}
         </div>
-        <Button onClick={handleScanNow} disabled={scanning || scanCooldown}>
+        {canScan && <Button onClick={handleScanNow} disabled={scanning || scanCooldown}>
           {scanning ? t.signals.scanning : t.signals.scanNow}
-        </Button>
+        </Button>}
       </div>
 
       {/* Content + Sidebar grid */}

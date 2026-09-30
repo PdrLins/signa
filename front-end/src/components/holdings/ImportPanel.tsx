@@ -99,11 +99,13 @@ export function ImportPanel({ onDone, onCancel, showCancel }: {
       toast.show(fill(th.import.saved, { n: res.count }), 'success')
       qc.invalidateQueries({ queryKey: HOLDINGS_KEY })
       setText('')
+      qc.invalidateQueries({ queryKey: ['auth', 'me'] }) // slot count
       setRows([])
       setPhase('edit')
       onDone()
     } catch (e) {
-      setError(errorText(toHoldingsError(e).code, th))
+      const he = toHoldingsError(e)
+      setError(errorText(he.code, th, { limit: he.limit ?? null }))
       setPhase('confirm')
     }
   }

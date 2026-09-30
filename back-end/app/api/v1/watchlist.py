@@ -5,6 +5,8 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from loguru import logger
 
+from app.core.access import require_feature
+from app.services import slots
 from app.core.dependencies import get_current_user
 from app.models.watchlist import WatchlistAddRequest
 from app.services import watchlist_service
@@ -12,14 +14,14 @@ from app.services import watchlist_service
 router = APIRouter(prefix="/watchlist", tags=["Watchlist"])
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_feature("area.watchlist"))])
 async def get_watchlist(user: dict = Depends(get_current_user)):
     """Get the current watchlist."""
     items = watchlist_service.get_watchlist(user["user_id"])
     return {"items": items, "count": len(items)}
 
 
-@router.get("/search")
+@router.get("/search", dependencies=[Depends(require_feature("area.watchlist"))])
 async def search_tickers(q: str = Query(..., min_length=1, max_length=10), user: dict = Depends(get_current_user)):
     """Search for valid tickers via yfinance. Returns matching symbols with name and exchange."""
     import yfinance as yf
@@ -61,7 +63,7 @@ async def search_tickers(q: str = Query(..., min_length=1, max_length=10), user:
         return {"results": []}
 
 
-@router.post("/{ticker}", status_code=status.HTTP_201_CREATED)
+@router.post("/{ticker}", dependencies=[Depends(require_feature("action.watchlist.edit"))], status_code=status.HTTP_201_CREATED)
 async def add_to_watchlist(
     ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10}$"),
     body: WatchlistAddRequest | None = None,
@@ -71,6 +73,7 @@ async def add_to_watchlist(
     import yfinance as yf
 
     symbol = ticker.upper()
+    await slots.check_new_symbols_async(user, [symbol])
 
     # Validate ticker exists
     def _validate():
@@ -94,7 +97,7 @@ async def add_to_watchlist(
     return item
 
 
-@router.delete("/{ticker}")
+@router.delete("/{ticker}", dependencies=[Depends(require_feature("action.watchlist.edit"))])
 async def remove_from_watchlist(
     ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10}$"),
     user: dict = Depends(get_current_user),

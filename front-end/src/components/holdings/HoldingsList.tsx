@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronUp, ExternalLink, Pencil, Trash2 } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
+import { useAccess } from '@/hooks/useAccess'
 import { useToast } from '@/hooks/useToast'
 import { holdingsApi } from '@/lib/api'
 import { checkHref } from '@/lib/check'
@@ -78,6 +79,7 @@ function Actions({ h, reviewing, reviewBusy, onReview, onEdit, editing, compact 
   const toast = useToast()
   const qc = useQueryClient()
   const [removing, setRemoving] = useState(false)
+  const { can } = useAccess()
   const btn = 'min-h-[44px] min-w-[44px] px-3 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5 focus-visible:outline focus-visible:outline-2 disabled:opacity-50'
   const style = { backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text, outlineColor: theme.colors.primary }
 
@@ -87,6 +89,7 @@ function Actions({ h, reviewing, reviewBusy, onReview, onEdit, editing, compact 
     try {
       await holdingsApi.remove(h.id)
       qc.invalidateQueries({ queryKey: HOLDINGS_KEY })
+      qc.invalidateQueries({ queryKey: ['auth', 'me'] }) // slot count
     } catch (e) {
       toast.show(errorText(toHoldingsError(e).code, th), 'error')
       setRemoving(false)
@@ -95,28 +98,28 @@ function Actions({ h, reviewing, reviewBusy, onReview, onEdit, editing, compact 
 
   return (
     <div className="flex flex-wrap gap-1.5">
-      <button type="button" className={btn} style={{ ...style, color: theme.colors.primary }}
+      {can('action.holdings.review') && <button type="button" className={btn} style={{ ...style, color: theme.colors.primary }}
         disabled={reviewBusy} onClick={() => onReview(h.id)}
         aria-label={`${h.last_review ? th.actions.reReview : th.actions.review} ${h.symbol}`}>
         {reviewing ? th.actions.reviewing : h.last_review ? th.actions.reReview : th.actions.review}
-      </button>
-      <Link href={checkHref(h.symbol, 'long')} className={btn} style={style}
+      </button>}
+      {can('area.check') && <Link href={checkHref(h.symbol, 'long')} className={btn} style={style}
         aria-label={`${th.actions.checkLong} ${h.symbol}`}>
         {!compact && th.actions.checkLong}
         <ExternalLink size={14} aria-hidden="true" />
-      </Link>
-      <Link href={`/signals/${encodeURIComponent(h.symbol)}`} className={btn} style={style}
+      </Link>}
+      {can('area.signals') && <Link href={`/signals/${encodeURIComponent(h.symbol)}`} className={btn} style={style}
         aria-label={`${th.actions.signals} ${h.symbol}`}>
         {th.actions.signals}
-      </Link>
-      <button type="button" className={btn} style={style} onClick={onEdit} aria-expanded={editing}
+      </Link>}
+      {can('action.holdings.edit') && <button type="button" className={btn} style={style} onClick={onEdit} aria-expanded={editing}
         aria-label={fill(th.edit.title, { symbol: h.symbol })}>
         <Pencil size={14} aria-hidden="true" />{!compact && th.actions.edit}
-      </button>
-      <button type="button" className={btn} style={{ ...style, color: theme.colors.down }} onClick={remove}
+      </button>}
+      {can('action.holdings.edit') && <button type="button" className={btn} style={{ ...style, color: theme.colors.down }} onClick={remove}
         disabled={removing} aria-label={`${th.actions.remove} ${h.symbol}`}>
         <Trash2 size={14} aria-hidden="true" />
-      </button>
+      </button>}
     </div>
   )
 }

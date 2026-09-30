@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useAllSignals } from '@/hooks/useSignals'
+import { useAccess } from '@/hooks/useAccess'
 import { client } from '@/lib/api'
 import { WatchlistTable } from '@/components/watchlist/WatchlistTable'
 import { BrainPerformanceWidget } from '@/components/dashboard/DashboardWidgets'
@@ -83,7 +84,14 @@ function ConnectionStatus() {
   )
 }
 
+/** Brain side panel (radar, brain picks, performance): only for users who
+ *  can see signals — it would otherwise call brain APIs that answer 403. */
 export function Sidebar() {
+  const { can } = useAccess()
+  return can('area.signals') ? <SidebarContent /> : null
+}
+
+function SidebarContent() {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const { data: signals } = useAllSignals({ limit: 50 })

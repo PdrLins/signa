@@ -11,6 +11,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
 
+from app.core.access import require_feature
 from app.core.dependencies import get_current_user
 from app.core.utils import get_client_ip
 from app.db.queries import insert_audit_log
@@ -44,7 +45,7 @@ class RejectSuggestionRequest(BaseModel):
 
 # ── Outcomes (JWT only) ──
 
-@router.post("/outcomes")
+@router.post("/outcomes", dependencies=[Depends(require_feature("action.learning.manage"))])
 async def record_outcome(
     body: TradeOutcomeRequest,
     user: dict = Depends(get_current_user),
@@ -54,7 +55,7 @@ async def record_outcome(
     return result
 
 
-@router.get("/outcomes")
+@router.get("/outcomes", dependencies=[Depends(require_feature("area.brain"))])
 async def get_outcomes(
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(100, ge=1, le=500),
@@ -81,7 +82,7 @@ async def get_outcomes(
 
 # ── Analysis + Suggestions (brain 2FA required) ──
 
-@router.post("/analyze")
+@router.post("/analyze", dependencies=[Depends(require_feature("action.learning.manage"))])
 async def run_analysis(
     request: Request,
     days: int = Query(7, ge=1, le=90),
@@ -108,7 +109,7 @@ async def run_analysis(
     }
 
 
-@router.get("/suggestions")
+@router.get("/suggestions", dependencies=[Depends(require_feature("area.brain"))])
 async def get_suggestions(
     status: Literal["PENDING", "APPROVED", "REJECTED", "APPLIED"] | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
@@ -118,7 +119,7 @@ async def get_suggestions(
     return await asyncio.to_thread(learning_service.get_suggestions, status=status, limit=limit)
 
 
-@router.put("/suggestions/{suggestion_id}/approve")
+@router.put("/suggestions/{suggestion_id}/approve", dependencies=[Depends(require_feature("action.learning.manage"))])
 async def approve_suggestion(
     suggestion_id: str,
     request: Request,
@@ -147,7 +148,7 @@ async def approve_suggestion(
     return {"status": "approved"}
 
 
-@router.put("/suggestions/{suggestion_id}/reject")
+@router.put("/suggestions/{suggestion_id}/reject", dependencies=[Depends(require_feature("action.learning.manage"))])
 async def reject_suggestion(
     suggestion_id: str,
     request: Request,
@@ -178,7 +179,7 @@ async def reject_suggestion(
     return {"status": "rejected"}
 
 
-@router.post("/suggestions/{suggestion_id}/apply")
+@router.post("/suggestions/{suggestion_id}/apply", dependencies=[Depends(require_feature("action.learning.manage"))])
 async def apply_suggestion(
     suggestion_id: str,
     request: Request,

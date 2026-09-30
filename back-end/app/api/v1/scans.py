@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
+from app.core.access import require_feature
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.core.scan_schedule import SCAN_SCHEDULE
@@ -16,7 +17,7 @@ from app.services import scan_service, signal_service
 router = APIRouter(prefix="/scans", tags=["Scans"])
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_feature("area.today"))])
 async def get_scans(
     limit: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
@@ -26,7 +27,7 @@ async def get_scans(
     return {"scans": scans, "count": len(scans)}
 
 
-@router.get("/today", response_model=list[ScanTodayRecord])
+@router.get("/today", dependencies=[Depends(require_feature("area.today"))], response_model=list[ScanTodayRecord])
 async def get_scans_today(user: dict = Depends(get_current_user)):
     """Get today's 4 scan slots — one per type, PENDING if not yet run.
 
@@ -140,7 +141,7 @@ async def get_scans_today(user: dict = Depends(get_current_user)):
     return result
 
 
-@router.post("/trigger")
+@router.post("/trigger", dependencies=[Depends(require_feature("action.scan.trigger"))])
 async def trigger_scan(
     background_tasks: BackgroundTasks,
     scan_type: Literal["PRE_MARKET", "MORNING", "MIDDAY", "PRE_CLOSE", "AFTER_CLOSE", "MANUAL"] = Query("MANUAL"),
@@ -192,7 +193,7 @@ async def trigger_scan(
     }
 
 
-@router.get("/{scan_id}/progress")
+@router.get("/{scan_id}/progress", dependencies=[Depends(require_feature("area.today"))])
 async def get_scan_progress(
     scan_id: UUID,
     user: dict = Depends(get_current_user),

@@ -37,6 +37,7 @@ export function useAddTicker() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['watchlist'] })
+      queryClient.invalidateQueries({ queryKey: ['auth', 'me'] }) // slot count
     },
   })
 }
@@ -60,6 +61,7 @@ export function useRemoveTicker() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['watchlist'] })
+      queryClient.invalidateQueries({ queryKey: ['auth', 'me'] }) // slot count
     },
   })
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { holdingsApi, CheckApiError } from '@/lib/api'
+import { ApiAccessError } from '@/lib/access'
 import type { HoldingsResponse, ReviewJob } from '@/types/holdings'
 
 export const HOLDINGS_KEY = ['holdings'] as const
@@ -13,9 +14,14 @@ export interface HoldingsError {
   message: string
   status: number
   nextAllowedAt?: string
+  /** slot_limit: the plan's number of followed stocks */
+  limit?: number
 }
 
 export function toHoldingsError(e: unknown): HoldingsError {
+  if (e instanceof ApiAccessError) {
+    return { code: e.code, message: e.message, status: 403, limit: e.limit }
+  }
   if (e instanceof CheckApiError) {
     return { code: e.code, message: e.message, status: e.status, nextAllowedAt: (e as { nextAllowedAt?: string }).nextAllowedAt }
   }
@@ -47,7 +53,7 @@ const POLL_MS = 2_000
 
 /** Review jobs: start ({ids} | {all}) and poll until done; resumes a running
  *  job after a reload. Invalidates holdings + allocate ideas as results land. */
-export function useHoldingsReview() {
+export function useHoldingsReview(enabled = true) {
   const qc = useQueryClient()
   const [job, setJob] = useState<ReviewJob | null>(null)
   const [error, setError] = useState<HoldingsError | null>(null)
@@ -85,12 +91,13 @@ export function useHoldingsReview() {
   }, [refreshData, stop])
 
   useEffect(() => {
+    if (!enabled) return
     let alive = true
     holdingsApi.reviewCurrent()
       .then((r) => { if (alive && r.job && r.job.status === 'running') follow(r.job) })
       .catch(() => {})
     return () => { alive = false; stop() }
-  }, [follow, stop])
+  }, [follow, stop, enabled])
 
   const start = useCallback(async (body: { ids?: string[]; all?: boolean }) => {
     stop()

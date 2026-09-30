@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from app.core.access import require_feature
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.core.scan_schedule import SCAN_SCHEDULE
@@ -77,7 +78,7 @@ async def health_check():
     }
 
 
-@router.get("/health/integrations")
+@router.get("/health/integrations", dependencies=[Depends(require_feature("area.integrations"))])
 async def integration_status(user: dict = Depends(get_current_user)):
     """Check connectivity of all external integrations in parallel.
 
@@ -213,7 +214,7 @@ async def integration_status(user: dict = Depends(get_current_user)):
     return {"status": "healthy" if all_ok else "degraded", "integrations": results}
 
 
-@router.post("/health/ping-telegram")
+@router.post("/health/ping-telegram", dependencies=[Depends(require_feature("area.integrations"))])
 async def ping_telegram(user: dict = Depends(get_current_user)):
     """Send a test ping to Telegram to verify the bot is working."""
     from app.notifications.telegram_bot import send_message
@@ -225,7 +226,7 @@ async def ping_telegram(user: dict = Depends(get_current_user)):
     return {"status": "failed", "message": "Failed to send — check bot token and chat ID"}
 
 
-@router.get("/health/budget")
+@router.get("/health/budget", dependencies=[Depends(require_feature("area.integrations"))])
 async def get_budget(user: dict = Depends(get_current_user)):
     """Get AI budget summary — spend per provider, limits, remaining."""
     from app.services.budget_service import BudgetService
@@ -233,7 +234,7 @@ async def get_budget(user: dict = Depends(get_current_user)):
     return budget.get_budget_summary()
 
 
-@router.put("/health/budget")
+@router.put("/health/budget", dependencies=[Depends(require_feature("action.settings.ai"))])
 async def update_budget(
     request: Request,
     body: BudgetUpdateRequest,
@@ -272,7 +273,7 @@ async def update_budget(
     return budget.get_budget_summary()
 
 
-@router.get("/health/ai-config")
+@router.get("/health/ai-config", dependencies=[Depends(require_feature("area.integrations"))])
 async def get_ai_config(user: dict = Depends(get_current_user)):
     """Get current AI provider configuration."""
     return {
@@ -321,7 +322,7 @@ async def get_ai_config(user: dict = Depends(get_current_user)):
     }
 
 
-@router.put("/health/ai-config")
+@router.put("/health/ai-config", dependencies=[Depends(require_feature("action.settings.ai"))])
 async def update_ai_config(
     request: Request,
     body: AIConfigUpdateRequest,

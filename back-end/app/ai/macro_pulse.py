@@ -9,6 +9,7 @@ the synthesis prompt.
 
 from loguru import logger
 
+from app.core.access import ai_guarded
 from app.core.cache import TTLCache
 from app.core.config import settings
 
@@ -29,6 +30,7 @@ MACRO_PULSE_PROMPT = (
 )
 
 
+@ai_guarded("get_macro_pulse")
 async def get_macro_pulse() -> dict:
     """Fetch trending market topics from Grok. Cached for settings.macro_pulse_cache_hours.
 

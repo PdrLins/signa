@@ -11,7 +11,8 @@ import type { Signal } from '@/types/signal'
 interface WatchlistRowProps {
   item: WatchlistItem
   signal?: Signal
-  onRemove: (symbol: string) => void
+  /** Omitted when the user's plan can't edit the watchlist. */
+  onRemove?: (symbol: string) => void
 }
 
 export const WatchlistRow = memo(function WatchlistRow({ item, signal, onRemove }: WatchlistRowProps) {
@@ -70,13 +71,13 @@ export const WatchlistRow = memo(function WatchlistRow({ item, signal, onRemove 
         <span className="text-[11px]" style={{ color: theme.colors.textSub }}>
           {new Date(item.added_at).toLocaleDateString('en-CA')}
         </span>
-        <button
+        {onRemove && <button
           onClick={(e) => { e.preventDefault(); onRemove(item.symbol) }}
           aria-label={`Remove ${item.symbol} from watchlist`}
           className="p-1 rounded-md transition-opacity hover:opacity-70"
         >
           <X size={14} style={{ color: theme.colors.textSub }} />
-        </button>
+        </button>}
       </div>
     </div>
   )

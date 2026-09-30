@@ -10,6 +10,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from app.core.access import require_feature
 from app.core.config import settings
 from app.core.security import decode_token
 from app.db.queries import is_token_blacklisted
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/logs", tags=["Logs"])
 LOGS_SUBPROTOCOL = "signa.logs"
 
 
-@router.get("/recent")
+@router.get("/recent", dependencies=[Depends(require_feature("area.logs"))])
 async def get_logs(
     limit: int = Query(100, ge=1, le=500),
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None = Query(None),

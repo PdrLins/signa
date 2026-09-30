@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { useAuthStore } from '@/store/authStore'
+import { useAccess } from '@/hooks/useAccess'
 import { useAllSignals } from '@/hooks/useSignals'
 import { useStats } from '@/hooks/useStats'
 import { isMarketOpen, DEFAULT_TIMEZONE } from '@/lib/utils'
@@ -42,8 +43,11 @@ export function LeftNav() {
 
   // Market status data (mirrors the old MarketIndicator)
   const open = isMarketOpen()
-  const { data: signals } = useAllSignals({ limit: 50 })
-  const { data: stats } = useStats()
+  const { can } = useAccess()
+  // Market regime / macro come from the brain's data: only fetched for
+  // users who can see it (the open/closed dot works for everyone).
+  const { data: signals } = useAllSignals({ limit: 50 }, { enabled: can('area.signals') })
+  const { data: stats } = useStats({ enabled: can('area.today') })
   const [marketHovered, setMarketHovered] = useState(false)
   const [time, setTime] = useState<Date | null>(null)
 
@@ -74,16 +78,16 @@ export function LeftNav() {
   // Primary destinations, How it works, then (after a divider) Settings,
   // which links onward to Integrations, Logs and Watchlist.
   const NAV_ITEMS = [
-    { label: t.nav.today, href: '/today', icon: LayoutDashboard },
-    { label: t.nav.signals, href: '/signals', icon: Activity },
-    { label: t.nav.check, href: '/check', icon: Search },
-    { label: t.nav.positions, href: '/positions', icon: Briefcase },
-    { label: t.nav.holdings, href: '/holdings', icon: Wallet },
-    { label: t.nav.isItWorking, href: '/performance', icon: ChartLine },
-    { label: t.nav.brain, href: '/brain', icon: Brain },
-    { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle },
-    { label: t.nav.settings, href: '/settings', icon: Settings },
-  ]
+    { label: t.nav.today, href: '/today', icon: LayoutDashboard, feature: 'area.today' },
+    { label: t.nav.signals, href: '/signals', icon: Activity, feature: 'area.signals' },
+    { label: t.nav.check, href: '/check', icon: Search, feature: 'area.check' },
+    { label: t.nav.positions, href: '/positions', icon: Briefcase, feature: 'area.positions' },
+    { label: t.nav.holdings, href: '/holdings', icon: Wallet, feature: 'area.holdings' },
+    { label: t.nav.isItWorking, href: '/performance', icon: ChartLine, feature: 'area.performance' },
+    { label: t.nav.brain, href: '/brain', icon: Brain, feature: 'area.brain' },
+    { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle, feature: 'area.how_it_works' },
+    { label: t.nav.settings, href: '/settings', icon: Settings, feature: 'area.settings' },
+  ].filter((item) => can(item.feature))
 
   return (
     <nav

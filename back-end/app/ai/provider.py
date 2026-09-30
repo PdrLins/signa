@@ -52,6 +52,7 @@ and fires the 70/90/100% Telegram alerts.
 
 from loguru import logger
 
+from app.core.access import ai_guarded
 from app.core.cache import TTLCache
 from app.core.config import settings
 
@@ -133,6 +134,7 @@ async def synthesize_signal(
     return result
 
 
+@ai_guarded("_route_synthesis")
 async def _route_synthesis(
     ticker: str,
     technical_data: dict,
@@ -285,6 +287,7 @@ async def analyze_sentiment(
     return result
 
 
+@ai_guarded("_route_sentiment")
 async def _route_sentiment(ticker: str, market_cap: float | None = None,
                            providers: list[str] | None = None, reserved: bool = False) -> dict:
     providers = providers if providers is not None else settings.sentiment_providers
@@ -334,6 +337,7 @@ async def _route_sentiment(ticker: str, market_cap: float | None = None,
 # budget-checked API only). If Claude is unavailable we return None and the thesis tracker treats the position as "not
 # re-evaluated this scan" (existing exit gates fall back to no thesis check).
 
+@ai_guarded("re_evaluate_thesis")
 async def re_evaluate_thesis(
     symbol: str,
     entry_date: str,
@@ -486,6 +490,7 @@ async def re_evaluate_thesis(
 # decision-tier judgement. Returns None on any failure; the caller then
 # falls back to the deterministic scorecard verdict.
 
+@ai_guarded("assess_long_term")
 async def assess_long_term(symbol: str, prompt: str) -> dict | None:
     from app.ai.prompts import LONG_TERM_JSON_SCHEMA, normalize_long_term_result
 
@@ -538,6 +543,7 @@ async def assess_long_term(symbol: str, prompt: str) -> dict | None:
 # only otherwise. Never Gemini. Returns the raw parsed dict (+ "_provider")
 # or None; the caller validates and falls back to a deterministic ranking.
 
+@ai_guarded("compare_stocks")
 async def compare_stocks(prompt: str, schema: dict, label: str) -> dict | None:
     if settings.claude_local:
         try:
@@ -573,6 +579,7 @@ async def compare_stocks(prompt: str, schema: dict, label: str) -> dict | None:
 # GENERIC STRUCTURED CLAUDE CALL (learning analysis, tools)
 # ============================================================
 
+@ai_guarded("claude_structured")
 async def claude_structured(prompt: str, schema: dict, label: str = "",
                             tier: str = "routine") -> dict | None:
     """One Claude call constrained to `schema`, routed like everything else:

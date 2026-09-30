@@ -1,4 +1,4 @@
-"""Create a Signa user — run once to set up your account.
+"""Create a Signa user (needs migration 011 for access levels).
 
 Usage:
     venv/bin/python create_user.py
@@ -32,9 +32,11 @@ def main():
         print("Passwords do not match")
         sys.exit(1)
 
-    telegram_chat_id = input("Telegram Chat ID: ").strip()
-    if not telegram_chat_id:
-        print("Telegram Chat ID is required for OTP login")
+    telegram_chat_id = input("Telegram Chat ID (optional, Enter to skip): ").strip() or None
+
+    access_level = (input("Access level [free/premium/owner] (default free): ").strip().lower() or "free")
+    if access_level not in ("free", "premium", "owner"):
+        print("Access level must be free, premium or owner")
         sys.exit(1)
 
     # Hash password
@@ -47,6 +49,7 @@ def main():
             "username": username,
             "password_hash": password_hash,
             "telegram_chat_id": telegram_chat_id,
+            "access_level": access_level,
             "is_active": True,
         }).execute()
 
@@ -56,7 +59,8 @@ def main():
             print(f"User created successfully!")
             print(f"  ID: {user['id']}")
             print(f"  Username: {username}")
-            print(f"  Telegram: {telegram_chat_id}")
+            print(f"  Telegram: {telegram_chat_id or '(none: password-only login)'}")
+            print(f"  Access level: {access_level}")
             print()
             print("You can now login at POST /api/v1/auth/login")
         else:

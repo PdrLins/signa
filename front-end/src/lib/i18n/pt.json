@@ -2104,7 +2104,25 @@
       "invalid_input": "Alguns valores são inválidos — confira os números.",
       "rate_limited": "Muitas requisições — aguarde um momento.",
       "network": "Erro de rede — verifique sua conexão.",
-      "internal": "Algo deu errado — tente novamente."
+      "internal": "Algo deu errado — tente novamente.",
+      "slot_limit": "Seu plano acompanha até {limit} ações. Remova uma para adicionar outra.",
+      "upgrade_required": "Isso não está disponível no seu plano."
     }
+  },
+  "access": {
+    "levels": {
+      "free": "Grátis",
+      "premium": "Premium",
+      "owner": "Dono"
+    },
+    "lockedTitle": "Não disponível no seu plano",
+    "lockedBody": "Esta parte do Signa precisa do plano {level}.",
+    "goHome": "Ir para a sua página inicial",
+    "locked": "Requer {level}",
+    "upgradeRequired": "Isso não está disponível no seu plano.",
+    "slotLimit": "Seu plano acompanha até {limit} ações. Remova uma para adicionar outra.",
+    "slots": "{used} de {limit} ações acompanhadas",
+    "slotsUnlimited": "{used} ações acompanhadas",
+    "plan": "Plano"
   }
 }

@@ -131,9 +131,9 @@ async def login(
         user_agent=user_agent,
     )
 
-    if not settings.login_otp_enabled:
-        # Password-only login (LOGIN_OTP_ENABLED=false): skip the Telegram
-        # code and issue the JWT now.
+    if not settings.login_otp_enabled or not user.get("telegram_chat_id"):
+        # Password-only login (LOGIN_OTP_ENABLED=false, or an account with no
+        # Telegram linked, e.g. a free user): skip the code, issue the JWT.
         token = _issue_access_token(user, ip_address, user_agent)
         return {"message": "Logged in", "session_token": None, **token}
 

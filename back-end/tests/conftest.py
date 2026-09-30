@@ -123,3 +123,23 @@ def _reset_grok_account_block(monkeypatch):
     """A faked 401/403 pauses Grok module-wide; never leak that across tests."""
     from app.ai import grok_client
     monkeypatch.setattr(grok_client, "_account_blocked_until", None)
+
+
+@pytest.fixture(autouse=True)
+def _owner_access_by_default(monkeypatch, request):
+    """Test users aren't in a DB: treat them as owner (single-user behaviour)
+    and use the code's feature catalog. Access-level tests opt out with the
+    `real_access` marker and patch levels themselves."""
+    if request.node.get_closest_marker("real_access"):
+        return
+    from app.core import access
+    from app.middleware import auth as auth_mw
+    owner = lambda _uid: {"level": "owner", "slot_bonus": 0}  # noqa: E731
+    monkeypatch.setattr(access, "get_user_access", owner)
+    monkeypatch.setattr(auth_mw, "get_user_access", owner)
+    defaults = {k: v[0] for k, v in access.FEATURE_CATALOG.items()}
+    monkeypatch.setattr(access, "get_feature_levels", lambda: dict(defaults))
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "real_access: use real access-level resolution (no owner default)")

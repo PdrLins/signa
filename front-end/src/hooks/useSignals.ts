@@ -14,8 +14,9 @@ export function useGemSignals() {
   })
 }
 
-export function useAllSignals(filters?: SignalFilters) {
+export function useAllSignals(filters?: SignalFilters, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery<Signal[]>({
+    enabled,
     queryKey: ['signals', filters?.limit, filters?.bucket, filters?.action, filters?.status, filters?.period, filters?.min_score],
     queryFn: async () => {
       const res = await signalsApi.getAll(filters)

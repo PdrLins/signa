@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.core.access import get_user_access, reset_request_level, set_request_level
 from app.core.config import settings
 from app.core.security import decode_token
 from app.core.utils import get_client_ip
@@ -60,13 +61,23 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return _unauthorized_response("Token has been revoked")
 
         # Set user on request state (consumed by get_current_user dependency)
+        # Access level comes from the DB (cached 60s), not the token, so a
+        # change applies without logging out.
+        access = get_user_access(payload.get("sub"))
         request.state.user = {
             "user_id": payload.get("sub"),
             "username": payload.get("username"),
             "jti": jti,
+            "access_level": access["level"],
+            "slot_bonus": access["slot_bonus"],
         }
 
-        return await call_next(request)
+        # The AI layer reads this to refuse calls for users without system.ai.
+        level_token = set_request_level(access["level"])
+        try:
+            return await call_next(request)
+        finally:
+            reset_request_level(level_token)
 
 
 def _unauthorized_response(detail: str) -> JSONResponse:

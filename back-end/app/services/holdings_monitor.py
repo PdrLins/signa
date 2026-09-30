@@ -396,8 +396,9 @@ def send_alerts(alerts: list[dict]) -> bool:
 # ============================================================
 
 async def monitor_holdings(holdings: list[dict], usdcad: float | None = None,
-                           today: date | None = None) -> tuple[list[dict], list[dict]]:
+                           today: date | None = None, ai_allowed: bool = True) -> tuple[list[dict], list[dict]]:
     """Compute a fresh snapshot for every holding (no DB, no Telegram).
+    ai_allowed=False (users without system.ai) skips the Grok red-flag check.
     Returns (updates [{id, holding_status, alert_state}], alerts)."""
     today = today or _today_et()
     closes = await asyncio.to_thread(fetch_closes, [h["symbol"] for h in holdings])
@@ -414,7 +415,10 @@ async def monitor_holdings(holdings: list[dict], usdcad: float | None = None,
             st["asset_type"] = asset_type_of(h)
             st["currency"] = hs.holding_currency(h)
             st["earnings"] = await earnings_info(h, today)
-            flags, meta = await red_flag_check(h, prev, today)
+            if ai_allowed:
+                flags, meta = await red_flag_check(h, prev, today)
+            else:
+                flags, meta = [], {"skipped": "plan"}
             st["red_flags"] = flags
             st["sentiment"] = meta
             st["updated_at"] = now_iso
@@ -468,8 +472,10 @@ async def run_holdings_monitor(user_id: str | None = None) -> dict:
         total_alerts = 0
         updated = 0
         now_iso = datetime.now(timezone.utc).isoformat()
+        from app.core.access import can, get_user_access
         for uid, hs_rows in by_user.items():
-            updates, alerts = await monitor_holdings(hs_rows, usdcad)
+            level = (await asyncio.to_thread(get_user_access, uid))["level"]
+            updates, alerts = await monitor_holdings(hs_rows, usdcad, ai_allowed=can(level, "system.ai"))
             for u in updates:
                 try:
                     await asyncio.to_thread(queries.update_holding, str(u["id"]), uid, {
@@ -479,7 +485,9 @@ async def run_holdings_monitor(user_id: str | None = None) -> dict:
                     updated += 1
                 except Exception as e:
                     logger.warning(f"holdings monitor: save {u['id']} failed: {e}")
-            if send_alerts(alerts):
+            # Alerts go to the owner's Telegram chat; other users get none
+            # until per-user notifications exist.
+            if level == "owner" and send_alerts(alerts):
                 total_alerts += len(alerts)
         logger.info(f"Holdings monitor: {updated}/{len(rows)} updated, {total_alerts} alert(s) sent")
         return {"status": "ok", "holdings": len(rows), "updated": updated, "alerts": total_alerts}

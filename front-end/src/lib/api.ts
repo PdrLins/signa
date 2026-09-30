@@ -8,6 +8,8 @@ import type { TodayInsights, PerformanceInsights, BacktestInsights, SignalTrail,
 import type { CheckJob, CheckMode, CompareJob } from '@/types/check'
 import type { SymbolSearchResponse } from '@/types/symbols'
 import type { LoginRequest, LoginResponse, OtpVerifyRequest, AuthResponse } from '@/types/auth'
+import type { MeResponse } from '@/types/access'
+import { ApiAccessError } from '@/lib/access'
 import type {
   AllocateResponse, Holding, HoldingPatch, HoldingsResponse, HoldingUpsertItem, ResolveResponse, ReviewJob,
 } from '@/types/holdings'
@@ -159,7 +161,13 @@ client.interceptors.response.use(
     }
 
     if (error.response?.status === 403) {
-      throw new Error('Access denied.')
+      // Plan limits come back as {detail: {code, feature | limit, message}};
+      // components switch on `code` to show a translated message.
+      const detail = error.response.data?.detail
+      if (detail && typeof detail === 'object' && (detail.code === 'upgrade_required' || detail.code === 'slot_limit')) {
+        throw new ApiAccessError(String(detail.message ?? 'Not available on your plan.'), detail.code, detail.feature, detail.limit)
+      }
+      throw new ApiAccessError(typeof detail === 'string' ? detail : 'Access denied.', 'forbidden')
     }
 
     if (error.response?.status === 429) {
@@ -215,6 +223,7 @@ export const authApi = {
   verifyOtp: (body: OtpVerifyRequest) => post<AuthResponse>('/auth/verify-otp', body),
   logout: () => post<{ message: string }>('/auth/logout'),
   refresh: () => post<AuthResponse>('/auth/refresh'),
+  me: () => get<MeResponse>('/auth/me'),
 }
 
 // Signals — backend wraps in { signals, count }

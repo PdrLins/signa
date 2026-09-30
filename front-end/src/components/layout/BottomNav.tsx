@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
+import { useAccess } from '@/hooks/useAccess'
 import {
   LayoutDashboard,
   Activity,
@@ -29,24 +30,33 @@ export function BottomNav() {
   const t = useI18nStore((s) => s.t)
   const [moreOpen, setMoreOpen] = useState(false)
 
-  const MORE_ITEMS = useMemo(() => [
-    { label: t.nav.positions, href: '/positions', icon: Briefcase },
-    { label: t.nav.check, href: '/check', icon: Search },
-    { label: t.nav.brain, href: '/brain', icon: Brain },
-    { label: t.nav.settings, href: '/settings', icon: Settings },
-    { label: t.nav.watchlist, href: '/watchlist', icon: Star },
-    { label: t.nav.integrations, href: '/integrations', icon: Plug },
-    { label: t.nav.logs, href: '/logs', icon: ScrollText },
-    { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle },
-  ], [t])
+  const { can } = useAccess()
 
-  const TABS = useMemo(() => [
-    { label: t.nav.today, href: '/today', icon: LayoutDashboard },
-    { label: t.nav.signals, href: '/signals', icon: Activity },
-    { label: t.nav.holdingsShort, href: '/holdings', icon: Wallet },
-    { label: t.nav.isItWorkingShort, href: '/performance', icon: ChartLine },
-    { label: t.nav.more, href: '#more', icon: Menu },
-  ], [t])
+  // Only what the user's plan includes. The bar keeps up to 4 tabs plus
+  // More: when the plan hides some main tabs, allowed More items move up.
+  const { TABS, MORE_ITEMS } = useMemo(() => {
+    const main = [
+      { label: t.nav.today, href: '/today', icon: LayoutDashboard, feature: 'area.today' },
+      { label: t.nav.signals, href: '/signals', icon: Activity, feature: 'area.signals' },
+      { label: t.nav.holdingsShort, href: '/holdings', icon: Wallet, feature: 'area.holdings' },
+      { label: t.nav.isItWorkingShort, href: '/performance', icon: ChartLine, feature: 'area.performance' },
+    ].filter((i) => can(i.feature))
+    const more = [
+      { label: t.nav.positions, href: '/positions', icon: Briefcase, feature: 'area.positions' },
+      { label: t.nav.check, href: '/check', icon: Search, feature: 'area.check' },
+      { label: t.nav.brain, href: '/brain', icon: Brain, feature: 'area.brain' },
+      { label: t.nav.watchlist, href: '/watchlist', icon: Star, feature: 'area.watchlist' },
+      { label: t.nav.settings, href: '/settings', icon: Settings, feature: 'area.settings' },
+      { label: t.nav.integrations, href: '/integrations', icon: Plug, feature: 'area.integrations' },
+      { label: t.nav.logs, href: '/logs', icon: ScrollText, feature: 'area.logs' },
+      { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle, feature: 'area.how_it_works' },
+    ].filter((i) => can(i.feature))
+    const promoted = more.slice(0, Math.max(0, 4 - main.length))
+    return {
+      TABS: [...main, ...promoted, { label: t.nav.more, href: '#more', icon: Menu, feature: '' }],
+      MORE_ITEMS: more.slice(promoted.length),
+    }
+  }, [t, can])
 
   const moreActive = (href: string) =>
     href === '/brain' || href === '/positions' ? isNavActive(href, pathname) : (pathname === href || pathname.startsWith(href + '/'))

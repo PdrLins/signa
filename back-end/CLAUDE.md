@@ -30,6 +30,10 @@ Config in `app/core/config.py` (Pydantic Settings from `.env`). Required: `JWT_S
 - `/telegram` — Bot commands, alert types, OTP, webhook setup, bilingual templates
 - `/conventions` — Async patterns, auth patterns, caching, validation, file organization
 
+## Access levels
+
+Users have `access_level` free | premium | owner (migration 011, read from the DB per request, cached 60s). Every area (page) and action (button) is a feature key with a minimum level: defaults in `app/core/access.py`, overridden by the `access_features` table. Routes declare `Depends(require_feature("..."))`; `tests/test_access.py` fails if a new route has neither a feature nor an entry in its UNGATED list. AI entry points are wrapped in `@ai_guarded` (a request from a user without `system.ai` can't reach Grok/Claude/Codex; scheduler jobs can). Clients (web, iOS) read `GET /auth/me` for level, allowed keys, catalog and slots; 403 bodies carry `{"code": "upgrade_required" | "slot_limit"}`.
+
 ## Key Thresholds
 
 All live values are in `app/core/config.py`; this is the shape of the decision.

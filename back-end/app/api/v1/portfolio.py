@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.core.access import require_feature
 from app.core.dependencies import get_current_user
 from app.db import queries
 from app.models.portfolio import PortfolioAddRequest, PortfolioUpdateRequest
@@ -11,14 +12,14 @@ from app.models.portfolio import PortfolioAddRequest, PortfolioUpdateRequest
 router = APIRouter(prefix="/portfolio", tags=["Portfolio"])
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_feature("area.holdings"))])
 async def get_portfolio(user: dict = Depends(get_current_user)):
     """Get all portfolio positions."""
     items = queries.get_portfolio(user["user_id"])
     return {"items": items, "count": len(items)}
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", dependencies=[Depends(require_feature("area.holdings"))], status_code=status.HTTP_201_CREATED)
 async def add_portfolio_item(
     body: PortfolioAddRequest,
     user: dict = Depends(get_current_user),
@@ -36,7 +37,7 @@ async def add_portfolio_item(
     return item
 
 
-@router.put("/{item_id}")
+@router.put("/{item_id}", dependencies=[Depends(require_feature("area.holdings"))])
 async def update_portfolio_item(
     item_id: UUID,
     body: PortfolioUpdateRequest,
@@ -54,7 +55,7 @@ async def update_portfolio_item(
     return item
 
 
-@router.delete("/{item_id}")
+@router.delete("/{item_id}", dependencies=[Depends(require_feature("area.holdings"))])
 async def delete_portfolio_item(
     item_id: UUID,
     user: dict = Depends(get_current_user),

@@ -14,6 +14,7 @@ import { HoldingsList } from '@/components/holdings/HoldingsList'
 import { AllocatePanel, ReviewPanel, TotalsCard } from '@/components/holdings/SidePanels'
 import { errorText } from '@/components/holdings/format'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { useAccess } from '@/hooks/useAccess'
 
 export default function HoldingsPage() {
   const theme = useTheme()
@@ -23,7 +24,9 @@ export default function HoldingsPage() {
   const toast = useToast()
   const qc = useQueryClient()
   const q = useHoldings()
-  const review = useHoldingsReview()
+  const { can, slots } = useAccess()
+  const canEdit = can('action.holdings.edit')
+  const review = useHoldingsReview(can('action.holdings.review'))
   const [importOpen, setImportOpen] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -58,7 +61,7 @@ export default function HoldingsPage() {
 
   const loadError = q.error ? toHoldingsError(q.error) : null
   const empty = !!data && items.length === 0
-  const showImport = empty || importOpen
+  const showImport = canEdit && (empty || importOpen)
   const monitorRunning = !!data?.monitor_running
 
   return (
@@ -71,20 +74,25 @@ export default function HoldingsPage() {
           </h1>
           <p className="text-[13px] md:text-sm mt-1 max-w-2xl" style={{ color: theme.colors.textSub }}>{th.subtitle}</p>
           <p className="text-[12px] mt-1" style={{ color: theme.colors.textHint }}>{th.paperNote}</p>
+          {slots && slots.limit !== null && (
+            <p className="text-[12px] mt-1 tabular-nums" style={{ color: theme.colors.textSub }}>
+              {fill(t.access.slots, { used: slots.used, limit: slots.limit })}
+            </p>
+          )}
         </div>
         {data && items.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setImportOpen((o) => !o)} aria-expanded={importOpen}
+            {canEdit && <button type="button" onClick={() => setImportOpen((o) => !o)} aria-expanded={importOpen}
               className="min-h-[44px] px-4 rounded-xl text-[14px] font-semibold flex items-center gap-2 focus-visible:outline focus-visible:outline-2"
               style={{ backgroundColor: theme.colors.primary, color: theme.colors.surface, outlineColor: theme.colors.primary }}>
               <Plus size={16} aria-hidden="true" />{th.import.addMore}
-            </button>
-            <button type="button" onClick={refresh} disabled={refreshing || monitorRunning}
+            </button>}
+            {can('action.holdings.refresh') && <button type="button" onClick={refresh} disabled={refreshing || monitorRunning}
               className="min-h-[44px] px-4 rounded-xl text-[14px] font-medium flex items-center gap-2 disabled:opacity-60 focus-visible:outline focus-visible:outline-2"
               style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text, outlineColor: theme.colors.primary }}>
               <RefreshCw size={16} aria-hidden="true" className={monitorRunning ? 'animate-spin' : undefined} />
               {monitorRunning ? th.list.refreshing : th.list.refresh}
-            </button>
+            </button>}
           </div>
         )}
       </header>
@@ -134,8 +142,12 @@ export default function HoldingsPage() {
           </section>
           <aside className="flex flex-col gap-5 min-w-0 order-first xl:order-none">
             <TotalsCard data={data} />
-            <ReviewPanel data={data} job={review.job} running={review.running} error={review.error} onReviewAll={onReviewAll} />
-            <AllocatePanel hasHoldings={items.length > 0} reviewedCount={reviewedCount} />
+            {can('action.holdings.review') && (
+              <ReviewPanel data={data} job={review.job} running={review.running} error={review.error} onReviewAll={onReviewAll} />
+            )}
+            {can('action.holdings.allocate') && (
+              <AllocatePanel hasHoldings={items.length > 0} reviewedCount={reviewedCount} />
+            )}
           </aside>
         </div>
       )}

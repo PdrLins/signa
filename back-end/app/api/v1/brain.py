@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from app.core.access import require_feature
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.core.security import generate_otp, hash_otp, verify_otp
@@ -79,14 +80,14 @@ def _check_lockout(user_id: str):
 
 # ═══ HIGHLIGHTS (JWT only) ═══
 
-@router.get("/highlights")
+@router.get("/highlights", dependencies=[Depends(require_feature("area.brain"))])
 async def get_highlights(user: dict = Depends(get_current_user)):
     return _ks.get_highlights()
 
 
 # ═══ BRAIN INSIGHTS FOR A TICKER (JWT only) ═══
 
-@router.get("/insights/{ticker}")
+@router.get("/insights/{ticker}", dependencies=[Depends(require_feature("area.brain"))])
 async def get_brain_insights(ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10}$"), user: dict = Depends(get_current_user)):
     """Return brain insights relevant to a specific ticker.
 
@@ -407,7 +408,7 @@ def brain_otp_via_telegram() -> bool:
     return not placeholder
 
 
-@router.post("/challenge")
+@router.post("/challenge", dependencies=[Depends(require_feature("area.brain"))])
 async def brain_challenge(request: Request, user: dict = Depends(get_current_user)):
     user_id = user["user_id"]
     ip = get_client_ip(request)
@@ -449,7 +450,7 @@ async def brain_challenge(request: Request, user: dict = Depends(get_current_use
     return {"message": "Code sent to your Telegram", "channel": "telegram"}
 
 
-@router.post("/verify")
+@router.post("/verify", dependencies=[Depends(require_feature("area.brain"))])
 async def brain_verify(request: Request, body: BrainVerifyRequest, user: dict = Depends(get_current_user)):
     user_id = user["user_id"]
     ip = get_client_ip(request)
@@ -499,12 +500,12 @@ async def brain_verify(request: Request, body: BrainVerifyRequest, user: dict = 
 
 # ═══ RULES (JWT + brain_token) ═══
 
-@router.get("/rules")
+@router.get("/rules", dependencies=[Depends(require_feature("area.brain"))])
 async def get_rules(user: dict = Depends(require_brain_token)):
     return _ks.get_all_rules()
 
 
-@router.get("/rules/{rule_id}")
+@router.get("/rules/{rule_id}", dependencies=[Depends(require_feature("area.brain"))])
 async def get_rule(rule_id: str, user: dict = Depends(require_brain_token)):
     rule = _ks.get_rule_by_id(rule_id)
     if not rule:
@@ -512,7 +513,7 @@ async def get_rule(rule_id: str, user: dict = Depends(require_brain_token)):
     return rule
 
 
-@router.put("/rules/{rule_id}")
+@router.put("/rules/{rule_id}", dependencies=[Depends(require_feature("area.brain")), Depends(require_feature("action.brain.edit"))])
 async def update_rule(rule_id: str, body: RuleUpdateRequest, request: Request, user: dict = Depends(require_brain_token)):
     old = _ks.get_rule_by_id(rule_id)
     if not old:
@@ -543,12 +544,12 @@ async def update_rule(rule_id: str, body: RuleUpdateRequest, request: Request, u
 
 # ═══ KNOWLEDGE (JWT + brain_token) ═══
 
-@router.get("/knowledge")
+@router.get("/knowledge", dependencies=[Depends(require_feature("area.brain"))])
 async def get_knowledge(user: dict = Depends(require_brain_token)):
     return _ks.get_all_knowledge()
 
 
-@router.get("/knowledge/{knowledge_id}")
+@router.get("/knowledge/{knowledge_id}", dependencies=[Depends(require_feature("area.brain"))])
 async def get_knowledge_entry(knowledge_id: str, user: dict = Depends(require_brain_token)):
     entry = _ks.get_knowledge_by_id(knowledge_id)
     if not entry:
@@ -556,7 +557,7 @@ async def get_knowledge_entry(knowledge_id: str, user: dict = Depends(require_br
     return entry
 
 
-@router.put("/knowledge/{knowledge_id}")
+@router.put("/knowledge/{knowledge_id}", dependencies=[Depends(require_feature("area.brain")), Depends(require_feature("action.brain.edit"))])
 async def update_knowledge(knowledge_id: str, body: KnowledgeUpdateRequest, request: Request, user: dict = Depends(require_brain_token)):
     old = _ks.get_knowledge_by_id(knowledge_id)
     if not old:
@@ -582,7 +583,7 @@ async def update_knowledge(knowledge_id: str, body: KnowledgeUpdateRequest, requ
 
 # ═══ AUDIT LOG (JWT + brain_token) ═══
 
-@router.get("/audit")
+@router.get("/audit", dependencies=[Depends(require_feature("area.brain"))])
 async def get_brain_audit(user: dict = Depends(require_brain_token)):
     client = get_client()
     result = client.table("audit_logs").select("*").like("event_type", "BRAIN_%").order("created_at", desc=True).limit(50).execute()

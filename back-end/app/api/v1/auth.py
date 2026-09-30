@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from app.core.access import FEATURE_CATALOG, allowed_features, get_feature_levels
 from app.core.dependencies import get_current_user
 from app.core.utils import get_client_ip
 from app.models.auth import (
@@ -88,3 +89,28 @@ async def refresh_token(request: Request):
             headers={"WWW-Authenticate": "Bearer"},
         )
     return TokenResponse(**result)
+
+
+@router.get("/me")
+async def me(user: dict = Depends(get_current_user)):
+    """Who am I and what can I use? The single source of access for every
+    client (web, iOS): the level, every allowed area/action key, the full
+    catalog (key -> min level, so a client can show "premium" badges on
+    locked items) and followed-stock slots."""
+    import asyncio
+
+    from app.services import slots
+
+    level = user.get("access_level") or "free"
+    levels = get_feature_levels()
+    return {
+        "user_id": user["user_id"],
+        "username": user.get("username"),
+        "access_level": level,
+        "features": allowed_features(level),
+        "catalog": [
+            {"key": k, "min_level": levels[k], "description": FEATURE_CATALOG.get(k, ("", ""))[1]}
+            for k in sorted(levels)
+        ],
+        "slots": await asyncio.to_thread(slots.slot_summary, user),
+    }

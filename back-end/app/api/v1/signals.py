@@ -8,13 +8,14 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Path, Query
 
+from app.core.access import require_feature
 from app.core.dependencies import get_current_user
 from app.services import signal_service
 
 router = APIRouter(prefix="/signals", tags=["Signals"])
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_feature("area.signals"))])
 async def get_signals(
     bucket: Literal["SAFE_INCOME", "HIGH_RISK"] | None = Query(None),
     action: Literal["BUY", "HOLD", "SELL", "AVOID"] | None = Query(None),
@@ -33,7 +34,7 @@ async def get_signals(
     return {"signals": signals, "count": len(signals)}
 
 
-@router.get("/gems")
+@router.get("/gems", dependencies=[Depends(require_feature("area.signals"))])
 async def get_gem_signals(
     limit: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
@@ -43,7 +44,7 @@ async def get_gem_signals(
     return {"signals": gems, "count": len(gems)}
 
 
-@router.get("/track-record")
+@router.get("/track-record", dependencies=[Depends(require_feature("area.signals"))])
 async def get_track_record(
     user: dict = Depends(get_current_user),
 ):
@@ -56,7 +57,7 @@ async def get_track_record(
     return record
 
 
-@router.get("/{ticker}")
+@router.get("/{ticker}", dependencies=[Depends(require_feature("area.signals"))])
 async def get_ticker_signals(
     ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10}$"),
     limit: int = Query(20, ge=1, le=100),

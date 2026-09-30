@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useWatchlist, useRemoveTicker } from '@/hooks/useWatchlist'
+import { useAccess } from '@/hooks/useAccess'
 import { WatchlistRow } from './WatchlistRow'
 
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -20,6 +21,7 @@ export function WatchlistTable({ signals, compact = false }: WatchlistTableProps
   const t = useI18nStore((s) => s.t)
   const { data: items, isLoading, isError, error } = useWatchlist()
   const removeTicker = useRemoveTicker()
+  const canEdit = useAccess().can('action.watchlist.edit')
 
   if (isLoading) {
     return compact
@@ -80,13 +82,13 @@ export function WatchlistTable({ signals, compact = false }: WatchlistTableProps
                     {signal.score}
                   </span>
                 )}
-                <button
+                {canEdit && <button
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeTicker.mutate(item.symbol) }}
                   aria-label={`Remove ${item.symbol} from watchlist`}
                   className="opacity-30 hover:opacity-100 transition-opacity"
                 >
                   <X size={10} style={{ color: theme.colors.textHint }} />
-                </button>
+                </button>}
               </div>
             </Link>
           )
@@ -105,7 +107,7 @@ export function WatchlistTable({ signals, compact = false }: WatchlistTableProps
             key={item.id}
             item={item}
             signal={signal}
-            onRemove={(ticker) => removeTicker.mutate(ticker)}
+            onRemove={canEdit ? (ticker) => removeTicker.mutate(ticker) : undefined}
           />
         )
       })}

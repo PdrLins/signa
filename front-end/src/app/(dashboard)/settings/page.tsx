@@ -14,6 +14,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { SettingsLinks } from '@/components/layout/SettingsLinks'
+import { useAccess } from '@/hooks/useAccess'
 import { Check, Brain, Zap, ChevronUp, ChevronDown } from 'lucide-react'
 
 const themeIds = Object.keys(themes) as ThemeId[]
@@ -233,8 +234,10 @@ export default function SettingsPage() {
   const router = useRouter()
   const toast = useToast()
 
+  const canAi = useAccess().can('action.settings.ai')
   const { data: aiConfig, isLoading: aiLoading } = useQuery<AIProviderConfig>({
     queryKey: ['ai-config'],
+    enabled: canAi,
     queryFn: async () => {
       const res = await client.get<AIProviderConfig>('/health/ai-config')
       return res.data
@@ -361,6 +364,8 @@ export default function SettingsPage() {
 
       <SettingsLinks />
 
+      {/* AI, scanning, thresholds and watchdog: owner-only (action.settings.ai) */}
+      {canAi && (<>
       {/* AI Providers */}
       <Card>
         <div className="flex items-center justify-between mb-4">
@@ -746,6 +751,7 @@ export default function SettingsPage() {
         </div>
       </Card>
 
+      </>)}
       {/* Theme */}
       <Card>
         <p className="text-[11px] font-semibold uppercase tracking-wide mb-4" style={{ color: theme.colors.textSub }}>

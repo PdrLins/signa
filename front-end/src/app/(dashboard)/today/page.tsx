@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { RefreshCw } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
+import { useAccess } from '@/hooks/useAccess'
 import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { useTodayInsights } from '@/hooks/useInsights'
 import { useStats } from '@/hooks/useStats'
@@ -26,6 +27,7 @@ export default function TodayPage() {
   const { data, isLoading, isError, refetch } = useTodayInsights()
   const { data: stats } = useStats()
   const { scanning, progress, cooldown, trigger, phaseLabel } = useScanTrigger()
+  const canScan = useAccess().can('action.scan.trigger')
   const tt = t.today
 
   const dateStr = new Date().toLocaleDateString(intlLocale(), {
@@ -58,15 +60,15 @@ export default function TodayPage() {
           >
             {tt.scanLog}
           </Link>
-          <div className="hidden md:block">
+          {canScan && <div className="hidden md:block">
             <Button onClick={trigger} disabled={scanning || cooldown}>
               <span className="flex items-center gap-2">
                 <RefreshCw size={16} aria-hidden="true" className={scanning ? 'animate-spin' : ''} />
                 {scanLabel}
               </span>
             </Button>
-          </div>
-          <button
+          </div>}
+          {canScan && <button
             type="button"
             onClick={trigger}
             disabled={scanning || cooldown}
@@ -75,7 +77,7 @@ export default function TodayPage() {
             style={{ backgroundColor: theme.colors.primary, color: theme.colors.surface, outlineColor: theme.colors.primary }}
           >
             <RefreshCw size={18} aria-hidden="true" className={scanning ? 'animate-spin' : ''} />
-          </button>
+          </button>}
         </div>
       </header>
 

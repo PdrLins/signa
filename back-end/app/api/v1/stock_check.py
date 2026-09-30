@@ -51,6 +51,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from app.core.access import require_feature
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.services import long_term_check, stock_check, stock_compare
@@ -260,7 +261,7 @@ async def _run(job: Job) -> None:
         job.updated = time.time()
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_feature("action.check.run"))])
 async def start_check(body: CheckRequest, user: dict = Depends(get_current_user)):
     _purge()
     try:
@@ -293,7 +294,7 @@ async def start_check(body: CheckRequest, user: dict = Depends(get_current_user)
     return {**job.public(), "remaining_today": max(0, limit - _daily_count())}
 
 
-@router.get("/{job_id}")
+@router.get("/{job_id}", dependencies=[Depends(require_feature("area.check"))])
 async def get_check(job_id: str, user: dict = Depends(get_current_user)):
     _purge()
     job = _jobs.get(job_id) if _JOB_ID.match(job_id or "") else None
@@ -400,7 +401,7 @@ async def _run_compare(comp: CompareJob) -> None:
         comp.updated = time.time()
 
 
-@router.post("/compare")
+@router.post("/compare", dependencies=[Depends(require_feature("action.check.compare"))])
 async def start_compare(body: CompareRequest, user: dict = Depends(get_current_user)):
     _purge()
     n = len(body.tickers)
@@ -466,7 +467,7 @@ async def start_compare(body: CompareRequest, user: dict = Depends(get_current_u
     return {**comp.public(), "remaining_today": max(0, limit - _daily_count())}
 
 
-@router.get("/compare/{compare_id}")
+@router.get("/compare/{compare_id}", dependencies=[Depends(require_feature("area.check"))])
 async def get_compare(compare_id: str, user: dict = Depends(get_current_user)):
     _purge()
     comp = _compares.get(compare_id) if _JOB_ID.match(compare_id or "") else None

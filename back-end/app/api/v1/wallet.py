@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from app.core.access import require_feature
 from app.core.dependencies import get_current_user
 from app.services import wallet as wallet_svc
 
@@ -32,7 +33,7 @@ class WalletAmountRequest(BaseModel):
     note: str | None = Field(None, max_length=500)
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_feature("area.positions"))])
 async def get_wallet(user: dict = Depends(get_current_user)):
     """Return current wallet state + open-position mark-to-market value.
 
@@ -49,7 +50,7 @@ async def get_wallet(user: dict = Depends(get_current_user)):
     return await asyncio.to_thread(_fetch)
 
 
-@router.post("/deposit", status_code=status.HTTP_201_CREATED)
+@router.post("/deposit", dependencies=[Depends(require_feature("action.wallet.manage"))], status_code=status.HTTP_201_CREATED)
 async def deposit(body: WalletAmountRequest, user: dict = Depends(get_current_user)):
     """Credit the wallet. First deposit sets initial_deposit for the ROI baseline.
 
@@ -91,7 +92,7 @@ async def deposit(body: WalletAmountRequest, user: dict = Depends(get_current_us
     return await asyncio.to_thread(wallet_svc.wallet_state, user["user_id"])
 
 
-@router.post("/withdraw", status_code=status.HTTP_200_OK)
+@router.post("/withdraw", dependencies=[Depends(require_feature("action.wallet.manage"))], status_code=status.HTTP_200_OK)
 async def withdraw(body: WalletAmountRequest, user: dict = Depends(get_current_user)):
     """Debit the wallet. Collateral reserved for open shorts is NOT withdrawable.
 
@@ -115,7 +116,7 @@ async def withdraw(body: WalletAmountRequest, user: dict = Depends(get_current_u
     return await asyncio.to_thread(wallet_svc.wallet_state, user["user_id"])
 
 
-@router.get("/transactions")
+@router.get("/transactions", dependencies=[Depends(require_feature("area.positions"))])
 async def list_transactions(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),

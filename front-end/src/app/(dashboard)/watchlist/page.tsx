@@ -5,6 +5,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useWatchlist, useAddTicker } from '@/hooks/useWatchlist'
 import { useToast } from '@/hooks/useToast'
+import { useAccess } from '@/hooks/useAccess'
 import { client } from '@/lib/api'
 import { WatchlistTable } from '@/components/watchlist/WatchlistTable'
 import { Card } from '@/components/ui/Card'
@@ -30,6 +31,7 @@ export default function WatchlistPage() {
   const [searching, setSearching] = useState(false)
   const [showDropdown, setShowDropdown] = useState(false)
   const addTicker = useAddTicker()
+  const canEdit = useAccess().can('action.watchlist.edit')
   const dropdownRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<NodeJS.Timeout>()
 
@@ -99,7 +101,7 @@ export default function WatchlistPage() {
       </div>
 
       {/* Search + Add */}
-      <div className="relative" ref={dropdownRef}>
+      <div className="relative" ref={dropdownRef} hidden={!canEdit}>
         <form onSubmit={handleSubmit} className="flex gap-2">
           <div className="relative flex-1">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: theme.colors.textHint }} />
