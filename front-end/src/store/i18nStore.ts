@@ -34,8 +34,8 @@ export const useI18nStore = create<I18nStore>((set) => ({
     set({ locale, t: locales[locale] })
     // Sync to server (user settings + backend language for Telegram)
     import('@/lib/api').then(({ client: apiClient }) => {
+      // The server also applies it to the owner's Telegram messages.
       apiClient.put('/stats/user-settings', { language: locale }).catch(() => {})
-      apiClient.put('/health/ai-config', { language: locale }).catch(() => {})
     }).catch(() => {})
   },
 

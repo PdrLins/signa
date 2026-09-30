@@ -109,3 +109,19 @@ class TestMiddlewareOrder:
         r = client.get("/api/v1/signals", headers={"Origin": origin})
         assert r.status_code == 401
         assert r.headers.get("access-control-allow-origin") == origin
+
+
+def test_standard_rate_limit_is_per_user_not_per_ip():
+    from starlette.requests import Request
+
+    from app.core.security import create_access_token
+    from app.middleware.rate_limit import _standard_key
+
+    def req(headers):
+        return Request({"type": "http", "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()]})
+
+    a = _standard_key(req({"Authorization": "Bearer " + create_access_token("user-a", "a")}))
+    b = _standard_key(req({"Authorization": "Bearer " + create_access_token("user-b", "b")}))
+    assert a == "user:user-a" and b == "user:user-b"      # same IP, separate buckets
+    assert _standard_key(req({"Authorization": "Bearer not-a-token"})) is None   # falls back to IP
+    assert _standard_key(req({})) is None

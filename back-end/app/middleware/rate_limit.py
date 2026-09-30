@@ -3,7 +3,9 @@
 Three tiers:
 - AUTH: 5 requests per 15 minutes (login, OTP)
 - STRICT: 3 requests per 5 minutes (scan trigger, learning analyze)
-- STANDARD: 60 requests per minute (all other protected endpoints)
+- STANDARD: 240 requests per minute per signed-in user (per IP when there is
+  no valid token). The web app proxies every call through 127.0.0.1, so an
+  IP key would put all users in one bucket.
 
 Uses in-memory tracking with bounded size and threading lock.
 For multi-worker production, replace with Redis TTL keys.
@@ -30,7 +32,7 @@ MAX_TRACKED_IPS = 10_000
 # (max_requests, window_seconds, count_only_failures)
 TIER_AUTH = (5, 15 * 60, True)       # 5 failed attempts per 15 min
 TIER_STRICT = (3, 5 * 60, False)     # 3 requests per 5 min
-TIER_STANDARD = (60, 60, False)      # 60 requests per minute
+TIER_STANDARD = (240, 60, False)     # 240 requests per minute, per signed-in user (else per IP)
 
 # Path → tier mapping
 _AUTH_PATHS = {
@@ -83,6 +85,18 @@ def _get_tier(path: str) -> tuple[str, int, int, bool]:
     return ("standard", *TIER_STANDARD)
 
 
+def _standard_key(request: Request) -> str | None:
+    """'user:<id>' from a valid bearer token (signature + expiry only; the
+    blacklist is checked later by AuthMiddleware), else None."""
+    auth = request.headers.get("Authorization") or ""
+    if not auth.startswith("Bearer "):
+        return None
+    from app.core.security import decode_token
+    payload = decode_token(auth.split(" ", 1)[1])
+    sub = payload.get("sub") if payload else None
+    return f"user:{sub}" if sub else None
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -100,7 +114,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         ip = get_client_ip(request)
         now = time.time()
         tier_name, max_requests, window_seconds, count_only_failures = _get_tier(path)
-        bucket_key = f"{ip}|{tier_name}"
+        bucket_key = f"{_standard_key(request) or ip}|{tier_name}" if tier_name == "standard" else f"{ip}|{tier_name}"
         should_block = False
         should_audit = False
         attempt_count = 0

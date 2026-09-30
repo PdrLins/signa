@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from app.core.access import require_feature
+from app.core.access import can, require_feature
 from app.core.dependencies import get_current_user
 from app.db import queries
 from app.models.stats import DailyStatsResponse
@@ -33,6 +33,11 @@ async def get_user_settings(user: dict = Depends(get_current_user)):
 async def update_user_settings(body: UserSettingsUpdate, user: dict = Depends(get_current_user)):
     """Update current user's settings."""
     updates = body.model_dump(exclude_none=True)
+    # The owner's language also drives the Telegram bot's messages (this used
+    # to be a separate PUT /health/ai-config call from every client).
+    if "language" in updates and can(user.get("access_level") or "free", "action.settings.ai"):
+        from app.core.config import settings
+        settings.language = updates["language"]
     if not updates:
         return await asyncio.to_thread(queries.get_user_settings, user["user_id"])
     return await asyncio.to_thread(queries.update_user_settings, user["user_id"], updates)
