@@ -11,6 +11,7 @@ import { fill } from '@/lib/insights'
 import { Panel } from '@/components/insights/Panel'
 import { HOLDINGS_KEY, toHoldingsError } from '@/hooks/useHoldings'
 import { errorText, money, useToneColor, type Tone } from './format'
+import { AccountSelect } from './AccountSelect'
 import type { HoldingUpsertItem, Listing, ResolvedLine } from '@/types/holdings'
 
 interface Row {
@@ -28,7 +29,9 @@ function parsePositive(v: string): number | null | 'bad' {
   return Number.isFinite(n) && n > 0 ? n : 'bad'
 }
 
-export function ImportPanel({ onDone, onCancel, showCancel }: {
+export function ImportPanel({ onDone, onCancel, showCancel, defaultAccountId = '' }: {
+  /** account preselected for every imported row */
+  defaultAccountId?: string
   onDone: () => void
   onCancel?: () => void
   showCancel: boolean
@@ -46,6 +49,7 @@ export function ImportPanel({ onDone, onCancel, showCancel }: {
   const [phase, setPhase] = useState<'edit' | 'resolving' | 'confirm' | 'saving'>('edit')
   const [rows, setRows] = useState<Row[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [accountId, setAccountId] = useState(defaultAccountId)
 
   const check = async () => {
     if (!text.trim()) return
@@ -91,7 +95,7 @@ export function ImportPanel({ onDone, onCancel, showCancel }: {
         asset_type: l.asset_type,
         shares: typeof shares === 'number' ? shares : null,
         avg_cost: typeof cost === 'number' ? cost : null,
-        account: r.line.account,
+        account_id: accountId || null,
       }
     })
     try {
@@ -184,6 +188,7 @@ export function ImportPanel({ onDone, onCancel, showCancel }: {
           <p className="text-[13px]" style={{ color: theme.colors.textSub }}>
             {fill(th.import.summary, counts)}
           </p>
+          <AccountSelect className="sm:max-w-sm" label={th.accounts.importAccount} value={accountId} onChange={setAccountId} />
           <ul className="flex flex-col gap-2">
             {rows.map((r, i) => {
               const l = r.line

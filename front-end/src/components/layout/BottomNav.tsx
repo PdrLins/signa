@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { memo, useState, useMemo, useEffect } from 'react'
 import { LangSwitcher } from '@/components/ui/LangSwitcher'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
@@ -20,8 +20,31 @@ import {
   HelpCircle,
   ScrollText,
   Search,
-  Wallet, CalendarDays } from 'lucide-react'
-import { isNavActive } from '@/components/layout/LeftNav'
+  Wallet,
+  CalendarDays,
+  Sun,
+  PieChart,
+  UserRound,
+  CalendarClock,
+} from 'lucide-react'
+import { isNavActive, type NavItem } from '@/components/layout/LeftNav'
+
+const MoreLink = memo(function MoreLink({ item, active, onClose }: { item: NavItem; active: boolean; onClose: () => void }) {
+  const theme = useTheme()
+  const color = active ? theme.colors.primary : theme.colors.textSub
+  return (
+    <Link
+      href={item.href}
+      onClick={onClose}
+      className="flex flex-col items-center gap-1.5 py-3 min-h-[44px] rounded-xl transition-all focus-visible:outline focus-visible:outline-2"
+      style={{ backgroundColor: active ? theme.colors.primary + '15' : 'transparent', outlineColor: theme.colors.primary }}
+      aria-current={active ? 'page' : undefined}
+    >
+      <item.icon aria-hidden="true" size={20} style={{ color }} />
+      <span className="text-[10px] font-medium text-center" style={{ color }}>{item.label}</span>
+    </Link>
+  )
+})
 
 export function BottomNav() {
   const theme = useTheme()
@@ -31,42 +54,50 @@ export function BottomNav() {
 
   const { can } = useAccess()
 
-  // Only what the user's plan includes. The bar keeps up to 4 tabs plus
-  // More: when the plan hides some main tabs, allowed More items move up.
-  const { TABS, MORE_ITEMS } = useMemo(() => {
-    const main = [
-      { label: t.nav.today, href: '/today', icon: LayoutDashboard, feature: 'area.today' },
-      { label: t.nav.signals, href: '/signals', icon: Activity, feature: 'area.signals' },
+  // Only what the user's plan includes. The bar keeps up to 4 tracker tabs
+  // plus More; if the plan hides a tab, the first More items move up. The
+  // More sheet lists the rest, with the brain pages under their own heading.
+  const { TABS, MORE_ITEMS, BRAIN_ITEMS } = useMemo(() => {
+    const main: NavItem[] = [
+      { label: t.nav.home, href: '/home', icon: Sun, feature: 'area.home' },
       { label: t.nav.holdingsShort, href: '/holdings', icon: Wallet, feature: 'area.holdings' },
       { label: t.nav.dividends, href: '/dividends', icon: CalendarDays, feature: 'area.dividends' },
-      { label: t.nav.isItWorkingShort, href: '/performance', icon: ChartLine, feature: 'area.performance' },
+      { label: t.nav.insights, href: '/insights', icon: PieChart, feature: 'area.insights' },
     ].filter((i) => can(i.feature))
-    const more = [
-      { label: t.nav.positions, href: '/positions', icon: Briefcase, feature: 'area.positions' },
-      { label: t.nav.check, href: '/check', icon: Search, feature: 'area.check' },
-      { label: t.nav.brain, href: '/brain', icon: Brain, feature: 'area.brain' },
+    const more: NavItem[] = [
+      { label: t.nav.profile, href: '/profile', icon: UserRound, feature: 'area.profile' },
+      { label: t.nav.comingUp, href: '/coming-up', icon: CalendarClock, feature: 'area.coming_up' },
       { label: t.nav.watchlist, href: '/watchlist', icon: Star, feature: 'area.watchlist' },
       { label: t.nav.settings, href: '/settings', icon: Settings, feature: 'area.settings' },
-      { label: t.nav.integrations, href: '/integrations', icon: Plug, feature: 'area.integrations' },
-      { label: t.nav.logs, href: '/logs', icon: ScrollText, feature: 'area.logs' },
       { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle, feature: 'area.how_it_works' },
     ].filter((i) => can(i.feature))
+    const brain: NavItem[] = [
+      { label: t.nav.brainToday, href: '/today', icon: LayoutDashboard, feature: 'area.today' },
+      { label: t.nav.signals, href: '/signals', icon: Activity, feature: 'area.signals' },
+      { label: t.nav.check, href: '/check', icon: Search, feature: 'area.check' },
+      { label: t.nav.positions, href: '/positions', icon: Briefcase, feature: 'area.positions' },
+      { label: t.nav.isItWorkingShort, href: '/performance', icon: ChartLine, feature: 'area.performance' },
+      { label: t.nav.brain, href: '/brain', icon: Brain, feature: 'area.brain' },
+      { label: t.nav.integrations, href: '/integrations', icon: Plug, feature: 'area.integrations' },
+      { label: t.nav.logs, href: '/logs', icon: ScrollText, feature: 'area.logs' },
+    ].filter((i) => can(i.feature))
     const shown = main.slice(0, 4)
-    const rest = [...main.slice(4), ...more]
-    const promoted = rest.slice(0, Math.max(0, 4 - shown.length))
+    const promoted = more.slice(0, Math.max(0, 4 - shown.length))
     return {
       TABS: [...shown, ...promoted, { label: t.nav.more, href: '#more', icon: Menu, feature: '' }],
-      MORE_ITEMS: rest.slice(promoted.length),
+      MORE_ITEMS: more.slice(promoted.length),
+      BRAIN_ITEMS: brain,
     }
   }, [t, can])
 
   const moreActive = (href: string) =>
     href === '/brain' || href === '/positions' ? isNavActive(href, pathname) : (pathname === href || pathname.startsWith(href + '/'))
 
+
   const isMoreActive = useMemo(
-    () => MORE_ITEMS.some((item) => moreActive(item.href)),
+    () => [...MORE_ITEMS, ...BRAIN_ITEMS].some((item) => moreActive(item.href)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [MORE_ITEMS, pathname]
+    [MORE_ITEMS, BRAIN_ITEMS, pathname]
   )
 
   // Escape closes the More sheet
@@ -85,7 +116,7 @@ export function BottomNav() {
           onClick={() => setMoreOpen(false)}
         >
           <div
-            className="absolute bottom-[72px] left-0 right-0 rounded-t-2xl p-4 pb-6 animate-in slide-in-from-bottom duration-200"
+            className="absolute bottom-[72px] left-0 right-0 rounded-t-2xl p-4 pb-6 max-h-[calc(100vh-96px)] overflow-y-auto animate-in slide-in-from-bottom duration-200"
             style={{
               backgroundColor: theme.colors.surface,
               borderTop: `1px solid ${theme.colors.border}`,
@@ -97,35 +128,27 @@ export function BottomNav() {
             role="dialog"
             aria-label={t.nav.moreNav}
           >
-            <div className="grid grid-cols-3 gap-3">
-              {MORE_ITEMS.map((item) => {
-                const isActive = moreActive(item.href)
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => setMoreOpen(false)}
-                    className="flex flex-col items-center gap-1.5 py-3 rounded-xl transition-all"
-                    style={{
-                      backgroundColor: isActive ? theme.colors.primary + '15' : 'transparent',
-                    }}
-                    aria-current={isActive ? 'page' : undefined}
-                  >
-                    <item.icon
-                      aria-hidden="true"
-                      size={20}
-                      style={{ color: isActive ? theme.colors.primary : theme.colors.textSub }}
-                    />
-                    <span
-                      className="text-[10px] font-medium"
-                      style={{ color: isActive ? theme.colors.primary : theme.colors.textSub }}
-                    >
-                      {item.label}
-                    </span>
-                  </Link>
-                )
-              })}
-            </div>
+            <ul className="grid grid-cols-3 gap-3">
+              {MORE_ITEMS.map((item) => (
+                <li key={item.href}>
+                  <MoreLink item={item} active={moreActive(item.href)} onClose={() => setMoreOpen(false)} />
+                </li>
+              ))}
+            </ul>
+            {BRAIN_ITEMS.length > 0 && (
+              <section aria-labelledby="more-brain" className="mt-4 pt-3" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
+                <h2 id="more-brain" className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: theme.colors.textHint }}>
+                  {t.nav.brainGroup}
+                </h2>
+                <ul className="grid grid-cols-3 gap-3">
+                  {BRAIN_ITEMS.map((item) => (
+                    <li key={item.href}>
+                      <MoreLink item={item} active={moreActive(item.href)} onClose={() => setMoreOpen(false)} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             <div className="mt-4 pt-4 flex justify-center" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
               <LangSwitcher />
             </div>

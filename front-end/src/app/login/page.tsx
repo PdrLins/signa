@@ -59,7 +59,7 @@ export default function LoginPage() {
       if (res.access_token) {
         // Password-only login — no Telegram code step
         setToken(res.access_token)
-        router.push('/today')
+        router.push('/home')
         return
       }
       setSessionToken(res.session_token ?? '')
@@ -118,7 +118,7 @@ export default function LoginPage() {
       if (res.last_login) {
         localStorage.setItem('signa-last-login', res.last_login)
       }
-      router.push('/today')
+      router.push('/home')
     } catch (err) {
       const msg = err instanceof Error ? err.message : ''
       const newAttempts = attempts + 1

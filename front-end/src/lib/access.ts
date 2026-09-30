@@ -4,6 +4,10 @@
  * matching prefix wins.
  */
 const ROUTE_AREAS: [string, string][] = [
+  ['/home', 'area.home'],
+  ['/insights', 'area.insights'],
+  ['/coming-up', 'area.coming_up'],
+  ['/profile', 'area.profile'],
   ['/today', 'area.today'],
   ['/overview', 'area.today'],
   ['/signals', 'area.signals'],
@@ -34,8 +38,10 @@ export function areaForPath(pathname: string): string | null {
   return best ? best[1] : null
 }
 
-/** First page the user may open, in this order. */
+/** First page the user may open, in this order (everyone lands on /home). */
 const HOME_CANDIDATES: [string, string][] = [
+  ['/home', 'area.home'],
+  ['/holdings', 'area.holdings'],
   ['/today', 'area.today'],
   ['/holdings', 'area.holdings'],
   ['/watchlist', 'area.watchlist'],

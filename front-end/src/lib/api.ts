@@ -13,6 +13,15 @@ import type { MeResponse } from '@/types/access'
 import type { DividendCalendarResponse } from '@/types/dividends'
 import { ApiAccessError } from '@/lib/access'
 import type {
+  NotificationPrefsResponse, NotificationPrefsUpdate, Profile, ProfileOptions, ProfileUpdate,
+} from '@/types/profile'
+import type {
+  Account, AccountDeleteResult, AccountInput, AccountsResponse, PeopleResponse, Person, PersonInput,
+} from '@/types/accounts'
+import type {
+  ImportDryRun, ImportOptions, ImportResult, Transaction, TransactionFilters, TransactionInput, TransactionsResponse,
+} from '@/types/transactions'
+import type {
   AllocateResponse, Holding, HoldingPatch, HoldingsResponse, HoldingUpsertItem, ResolveResponse, ReviewJob,
 } from '@/types/holdings'
 import type {
@@ -405,10 +414,13 @@ export const stocksApi = {
   get: (symbol: string) => checkCall<StockPage>('get', `/stocks/${encodeURIComponent(symbol)}`),
 }
 
-// My holdings — coded 4xx/503 errors are returned as CheckApiError (same
-// {detail: {code, message}} shape as /check) so the page can translate them.
+// My holdings and the portfolio tracker — coded 4xx/503 errors are returned
+// as CheckApiError (same {detail: {code, message, ...}} shape as /check) so
+// pages can translate them; the rest of the detail object is in `extra`
+// (e.g. account_has_holdings.holdings, import_has_errors.errors). 403 still
+// goes through the interceptor (ApiAccessError upgrade_required / slot_limit).
 async function holdingsCall<T>(
-  method: 'get' | 'post' | 'patch' | 'delete',
+  method: 'get' | 'post' | 'put' | 'patch' | 'delete',
   url: string,
   data?: unknown,
   extra?: AxiosRequestConfig,
@@ -418,16 +430,17 @@ async function holdingsCall<T>(
     url,
     data,
     ...extra,
-    validateStatus: (s) => (s >= 200 && s < 300) || [400, 404, 409, 422, 429, 503].includes(s),
+    validateStatus: (s) => (s >= 200 && s < 300) || [400, 404, 409, 413, 422, 429, 503].includes(s),
   })
   if (res.status >= 400) {
     const detail = (res.data as { detail?: unknown } | undefined)?.detail
     const obj = detail && typeof detail === 'object' && !Array.isArray(detail)
       ? (detail as { code?: string; message?: string; next_allowed_at?: string })
       : null
-    const code = obj?.code ?? (res.status === 422 ? 'invalid_input' : res.status === 429 ? 'rate_limited' : 'internal')
+    const code = obj?.code
+      ?? (res.status === 422 ? 'invalid_input' : res.status === 429 ? 'rate_limited' : res.status === 413 ? 'file_too_large' : 'internal')
     const message = obj?.message ?? (typeof detail === 'string' ? detail : 'Request failed.')
-    const err = new CheckApiError(code, message, res.status) as CheckApiError & { nextAllowedAt?: string }
+    const err = new CheckApiError(code, message, res.status, obj ? { ...obj } : {}) as CheckApiError & { nextAllowedAt?: string }
     if (obj?.next_allowed_at) err.nextAllowedAt = obj.next_allowed_at
     throw err
   }
@@ -435,7 +448,8 @@ async function holdingsCall<T>(
 }
 
 export const holdingsApi = {
-  list: () => holdingsCall<HoldingsResponse>('get', '/holdings'),
+  list: (params?: { account_id?: string; person_id?: string }) =>
+    holdingsCall<HoldingsResponse>('get', '/holdings', undefined, params ? { params } : undefined),
   // Resolving ~30 tickers makes several Yahoo lookups each — allow 90s.
   resolve: (text: string) => holdingsCall<ResolveResponse>('post', '/holdings/resolve', { text }, { timeout: 90_000 }),
   save: (items: HoldingUpsertItem[]) =>
@@ -457,6 +471,64 @@ export const dividendsApi = {
   calendar: (months = 12, includeWatchlist = false) =>
     holdingsCall<DividendCalendarResponse>('get', '/dividends/calendar', undefined,
       { params: { months, include_watchlist: includeWatchlist }, timeout: 60_000 }),
+}
+
+// ── Portfolio tracker (migration 013; 503 migration_required before it) ──
+
+export const profileApi = {
+  get: () => holdingsCall<Profile>('get', '/profile'),
+  update: (body: ProfileUpdate) => holdingsCall<Profile>('put', '/profile', body),
+  options: () => holdingsCall<ProfileOptions>('get', '/profile/options'),
+}
+
+export const notificationsApi = {
+  getPrefs: () => holdingsCall<NotificationPrefsResponse>('get', '/notifications/prefs'),
+  updatePrefs: (body: NotificationPrefsUpdate) =>
+    holdingsCall<NotificationPrefsResponse>('put', '/notifications/prefs', body),
+}
+
+export const peopleApi = {
+  list: () => holdingsCall<PeopleResponse>('get', '/people'),
+  create: (body: PersonInput) => holdingsCall<Person>('post', '/people', body),
+  update: (id: string, body: PersonInput) => holdingsCall<Person>('patch', `/people/${encodeURIComponent(id)}`, body),
+  remove: (id: string) => holdingsCall<{ deleted: true; id: string }>('delete', `/people/${encodeURIComponent(id)}`),
+}
+
+export const accountsApi = {
+  list: (personId?: string) =>
+    holdingsCall<AccountsResponse>('get', '/accounts', undefined, personId ? { params: { person_id: personId } } : undefined),
+  create: (body: AccountInput) => holdingsCall<Account>('post', '/accounts', body),
+  update: (id: string, body: AccountInput) => holdingsCall<Account>('patch', `/accounts/${encodeURIComponent(id)}`, body),
+  /** 409 account_has_holdings unless moveTo or force is given. */
+  remove: (id: string, opts?: { moveTo?: string; force?: boolean }) =>
+    holdingsCall<AccountDeleteResult>('delete', `/accounts/${encodeURIComponent(id)}`, undefined, {
+      params: opts?.moveTo ? { move_to: opts.moveTo } : opts?.force ? { force: true } : undefined,
+    }),
+}
+
+export const transactionsApi = {
+  list: (filters: TransactionFilters = {}) =>
+    holdingsCall<TransactionsResponse>('get', '/transactions', undefined, { params: filters }),
+  create: (body: TransactionInput) => holdingsCall<Transaction>('post', '/transactions', body),
+  update: (id: string, body: TransactionInput) =>
+    holdingsCall<Transaction>('patch', `/transactions/${encodeURIComponent(id)}`, body),
+  remove: (id: string) => holdingsCall<{ deleted: true; id: string }>('delete', `/transactions/${encodeURIComponent(id)}`),
+  /** The CSV template as text (header + 3 example rows). */
+  templateCsv: () =>
+    holdingsCall<string>('get', '/transactions/template', undefined, { params: { format: 'csv' }, responseType: 'text' }),
+  /** Upload a CSV. dry_run (default) only validates; false imports. */
+  import: (file: File, dryRun: boolean, opts: ImportOptions = {}) => {
+    const form = new FormData()
+    form.append('file', file)
+    return holdingsCall<ImportDryRun | ImportResult>('post', '/transactions/import', form, {
+      params: { dry_run: dryRun, ...opts },
+      // multipart: the browser sets the boundary (axios drops the JSON default for FormData)
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60_000,
+    })
+  },
+  undoImport: (batchId: string) =>
+    holdingsCall<{ deleted: number; import_batch_id: string }>('delete', `/transactions/import/${encodeURIComponent(batchId)}`),
 }
 
 export const healthApi = {

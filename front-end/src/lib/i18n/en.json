@@ -28,7 +28,14 @@
     "check": "Check a stock",
     "holdings": "My holdings",
     "holdingsShort": "Holdings",
-    "dividends": "Dividends"
+    "dividends": "Dividends",
+    "home": "Today",
+    "insights": "Insights",
+    "comingUp": "Coming up",
+    "profile": "Profile",
+    "brainGroup": "Brain",
+    "brainToday": "Dashboard",
+    "trackerGroup": "Portfolio"
   },
   "login": {
     "welcome": "Signa",
@@ -922,7 +929,8 @@
     "logs": "Scan and server logs",
     "howItWorksTitle": "How it works",
     "howItWorks": "The pipeline, risk rules and learning",
-    "watchlist": "Tickers you follow"
+    "watchlist": "Tickers you follow",
+    "profile": "Your name, country, currency and notifications"
   },
   "today": {
     "title": "Today",
@@ -2107,7 +2115,10 @@
       "network": "Network error — check your connection.",
       "internal": "Something went wrong — please try again.",
       "slot_limit": "Your plan follows up to {limit} stocks. Remove one to add another.",
-      "upgrade_required": "That isn't available on your plan."
+      "upgrade_required": "That isn't available on your plan.",
+      "migration_required": "This needs a database update (migration 013) — it will work as soon as it's applied.",
+      "invalid_account": "That account wasn't found — refresh and pick another one.",
+      "duplicate_holding": "That account already holds this stock — edit that holding instead."
     },
     "add": {
       "title": "Add a stock",
@@ -2123,6 +2134,22 @@
       "pasteList": "Have a list? Paste it instead",
       "searchInstead": "Add one stock instead",
       "hint": "Leave shares and cost empty if you only want to follow the stock; add them later to see value and dividend cash."
+    },
+    "accounts": {
+      "filterLabel": "Filter by account",
+      "all": "All",
+      "noAccount": "No account",
+      "account": "Account",
+      "addAccount": "Add account…",
+      "newAccountName": "New account name",
+      "newAccountPlaceholder": "e.g. the name of your broker",
+      "createAccount": "Create",
+      "creating": "Creating…",
+      "created": "Account “{name}” added",
+      "manage": "Manage accounts",
+      "importAccount": "Account for all rows",
+      "inAccount": "In {name}",
+      "noneInAccount": "No holdings in this account yet."
     }
   },
   "access": {
@@ -2311,6 +2338,402 @@
       "failed": "Couldn't update the watchlist. Try again.",
       "openSignals": "Open in Signals",
       "checkAi": "Check with AI"
+    }
+  },
+  "tracker": {
+    "comingSoon": "Coming soon",
+    "premium": "Premium",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleting": "Deleting…",
+    "edit": "Edit",
+    "add": "Add",
+    "close": "Close",
+    "back": "Back",
+    "optional": "optional",
+    "loadError": "Couldn't load this — please try again.",
+    "retry": "Try again",
+    "migrationTitle": "Almost ready",
+    "migrationBody": "This part of Signa needs a database update. It will work as soon as the update is applied.",
+    "notAdvice": "Signa shows information, not financial advice. Decisions are yours.",
+    "errors": {
+      "migration_required": "This needs a database update — it will work as soon as it's applied.",
+      "storage_unavailable": "Storage is unavailable right now — please try again later.",
+      "upgrade_required": "That needs the Premium plan.",
+      "slot_limit": "Your plan follows up to {limit} stocks. Remove one to add another.",
+      "forbidden": "You can't do that on your plan.",
+      "nothing_to_update": "Nothing changed.",
+      "not_found": "That no longer exists — refresh the page.",
+      "invalid_display_name": "Use up to 60 characters for your name.",
+      "invalid_country": "Pick a country from the list.",
+      "invalid_currency": "Pick a currency from the list.",
+      "invalid_language": "Pick a language from the list.",
+      "invalid_compare_index": "Pick a benchmark from the list.",
+      "invalid_tax_view": "Pick after tax or before tax.",
+      "invalid_value": "That value isn't valid.",
+      "tax_view_unavailable": "After-tax dividends are available for Canada and the United States only.",
+      "invalid_prefs": "Those notification settings aren't valid.",
+      "duplicate_name": "You already have one with that name.",
+      "too_many_accounts": "You've reached the maximum number of accounts.",
+      "too_many_people": "You've reached the maximum number of people.",
+      "account_has_holdings": "This account still has holdings.",
+      "invalid_name": "Enter a name (up to 60 characters).",
+      "invalid_color": "That color isn't valid.",
+      "invalid_cash_balance": "Enter a valid cash balance.",
+      "invalid_person": "That person wasn't found.",
+      "invalid_account_type": "Pick an account type from the list.",
+      "account_type_unavailable": "Account types are available for Canada and the United States only.",
+      "invalid_move_to": "Pick another of your accounts.",
+      "invalid_account": "That account wasn't found.",
+      "duplicate_holding": "That account already holds this stock.",
+      "invalid_type": "Pick a transaction type.",
+      "invalid_date": "Enter a valid date.",
+      "date_in_future": "The date can't be in the future.",
+      "symbol_required": "This type needs a symbol.",
+      "symbol_not_allowed": "This type has no symbol — leave it empty.",
+      "invalid_symbol": "That symbol isn't valid (e.g. XEQT.TO, NVDA).",
+      "invalid_number": "Enter a valid number.",
+      "quantity_required": "Enter a quantity greater than 0.",
+      "price_required": "Enter a price (or amount) greater than 0.",
+      "amount_required": "Enter an amount greater than 0.",
+      "invalid_split_ratio": "Enter the split ratio (e.g. 2 for a 2-for-1 split).",
+      "unknown_account": "No account with that name — create it first, or tick “create missing accounts”.",
+      "note_too_long": "The note is too long.",
+      "invalid_file": "That file couldn't be read — save it as CSV and try again.",
+      "empty_file": "The file is empty.",
+      "invalid_header": "The columns don't match Signa's template — download it and copy your rows in.",
+      "too_many_rows": "Too many rows — up to 5,000 per import.",
+      "ambiguous_dates": "The dates mix day/month and month/day — choose the date format.",
+      "nothing_to_import": "There are no valid rows to import.",
+      "import_has_errors": "Some rows have errors — fix them or choose to skip them.",
+      "file_too_large": "The file is larger than 2 MB.",
+      "invalid_input": "Some values are invalid — check the form.",
+      "rate_limited": "Too many requests — wait a moment.",
+      "network": "Network error — check your connection.",
+      "internal": "Something went wrong — please try again."
+    }
+  },
+  "home": {
+    "title": "Today",
+    "hello": "Hi, {name}",
+    "helloAnon": "Hi",
+    "search": "Find a stock",
+    "searchPlaceholder": "Search a stock or ETF by name or ticker",
+    "closeSearch": "Close search",
+    "openProfile": "Open your profile",
+    "intro": "Your portfolio at a glance is on its way. Meanwhile, your holdings and dividends are one tap away.",
+    "cards": [
+      {
+        "key": "value",
+        "title": "Portfolio value",
+        "body": "Total value, today's change and your gain since you started."
+      },
+      {
+        "key": "income",
+        "title": "Dividend income",
+        "body": "What your holdings pay this month and this year."
+      },
+      {
+        "key": "movers",
+        "title": "Today's movers",
+        "body": "Your holdings that moved the most today."
+      },
+      {
+        "key": "next",
+        "title": "Coming up",
+        "body": "Next ex-dividend dates, payments and earnings."
+      }
+    ],
+    "goHoldings": "Open holdings",
+    "goDividends": "Open dividends"
+  },
+  "insightsPage": {
+    "title": "Insights",
+    "subtitle": "How your portfolio is built and how it's doing.",
+    "cards": [
+      {
+        "key": "allocation",
+        "title": "Allocation",
+        "body": "By stock, sector, country, currency and account."
+      },
+      {
+        "key": "performance",
+        "title": "Performance",
+        "body": "Your return over time, with an optional benchmark."
+      },
+      {
+        "key": "income",
+        "title": "Income",
+        "body": "Dividends received by month and year."
+      }
+    ]
+  },
+  "comingUpPage": {
+    "title": "Coming up",
+    "subtitle": "Dividends, earnings and events for the stocks you own.",
+    "cards": [
+      {
+        "key": "dividends",
+        "title": "Dividends",
+        "body": "Ex-dividend and payment dates for your holdings."
+      },
+      {
+        "key": "earnings",
+        "title": "Earnings",
+        "body": "When your companies report results."
+      },
+      {
+        "key": "events",
+        "title": "Events",
+        "body": "Splits and other events that change your holdings."
+      }
+    ],
+    "seeCalendar": "See the dividend calendar"
+  },
+  "profile": {
+    "title": "Profile",
+    "subtitle": "Who you are and how Signa shows your money.",
+    "sections": {
+      "you": "You",
+      "money": "Money",
+      "country": "Country",
+      "portfolios": "Portfolios",
+      "notifications": "Notifications",
+      "data": "Your data",
+      "invite": "Invite friends",
+      "about": "About",
+      "account": "Account"
+    },
+    "displayName": "Display name",
+    "displayNamePlaceholder": "What should we call you?",
+    "email": "Email",
+    "username": "Username",
+    "plan": "Plan",
+    "language": "Language",
+    "languages": {
+      "en": "English",
+      "pt": "Português"
+    },
+    "homeCurrency": "Home currency",
+    "homeCurrencyHelp": "Totals are shown in this currency. Today only {list} convert automatically.",
+    "nativeCurrency": "Holdings in their own currency",
+    "nativeCurrencyHelp": "Show each holding in the currency it trades in, instead of your home currency.",
+    "compareWith": "Compare with",
+    "compareOff": "Off",
+    "compareHelp": "Show a benchmark next to your performance.",
+    "country": "Country",
+    "countryNone": "Not set",
+    "countryHelp": "Used for account types and taxes on dividends.",
+    "showDividends": "Show dividends",
+    "afterTax": "After tax",
+    "beforeTax": "Before tax",
+    "taxCountryOnly": "After-tax dividends are available when your country is Canada or the United States.",
+    "taxPremiumOnly": "After-tax dividends are a Premium feature. Dividends are shown before tax.",
+    "portfolios": "People and accounts",
+    "portfoliosDesc": "Name your accounts and who they belong to",
+    "notificationsLink": "Notification settings",
+    "notificationsDesc": "Choose what Signa tells you about",
+    "transactions": "Transactions",
+    "transactionsDesc": "Buys, sells, dividends and cash movements",
+    "import": "Import a CSV",
+    "importDesc": "Bring your history from a spreadsheet",
+    "export": "Export your data",
+    "exportDesc": "Download everything as CSV",
+    "inviteBody": "Invite links are coming soon.",
+    "privacy": "Privacy policy",
+    "terms": "Terms and disclaimer",
+    "signOut": "Sign out",
+    "deleteAccount": "Delete account",
+    "deleteTitle": "Delete your account?",
+    "deleteBody": "This would remove your profile, accounts, holdings and transactions for good.",
+    "deleteConfirm": "Yes, delete my account",
+    "deleteUnavailable": "Deleting an account from the app isn't available yet. Nothing was deleted.",
+    "saved": "Saved",
+    "open": "Open {name}"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "subtitle": "Choose what Signa tells you about.",
+    "back": "Back to profile",
+    "phoneNote": "Phone notifications come with the iOS app. Your choices here will apply to it.",
+    "defaults": "These are the default settings.",
+    "items": {
+      "exdiv_reminder": {
+        "title": "Ex-dividend reminder",
+        "desc": "The day before you need to own a stock to get its next dividend."
+      },
+      "dividend_paid": {
+        "title": "Dividend paid",
+        "desc": "When a holding pays you a dividend."
+      },
+      "dividend_change": {
+        "title": "Dividend change",
+        "desc": "When a company raises, cuts or suspends its dividend."
+      },
+      "check_changed": {
+        "title": "Check changed",
+        "desc": "When a stock's Signa check result changes."
+      },
+      "earnings": {
+        "title": "Earnings",
+        "desc": "Before your companies report results."
+      },
+      "big_move": {
+        "title": "Big move",
+        "desc": "When a holding moves a lot in one day."
+      },
+      "analyst_ratings": {
+        "title": "Analyst ratings",
+        "desc": "When analysts upgrade or downgrade a holding."
+      },
+      "economy": {
+        "title": "Economy",
+        "desc": "Rate decisions and other big economic news."
+      }
+    },
+    "threshold": "Move threshold (%)",
+    "thresholdHelp": "Tell me when a holding moves more than {pct}% in a day.",
+    "thresholdInvalid": "Use a number from 1 to 50.",
+    "saveThreshold": "Save threshold"
+  },
+  "accountsPage": {
+    "title": "People and accounts",
+    "subtitle": "Group your holdings the way you think about them — use your broker's name or any name you like.",
+    "back": "Back to profile",
+    "empty": "Add your first account, e.g. the name of your broker",
+    "accounts": "Accounts",
+    "addAccount": "Add account",
+    "name": "Name",
+    "namePlaceholder": "e.g. Wealthsimple, Questrade, Fidelity",
+    "person": "Person",
+    "personNone": "No one",
+    "currency": "Currency",
+    "cash": "Cash balance",
+    "type": "Account type",
+    "typeNone": "Not set",
+    "typePremium": "Account types (TFSA, RRSP, IRA …) are a Premium feature.",
+    "typeCountry": "Account types are available when your country is Canada or the United States.",
+    "types": {
+      "TFSA": "TFSA",
+      "RRSP": "RRSP",
+      "FHSA": "FHSA",
+      "RESP": "RESP",
+      "NON_REGISTERED": "Non-registered",
+      "OTHER": "Other",
+      "ROTH_IRA": "Roth IRA",
+      "TRADITIONAL_IRA": "Traditional IRA",
+      "401K": "401(k)",
+      "TAXABLE": "Taxable"
+    },
+    "holdingsCount": "{n} holdings",
+    "cashLine": "Cash {amount}",
+    "editAccount": "Edit {name}",
+    "deleteAccount": "Delete {name}",
+    "deleteConfirm": "Delete the account “{name}”?",
+    "hasHoldings": "“{name}” still has {n} holdings. Move them to another account, or delete them with the account.",
+    "moveTo": "Move holdings to",
+    "moveAndDelete": "Move and delete",
+    "forceDelete": "Delete account and its holdings",
+    "created": "Account added",
+    "updated": "Account saved",
+    "deleted": "Account deleted",
+    "moved": "{n} holdings moved",
+    "people": "People",
+    "peopleHelp": "Optional — who each account belongs to, e.g. you and your partner.",
+    "addPerson": "Add person",
+    "personName": "Person's name",
+    "personNamePlaceholder": "e.g. Ana",
+    "accountsCount": "{n} accounts",
+    "editPerson": "Rename {name}",
+    "deletePerson": "Delete {name}",
+    "personDeleteConfirm": "Delete {name}? Their accounts stay, without a person.",
+    "personCreated": "Person added",
+    "personUpdated": "Saved",
+    "personDeleted": "Person deleted"
+  },
+  "transactionsPage": {
+    "title": "Transactions",
+    "subtitle": "Every buy, sell, dividend and cash movement, newest first.",
+    "back": "Back to profile",
+    "filters": "Filters",
+    "account": "Account",
+    "allAccounts": "All accounts",
+    "noAccount": "No account",
+    "symbol": "Symbol",
+    "symbolPlaceholder": "e.g. XEQT.TO",
+    "type": "Type",
+    "allTypes": "All types",
+    "clearFilters": "Clear filters",
+    "types": {
+      "buy": "Buy",
+      "sell": "Sell",
+      "dividend": "Dividend",
+      "deposit": "Deposit",
+      "withdrawal": "Withdrawal",
+      "split": "Split",
+      "fee": "Fee"
+    },
+    "date": "Date",
+    "quantity": "Quantity",
+    "ratio": "Split ratio",
+    "ratioHelp": "New shares per old share — 2 for a 2-for-1 split.",
+    "price": "Price",
+    "amount": "Amount",
+    "amountHelp": "Always a positive number — the type sets the direction.",
+    "currency": "Currency",
+    "fee": "Fee",
+    "note": "Note",
+    "add": "Add transaction",
+    "addTitle": "New transaction",
+    "editTitle": "Edit transaction",
+    "editLabel": "Edit {type} on {date}",
+    "deleteLabel": "Delete {type} on {date}",
+    "deleteConfirm": "Delete this transaction?",
+    "added": "Transaction added",
+    "saved": "Transaction saved",
+    "deleted": "Transaction deleted",
+    "empty": "No transactions yet. Add one, or import your history from a CSV.",
+    "emptyFiltered": "No transactions match these filters.",
+    "count": "{shown} of {total}",
+    "loadMore": "Show more",
+    "imported": "Imported",
+    "noAccounts": "Tip: add an account to keep transactions grouped by broker.",
+    "manageAccounts": "Manage accounts",
+    "import": {
+      "title": "Import a CSV",
+      "body": "Use Signa's template: one row per transaction with date, type, symbol, quantity, price, amount, currency, fee and account (by name).",
+      "template": "Download template",
+      "choose": "CSV file",
+      "check": "Check file",
+      "checking": "Checking…",
+      "dateFormat": "Date format",
+      "dateFormats": {
+        "auto": "Detect",
+        "dmy": "Day/month/year",
+        "mdy": "Month/day/year"
+      },
+      "createMissing": "Create accounts named in the file that don't exist yet",
+      "summary": "{valid} of {rows} rows are ready · {invalid} with errors",
+      "range": "From {from} to {to}",
+      "newAccounts": "New accounts: {names}",
+      "line": "Line {line}",
+      "rowsWithErrors": "Rows with errors",
+      "preview": "Preview",
+      "moreRows": "+ {n} more rows",
+      "skipErrors": "Import the valid rows and skip the ones with errors",
+      "confirm": "Import {n} transactions",
+      "importing": "Importing…",
+      "success": "{n} transactions imported",
+      "skipped": "{n} rows skipped",
+      "accountsCreated": "Accounts created: {names}",
+      "undo": "Undo import",
+      "undoing": "Undoing…",
+      "undone": "Import undone — {n} transactions removed",
+      "another": "Import another file",
+      "cancel": "Cancel"
     }
   }
 }

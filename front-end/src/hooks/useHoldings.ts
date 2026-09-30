@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { holdingsApi, CheckApiError } from '@/lib/api'
 import { ApiAccessError } from '@/lib/access'
 import type { HoldingsResponse, ReviewJob } from '@/types/holdings'
@@ -16,6 +16,8 @@ export interface HoldingsError {
   nextAllowedAt?: string
   /** slot_limit: the plan's number of followed stocks */
   limit?: number
+  /** the rest of the error body (e.g. holdings, errors, summary) */
+  extra?: Record<string, unknown>
 }
 
 export function toHoldingsError(e: unknown): HoldingsError {
@@ -23,17 +25,19 @@ export function toHoldingsError(e: unknown): HoldingsError {
     return { code: e.code, message: e.message, status: 403, limit: e.limit }
   }
   if (e instanceof CheckApiError) {
-    return { code: e.code, message: e.message, status: e.status, nextAllowedAt: (e as { nextAllowedAt?: string }).nextAllowedAt }
+    return { code: e.code, message: e.message, status: e.status, nextAllowedAt: (e as { nextAllowedAt?: string }).nextAllowedAt, extra: e.extra }
   }
   const msg = e instanceof Error ? e.message : String(e)
   return { code: /network/i.test(msg) ? 'network' : 'internal', message: msg, status: 0 }
 }
 
-/** GET /holdings — polls every 5s while the monitor (price refresh) runs. */
-export function useHoldings() {
+/** GET /holdings (optionally one account) — polls every 5s while the
+ *  monitor (price refresh) runs. */
+export function useHoldings(accountId: string | null = null) {
   return useQuery<HoldingsResponse, unknown>({
-    queryKey: HOLDINGS_KEY,
-    queryFn: () => holdingsApi.list(),
+    queryKey: [...HOLDINGS_KEY, 'list', accountId ?? 'all'],
+    queryFn: () => holdingsApi.list(accountId ? { account_id: accountId } : undefined),
+    placeholderData: keepPreviousData,
     staleTime: 30_000,
     retry: (count, err) => !(err instanceof CheckApiError && err.status === 503) && count < 2,
     refetchInterval: (q) => (q.state.data?.monitor_running ? 5_000 : false),

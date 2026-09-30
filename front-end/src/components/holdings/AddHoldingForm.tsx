@@ -11,10 +11,10 @@ import { fill } from '@/lib/insights'
 import { HOLDINGS_KEY, toHoldingsError } from '@/hooks/useHoldings'
 import { SymbolCombobox } from '@/components/check/SymbolCombobox'
 import { errorText } from '@/components/holdings/format'
-import type { Holding, HoldingAccount, HoldingAssetType } from '@/types/holdings'
+import { AccountSelect } from '@/components/holdings/AccountSelect'
+import type { Holding, HoldingAssetType } from '@/types/holdings'
 import type { SymbolMatch, SymbolType } from '@/types/symbols'
 
-const ACCOUNTS: (HoldingAccount | '')[] = ['', 'TFSA', 'RRSP', 'FHSA', 'NON_REGISTERED', 'OTHER']
 const ASSET_TYPE: Record<SymbolType, HoldingAssetType> = { stock: 'STOCK', etf: 'ETF', crypto: 'CRYPTO' }
 
 function guessCurrency(symbol: string): string {
@@ -25,8 +25,10 @@ function guessCurrency(symbol: string): string {
 /** Add one holding: search by name or ticker, pick a match, optionally
  *  enter shares / average cost / account, save. The bulk paste import is
  *  one click away (`onPasteList`). */
-export function AddHoldingForm({ existing, onDone, onCancel, onPasteList }: {
+export function AddHoldingForm({ existing, defaultAccountId = '', onDone, onCancel, onPasteList }: {
   existing: Holding[]
+  /** preselected account (e.g. the holdings page's account filter) */
+  defaultAccountId?: string
   onDone: () => void
   onCancel?: () => void
   onPasteList: () => void
@@ -37,13 +39,13 @@ export function AddHoldingForm({ existing, onDone, onCancel, onPasteList }: {
   const ta = th.add
   const toast = useToast()
   const qc = useQueryClient()
-  const ids = { q: useId(), s: useId(), c: useId(), a: useId(), hint: useId() }
+  const ids = { q: useId(), s: useId(), c: useId(), hint: useId() }
 
   const [query, setQuery] = useState('')
   const [picked, setPicked] = useState<SymbolMatch | null>(null)
   const [shares, setShares] = useState('')
   const [cost, setCost] = useState('')
-  const [account, setAccount] = useState<HoldingAccount | ''>('')
+  const [accountId, setAccountId] = useState(defaultAccountId)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -58,8 +60,8 @@ export function AddHoldingForm({ existing, onDone, onCancel, onPasteList }: {
   const bad = ps === 'bad' || pc === 'bad'
   const ccy = picked ? guessCurrency(picked.symbol) : 'USD'
   const already = useMemo(
-    () => (picked ? existing.some((h) => h.symbol === picked.symbol) : false),
-    [picked, existing],
+    () => (picked ? existing.some((h) => h.symbol === picked.symbol && (h.account_id ?? '') === accountId) : false),
+    [picked, existing, accountId],
   )
 
   const input = 'min-h-[44px] rounded-lg px-3 text-[16px] md:text-[14px] w-full min-w-0 focus-visible:outline focus-visible:outline-2'
@@ -67,7 +69,7 @@ export function AddHoldingForm({ existing, onDone, onCancel, onPasteList }: {
   const label = 'flex flex-col gap-1 min-w-0 text-[12px]'
 
   const reset = () => {
-    setPicked(null); setQuery(''); setShares(''); setCost(''); setAccount(''); setError(null)
+    setPicked(null); setQuery(''); setShares(''); setCost(''); setAccountId(defaultAccountId); setError(null)
   }
 
   const save = async (e: React.FormEvent) => {
@@ -85,7 +87,7 @@ export function AddHoldingForm({ existing, onDone, onCancel, onPasteList }: {
         asset_type: ASSET_TYPE[picked.type] ?? 'OTHER',
         shares: ps as number | null,
         avg_cost: pc as number | null,
-        account: account || null,
+        account_id: accountId || null,
       }])
       toast.show(fill(ta.added, { symbol: picked.symbol }), 'success')
       qc.invalidateQueries({ queryKey: HOLDINGS_KEY })
@@ -163,14 +165,7 @@ export function AddHoldingForm({ existing, onDone, onCancel, onPasteList }: {
                 className={input} style={{ ...style, borderColor: pc === 'bad' ? theme.colors.down : theme.colors.border }}
                 aria-invalid={pc === 'bad' || undefined} />
             </label>
-            <label htmlFor={ids.a} className={`col-span-2 sm:col-span-1 ${label}`} style={{ color: theme.colors.textSub }}>
-              {th.edit.account}
-              <select id={ids.a} value={account} onChange={(e) => setAccount(e.target.value as HoldingAccount | '')} className={input} style={style}>
-                {ACCOUNTS.map((a) => (
-                  <option key={a || 'none'} value={a}>{a ? th.edit.accounts[a] : th.edit.accounts.none}</option>
-                ))}
-              </select>
-            </label>
+            <AccountSelect className="col-span-2 sm:col-span-1" value={accountId} onChange={setAccountId} />
           </div>
           {bad && <p role="alert" className="text-[12px]" style={{ color: theme.colors.down }}>{th.edit.invalid}</p>}
           {error && <p role="alert" className="text-[13px]" style={{ color: theme.colors.down }}>{error}</p>}

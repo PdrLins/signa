@@ -15,9 +15,9 @@ import { HOLDINGS_KEY, toHoldingsError } from '@/hooks/useHoldings'
 import {
   errorText, holdingChips, money, num, pct, spct, useToneColor, verdictTone, type Chip,
 } from './format'
-import type { Holding, HoldingAccount } from '@/types/holdings'
+import { AccountSelect } from '@/components/holdings/AccountSelect'
+import type { Holding } from '@/types/holdings'
 
-const ACCOUNTS: (HoldingAccount | '')[] = ['', 'TFSA', 'RRSP', 'FHSA', 'NON_REGISTERED', 'OTHER']
 
 export function ChipList({ chips }: { chips: Chip[] }) {
   const theme = useTheme()
@@ -130,10 +130,10 @@ function HoldingEditor({ h, onClose }: { h: Holding; onClose: () => void }) {
   const th = t.holdings
   const toast = useToast()
   const qc = useQueryClient()
-  const ids = { s: useId(), c: useId(), a: useId(), n: useId() }
+  const ids = { s: useId(), c: useId(), n: useId() }
   const [shares, setShares] = useState(h.shares != null ? String(h.shares) : '')
   const [cost, setCost] = useState(h.avg_cost != null ? String(h.avg_cost) : '')
-  const [account, setAccount] = useState<HoldingAccount | ''>(h.account ?? '')
+  const [accountId, setAccountId] = useState(h.account_id ?? '')
   const [notes, setNotes] = useState(h.notes ?? '')
   const [saving, setSaving] = useState(false)
   const parse = (v: string): number | null | 'bad' => {
@@ -156,7 +156,9 @@ function HoldingEditor({ h, onClose }: { h: Holding; onClose: () => void }) {
     try {
       await holdingsApi.update(h.id, {
         shares: ps as number | null, avg_cost: pc as number | null,
-        account: account || null, notes: notes.trim() || null,
+        notes: notes.trim() || null,
+        // only send account_id when it changed (a move; 503 before migration 013)
+        ...(accountId !== (h.account_id ?? '') ? { account_id: accountId || null } : {}),
       })
       qc.invalidateQueries({ queryKey: HOLDINGS_KEY })
       onClose()
@@ -181,14 +183,7 @@ function HoldingEditor({ h, onClose }: { h: Holding; onClose: () => void }) {
           <input id={ids.c} inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} className={input}
             style={{ ...style, borderColor: pc === 'bad' ? theme.colors.down : theme.colors.border }} aria-invalid={pc === 'bad' || undefined} />
         </label>
-        <label htmlFor={ids.a} className="col-span-2 sm:col-span-1 flex flex-col gap-1 min-w-0 text-[12px]" style={{ color: theme.colors.textSub }}>
-          {th.edit.account}
-          <select id={ids.a} value={account} onChange={(e) => setAccount(e.target.value as HoldingAccount | '')} className={input} style={style}>
-            {ACCOUNTS.map((a) => (
-              <option key={a || 'none'} value={a}>{a ? th.edit.accounts[a] : th.edit.accounts.none}</option>
-            ))}
-          </select>
-        </label>
+        <AccountSelect className="col-span-2 sm:col-span-1" value={accountId} onChange={setAccountId} allowCreate={false} />
         <label htmlFor={ids.n} className="col-span-2 sm:col-span-1 flex flex-col gap-1 min-w-0 text-[12px]" style={{ color: theme.colors.textSub }}>
           {th.edit.notes}
           <input id={ids.n} value={notes} maxLength={500} onChange={(e) => setNotes(e.target.value)} className={input} style={style} />
@@ -290,6 +285,9 @@ const HoldingCard = memo(function HoldingCard(props: ItemProps) {
           <p className="text-[12px] truncate" style={{ color: theme.colors.textSub }}>
             {h.name ?? DASH}{h.exchange ? ` · ${h.exchange}` : ''}
           </p>
+          {h.account_name && (
+            <p className="text-[12px] truncate" style={{ color: theme.colors.textSub }}>{fill(th.accounts.inAccount, { name: h.account_name })}</p>
+          )}
         </div>
         <div className="text-right shrink-0">
           <p className="text-[15px] font-semibold tabular-nums" style={{ color: theme.colors.text }}>
@@ -348,6 +346,9 @@ const HoldingRow = memo(function HoldingRow(props: ItemProps) {
             </Link>
           </p>
           <p className="text-[12px] max-w-[220px] truncate" style={{ color: theme.colors.textSub }} title={h.name ?? undefined}>{h.name ?? DASH}</p>
+          {h.account_name && (
+            <p className="text-[12px] max-w-[220px] truncate" style={{ color: theme.colors.textHint }}>{fill(th.accounts.inAccount, { name: h.account_name })}</p>
+          )}
         </th>
         <td className={`${td} text-right tabular-nums`}>
           <p className="text-[14px]" style={{ color: theme.colors.text }}>{st.price != null ? money(st.price, ccy, locale) : DASH}</p>

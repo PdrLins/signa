@@ -18,16 +18,26 @@ import {
   ChartLine,
   Settings,
   Brain,
-  HelpCircle,
   LogOut,
   Search,
   Wallet,
   CalendarDays,
+  Sun,
+  PieChart,
+  UserRound,
+  type LucideIcon,
 } from 'lucide-react'
 
 // Pages reached through Settings (and the mobile "More" sheet) keep the
 // Settings rail item highlighted.
-const SETTINGS_CHILDREN = ['/settings', '/integrations', '/logs', '/watchlist']
+const SETTINGS_CHILDREN = ['/settings', '/integrations', '/logs', '/watchlist', '/how-it-works']
+
+export interface NavItem {
+  label: string
+  href: string
+  icon: LucideIcon
+  feature: string
+}
 
 export function isNavActive(href: string, pathname: string): boolean {
   if (href === '/settings') return SETTINGS_CHILDREN.some((p) => pathname === p || pathname.startsWith(p + '/'))
@@ -76,20 +86,49 @@ export function LeftNav() {
 
   const dotColor = open ? theme.colors.up : theme.colors.textHint
 
-  // Primary destinations, How it works, then (after a divider) Settings,
-  // which links onward to Integrations, Logs and Watchlist.
-  const NAV_ITEMS = [
-    { label: t.nav.today, href: '/today', icon: LayoutDashboard, feature: 'area.today' },
+  // The tracker (everyone), then the owner's brain pages under a "Brain"
+  // heading (only for users whose plan includes them), then Profile and
+  // Settings (which links onward to Integrations, Logs, Watchlist, Guide).
+  const TRACKER: NavItem[] = [
+    { label: t.nav.home, href: '/home', icon: Sun, feature: 'area.home' },
+    { label: t.nav.holdingsShort, href: '/holdings', icon: Wallet, feature: 'area.holdings' },
+    { label: t.nav.dividends, href: '/dividends', icon: CalendarDays, feature: 'area.dividends' },
+    { label: t.nav.insights, href: '/insights', icon: PieChart, feature: 'area.insights' },
+  ].filter((item) => can(item.feature))
+  const BRAIN: NavItem[] = [
+    { label: t.nav.brainToday, href: '/today', icon: LayoutDashboard, feature: 'area.today' },
     { label: t.nav.signals, href: '/signals', icon: Activity, feature: 'area.signals' },
     { label: t.nav.check, href: '/check', icon: Search, feature: 'area.check' },
     { label: t.nav.positions, href: '/positions', icon: Briefcase, feature: 'area.positions' },
-    { label: t.nav.holdings, href: '/holdings', icon: Wallet, feature: 'area.holdings' },
-    { label: t.nav.dividends, href: '/dividends', icon: CalendarDays, feature: 'area.dividends' },
     { label: t.nav.isItWorking, href: '/performance', icon: ChartLine, feature: 'area.performance' },
     { label: t.nav.brain, href: '/brain', icon: Brain, feature: 'area.brain' },
-    { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle, feature: 'area.how_it_works' },
+  ].filter((item) => can(item.feature))
+  const ACCOUNT: NavItem[] = [
+    { label: t.nav.profile, href: '/profile', icon: UserRound, feature: 'area.profile' },
     { label: t.nav.settings, href: '/settings', icon: Settings, feature: 'area.settings' },
   ].filter((item) => can(item.feature))
+
+  const renderItem = (item: NavItem) => {
+    const isActive = isNavActive(item.href, pathname)
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        aria-label={item.label}
+        aria-current={isActive ? 'page' : undefined}
+        className="flex items-center justify-center w-11 h-11 rounded-xl transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+        style={{
+          outlineColor: theme.colors.primary,
+          backgroundColor: isActive ? theme.colors.primary + '15' : 'transparent',
+          color: isActive ? theme.colors.primary : theme.colors.textSub,
+        }}
+        title={item.label}
+      >
+        <item.icon size={20} strokeWidth={isActive ? 2.2 : 1.8} aria-hidden="true" />
+      </Link>
+    )
+  }
+  const divider = <div className="w-6 h-px mx-auto my-1" style={{ backgroundColor: theme.colors.border }} aria-hidden="true" />
 
   return (
     <nav
@@ -275,35 +314,24 @@ export function LeftNav() {
 
       <div className="w-6 h-px mx-auto mb-1" style={{ backgroundColor: theme.colors.border }} />
 
-      {NAV_ITEMS.map((item, i) => {
-        const isActive = isNavActive(item.href, pathname)
-        const isLast = i === NAV_ITEMS.length - 1
-        return (
-          <div key={item.href}>
-            {/* Separator before settings */}
-            {isLast && (
-              <div
-                className="w-6 h-px mx-auto mb-1"
-                style={{ backgroundColor: theme.colors.border }}
-              />
-            )}
-            <Link
-              href={item.href}
-              aria-label={item.label}
-              aria-current={isActive ? 'page' : undefined}
-              className="flex items-center justify-center w-10 h-10 rounded-xl transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-              style={{
-                outlineColor: theme.colors.primary,
-                backgroundColor: isActive ? theme.colors.primary + '15' : 'transparent',
-                color: isActive ? theme.colors.primary : theme.colors.textSub,
-              }}
-              title={item.label}
-            >
-              <item.icon size={20} strokeWidth={isActive ? 2.2 : 1.8} aria-hidden="true" />
-            </Link>
-          </div>
-        )
-      })}
+      <ul className="flex flex-col items-center gap-1" aria-label={t.nav.trackerGroup}>
+        {TRACKER.map((item) => <li key={item.href}>{renderItem(item)}</li>)}
+      </ul>
+
+      {BRAIN.length > 0 && (
+        <>
+          {divider}
+          <p className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textHint }} aria-hidden="true">
+            {t.nav.brainGroup}
+          </p>
+          <ul className="flex flex-col items-center gap-1" aria-label={t.nav.brainGroup}>
+            {BRAIN.map((item) => <li key={item.href}>{renderItem(item)}</li>)}
+          </ul>
+        </>
+      )}
+
+      {ACCOUNT.length > 0 && divider}
+      {ACCOUNT.map(renderItem)}
 
       {/* Language, then logout */}
       <div

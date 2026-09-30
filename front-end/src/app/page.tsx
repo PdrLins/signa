@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation'
 
-// Root lands on /today: the scan funnel, today's decisions and open
-// positions at a glance.
+// Root lands on /home: the portfolio tracker's Today page (every user).
 export default function Home() {
-  redirect('/today')
+  redirect('/home')
 }

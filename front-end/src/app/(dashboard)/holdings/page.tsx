@@ -1,8 +1,9 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useQueryClient } from '@tanstack/react-query'
-import { Plus, RefreshCw, Wallet } from 'lucide-react'
+import { Landmark, Plus, RefreshCw, Wallet } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useToast } from '@/hooks/useToast'
@@ -16,6 +17,45 @@ import { AllocatePanel, ReviewPanel, TotalsCard } from '@/components/holdings/Si
 import { errorText } from '@/components/holdings/format'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useAccess } from '@/hooks/useAccess'
+import { useAccounts } from '@/hooks/useAccounts'
+import type { Account } from '@/types/accounts'
+
+/** "All" + one chip per user account; aria-pressed toggle buttons. */
+const AccountChips = memo(function AccountChips({ accounts, value, onChange }: {
+  accounts: Account[]
+  value: string | null
+  onChange: (id: string | null) => void
+}) {
+  const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
+  const tha = t.holdings.accounts
+  const chip = 'min-h-[44px] px-3.5 rounded-full text-[13px] font-medium whitespace-nowrap focus-visible:outline focus-visible:outline-2'
+  const style = (on: boolean) => ({
+    backgroundColor: on ? theme.colors.primary + '1F' : theme.colors.surfaceAlt,
+    color: on ? theme.colors.primary : theme.colors.text,
+    border: `1px solid ${on ? theme.colors.primary : theme.colors.border}`,
+    outlineColor: theme.colors.primary,
+  })
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <div role="group" aria-label={tha.filterLabel} className="flex gap-2 overflow-x-auto min-w-0 pb-1 -mb-1">
+        <button type="button" aria-pressed={value === null} onClick={() => onChange(null)} className={chip} style={style(value === null)}>
+          {tha.all}
+        </button>
+        {accounts.map((a) => (
+          <button key={a.id} type="button" aria-pressed={value === a.id} onClick={() => onChange(a.id)} className={chip} style={style(value === a.id)}>
+            {a.name}
+          </button>
+        ))}
+      </div>
+      <Link href="/profile/accounts" aria-label={tha.manage} title={tha.manage}
+        className="shrink-0 min-h-[44px] min-w-[44px] rounded-full inline-flex items-center justify-center focus-visible:outline focus-visible:outline-2"
+        style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.textSub, outlineColor: theme.colors.primary }}>
+        <Landmark size={16} aria-hidden="true" />
+      </Link>
+    </div>
+  )
+})
 
 export default function HoldingsPage() {
   const theme = useTheme()
@@ -24,8 +64,11 @@ export default function HoldingsPage() {
   const th = t.holdings
   const toast = useToast()
   const qc = useQueryClient()
-  const q = useHoldings()
+  const [accountId, setAccountId] = useState<string | null>(null)
+  const q = useHoldings(accountId)
   const { can, slots } = useAccess()
+  const accountsQ = useAccounts()
+  const accounts = useMemo(() => accountsQ.data?.items ?? [], [accountsQ.data])
   const canEdit = can('action.holdings.edit')
   const review = useHoldingsReview(can('action.holdings.review'))
   // How to add: one stock via search (default) or a pasted list / CSV.
@@ -63,7 +106,10 @@ export default function HoldingsPage() {
   }
 
   const loadError = q.error ? toHoldingsError(q.error) : null
-  const empty = !!data && items.length === 0
+  // "empty" = no holdings at all (not just none in the filtered account)
+  const empty = !!data && items.length === 0 && !accountId
+  const emptyInAccount = !!data && items.length === 0 && !!accountId
+  const hasAny = !!data && (items.length > 0 || !!accountId)
   const showAdd = canEdit && (empty || addOpen)
   const closeAdd = () => { setAddOpen(false); setAddMode('search') }
   const monitorRunning = !!data?.monitor_running
@@ -84,7 +130,7 @@ export default function HoldingsPage() {
             </p>
           )}
         </div>
-        {data && items.length > 0 && (
+        {hasAny && (
           <div className="flex flex-wrap gap-2">
             {canEdit && <button type="button" onClick={() => { setAddOpen((o) => !o); setAddMode('search') }} aria-expanded={addOpen}
               className="min-h-[44px] px-4 rounded-xl text-[14px] font-semibold flex items-center gap-2 focus-visible:outline focus-visible:outline-2"
@@ -100,6 +146,10 @@ export default function HoldingsPage() {
           </div>
         )}
       </header>
+
+      {accounts.length > 0 && (hasAny || q.isLoading) && (
+        <AccountChips accounts={accounts} value={accountId} onChange={setAccountId} />
+      )}
 
       {q.isLoading && (
         <div className="space-y-3" aria-busy="true">
@@ -124,7 +174,7 @@ export default function HoldingsPage() {
       )}
 
       {data && showAdd && addMode === 'search' && (
-        <AddHoldingForm existing={items} onDone={closeAdd} onCancel={empty ? undefined : closeAdd}
+        <AddHoldingForm existing={items} defaultAccountId={accountId ?? ''} onDone={closeAdd} onCancel={empty ? undefined : closeAdd}
           onPasteList={() => setAddMode('paste')} />
       )}
       {data && showAdd && addMode === 'paste' && (
@@ -134,8 +184,15 @@ export default function HoldingsPage() {
             style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}>
             {th.add.searchInstead}
           </button>
-          <ImportPanel showCancel onCancel={() => setAddMode('search')} onDone={closeAdd} />
+          <ImportPanel defaultAccountId={accountId ?? ''} showCancel onCancel={() => setAddMode('search')} onDone={closeAdd} />
         </div>
+      )}
+
+      {emptyInAccount && !showAdd && (
+        <p className="text-[14px] rounded-2xl p-4" role="status"
+          style={{ backgroundColor: theme.colors.surface, border: `1px solid ${theme.colors.border}`, color: theme.colors.textSub }}>
+          {t.holdings.accounts.noneInAccount}
+        </p>
       )}
 
       {data && items.length > 0 && (

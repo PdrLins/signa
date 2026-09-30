@@ -70,7 +70,12 @@ export interface Holding {
   asset_type: HoldingAssetType | null
   shares: number | null
   avg_cost: number | null
+  /** deprecated (migration 013): legacy tax label, no longer written */
   account: HoldingAccount | null
+  /** The user's account holding this lot (null = no account / before 013). */
+  account_id: string | null
+  account_name: string | null
+  person_id: string | null
   notes: string | null
   holding_status: HoldingStatus | null
   status_updated_at: string | null
@@ -110,6 +115,7 @@ export interface HoldingsResponse {
   review_running: boolean
   review_all: ReviewAllInfo
   settings: { max_weight_pct: number; alerts_enabled: boolean; review_max_ids: number }
+  filter?: { account_id: string | null; person_id: string | null }
 }
 
 export interface Listing {
@@ -152,14 +158,16 @@ export interface HoldingUpsertItem {
   asset_type?: HoldingAssetType | null
   shares?: number | null
   avg_cost?: number | null
-  account?: HoldingAccount | null
+  /** The user's account (the legacy `account` field is deprecated and not sent). */
+  account_id?: string | null
   notes?: string | null
 }
 
 export interface HoldingPatch {
   shares?: number | null
   avg_cost?: number | null
-  account?: HoldingAccount | null
+  /** Move the holding to another account (null = no account). */
+  account_id?: string | null
   notes?: string | null
 }
 

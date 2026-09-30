@@ -24,10 +24,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const area = areaForPath(pathname)
   const locked = ready && area !== null && !can(area)
 
-  // The default landing page (/today) belongs to the brain: send users
-  // whose plan doesn't include it to their own home page instead.
+  // A landing page the plan doesn't include (an old /today bookmark, or
+  // /home if an admin locked it) sends the user to their own home page.
   useEffect(() => {
-    if (locked && pathname === '/today') router.replace(homePath(can))
+    if (locked && (pathname === '/today' || pathname === '/home')) router.replace(homePath(can))
   }, [locked, pathname, can, router])
 
   useEffect(() => {

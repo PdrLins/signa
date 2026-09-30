@@ -28,7 +28,14 @@
     "check": "Checar ação",
     "holdings": "Minha carteira",
     "holdingsShort": "Carteira",
-    "dividends": "Dividendos"
+    "dividends": "Dividendos",
+    "home": "Hoje",
+    "insights": "Análises",
+    "comingUp": "Próximos",
+    "profile": "Perfil",
+    "brainGroup": "Brain",
+    "brainToday": "Painel",
+    "trackerGroup": "Carteira"
   },
   "login": {
     "welcome": "Signa",
@@ -922,7 +929,8 @@
     "logs": "Logs de varredura e do servidor",
     "howItWorksTitle": "Como funciona",
     "howItWorks": "O pipeline, as regras de risco e o aprendizado",
-    "watchlist": "Tickers que você acompanha"
+    "watchlist": "Tickers que você acompanha",
+    "profile": "Seu nome, país, moeda e notificações"
   },
   "today": {
     "title": "Hoje",
@@ -2107,7 +2115,10 @@
       "network": "Erro de rede — verifique sua conexão.",
       "internal": "Algo deu errado — tente novamente.",
       "slot_limit": "Seu plano acompanha até {limit} ações. Remova uma para adicionar outra.",
-      "upgrade_required": "Isso não está disponível no seu plano."
+      "upgrade_required": "Isso não está disponível no seu plano.",
+      "migration_required": "Isso precisa de uma atualização do banco de dados (migração 013) — vai funcionar assim que for aplicada.",
+      "invalid_account": "Essa conta não foi encontrada — atualize e escolha outra.",
+      "duplicate_holding": "Essa conta já tem essa ação — edite aquele ativo."
     },
     "add": {
       "title": "Adicionar uma ação",
@@ -2123,6 +2134,22 @@
       "pasteList": "Tem uma lista? Cole aqui",
       "searchInstead": "Adicionar uma ação por vez",
       "hint": "Deixe quantidade e custo em branco se só quer acompanhar a ação; adicione depois para ver valor e dividendos em dinheiro."
+    },
+    "accounts": {
+      "filterLabel": "Filtrar por conta",
+      "all": "Todas",
+      "noAccount": "Sem conta",
+      "account": "Conta",
+      "addAccount": "Adicionar conta…",
+      "newAccountName": "Nome da nova conta",
+      "newAccountPlaceholder": "ex.: o nome da sua corretora",
+      "createAccount": "Criar",
+      "creating": "Criando…",
+      "created": "Conta “{name}” adicionada",
+      "manage": "Gerenciar contas",
+      "importAccount": "Conta para todas as linhas",
+      "inAccount": "Em {name}",
+      "noneInAccount": "Nenhum ativo nesta conta ainda."
     }
   },
   "access": {
@@ -2311,6 +2338,402 @@
       "failed": "Não foi possível atualizar a watchlist. Tente de novo.",
       "openSignals": "Abrir em Sinais",
       "checkAi": "Verificar com IA"
+    }
+  },
+  "tracker": {
+    "comingSoon": "Em breve",
+    "premium": "Premium",
+    "save": "Salvar",
+    "saving": "Salvando…",
+    "saved": "Salvo",
+    "cancel": "Cancelar",
+    "delete": "Excluir",
+    "deleting": "Excluindo…",
+    "edit": "Editar",
+    "add": "Adicionar",
+    "close": "Fechar",
+    "back": "Voltar",
+    "optional": "opcional",
+    "loadError": "Não foi possível carregar — tente novamente.",
+    "retry": "Tentar de novo",
+    "migrationTitle": "Quase pronto",
+    "migrationBody": "Esta parte do Signa precisa de uma atualização do banco de dados. Vai funcionar assim que a atualização for aplicada.",
+    "notAdvice": "O Signa mostra informações, não recomendações financeiras. As decisões são suas.",
+    "errors": {
+      "migration_required": "Isso precisa de uma atualização do banco de dados — vai funcionar assim que for aplicada.",
+      "storage_unavailable": "O armazenamento está indisponível agora — tente mais tarde.",
+      "upgrade_required": "Isso precisa do plano Premium.",
+      "slot_limit": "Seu plano acompanha até {limit} ações. Remova uma para adicionar outra.",
+      "forbidden": "Seu plano não permite isso.",
+      "nothing_to_update": "Nada mudou.",
+      "not_found": "Isso não existe mais — atualize a página.",
+      "invalid_display_name": "Use até 60 caracteres no seu nome.",
+      "invalid_country": "Escolha um país da lista.",
+      "invalid_currency": "Escolha uma moeda da lista.",
+      "invalid_language": "Escolha um idioma da lista.",
+      "invalid_compare_index": "Escolha um índice da lista.",
+      "invalid_tax_view": "Escolha depois ou antes dos impostos.",
+      "invalid_value": "Esse valor não é válido.",
+      "tax_view_unavailable": "Dividendos após impostos só estão disponíveis para Canadá e Estados Unidos.",
+      "invalid_prefs": "Essas configurações de notificação não são válidas.",
+      "duplicate_name": "Você já tem um com esse nome.",
+      "too_many_accounts": "Você atingiu o número máximo de contas.",
+      "too_many_people": "Você atingiu o número máximo de pessoas.",
+      "account_has_holdings": "Esta conta ainda tem ativos.",
+      "invalid_name": "Digite um nome (até 60 caracteres).",
+      "invalid_color": "Essa cor não é válida.",
+      "invalid_cash_balance": "Digite um saldo em caixa válido.",
+      "invalid_person": "Essa pessoa não foi encontrada.",
+      "invalid_account_type": "Escolha um tipo de conta da lista.",
+      "account_type_unavailable": "Tipos de conta só estão disponíveis para Canadá e Estados Unidos.",
+      "invalid_move_to": "Escolha outra das suas contas.",
+      "invalid_account": "Essa conta não foi encontrada.",
+      "duplicate_holding": "Essa conta já tem essa ação.",
+      "invalid_type": "Escolha um tipo de transação.",
+      "invalid_date": "Digite uma data válida.",
+      "date_in_future": "A data não pode estar no futuro.",
+      "symbol_required": "Este tipo precisa de um ticker.",
+      "symbol_not_allowed": "Este tipo não tem ticker — deixe em branco.",
+      "invalid_symbol": "Esse ticker não é válido (ex.: XEQT.TO, NVDA).",
+      "invalid_number": "Digite um número válido.",
+      "quantity_required": "Digite uma quantidade maior que 0.",
+      "price_required": "Digite um preço (ou valor) maior que 0.",
+      "amount_required": "Digite um valor maior que 0.",
+      "invalid_split_ratio": "Digite a proporção do desdobramento (ex.: 2 para 2 por 1).",
+      "unknown_account": "Não há conta com esse nome — crie antes, ou marque “criar contas que faltam”.",
+      "note_too_long": "A nota é longa demais.",
+      "invalid_file": "Não foi possível ler o arquivo — salve como CSV e tente de novo.",
+      "empty_file": "O arquivo está vazio.",
+      "invalid_header": "As colunas não batem com o modelo do Signa — baixe o modelo e copie suas linhas nele.",
+      "too_many_rows": "Linhas demais — até 5.000 por importação.",
+      "ambiguous_dates": "As datas misturam dia/mês e mês/dia — escolha o formato da data.",
+      "nothing_to_import": "Não há linhas válidas para importar.",
+      "import_has_errors": "Algumas linhas têm erros — corrija ou escolha pular essas linhas.",
+      "file_too_large": "O arquivo tem mais de 2 MB.",
+      "invalid_input": "Alguns valores são inválidos — confira o formulário.",
+      "rate_limited": "Muitas requisições — aguarde um momento.",
+      "network": "Erro de rede — verifique sua conexão.",
+      "internal": "Algo deu errado — tente novamente."
+    }
+  },
+  "home": {
+    "title": "Hoje",
+    "hello": "Olá, {name}",
+    "helloAnon": "Olá",
+    "search": "Buscar uma ação",
+    "searchPlaceholder": "Busque uma ação ou ETF pelo nome ou ticker",
+    "closeSearch": "Fechar busca",
+    "openProfile": "Abrir seu perfil",
+    "intro": "Sua carteira num relance está a caminho. Enquanto isso, seus ativos e dividendos estão a um toque.",
+    "cards": [
+      {
+        "key": "value",
+        "title": "Valor da carteira",
+        "body": "Valor total, variação de hoje e seu ganho desde o início."
+      },
+      {
+        "key": "income",
+        "title": "Renda de dividendos",
+        "body": "Quanto seus ativos pagam neste mês e neste ano."
+      },
+      {
+        "key": "movers",
+        "title": "Destaques de hoje",
+        "body": "Os ativos que mais se moveram hoje."
+      },
+      {
+        "key": "next",
+        "title": "Próximos",
+        "body": "Próximas datas ex-dividendo, pagamentos e resultados."
+      }
+    ],
+    "goHoldings": "Abrir carteira",
+    "goDividends": "Abrir dividendos"
+  },
+  "insightsPage": {
+    "title": "Análises",
+    "subtitle": "Como sua carteira está montada e como está indo.",
+    "cards": [
+      {
+        "key": "allocation",
+        "title": "Alocação",
+        "body": "Por ação, setor, país, moeda e conta."
+      },
+      {
+        "key": "performance",
+        "title": "Desempenho",
+        "body": "Seu retorno ao longo do tempo, com um índice de comparação opcional."
+      },
+      {
+        "key": "income",
+        "title": "Renda",
+        "body": "Dividendos recebidos por mês e por ano."
+      }
+    ]
+  },
+  "comingUpPage": {
+    "title": "Próximos",
+    "subtitle": "Dividendos, resultados e eventos das ações que você tem.",
+    "cards": [
+      {
+        "key": "dividends",
+        "title": "Dividendos",
+        "body": "Datas ex-dividendo e de pagamento dos seus ativos."
+      },
+      {
+        "key": "earnings",
+        "title": "Resultados",
+        "body": "Quando suas empresas divulgam resultados."
+      },
+      {
+        "key": "events",
+        "title": "Eventos",
+        "body": "Desdobramentos e outros eventos que mudam seus ativos."
+      }
+    ],
+    "seeCalendar": "Ver o calendário de dividendos"
+  },
+  "profile": {
+    "title": "Perfil",
+    "subtitle": "Quem você é e como o Signa mostra seu dinheiro.",
+    "sections": {
+      "you": "Você",
+      "money": "Dinheiro",
+      "country": "País",
+      "portfolios": "Carteiras",
+      "notifications": "Notificações",
+      "data": "Seus dados",
+      "invite": "Convide amigos",
+      "about": "Sobre",
+      "account": "Conta"
+    },
+    "displayName": "Nome de exibição",
+    "displayNamePlaceholder": "Como devemos te chamar?",
+    "email": "E-mail",
+    "username": "Usuário",
+    "plan": "Plano",
+    "language": "Idioma",
+    "languages": {
+      "en": "English",
+      "pt": "Português"
+    },
+    "homeCurrency": "Moeda principal",
+    "homeCurrencyHelp": "Os totais aparecem nesta moeda. Por enquanto só {list} são convertidas automaticamente.",
+    "nativeCurrency": "Ativos na própria moeda",
+    "nativeCurrencyHelp": "Mostra cada ativo na moeda em que é negociado, em vez da sua moeda principal.",
+    "compareWith": "Comparar com",
+    "compareOff": "Desligado",
+    "compareHelp": "Mostra um índice ao lado do seu desempenho.",
+    "country": "País",
+    "countryNone": "Não definido",
+    "countryHelp": "Usado para tipos de conta e impostos sobre dividendos.",
+    "showDividends": "Mostrar dividendos",
+    "afterTax": "Após impostos",
+    "beforeTax": "Antes dos impostos",
+    "taxCountryOnly": "Dividendos após impostos ficam disponíveis quando seu país é Canadá ou Estados Unidos.",
+    "taxPremiumOnly": "Dividendos após impostos são um recurso Premium. Os dividendos aparecem antes dos impostos.",
+    "portfolios": "Pessoas e contas",
+    "portfoliosDesc": "Dê nome às suas contas e a quem pertencem",
+    "notificationsLink": "Configurar notificações",
+    "notificationsDesc": "Escolha sobre o que o Signa te avisa",
+    "transactions": "Transações",
+    "transactionsDesc": "Compras, vendas, dividendos e movimentações de caixa",
+    "import": "Importar um CSV",
+    "importDesc": "Traga seu histórico de uma planilha",
+    "export": "Exportar seus dados",
+    "exportDesc": "Baixe tudo em CSV",
+    "inviteBody": "Os links de convite chegam em breve.",
+    "privacy": "Política de privacidade",
+    "terms": "Termos e aviso legal",
+    "signOut": "Sair",
+    "deleteAccount": "Excluir conta",
+    "deleteTitle": "Excluir sua conta?",
+    "deleteBody": "Isso apagaria seu perfil, contas, ativos e transações para sempre.",
+    "deleteConfirm": "Sim, excluir minha conta",
+    "deleteUnavailable": "Ainda não é possível excluir a conta pelo app. Nada foi excluído.",
+    "saved": "Salvo",
+    "open": "Abrir {name}"
+  },
+  "notifications": {
+    "title": "Notificações",
+    "subtitle": "Escolha sobre o que o Signa te avisa.",
+    "back": "Voltar ao perfil",
+    "phoneNote": "Notificações no celular chegam com o app para iOS. Suas escolhas aqui valerão para ele.",
+    "defaults": "Estas são as configurações padrão.",
+    "items": {
+      "exdiv_reminder": {
+        "title": "Lembrete ex-dividendo",
+        "desc": "Um dia antes do último dia para ter a ação e receber o próximo dividendo."
+      },
+      "dividend_paid": {
+        "title": "Dividendo pago",
+        "desc": "Quando um ativo te paga dividendos."
+      },
+      "dividend_change": {
+        "title": "Mudança no dividendo",
+        "desc": "Quando uma empresa aumenta, corta ou suspende o dividendo."
+      },
+      "check_changed": {
+        "title": "Checagem mudou",
+        "desc": "Quando o resultado da checagem do Signa de uma ação muda."
+      },
+      "earnings": {
+        "title": "Resultados",
+        "desc": "Antes das suas empresas divulgarem resultados."
+      },
+      "big_move": {
+        "title": "Grande variação",
+        "desc": "Quando um ativo se move muito em um dia."
+      },
+      "analyst_ratings": {
+        "title": "Recomendações de analistas",
+        "desc": "Quando analistas elevam ou rebaixam um ativo."
+      },
+      "economy": {
+        "title": "Economia",
+        "desc": "Decisões de juros e outras grandes notícias econômicas."
+      }
+    },
+    "threshold": "Limite de variação (%)",
+    "thresholdHelp": "Avise quando um ativo variar mais de {pct}% em um dia.",
+    "thresholdInvalid": "Use um número de 1 a 50.",
+    "saveThreshold": "Salvar limite"
+  },
+  "accountsPage": {
+    "title": "Pessoas e contas",
+    "subtitle": "Agrupe seus ativos do jeito que você pensa — use o nome da corretora ou qualquer nome.",
+    "back": "Voltar ao perfil",
+    "empty": "Adicione sua primeira conta, ex.: o nome da sua corretora",
+    "accounts": "Contas",
+    "addAccount": "Adicionar conta",
+    "name": "Nome",
+    "namePlaceholder": "ex.: Wealthsimple, Questrade, Fidelity",
+    "person": "Pessoa",
+    "personNone": "Ninguém",
+    "currency": "Moeda",
+    "cash": "Saldo em caixa",
+    "type": "Tipo de conta",
+    "typeNone": "Não definido",
+    "typePremium": "Tipos de conta (TFSA, RRSP, IRA …) são um recurso Premium.",
+    "typeCountry": "Tipos de conta ficam disponíveis quando seu país é Canadá ou Estados Unidos.",
+    "types": {
+      "TFSA": "TFSA",
+      "RRSP": "RRSP",
+      "FHSA": "FHSA",
+      "RESP": "RESP",
+      "NON_REGISTERED": "Não registrada",
+      "OTHER": "Outra",
+      "ROTH_IRA": "Roth IRA",
+      "TRADITIONAL_IRA": "IRA tradicional",
+      "401K": "401(k)",
+      "TAXABLE": "Tributável"
+    },
+    "holdingsCount": "{n} ativos",
+    "cashLine": "Caixa {amount}",
+    "editAccount": "Editar {name}",
+    "deleteAccount": "Excluir {name}",
+    "deleteConfirm": "Excluir a conta “{name}”?",
+    "hasHoldings": "“{name}” ainda tem {n} ativos. Mova para outra conta ou exclua junto com a conta.",
+    "moveTo": "Mover ativos para",
+    "moveAndDelete": "Mover e excluir",
+    "forceDelete": "Excluir a conta e seus ativos",
+    "created": "Conta adicionada",
+    "updated": "Conta salva",
+    "deleted": "Conta excluída",
+    "moved": "{n} ativos movidos",
+    "people": "Pessoas",
+    "peopleHelp": "Opcional — a quem pertence cada conta, ex.: você e seu parceiro.",
+    "addPerson": "Adicionar pessoa",
+    "personName": "Nome da pessoa",
+    "personNamePlaceholder": "ex.: Ana",
+    "accountsCount": "{n} contas",
+    "editPerson": "Renomear {name}",
+    "deletePerson": "Excluir {name}",
+    "personDeleteConfirm": "Excluir {name}? As contas continuam, sem pessoa.",
+    "personCreated": "Pessoa adicionada",
+    "personUpdated": "Salvo",
+    "personDeleted": "Pessoa excluída"
+  },
+  "transactionsPage": {
+    "title": "Transações",
+    "subtitle": "Cada compra, venda, dividendo e movimentação de caixa, das mais novas às mais antigas.",
+    "back": "Voltar ao perfil",
+    "filters": "Filtros",
+    "account": "Conta",
+    "allAccounts": "Todas as contas",
+    "noAccount": "Sem conta",
+    "symbol": "Ticker",
+    "symbolPlaceholder": "ex.: XEQT.TO",
+    "type": "Tipo",
+    "allTypes": "Todos os tipos",
+    "clearFilters": "Limpar filtros",
+    "types": {
+      "buy": "Compra",
+      "sell": "Venda",
+      "dividend": "Dividendo",
+      "deposit": "Depósito",
+      "withdrawal": "Saque",
+      "split": "Desdobramento",
+      "fee": "Taxa"
+    },
+    "date": "Data",
+    "quantity": "Quantidade",
+    "ratio": "Proporção",
+    "ratioHelp": "Ações novas por ação antiga — 2 para um desdobramento de 2 por 1.",
+    "price": "Preço",
+    "amount": "Valor",
+    "amountHelp": "Sempre um número positivo — o tipo define a direção.",
+    "currency": "Moeda",
+    "fee": "Taxa",
+    "note": "Nota",
+    "add": "Adicionar transação",
+    "addTitle": "Nova transação",
+    "editTitle": "Editar transação",
+    "editLabel": "Editar {type} de {date}",
+    "deleteLabel": "Excluir {type} de {date}",
+    "deleteConfirm": "Excluir esta transação?",
+    "added": "Transação adicionada",
+    "saved": "Transação salva",
+    "deleted": "Transação excluída",
+    "empty": "Nenhuma transação ainda. Adicione uma ou importe seu histórico de um CSV.",
+    "emptyFiltered": "Nenhuma transação com esses filtros.",
+    "count": "{shown} de {total}",
+    "loadMore": "Mostrar mais",
+    "imported": "Importada",
+    "noAccounts": "Dica: adicione uma conta para agrupar as transações por corretora.",
+    "manageAccounts": "Gerenciar contas",
+    "import": {
+      "title": "Importar um CSV",
+      "body": "Use o modelo do Signa: uma linha por transação com data, tipo, ticker, quantidade, preço, valor, moeda, taxa e conta (pelo nome).",
+      "template": "Baixar modelo",
+      "choose": "Arquivo CSV",
+      "check": "Verificar arquivo",
+      "checking": "Verificando…",
+      "dateFormat": "Formato da data",
+      "dateFormats": {
+        "auto": "Detectar",
+        "dmy": "Dia/mês/ano",
+        "mdy": "Mês/dia/ano"
+      },
+      "createMissing": "Criar as contas citadas no arquivo que ainda não existem",
+      "summary": "{valid} de {rows} linhas prontas · {invalid} com erros",
+      "range": "De {from} a {to}",
+      "newAccounts": "Novas contas: {names}",
+      "line": "Linha {line}",
+      "rowsWithErrors": "Linhas com erros",
+      "preview": "Prévia",
+      "moreRows": "+ {n} linhas",
+      "skipErrors": "Importar as linhas válidas e pular as com erros",
+      "confirm": "Importar {n} transações",
+      "importing": "Importando…",
+      "success": "{n} transações importadas",
+      "skipped": "{n} linhas puladas",
+      "accountsCreated": "Contas criadas: {names}",
+      "undo": "Desfazer importação",
+      "undoing": "Desfazendo…",
+      "undone": "Importação desfeita — {n} transações removidas",
+      "another": "Importar outro arquivo",
+      "cancel": "Cancelar"
     }
   }
 }
