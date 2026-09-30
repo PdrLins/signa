@@ -595,6 +595,17 @@ class Settings(BaseSettings):
     # watchlists. Daily snapshots per user/account at 16:30 ET.
     quotes_refresh_enabled: bool = True
     portfolio_snapshots_enabled: bool = True
+    # Cost control (migration 014): the quotes job runs every minute but a
+    # symbol is refreshed only when its best follower's level is due —
+    # followed by any premium/owner user -> every quotes_refresh_seconds_premium,
+    # free-only -> every quotes_refresh_seconds_free. Only symbols followed by
+    # users seen in the last quotes_active_user_days days are refreshed.
+    quotes_refresh_seconds_free: int = 900
+    quotes_refresh_seconds_premium: int = 60
+    quotes_active_user_days: int = 7
+    # Insights history jobs (migration 014): income forecast (18:00 ET) and
+    # Signa check statuses per followed symbol (18:15 ET).
+    portfolio_insights_jobs_enabled: bool = True
 
     # --- Language ---
     language: str = "en"  # "en" or "pt"

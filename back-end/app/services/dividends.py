@@ -393,6 +393,7 @@ def empty_profile(symbol: str, reason: str = "no_dividend") -> dict:
         "upcoming": [], "last_payments": [], "growth_5y_cagr": None,
         "years_without_cut": None, "last_cut_date": None, "recent_cut": False,
         "is_fund": False, "sector": None, "industry": None,
+        "history": [], "name": None, "category": None,
     }
 
 
@@ -435,6 +436,8 @@ def build_profile(symbol: str, info: dict | None, raw_dividends: Any, calendar: 
             "last_payments": _last_payments(payments, specials),
             "currency": info.get("currency"),
             "is_fund": is_fund, "sector": info.get("sector"), "industry": info.get("industry"),
+            "history": _history(payments, specials, today),
+            "name": info.get("longName") or info.get("shortName"), "category": info.get("category"),
         })
         return prof
 
@@ -509,7 +512,21 @@ def build_profile(symbol: str, info: dict | None, raw_dividends: Any, calendar: 
         "is_fund": is_fund,
         "sector": info.get("sector"),
         "industry": info.get("industry"),
+        "history": _history(payments, specials, today),
+        "name": info.get("longName") or info.get("shortName"),
+        "category": info.get("category"),
     }
+
+
+HISTORY_YEARS = 6   # profile["history"]: payments of the last 6 years (1y/5y growth, payout volatility)
+
+
+def _history(payments: list[Payment], specials: list[Payment], today: date) -> list[dict]:
+    """[{ex_date, amount, special}] of the last HISTORY_YEARS years, oldest first."""
+    sp = set(specials)
+    cutoff = today - timedelta(days=int(HISTORY_YEARS * 365.25))
+    return [{"ex_date": d.isoformat(), "amount": round(a, 6), "special": (d, a) in sp}
+            for d, a in payments if d >= cutoff]
 
 
 def _last_payments(payments: list[Payment], specials: list[Payment]) -> list[dict]:

@@ -19,6 +19,11 @@ from app.api.v1 import accounts as accounts_api
 from app.api.v1 import notifications as notifications_api
 from app.api.v1 import profile as profile_api
 from app.api.v1 import transactions as transactions_api
+from app.api.v1 import admin_usage as admin_usage_api
+from app.api.v1 import allocation as allocation_api
+from app.api.v1 import dividend_summary as dividend_summary_api
+from app.api.v1 import events as events_api
+from app.api.v1 import portfolio_home as portfolio_home_api
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.middleware.audit import AuditMiddleware
@@ -145,6 +150,12 @@ app.include_router(notifications_api.router, prefix=api_prefix)
 app.include_router(accounts_api.people_router, prefix=api_prefix)
 app.include_router(accounts_api.router, prefix=api_prefix)
 app.include_router(transactions_api.router, prefix=api_prefix)
+app.include_router(portfolio_home_api.router, prefix=api_prefix)
+app.include_router(allocation_api.router, prefix=api_prefix)
+app.include_router(dividend_summary_api.router, prefix=api_prefix)
+app.include_router(dividend_summary_api.income_router, prefix=api_prefix)
+app.include_router(events_api.router, prefix=api_prefix)
+app.include_router(admin_usage_api.router, prefix=api_prefix)
 
 
 @app.post("/api/v1/telegram/webhook")

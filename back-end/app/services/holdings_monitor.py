@@ -399,19 +399,33 @@ async def monitor_holdings(holdings: list[dict], usdcad: float | None = None,
                            today: date | None = None, ai_allowed: bool = True) -> tuple[list[dict], list[dict]]:
     """Compute a fresh snapshot for every holding (no DB, no Telegram).
     ai_allowed=False (users without system.ai) skips the Grok red-flag check.
-    Returns (updates [{id, holding_status, alert_state}], alerts)."""
+    Returns (updates [{id, holding_status, alert_state}], alerts).
+
+    One stock can sit in several accounts (migration 013): price status,
+    earnings and the red-flag check run ONCE per symbol, every row of the
+    symbol gets the same status, and alerts are evaluated once per symbol
+    (position = the lots merged; prev state = the first row that has one)
+    with the resulting alert_state written to every row of the symbol.
+    Callers pass one user's holdings."""
     today = today or _today_et()
-    closes = await asyncio.to_thread(fetch_closes, [h["symbol"] for h in holdings])
+    groups: dict[str, list[dict]] = {}
+    for h in holdings:
+        groups.setdefault(str(h.get("symbol") or "").upper(), []).append(h)
+    closes = await asyncio.to_thread(fetch_closes, [rows[0]["symbol"] for rows in groups.values()])
     sem = asyncio.Semaphore(FETCH_CONCURRENCY)
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    async def one(h: dict) -> dict:
+    def _prev_status(rows: list[dict]) -> dict:
+        return next((r.get("holding_status") for r in rows if r.get("holding_status")), None) or {}
+
+    async def one(rows: list[dict]) -> dict:
+        h = rows[0]
         async with sem:
             st = compute_price_status(closes.get(h["symbol"]))
-            prev = h.get("holding_status") or {}
+            prev = _prev_status(rows)
             if st.get("error") and prev.get("price") is not None:
                 # keep the last good figures, mark them stale
-                st = {**{k: v for k, v in prev.items() if k not in ("error",)}, "stale": True}
+                st = {**{k: v for k, v in prev.items() if k not in ("error", "position")}, "stale": True}
             st["asset_type"] = asset_type_of(h)
             st["currency"] = hs.holding_currency(h)
             st["earnings"] = await earnings_info(h, today)
@@ -424,27 +438,38 @@ async def monitor_holdings(holdings: list[dict], usdcad: float | None = None,
             st["updated_at"] = now_iso
             return st
 
-    statuses = await asyncio.gather(*(one(h) for h in holdings), return_exceptions=True)
-    snap: list[dict] = []
-    for h, st in zip(holdings, statuses):
+    syms = list(groups)
+    statuses = await asyncio.gather(*(one(groups[s]) for s in syms), return_exceptions=True)
+    by_sym: dict[str, dict] = {}
+    for sym, st in zip(syms, statuses):
         if isinstance(st, BaseException):
-            logger.warning(f"holdings monitor: {h.get('symbol')} failed: {st}")
-            st = {**(h.get("holding_status") or {}), "stale": True, "updated_at": now_iso}
-        snap.append({**h, "holding_status": st})
+            logger.warning(f"holdings monitor: {sym} failed: {st}")
+            st = {**_prev_status(groups[sym]), "stale": True, "updated_at": now_iso}
+        by_sym[sym] = st
 
-    per, _totals = hs.portfolio_math(snap, usdcad)
+    # position figures: per row (its own lot) and per symbol (lots merged, for alerts)
+    snap = [{**h, "holding_status": by_sym[str(h.get("symbol") or "").upper()]} for h in holdings]
+    per_row, _t = hs.portfolio_math(snap, usdcad)
+    merged = hs.merge_by_symbol(snap)
+    per_sym, _t2 = hs.portfolio_math([{**m, "id": str(m.get("symbol") or "").upper()} for m in merged], usdcad)
+
     updates: list[dict] = []
     all_alerts: list[dict] = []
-    for h in snap:
-        hid = str(h.get("id") or h.get("symbol"))
-        pos = per.get(hid)
-        st = h["holding_status"]
-        if pos:
-            st["position"] = pos
-        alerts, state = evaluate_alerts(h, st, pos if h.get("shares") else None, h.get("alert_state"))
+    for m in merged:
+        sym = str(m.get("symbol") or "").upper()
+        rows = groups[sym]
+        base = by_sym[sym]
+        sym_pos = per_sym.get(sym)
+        prev_state = next((r.get("alert_state") for r in rows if r.get("alert_state") is not None), None)
+        alerts, state = evaluate_alerts(m, dict(base), sym_pos if m.get("shares") else None, prev_state)
         all_alerts.extend(alerts)
-        updates.append({"id": h.get("id"), "user_id": h.get("user_id"), "holding_status": st,
-                        "alert_state": state})
+        for r in rows:
+            st = dict(base)
+            pos = per_row.get(str(r.get("id") or r.get("symbol")))
+            if pos:
+                st["position"] = pos
+            updates.append({"id": r.get("id"), "user_id": r.get("user_id"), "holding_status": st,
+                            "alert_state": state})
     return updates, all_alerts
 
 

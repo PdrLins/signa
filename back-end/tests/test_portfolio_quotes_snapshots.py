@@ -98,11 +98,15 @@ def test_in_market_session(when, open_):
 
 
 def test_followed_refresh_skips_when_closed(monkeypatch, downloads, table):
-    monkeypatch.setattr(queries, "get_all_followed_symbols", lambda: {"NVDA", "XEQT.TO"})
+    monkeypatch.setattr(queries, "get_follow_rows",
+                        lambda: [{"user_id": "u1", "symbol": "NVDA"}, {"user_id": "u1", "symbol": "XEQT.TO"}])
+    monkeypatch.setattr(queries, "get_users_activity", lambda: [
+        {"id": "u1", "access_level": "free", "last_seen_at": datetime.now(ET).isoformat()}])
+    monkeypatch.setattr(quotes, "_last_refresh", {})
     closed = datetime(2026, 10, 3, 11, 0, tzinfo=ET)
     assert quotes.refresh_followed_quotes(now=closed) == {"status": "closed"} and downloads == []
     r = quotes.refresh_followed_quotes(force=True)
-    assert r == {"status": "ok", "symbols": 2, "quotes": 2} and len(downloads) == 1
+    assert r == {"status": "ok", "followed": 2, "symbols": 2, "quotes": 2} and len(downloads) == 1
 
 
 # ---------------------------------------------------------------- snapshots

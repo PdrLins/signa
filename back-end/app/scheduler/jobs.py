@@ -276,3 +276,50 @@ async def portfolio_snapshots():
         logger.info(f"Portfolio snapshots: {result}")
     except Exception as e:
         logger.error(f"Portfolio snapshots failed: {e}")
+
+
+async def income_forecast_snapshots():
+    """18:00 ET weekdays — per-user forward dividend income forecast
+    (migration 014), the history "why your income changed" diffs against
+    (app/services/income_forecast.py). No AI."""
+    import asyncio
+
+    from app.core.config import settings
+
+    if not settings.portfolio_insights_jobs_enabled:
+        return
+    try:
+        from app.services.income_forecast import run_income_snapshots
+        result = await run_income_snapshots()
+        logger.info(f"Income forecast snapshots: {result}")
+    except Exception as e:
+        logger.error(f"Income forecast snapshots failed: {e}")
+
+
+async def check_status_snapshots():
+    """18:15 ET weekdays — the five Signa checks per followed symbol
+    (migration 014), diffed by /events/upcoming (app/services/check_status.py).
+    Shared per symbol, no AI."""
+    from app.core.config import settings
+
+    if not settings.portfolio_insights_jobs_enabled:
+        return
+    try:
+        from app.services.check_status import run_check_snapshots
+        result = await run_check_snapshots()
+        logger.info(f"Check status snapshots: {result}")
+    except Exception as e:
+        logger.error(f"Check status snapshots failed: {e}")
+
+
+async def usage_flush():
+    """Every 5 minutes — write the buffered data-usage counters (migration 014)."""
+    import asyncio
+
+    try:
+        from app.services.usage_metrics import flush
+        result = await asyncio.to_thread(flush)
+        if result.get("rows"):
+            logger.debug(f"Usage flush: {result}")
+    except Exception as e:
+        logger.error(f"Usage flush failed: {e}")

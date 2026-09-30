@@ -33,6 +33,22 @@ def _no_live_dividends(monkeypatch):
     dividends._cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _no_live_last_seen(monkeypatch):
+    """The auth middleware records users.last_seen_at in a thread: never let
+    a test reach Supabase for it."""
+    from app.middleware import auth as auth_mw
+    monkeypatch.setattr(auth_mw, "touch_user_last_seen", lambda _uid: None)
+    auth_mw._last_seen_written.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_usage_leak():
+    """Usage counters are process memory: start every test empty."""
+    from app.services import usage_metrics
+    usage_metrics.reset()
+
+
 @pytest.fixture
 def sample_indicators():
     """Sample technical indicators for a healthy stock."""

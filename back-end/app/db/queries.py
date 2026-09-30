@@ -1470,24 +1470,60 @@ def delete_transaction_batch(user_id: str, batch_id: str) -> int:
 # ---- quotes (shared by all users) ----
 
 QUOTE_COLUMNS = "symbol, price, prev_close, change_pct, currency, day_high, day_low, as_of, updated_at"
+# as_of_source arrives with migration 014; until then reads/writes go without it.
+_quotes_no_source_at: float | None = None
+
+
+def _quotes_have_source() -> bool:
+    import time
+    at = _quotes_no_source_at
+    return at is None or time.time() - at > _ACCOUNT_ID_RETRY_S
+
+
+def _mark_quotes_no_source(err: Exception) -> bool:
+    global _quotes_no_source_at
+    import time
+    if _missing_schema(err) and "as_of_source" in str(err).lower():
+        logger.warning("quotes.as_of_source missing — apply migration 014_portfolio_insights.sql")
+        _quotes_no_source_at = time.time()
+        return True
+    return False
 
 
 def get_quote_rows(symbols: list[str]) -> list[dict]:
     if not symbols:
         return []
     client = get_client()
-    out: list[dict] = []
-    for i in range(0, len(symbols), 200):
-        out.extend(client.table("quotes").select(QUOTE_COLUMNS).in_("symbol", symbols[i:i + 200])
-                   .execute().data or [])
-    return out
+
+    def read(cols: str) -> list[dict]:
+        out: list[dict] = []
+        for i in range(0, len(symbols), 200):
+            out.extend(client.table("quotes").select(cols).in_("symbol", symbols[i:i + 200])
+                       .execute().data or [])
+        return out
+    if _quotes_have_source():
+        try:
+            return read(QUOTE_COLUMNS + ", as_of_source")
+        except Exception as e:
+            if not _mark_quotes_no_source(e):
+                raise
+    return read(QUOTE_COLUMNS)
 
 
 def upsert_quotes(rows: list[dict], chunk: int = 500) -> int:
     client = get_client()
+    if not _quotes_have_source():
+        rows = [{k: v for k, v in r.items() if k != "as_of_source"} for r in rows]
     n = 0
     for i in range(0, len(rows), chunk):
-        n += len(client.table("quotes").upsert(rows[i:i + chunk], on_conflict="symbol").execute().data or [])
+        part = rows[i:i + chunk]
+        try:
+            n += len(client.table("quotes").upsert(part, on_conflict="symbol").execute().data or [])
+        except Exception as e:
+            if not _mark_quotes_no_source(e):
+                raise
+            part = [{k: v for k, v in r.items() if k != "as_of_source"} for r in part]
+            n += len(client.table("quotes").upsert(part, on_conflict="symbol").execute().data or [])
     return n
 
 
@@ -1531,3 +1567,129 @@ def upsert_notification_prefs(user_id: str, prefs: dict) -> dict:
     row = {"user_id": user_id, "prefs": prefs, "updated_at": datetime.now(timezone.utc).isoformat()}
     result = client.table("notification_prefs").upsert(row, on_conflict="user_id").execute()
     return result.data[0] if result.data else row
+
+
+# ============================================================
+# PORTFOLIO INSIGHTS (migration 014)
+# ============================================================
+
+SNAPSHOT_COLUMNS = "snapshot_date, account_id, market_value, cash, cost_basis, currency, unconverted"
+
+
+def get_portfolio_snapshot_rows(user_id: str, since: str | None = None,
+                                account_ids: list[str] | None = None) -> list[dict]:
+    """portfolio_snapshots rows, oldest first. account_ids None -> the
+    whole-portfolio rows (account_id NULL); a list -> those accounts' rows."""
+    client = get_client()
+
+    def build():
+        q = client.table("portfolio_snapshots").select(SNAPSHOT_COLUMNS).eq("user_id", user_id)
+        q = q.is_("account_id", "null") if account_ids is None else q.in_("account_id", account_ids)
+        if since:
+            q = q.gte("snapshot_date", since)
+        return q.order("snapshot_date")
+    return _select_all_pages(build)
+
+
+def get_income_snapshots(user_id: str, since: str | None = None) -> list[dict]:
+    """income_forecast_snapshots rows of a user, oldest first."""
+    client = get_client()
+    q = client.table("income_forecast_snapshots").select(
+        "snapshot_date, total_home, currency, usdcad, per_symbol").eq("user_id", user_id)
+    if since:
+        q = q.gte("snapshot_date", since)
+    return q.order("snapshot_date").limit(400).execute().data or []
+
+
+def upsert_income_snapshot(user_id: str, snapshot_date: str, row: dict) -> int:
+    client = get_client()
+    payload = {**row, "user_id": user_id, "snapshot_date": snapshot_date}
+    return len(client.table("income_forecast_snapshots")
+               .upsert(payload, on_conflict="user_id,snapshot_date").execute().data or [])
+
+
+def get_check_status_rows(symbols: list[str], since: str | None = None) -> list[dict]:
+    """check_status_daily rows for symbols, oldest first."""
+    if not symbols:
+        return []
+    client = get_client()
+    out: list[dict] = []
+    for i in range(0, len(symbols), 200):
+        q = client.table("check_status_daily").select("symbol, check_date, statuses").in_(
+            "symbol", symbols[i:i + 200])
+        if since:
+            q = q.gte("check_date", since)
+        out.extend(q.order("check_date").limit(5000).execute().data or [])
+    return out
+
+
+def upsert_check_status_rows(rows: list[dict], chunk: int = 500) -> int:
+    """rows: [{symbol, check_date, statuses}] (idempotent per symbol/day)."""
+    client = get_client()
+    n = 0
+    for i in range(0, len(rows), chunk):
+        n += len(client.table("check_status_daily").upsert(rows[i:i + chunk], on_conflict="symbol,check_date")
+                 .execute().data or [])
+    return n
+
+
+def get_allocation_targets(user_id: str) -> dict | None:
+    """user_settings.allocation_targets (None when unset)."""
+    client = get_client()
+    rows = (client.table("user_settings").select("allocation_targets").eq("user_id", user_id)
+            .limit(1).execute().data or [])
+    return (rows[0] or {}).get("allocation_targets") if rows else None
+
+
+def set_allocation_targets(user_id: str, targets: dict | None) -> dict | None:
+    client = get_client()
+    client.table("user_settings").upsert({"user_id": user_id, "allocation_targets": targets},
+                                         on_conflict="user_id").execute()
+    return targets
+
+
+# ---- activity (cost control) ----
+
+def touch_user_last_seen(user_id: str) -> None:
+    """users.last_seen_at = now (migration 014)."""
+    client = get_client()
+    client.table("users").update({"last_seen_at": datetime.now(timezone.utc).isoformat()}).eq(
+        "id", user_id).execute()
+
+
+def get_users_activity() -> list[dict]:
+    """[{id, access_level, last_seen_at, last_login}] for every active user.
+    Falls back gracefully before 011 (no access_level) / 014 (no last_seen_at)."""
+    client = get_client()
+    for cols in ("id, access_level, last_seen_at, last_login", "id, access_level, last_login", "id, last_login"):
+        try:
+            return (client.table("users").select(cols).eq("is_active", True).limit(10000).execute().data or [])
+        except Exception as e:
+            if not _missing_schema(e):
+                raise
+    return []
+
+
+def get_follow_rows() -> list[dict]:
+    """[{user_id, symbol}] from every user's holdings and watchlist."""
+    client = get_client()
+    out: list[dict] = []
+    for table in ("holdings", "watchlist"):
+        try:
+            out.extend(_select_all_pages(lambda t=table: client.table(t).select("user_id, symbol")))
+        except Exception as e:
+            logger.debug(f"follow rows: {table} unavailable: {e}")
+    return out
+
+
+# ---- usage metrics ----
+
+def increment_data_usage(usage_date: str, metric: str, count: int) -> None:
+    client = get_client()
+    client.rpc("increment_data_usage", {"p_date": usage_date, "p_metric": metric, "p_count": int(count)}).execute()
+
+
+def get_data_usage(since: str) -> list[dict]:
+    client = get_client()
+    return _select_all_pages(lambda: (client.table("data_usage_daily").select("usage_date, metric, count")
+                                      .gte("usage_date", since).order("usage_date")))

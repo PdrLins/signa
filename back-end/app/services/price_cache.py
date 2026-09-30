@@ -291,6 +291,8 @@ def fetch_daily_closes(symbols: list[str], period: str = "1y") -> dict:
         import pandas as pd
         import yfinance as yf
 
+        from app.services import usage_metrics
+        usage_metrics.record("provider_calls.daily_history")
         data = yf.download(missing, period=period, interval="1d", progress=False,
                            threads=False, auto_adjust=True)
         multi = data is not None and not data.empty and isinstance(data.columns, pd.MultiIndex) \

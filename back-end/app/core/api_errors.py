@@ -20,6 +20,7 @@ from fastapi import HTTPException, status
 from loguru import logger
 
 PORTFOLIO_MIGRATION = "013_portfolio_foundation.sql"
+INSIGHTS_MIGRATION = "014_portfolio_insights.sql"
 
 _MISSING_MARKERS = (
     "does not exist", "could not find the table", "could not find the", "42p01", "42703",
@@ -48,16 +49,21 @@ class MigrationRequired(RuntimeError):
 
 
 async def run_db(fn: Callable, *args: Any, **kwargs: Any) -> Any:
+    return await run_db_for(PORTFOLIO_MIGRATION, fn, *args, **kwargs)
+
+
+async def run_db_for(migration: str, fn: Callable, *args: Any, **kwargs: Any) -> Any:
+    """run_db, naming `migration` in a migration_required error."""
     try:
         return await asyncio.to_thread(fn, *args, **kwargs)
     except HTTPException:
         raise
     except MigrationRequired:
-        raise migration_required()
+        raise migration_required(migration)
     except Exception as e:
         if is_missing_schema(e):
             logger.warning(f"portfolio: schema missing in {getattr(fn, '__name__', fn)}: {e}")
-            raise migration_required()
+            raise migration_required(migration)
         logger.warning(f"portfolio: DB call {getattr(fn, '__name__', fn)} failed: {e}")
         raise api_error("storage_unavailable", "Storage is unavailable, try again shortly.",
                         status.HTTP_503_SERVICE_UNAVAILABLE)

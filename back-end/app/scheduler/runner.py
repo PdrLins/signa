@@ -10,9 +10,11 @@ from app.scheduler.jobs import (
     after_close_scan,
     brain_watchdog,
     candidate_outcome_tracking,
+    check_status_snapshots,
     cleanup_expired_tokens,
     daily_learning_loop,
     holdings_monitor,
+    income_forecast_snapshots,
     midday_scan,
     morning_scan,
     pre_close_scan,
@@ -20,6 +22,7 @@ from app.scheduler.jobs import (
     pre_market_scan,
     quotes_refresh,
     quotes_refresh_after_close,
+    usage_flush,
     virtual_portfolio_snapshot,
 )
 
@@ -151,6 +154,33 @@ def init_scheduler() -> AsyncIOScheduler:
             name="Portfolio snapshots (4:30 PM ET)",
             replace_existing=True,
         )
+
+    # Portfolio insights history (migration 014, no AI): the forward income
+    # forecast per user and the Signa check statuses per followed symbol.
+    if settings.portfolio_insights_jobs_enabled:
+        scheduler.add_job(
+            income_forecast_snapshots,
+            CronTrigger(hour=18, minute=0, day_of_week="mon-fri", timezone=settings.timezone),
+            id="income_forecast_snapshots",
+            name="Income forecast snapshots (6:00 PM ET)",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            check_status_snapshots,
+            CronTrigger(hour=18, minute=15, day_of_week="mon-fri", timezone=settings.timezone),
+            id="check_status_snapshots",
+            name="Signa check status snapshots (6:15 PM ET)",
+            replace_existing=True,
+        )
+
+    # Data-usage counters (cost control, migration 014): flush every 5 minutes.
+    scheduler.add_job(
+        usage_flush,
+        CronTrigger(minute="*/5", timezone=settings.timezone),
+        id="usage_flush",
+        name="Usage counters flush (every 5 min)",
+        replace_existing=True,
+    )
 
     # Every 15 min during market hours (9 AM - 5 PM ET, Mon-Fri)
     if settings.watchdog_enabled:

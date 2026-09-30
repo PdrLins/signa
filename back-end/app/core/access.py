@@ -81,6 +81,8 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "action.settings.ai": ("owner", "Change AI config and budgets"),
     # --- Features (behaviour inside an area) ---
     "feature.tax_view": ("premium", "After-tax dividend view"),
+    "feature.intraday_chart": ("premium", "5-minute intraday chart (free: 15-minute bars)"),
+    "feature.full_history": ("premium", "Full portfolio history (ALL range; free: up to 1 year)"),
     # --- System capabilities ---
     "system.ai": ("owner", "Trigger AI calls (Grok, Claude, Codex)"),
     "system.unlimited_slots": ("owner", "No limit on followed stocks"),

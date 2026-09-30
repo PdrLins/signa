@@ -13,8 +13,14 @@ from app.core.access import get_user_access, reset_request_level, set_request_le
 from app.core.config import settings
 from app.core.security import decode_token
 from app.core.utils import get_client_ip
-from app.db.queries import insert_audit_log, is_token_blacklisted
+from app.core.cache import TTLCache
+from app.db.queries import insert_audit_log, is_token_blacklisted, touch_user_last_seen
 from app.models.audit import AuditEvent
+
+# users.last_seen_at (migration 014) is written at most once per hour per
+# user and process; it decides which symbols the quotes job refreshes.
+LAST_SEEN_EVERY_S = 3600
+_last_seen_written = TTLCache(max_size=10000, default_ttl=LAST_SEEN_EVERY_S)
 
 PUBLIC_PATHS = {
     "/api/v1/auth/login",
@@ -72,12 +78,29 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "slot_bonus": access["slot_bonus"],
         }
 
+        _touch_last_seen(payload.get("sub"))
+
         # The AI layer reads this to refuse calls for users without system.ai.
         level_token = set_request_level(access["level"])
         try:
             return await call_next(request)
         finally:
             reset_request_level(level_token)
+
+
+def _touch_last_seen(user_id: str | None) -> None:
+    """Fire-and-forget users.last_seen_at update, at most hourly. Never raises."""
+    if not user_id or _last_seen_written.get(user_id):
+        return
+    _last_seen_written.set(user_id, True)
+
+    def write() -> None:
+        try:
+            touch_user_last_seen(user_id)
+        except Exception as e:  # before migration 014, or DB down: activity falls back to last_login
+            logger.debug(f"last_seen_at not written for {user_id}: {e}")
+    import threading
+    threading.Thread(target=write, name="last-seen", daemon=True).start()
 
 
 def _unauthorized_response(detail: str) -> JSONResponse:

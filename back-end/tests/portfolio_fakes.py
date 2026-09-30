@@ -33,6 +33,12 @@ class FakePortfolioDB:
         self.prefs: dict[str, dict] = {}
         self.missing = False
         self.followed: dict[str, set[str]] = {}
+        self.snapshots: list[dict] = []          # portfolio_snapshots rows (+ user_id)
+        self.income_snaps: dict[tuple, dict] = {}  # (user_id, date) -> row
+        self.check_rows: dict[tuple, dict] = {}    # (symbol, date) -> row
+        self.watchlist: dict[str, list[dict]] = {}
+        self.quotes: dict[str, dict] = {}          # SYMBOL -> quote row (no network)
+        self.closes: dict[str, object] = {}        # SYMBOL -> pandas Series of daily closes
         for name in (
             "get_profile_settings", "upsert_profile_settings", "get_user_email",
             "get_people", "insert_person", "update_person", "delete_person",
@@ -41,12 +47,21 @@ class FakePortfolioDB:
             "list_transactions", "get_transaction", "insert_transactions", "update_transaction",
             "delete_transaction", "delete_transaction_batch",
             "get_notification_prefs", "upsert_notification_prefs",
+            # Phase 2 (migration 014)
+            "get_all_transactions", "get_portfolio_snapshot_rows", "get_income_snapshots",
+            "upsert_income_snapshot", "get_check_status_rows", "upsert_check_status_rows",
+            "get_allocation_targets", "set_allocation_targets",
         ):
             monkeypatch.setattr(queries, name, self._wrap(getattr(self, name)))
         monkeypatch.setattr(queries, "get_holdings_review_all_at", lambda uid: None)
         monkeypatch.setattr(queries, "set_holdings_review_all_at", lambda uid, at: None)
-        monkeypatch.setattr(queries, "get_watchlist", lambda uid: [])
+        monkeypatch.setattr(queries, "get_watchlist", lambda uid: [dict(w) for w in self.watchlist.get(uid, [])])
         monkeypatch.setattr("app.services.price_cache.get_usdcad_rate", lambda *a, **k: 1.4)
+        monkeypatch.setattr("app.services.quotes.get_quotes",
+                            lambda syms: {s.upper(): dict(self.quotes[s.upper()]) for s in syms
+                                          if s and s.upper() in self.quotes})
+        monkeypatch.setattr("app.services.price_cache.fetch_daily_closes",
+                            lambda syms, period="1y": {s: self.closes[s] for s in syms if s in self.closes})
         from app.services import slots
         monkeypatch.setattr(slots, "followed_symbols",
                             lambda uid: {h["symbol"] for h in self.holdings.values() if h["user_id"] == uid}
@@ -220,6 +235,42 @@ class FakePortfolioDB:
         for k in ids:
             del self.txs[k]
         return len(ids)
+
+    # ---- phase 2 (migration 014)
+    def get_all_transactions(self, uid):
+        rows = [dict(t) for t in self.txs.values() if t["user_id"] == uid]
+        rows.sort(key=lambda t: (str(t["trade_date"]), t["created_at"]))
+        return rows
+
+    def get_portfolio_snapshot_rows(self, uid, since=None, account_ids=None):
+        rows = [dict(r) for r in self.snapshots if r["user_id"] == uid
+                and (r.get("account_id") is None if account_ids is None else r.get("account_id") in account_ids)
+                and (since is None or str(r["snapshot_date"]) >= since)]
+        return sorted(rows, key=lambda r: str(r["snapshot_date"]))
+
+    def get_income_snapshots(self, uid, since=None):
+        rows = [dict(r) for (u, d), r in self.income_snaps.items() if u == uid and (since is None or d >= since)]
+        return sorted(rows, key=lambda r: r["snapshot_date"])
+
+    def upsert_income_snapshot(self, uid, snapshot_date, row):
+        self.income_snaps[(uid, snapshot_date)] = {**row, "snapshot_date": snapshot_date}
+        return 1
+
+    def get_check_status_rows(self, symbols, since=None):
+        rows = [dict(r) for (sym, d), r in self.check_rows.items() if sym in symbols and (since is None or d >= since)]
+        return sorted(rows, key=lambda r: r["check_date"])
+
+    def upsert_check_status_rows(self, rows, chunk=500):
+        for r in rows:
+            self.check_rows[(r["symbol"], r["check_date"])] = dict(r)
+        return len(rows)
+
+    def get_allocation_targets(self, uid):
+        return (self.settings.get(uid) or {}).get("allocation_targets")
+
+    def set_allocation_targets(self, uid, targets):
+        self.settings.setdefault(uid, {"user_id": uid})["allocation_targets"] = targets
+        return targets
 
     # ---- notification prefs
     def get_notification_prefs(self, uid):
