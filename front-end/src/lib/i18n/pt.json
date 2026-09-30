@@ -39,16 +39,16 @@
   },
   "login": {
     "welcome": "Signa",
-    "subtitle": "Sinais mais inteligentes. Melhores decisões.",
-    "tagline": "Motor de sinais com IA escaneando 188+ tickers na TSX, NYSE, NASDAQ e cripto — entregando insights acionáveis 4 vezes ao dia.",
-    "featureScanning": "Escaneamento em tempo real",
-    "featureScanningDesc": "188+ tickers em 4 bolsas",
-    "featureAi": "IA multi-modelo",
-    "featureAiDesc": "3 provedores para análise imparcial",
-    "featureAlerts": "Alertas instantâneos",
-    "featureAlertsDesc": "Notificações no Telegram em segundos",
+    "subtitle": "Sua carteira, dividendos e eventos, com clareza.",
+    "tagline": "Acompanhe todas as contas num só lugar, veja cada dividendo e evento antes que aconteça e entenda o que você realmente tem.",
+    "featureScanning": "Todas as suas contas",
+    "featureScanningDesc": "Ações, ETFs e cripto, com os nomes que quiser",
+    "featureAi": "Dividendos, planejados",
+    "featureAiDesc": "Cada pagamento, mês a mês",
+    "featureAlerts": "Nada passa",
+    "featureAlertsDesc": "Resultados, datas ex e seus alertas de preço",
     "signIn": "Entrar",
-    "signInDesc": "Acesse seu painel de sinais",
+    "signInDesc": "Acesse sua carteira",
     "username": "Usuário",
     "password": "Senha",
     "signingIn": "Entrando...",
@@ -3202,5 +3202,77 @@
     "failed": "Não foi possível atualizar. Tente de novo.",
     "close": "Fechar a busca",
     "results": "Resultados"
+  },
+  "pricing": {
+    "title": "Planos",
+    "subtitle": "Comece grátis. Faça upgrade quando acompanhar mais de 10 ações.",
+    "back": "Voltar ao login",
+    "perMonth": "/mês",
+    "free": {
+      "name": "Grátis",
+      "price": "C$0",
+      "tagline": "Tudo o que você precisa para acompanhar uma carteira.",
+      "cta": "Entrar para começar"
+    },
+    "premium": {
+      "name": "Premium",
+      "price": "Em breve",
+      "tagline": "Para carteiras maiores e quem acompanha com frequência.",
+      "cta": "Em breve",
+      "badge": "Mais completo"
+    },
+    "everythingInFree": "Tudo do Grátis, mais:",
+    "freeFeatures": [
+      "Acompanhe até 10 ações, ETFs ou cripto",
+      "Suas próprias contas e pessoas, com os nomes que quiser",
+      "Transações à mão ou por arquivo CSV",
+      "Gráfico da carteira até 1 ano, preços a cada 15 minutos",
+      "Calendário de dividendos, renda por mês e próximos pagamentos",
+      "Nota de segurança dos dividendos e qualidade da renda",
+      "Próximos eventos: resultados, datas ex-dividendo e eventos econômicos importantes",
+      "Verificações do Signa em cada ação: tendência, sobrecompra, volume, resultados, saúde do dividendo",
+      "Alocação, mix alvo e onde colocar o próximo aporte",
+      "Desempenho, com comparação opcional a um índice",
+      "3 alertas de preço",
+      "English e Português"
+    ],
+    "premiumFeatures": [
+      "Ações ilimitadas",
+      "Alertas de preço ilimitados",
+      "Preços a cada minuto e gráfico intradiário de 5 minutos",
+      "Gráficos de 5 anos e histórico completo",
+      "Tipos de conta (TFSA, RRSP, IRA, 401(k)…) com dividendos após impostos e dicas fiscais, para Canadá e EUA"
+    ],
+    "compareTitle": "Compare os planos",
+    "rows": {
+      "stocks": "Ações acompanhadas",
+      "alerts": "Alertas de preço",
+      "prices": "Atualização de preços",
+      "intraday": "Detalhe do gráfico de 1 dia",
+      "history": "Histórico do gráfico",
+      "tax": "Dividendos após impostos (Canadá / EUA)",
+      "allocation": "Alocação e metas",
+      "events": "Próximos eventos",
+      "checks": "Verificações do Signa"
+    },
+    "values": {
+      "ten": "10",
+      "unlimited": "Ilimitado",
+      "three": "3",
+      "min15": "A cada 15 min",
+      "min1": "A cada minuto",
+      "m15": "15 minutos",
+      "m5": "5 minutos",
+      "y1": "Até 1 ano",
+      "all": "Histórico completo",
+      "no": "—",
+      "yes": "Incluído"
+    },
+    "notes": [
+      "Os preços vêm de dados de mercado gratuitos e têm atraso de cerca de 15 minutos.",
+      "O Signa mostra informação, não recomendação financeira.",
+      "O Premium ainda não está à venda; anunciaremos o preço antes."
+    ],
+    "seePlans": "Ver planos"
   }
 }

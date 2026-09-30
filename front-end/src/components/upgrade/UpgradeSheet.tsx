@@ -106,6 +106,11 @@ export function UpgradeSheet() {
               {tu.soon}
             </p>
           )}
+          <Link href="/pricing" onClick={close}
+            className="min-h-[44px] inline-flex items-center justify-center text-[13px] font-medium rounded-xl focus-visible:outline focus-visible:outline-2"
+            style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}>
+            {t.pricing.seePlans}
+          </Link>
           {state.reason === 'slot_limit' ? (
             <Link href="/watchlist" onClick={close} className={`${btnBase} font-medium`}
               style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text, outlineColor: theme.colors.primary }}>

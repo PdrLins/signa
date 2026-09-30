@@ -39,16 +39,16 @@
   },
   "login": {
     "welcome": "Signa",
-    "subtitle": "Smarter signals. Better decisions.",
-    "tagline": "AI-driven signal engine scanning 188+ tickers across TSX, NYSE, NASDAQ, and crypto — delivering actionable insights 4 times daily.",
-    "featureScanning": "Real-time scanning",
-    "featureScanningDesc": "188+ tickers across 4 exchanges",
-    "featureAi": "Multi-model AI",
-    "featureAiDesc": "3 providers for unbiased analysis",
-    "featureAlerts": "Instant alerts",
-    "featureAlertsDesc": "Telegram notifications in seconds",
+    "subtitle": "Your portfolio, dividends and events, clearly.",
+    "tagline": "Track every account in one place, see each dividend and event before it happens, and understand what you really own.",
+    "featureScanning": "All your accounts",
+    "featureScanningDesc": "Stocks, ETFs and crypto, named your way",
+    "featureAi": "Dividends, planned",
+    "featureAiDesc": "Every payment, month by month",
+    "featureAlerts": "Nothing missed",
+    "featureAlertsDesc": "Earnings, ex-dates and your price alerts",
     "signIn": "Sign in",
-    "signInDesc": "Access your signal dashboard",
+    "signInDesc": "Access your portfolio",
     "username": "Username",
     "password": "Password",
     "signingIn": "Signing in...",
@@ -3202,5 +3202,77 @@
     "failed": "Couldn't update. Try again.",
     "close": "Close search",
     "results": "Results"
+  },
+  "pricing": {
+    "title": "Plans",
+    "subtitle": "Start free. Upgrade when you follow more than 10 stocks.",
+    "back": "Back to sign in",
+    "perMonth": "/month",
+    "free": {
+      "name": "Free",
+      "price": "C$0",
+      "tagline": "Everything you need to track a portfolio.",
+      "cta": "Sign in to start"
+    },
+    "premium": {
+      "name": "Premium",
+      "price": "Coming soon",
+      "tagline": "For bigger portfolios and people who check often.",
+      "cta": "Coming soon",
+      "badge": "Most complete"
+    },
+    "everythingInFree": "Everything in Free, plus:",
+    "freeFeatures": [
+      "Follow up to 10 stocks, ETFs or crypto",
+      "Your own accounts and people, named your way",
+      "Transactions by hand or from a CSV file",
+      "Portfolio chart up to 1 year, prices every 15 minutes",
+      "Dividend calendar, income per month and upcoming payments",
+      "Dividend safety grades and income quality",
+      "Coming up: earnings, ex-dividend dates and key economic events",
+      "Signa checks on every stock: trend, overheating, trading volume, earnings, dividend health",
+      "Allocation, target mix and where your next deposit should go",
+      "Performance, with an optional comparison to an index",
+      "3 price alerts",
+      "English and Português"
+    ],
+    "premiumFeatures": [
+      "Unlimited stocks",
+      "Unlimited price alerts",
+      "Prices every minute and a 5-minute intraday chart",
+      "5-year and full-history charts",
+      "Account types (TFSA, RRSP, IRA, 401(k)…) with after-tax dividends and tax tips, for Canada and the US"
+    ],
+    "compareTitle": "Compare plans",
+    "rows": {
+      "stocks": "Stocks you follow",
+      "alerts": "Price alerts",
+      "prices": "Price updates",
+      "intraday": "1-day chart detail",
+      "history": "Chart history",
+      "tax": "After-tax dividends (Canada / US)",
+      "allocation": "Allocation and targets",
+      "events": "Coming up feed",
+      "checks": "Signa checks"
+    },
+    "values": {
+      "ten": "10",
+      "unlimited": "Unlimited",
+      "three": "3",
+      "min15": "Every 15 min",
+      "min1": "Every minute",
+      "m15": "15-minute",
+      "m5": "5-minute",
+      "y1": "Up to 1 year",
+      "all": "All history",
+      "no": "—",
+      "yes": "Included"
+    },
+    "notes": [
+      "Prices come from free market data and are delayed about 15 minutes.",
+      "Signa shows information, not financial advice.",
+      "Premium isn't on sale yet; we'll announce the price before it is."
+    ],
+    "seePlans": "See plans"
   }
 }

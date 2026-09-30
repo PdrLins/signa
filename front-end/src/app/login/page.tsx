@@ -8,7 +8,8 @@ import { useThemeStore } from '@/store/themeStore'
 import { useAuthStore } from '@/store/authStore'
 import { authApi } from '@/lib/api'
 import { LangSwitcher } from '@/components/ui/LangSwitcher'
-import { Eye, EyeOff, Activity, Cpu, Send, ArrowLeft, Shield } from 'lucide-react'
+import Link from 'next/link'
+import { Eye, EyeOff, ArrowLeft, Shield, Wallet, CalendarDays, Bell } from 'lucide-react'
 
 export default function LoginPage() {
   const theme = useTheme()
@@ -153,9 +154,9 @@ export default function LoginPage() {
   }
 
   const features = [
-    { icon: Activity, label: t.login.featureScanning, desc: t.login.featureScanningDesc },
-    { icon: Cpu, label: t.login.featureAi, desc: t.login.featureAiDesc },
-    { icon: Send, label: t.login.featureAlerts, desc: t.login.featureAlertsDesc },
+    { icon: Wallet, label: t.login.featureScanning, desc: t.login.featureScanningDesc },
+    { icon: CalendarDays, label: t.login.featureAi, desc: t.login.featureAiDesc },
+    { icon: Bell, label: t.login.featureAlerts, desc: t.login.featureAlertsDesc },
   ]
 
   return (
@@ -337,6 +338,15 @@ export default function LoginPage() {
                   </button>
                 </div>
               </form>
+              <p className="mt-6 text-center text-sm">
+                <Link
+                  href="/pricing"
+                  className="inline-flex min-h-[44px] items-center font-medium rounded-lg px-2 focus-visible:outline focus-visible:outline-2"
+                  style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}
+                >
+                  {t.pricing.seePlans}
+                </Link>
+              </p>
             </>
           ) : (
             <>

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { TOKEN_KEY } from '@/lib/constants'
 
-const PUBLIC_PATHS = ['/login', '/api', '/favicon.ico']
+const PUBLIC_PATHS = ['/login', '/pricing', '/api', '/favicon.ico']
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
