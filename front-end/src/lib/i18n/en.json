@@ -71,7 +71,16 @@
     "backToLogin": "Back to login",
     "attemptsRemaining": "Invalid credentials. {remaining} attempt{s} remaining.",
     "lastLoginAt": "Last login:",
-    "firstLogin": "First time signing in"
+    "firstLogin": "First time signing in",
+    "previewLabel": "Example of the Signa app with sample figures",
+    "previewPortfolio": "Portfolio",
+    "previewExample": "Example",
+    "previewDividends": "Dividends",
+    "previewPerMonth": "/month",
+    "previewNext12m": "Next 12 months",
+    "previewComingUp": "Coming up",
+    "previewEvent": "ENB ex-dividend Fri",
+    "notAdvice": "Information, not advice"
   },
   "overview": {
     "morning": "Good morning",

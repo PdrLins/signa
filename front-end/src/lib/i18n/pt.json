@@ -71,7 +71,16 @@
     "backToLogin": "Voltar ao login",
     "attemptsRemaining": "Credenciais inválidas. {remaining} tentativa{s} restante{s}.",
     "lastLoginAt": "Último acesso:",
-    "firstLogin": "Primeiro acesso"
+    "firstLogin": "Primeiro acesso",
+    "previewLabel": "Exemplo do app Signa com números de amostra",
+    "previewPortfolio": "Carteira",
+    "previewExample": "Exemplo",
+    "previewDividends": "Dividendos",
+    "previewPerMonth": "/mês",
+    "previewNext12m": "Próximos 12 meses",
+    "previewComingUp": "Próximos eventos",
+    "previewEvent": "ENB data ex sexta",
+    "notAdvice": "Informação, não recomendação"
   },
   "overview": {
     "morning": "Bom dia",

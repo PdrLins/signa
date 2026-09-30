@@ -8,8 +8,9 @@ import { useThemeStore } from '@/store/themeStore'
 import { useAuthStore } from '@/store/authStore'
 import { authApi } from '@/lib/api'
 import { LangSwitcher } from '@/components/ui/LangSwitcher'
+import { LoginShowcase } from '@/components/login/LoginShowcase'
 import Link from 'next/link'
-import { Eye, EyeOff, ArrowLeft, Shield, Wallet, CalendarDays, Bell } from 'lucide-react'
+import { Eye, EyeOff, ArrowLeft, Shield } from 'lucide-react'
 
 export default function LoginPage() {
   const theme = useTheme()
@@ -153,11 +154,6 @@ export default function LoginPage() {
     }
   }
 
-  const features = [
-    { icon: Wallet, label: t.login.featureScanning, desc: t.login.featureScanningDesc },
-    { icon: CalendarDays, label: t.login.featureAi, desc: t.login.featureAiDesc },
-    { icon: Bell, label: t.login.featureAlerts, desc: t.login.featureAlertsDesc },
-  ]
 
   return (
     <div
@@ -167,75 +163,15 @@ export default function LoginPage() {
       <div className="absolute top-4 right-4 z-10">
         <LangSwitcher />
       </div>
-      {/* Left: branding panel — dark */}
-      <div
-        className="hidden lg:flex flex-col justify-between w-[520px] p-14 relative overflow-hidden"
-        style={{
-          background: 'linear-gradient(165deg, #0a0a0a 0%, #141414 50%, #1a1a1a 100%)',
-        }}
-      >
-        {/* Subtle accent glow */}
-        <div
-          className="absolute -top-40 -right-40 w-96 h-96 rounded-full opacity-[0.07]"
-          style={{ backgroundColor: theme.colors.primary }}
-        />
-        <div
-          className="absolute -bottom-32 -left-32 w-72 h-72 rounded-full opacity-[0.05]"
-          style={{ backgroundColor: theme.colors.primary }}
-        />
-
-        <div className="relative z-10">
-          <h1 className="text-[42px] font-bold text-white tracking-tight leading-none">
-            Signa
-          </h1>
-          <p className="text-white/80 mt-4 text-xl font-medium leading-snug">
-            {t.login.subtitle}
-          </p>
-          <p className="text-white/50 mt-3 text-sm leading-relaxed max-w-[380px]">
-            {t.login.tagline}
-          </p>
-        </div>
-
-        <div className="relative z-10 space-y-5">
-          {features.map((feat) => (
-            <div key={feat.label} className="flex items-start gap-4">
-              <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                style={{ backgroundColor: 'rgba(255,255,255,0.06)' }}
-              >
-                <feat.icon size={18} className="text-white/90" />
-              </div>
-              <div>
-                <p className="text-white/90 text-sm font-semibold">{feat.label}</p>
-                <p className="text-white/50 text-[13px] mt-0.5">{feat.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      <LoginShowcase />
 
       {/* Right: form panel */}
       <div className="flex-1 flex items-center justify-center px-6">
         <div className="w-full max-w-[380px]">
           {/* Mobile header */}
-          <div className="lg:hidden mb-8">
-            <div
-              className="rounded-2xl px-6 py-8 mb-6 relative overflow-hidden"
-              style={{
-                background: 'linear-gradient(165deg, #0a0a0a 0%, #141414 50%, #1a1a1a 100%)',
-              }}
-            >
-              <div
-                className="absolute -top-20 -right-20 w-48 h-48 rounded-full opacity-[0.07]"
-                style={{ backgroundColor: theme.colors.primary }}
-              />
-              <h1 className="text-[28px] font-bold text-white tracking-tight leading-none relative z-10">
-                Signa
-              </h1>
-              <p className="text-white/70 mt-2 text-sm font-medium relative z-10">
-                {t.login.subtitle}
-              </p>
-            </div>
+          <div className="lg:hidden mb-8 flex flex-col gap-1.5">
+            <p className="text-[26px] font-bold tracking-tight" style={{ color: theme.colors.text }}>Signa</p>
+            <p className="text-[15px]" style={{ color: theme.colors.textSub }}>{t.login.subtitle}</p>
           </div>
 
           {step === 1 ? (
