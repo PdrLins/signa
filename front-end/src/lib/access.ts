@@ -13,6 +13,8 @@ const ROUTE_AREAS: [string, string][] = [
   ['/performance', 'area.performance'],
   ['/brain', 'area.brain'],
   ['/holdings', 'area.holdings'],
+  ['/stocks', 'area.stock'],
+  ['/dividends', 'area.dividends'],
   ['/portfolio', 'area.holdings'],
   ['/watchlist', 'area.watchlist'],
   ['/how-it-works', 'area.how_it_works'],

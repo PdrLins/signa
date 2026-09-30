@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from loguru import logger
 
-from app.core.access import require_feature
+from app.core.access import can, require_feature
 from app.core.dependencies import get_current_user
 from app.scanners import market_scanner
 from app.scanners.universe import get_exchange
@@ -131,11 +131,13 @@ async def get_ticker_chart(
     change = current - first
     change_pct = (change / first * 100) if first else 0
 
-    # Get signal overlay points (BUY/SELL signals in this period)
-    from app.db import queries
-    all_signals = queries.get_signals_by_ticker(ticker, limit=100)
+    # Get signal overlay points (BUY/SELL signals in this period). The chart
+    # is free; the brain's signals are not — only users with area.signals
+    # get the markers.
     signal_markers = []
-    if data_points:
+    if data_points and can(user.get("access_level") or "free", "area.signals"):
+        from app.db import queries
+        all_signals = queries.get_signals_by_ticker(ticker, limit=100)
         chart_start = data_points[0]["date"]
         for s in all_signals:
             created = s.get("created_at", "")

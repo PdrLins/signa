@@ -281,7 +281,12 @@ const HoldingCard = memo(function HoldingCard(props: ItemProps) {
       style={{ backgroundColor: theme.colors.surface, border: `1px solid ${theme.colors.border}` }}>
       <div className="flex items-start justify-between gap-3 min-w-0">
         <div className="min-w-0">
-          <h3 className="font-mono font-semibold text-[16px]" style={{ color: theme.colors.text }}>{h.symbol}</h3>
+          <h3 className="font-mono font-semibold text-[16px]">
+            <Link href={`/stocks/${encodeURIComponent(h.symbol)}`} className="underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2"
+              style={{ color: theme.colors.text, outlineColor: theme.colors.primary }} aria-label={fill(t.stock.openPage, { symbol: h.symbol })}>
+              {h.symbol}
+            </Link>
+          </h3>
           <p className="text-[12px] truncate" style={{ color: theme.colors.textSub }}>
             {h.name ?? DASH}{h.exchange ? ` · ${h.exchange}` : ''}
           </p>
@@ -336,7 +341,12 @@ const HoldingRow = memo(function HoldingRow(props: ItemProps) {
     <>
       <tr style={{ borderTop: `1px solid ${theme.colors.border}` }}>
         <th scope="row" className={`${td} text-left font-normal`}>
-          <p className="font-mono font-semibold text-[14px]" style={{ color: theme.colors.text }}>{h.symbol}</p>
+          <p className="font-mono font-semibold text-[14px]">
+            <Link href={`/stocks/${encodeURIComponent(h.symbol)}`} className="underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2"
+              style={{ color: theme.colors.text, outlineColor: theme.colors.primary }} aria-label={fill(t.stock.openPage, { symbol: h.symbol })}>
+              {h.symbol}
+            </Link>
+          </p>
           <p className="text-[12px] max-w-[220px] truncate" style={{ color: theme.colors.textSub }} title={h.name ?? undefined}>{h.name ?? DASH}</p>
         </th>
         <td className={`${td} text-right tabular-nums`}>

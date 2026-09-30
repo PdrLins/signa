@@ -215,3 +215,22 @@ def test_holdings_monitor_skips_grok_for_free(monkeypatch):
     assert not called and updates[0]["holding_status"]["sentiment"] == {"skipped": "plan"}
     asyncio.run(hm.monitor_holdings([h], ai_allowed=True))
     assert called
+
+
+def test_chart_hides_signal_markers_from_free(monkeypatch):
+    import pandas as pd
+
+    from app.api.v1 import tickers
+    from app.db import queries
+
+    idx = pd.date_range("2026-09-01", periods=3, freq="D")
+    df = pd.DataFrame({"Open": [1, 2, 3], "High": [1, 2, 3], "Low": [1, 2, 3], "Close": [1, 2, 3],
+                       "Volume": [10, 10, 10]}, index=idx)
+    monkeypatch.setattr("yfinance.Ticker", lambda _t: type("T", (), {"history": lambda self, **k: df})())
+    monkeypatch.setattr(queries, "get_signals_by_ticker",
+                        lambda *a, **k: [{"created_at": "2026-09-02", "action": "BUY", "score": 80}])
+    for level, expected in (("free", 0), ("owner", 1)):
+        _as(monkeypatch, level)
+        tickers._chart_cache.clear() if hasattr(tickers, "_chart_cache") else None
+        body = _client(monkeypatch, tickers.router).get("/api/v1/tickers/MSFT/chart").json()
+        assert len(body["signal_markers"]) == expected, (level, body)

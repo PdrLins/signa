@@ -7,8 +7,10 @@ import type { ScansResponse } from '@/types/scan'
 import type { TodayInsights, PerformanceInsights, BacktestInsights, SignalTrail, SignalVerdict } from '@/types/insights'
 import type { CheckJob, CheckMode, CompareJob } from '@/types/check'
 import type { SymbolSearchResponse } from '@/types/symbols'
+import type { StockPage } from '@/types/stock'
 import type { LoginRequest, LoginResponse, OtpVerifyRequest, AuthResponse } from '@/types/auth'
 import type { MeResponse } from '@/types/access'
+import type { DividendCalendarResponse } from '@/types/dividends'
 import { ApiAccessError } from '@/lib/access'
 import type {
   AllocateResponse, Holding, HoldingPatch, HoldingsResponse, HoldingUpsertItem, ResolveResponse, ReviewJob,
@@ -397,6 +399,12 @@ export const symbolsApi = {
     get<SymbolSearchResponse>('/symbols/search', { q, limit }, { signal }),
 }
 
+// Free stock page (price, dividends, events, Signa checks). 400/404 come
+// back as CheckApiError with code invalid_symbol / not_found.
+export const stocksApi = {
+  get: (symbol: string) => checkCall<StockPage>('get', `/stocks/${encodeURIComponent(symbol)}`),
+}
+
 // My holdings — coded 4xx/503 errors are returned as CheckApiError (same
 // {detail: {code, message}} shape as /check) so the page can translate them.
 async function holdingsCall<T>(
@@ -442,6 +450,13 @@ export const holdingsApi = {
   allocate: (includeWatchlist = false) =>
     holdingsCall<AllocateResponse>('get', '/holdings/allocate-ideas', undefined,
       { params: includeWatchlist ? { include_watchlist: true } : undefined, timeout: 45_000 }),
+}
+
+// Dividend calendar (free, no AI) — same coded-error handling as holdings
+export const dividendsApi = {
+  calendar: (months = 12, includeWatchlist = false) =>
+    holdingsCall<DividendCalendarResponse>('get', '/dividends/calendar', undefined,
+      { params: { months, include_watchlist: includeWatchlist }, timeout: 60_000 }),
 }
 
 export const healthApi = {

@@ -27,7 +27,8 @@
     "closeMore": "Close menu",
     "check": "Check a stock",
     "holdings": "My holdings",
-    "holdingsShort": "Holdings"
+    "holdingsShort": "Holdings",
+    "dividends": "Dividends"
   },
   "login": {
     "welcome": "Signa",
@@ -2124,5 +2125,177 @@
     "slots": "{used} of {limit} stocks followed",
     "slotsUnlimited": "{used} stocks followed",
     "plan": "Plan"
+  },
+  "dividendsPage": {
+    "title": "Dividends",
+    "subtitle": "Upcoming ex-dividend and payment dates for your holdings, and the cash to expect.",
+    "includeWatchlist": "Include watchlist",
+    "includeWatchlistHelp": "Show dividend dates for watchlist stocks you don't hold (no cash amounts).",
+    "refreshing": "Updating…",
+    "cards": {
+      "next12m": "Expected next 12 months",
+      "next12mHelp": "Cash from your holdings, converted to CAD",
+      "fxMissing": "Some amounts couldn't be converted to CAD; see the split.",
+      "nextPayment": "Next payment",
+      "nextPaymentNone": "No payment scheduled",
+      "perShareOnly": "{amount} per share",
+      "payers": "Dividend payers",
+      "payersValue": "{n} of {total}",
+      "yearly": "Yearly income {amount}",
+      "yield": "Forward yield {pct}"
+    },
+    "chart": {
+      "title": "Cash per month",
+      "aria": "Expected dividend cash per month, in CAD",
+      "bar": "{month}: {amount}",
+      "noData": "Add your shares to see cash per month."
+    },
+    "agenda": {
+      "title": "Calendar",
+      "monthTotal": "Total {amount}",
+      "none": "No upcoming dividends in the next 12 months.",
+      "ex": "Ex {date}",
+      "pays": "Pays {date}",
+      "paysUnknown": "Pay date not known yet",
+      "perShare": "{amount}/share",
+      "addShares": "Add shares",
+      "addSharesHelp": "Add your number of shares to see the cash amount",
+      "openStock": "Open {symbol}"
+    },
+    "tags": {
+      "estimated": "Estimated",
+      "estimatedHelp": "Projected from the payment history; not announced yet",
+      "payEstimated": "Pay date estimated",
+      "special": "Special",
+      "specialHelp": "A one-off payment larger than the usual dividend",
+      "watchlist": "Watchlist",
+      "watchlistHelp": "On your watchlist, not held: no cash counted",
+      "exPassed": "Ex-date passed",
+      "exPassedHelp": "You qualified for this payment; it hasn't been paid yet"
+    },
+    "notes": {
+      "missingShares": "Add your shares to see cash amounts for: {symbols}.",
+      "editHoldings": "Edit holdings",
+      "nonPayers": "Don't pay dividends: {symbols}.",
+      "unknown": "No dividend data right now for: {symbols}.",
+      "disclaimer": "Dates and amounts come from market data and may change. Estimated items are projected from past payments. Amounts are before tax and withholding."
+    },
+    "reasons": {
+      "crypto": "crypto",
+      "no_dividend": "no dividend",
+      "suspended": "suspended"
+    },
+    "empty": {
+      "title": "No holdings yet",
+      "body": "Add the stocks and ETFs you own to see when they pay and how much cash to expect.",
+      "cta": "Add holdings"
+    },
+    "errors": {
+      "holdings_unavailable": "Holdings aren't available right now. Try again later.",
+      "network": "Couldn't reach the server. Check your connection.",
+      "internal": "Couldn't load the dividend calendar. Try again.",
+      "retry": "Try again"
+    }
+  },
+  "stock": {
+    "openPage": "Open the {symbol} stock page",
+    "back": "Back",
+    "loadingLabel": "Loading {symbol}",
+    "notFoundTitle": "We couldn't find {symbol}",
+    "notFoundBody": "Check the ticker. Canadian listings end in .TO (ENB.TO) and crypto in -USD (BTC-USD).",
+    "errorTitle": "Couldn't load this stock",
+    "retry": "Try again",
+    "assetTypes": {
+      "stock": "Stock",
+      "etf": "ETF",
+      "crypto": "Crypto"
+    },
+    "today": "today",
+    "asOf": "As of {time}",
+    "range52w": "52-week range",
+    "low": "Low",
+    "high": "High",
+    "marketCap": "Market cap",
+    "sector": "Sector",
+    "chartTitle": "Price",
+    "inHoldings": "In your holdings",
+    "checksTitle": "Signa checks",
+    "checksSubtitle": "Simple rules on trend, momentum, trading volume, earnings and dividends.",
+    "disclaimer": "Information only, not advice. These checks describe the stock; on their own they did not beat simply holding the S&P 500 in our backtest.",
+    "statusLabel": {
+      "pass": "Pass",
+      "warn": "Watch",
+      "fail": "Fail",
+      "na": "N/A"
+    },
+    "checkAria": "{label}: {status}",
+    "ratings": {
+      "good": "good",
+      "fair": "fair",
+      "poor": "poor",
+      "n/a": "not rated"
+    },
+    "checks": {
+      "uptrend": {
+        "label": "Uptrend",
+        "uptrend": "Price {price} is above its 200-day average ({sma200}), and the 50-day average is above the 200-day.",
+        "below_sma200": "Price {price} is below its 200-day average ({sma200}).",
+        "sma50_below_sma200": "The 50-day average ({sma50}) is below the 200-day average ({sma200}).",
+        "downtrend": "Price {price} is below its 200-day average ({sma200}) and the 50-day average is below the 200-day: a downtrend.",
+        "insufficient_history": "Less than 200 days of prices, so the trend is not measured."
+      },
+      "not_overheated": {
+        "label": "Not overheated",
+        "calm": "RSI {rsi} (limit {max_rsi}) and {ext_pct}% from the 50-day average (limit {max_ext_pct}%).",
+        "rsi_overbought": "RSI {rsi} is above {max_rsi}: the price rose fast recently.",
+        "overextended_vs_sma50": "Price is {ext_pct}% above its 50-day average (more than {max_ext_pct}%).",
+        "rsi_and_extended": "RSI {rsi} is above {max_rsi} and the price is {ext_pct}% above its 50-day average.",
+        "no_data": "Not enough price data."
+      },
+      "liquidity": {
+        "label": "Liquidity",
+        "liquid": "About {dollar_volume} traded per day (20-day average; at least {min}).",
+        "low_liquidity": "Only about {dollar_volume} traded per day (below {min}): spreads can be wider and selling quickly harder.",
+        "no_data": "No trading volume data."
+      },
+      "earnings_soon": {
+        "label": "Earnings",
+        "earnings_later": "Next report on {date}, in {trading_days} trading days.",
+        "earnings_soon": "Earnings report on {date}, within {trading_days} trading days: the price can jump either way.",
+        "no_date": "No earnings date announced yet.",
+        "not_applicable": "Funds and crypto don't report earnings."
+      },
+      "dividend_health": {
+        "label": "Dividend health",
+        "measured": "Rated {rating}. Yield {yield}%, payout {payout}%, 5-year growth {cagr}%/yr.",
+        "none": "Pays no dividend.",
+        "etf_distribution": "Fund distribution of about {yield}% a year; the cut and growth rules apply to company dividends only.",
+        "suspended": "The dividend appears suspended.",
+        "not_applicable": "Crypto pays no dividends.",
+        "unavailable": "Dividend data is unavailable right now."
+      }
+    },
+    "eventsTitle": "Upcoming events",
+    "events": {
+      "earnings": "Earnings report",
+      "exDividend": "Ex-dividend date",
+      "payment": "Dividend payment",
+      "estimated": "estimated",
+      "inDays": "in {n} days",
+      "today": "today",
+      "amount": "{amount} per share",
+      "none": "No upcoming events known.",
+      "exHelp": "Own the shares before the ex-dividend date to receive the payment."
+    },
+    "actions": {
+      "addWatchlist": "Add to watchlist",
+      "removeWatchlist": "Remove from watchlist",
+      "inWatchlist": "In watchlist",
+      "added": "{symbol} added to your watchlist",
+      "removed": "{symbol} removed from your watchlist",
+      "failed": "Couldn't update the watchlist. Try again.",
+      "openSignals": "Open in Signals",
+      "checkAi": "Check with AI"
+    }
   }
 }

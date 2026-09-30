@@ -20,8 +20,7 @@ import {
   HelpCircle,
   ScrollText,
   Search,
-  Wallet,
-} from 'lucide-react'
+  Wallet, CalendarDays } from 'lucide-react'
 import { isNavActive } from '@/components/layout/LeftNav'
 
 export function BottomNav() {
@@ -39,6 +38,7 @@ export function BottomNav() {
       { label: t.nav.today, href: '/today', icon: LayoutDashboard, feature: 'area.today' },
       { label: t.nav.signals, href: '/signals', icon: Activity, feature: 'area.signals' },
       { label: t.nav.holdingsShort, href: '/holdings', icon: Wallet, feature: 'area.holdings' },
+      { label: t.nav.dividends, href: '/dividends', icon: CalendarDays, feature: 'area.dividends' },
       { label: t.nav.isItWorkingShort, href: '/performance', icon: ChartLine, feature: 'area.performance' },
     ].filter((i) => can(i.feature))
     const more = [
@@ -51,10 +51,12 @@ export function BottomNav() {
       { label: t.nav.logs, href: '/logs', icon: ScrollText, feature: 'area.logs' },
       { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle, feature: 'area.how_it_works' },
     ].filter((i) => can(i.feature))
-    const promoted = more.slice(0, Math.max(0, 4 - main.length))
+    const shown = main.slice(0, 4)
+    const rest = [...main.slice(4), ...more]
+    const promoted = rest.slice(0, Math.max(0, 4 - shown.length))
     return {
-      TABS: [...main, ...promoted, { label: t.nav.more, href: '#more', icon: Menu, feature: '' }],
-      MORE_ITEMS: more.slice(promoted.length),
+      TABS: [...shown, ...promoted, { label: t.nav.more, href: '#more', icon: Menu, feature: '' }],
+      MORE_ITEMS: rest.slice(promoted.length),
     }
   }, [t, can])
 

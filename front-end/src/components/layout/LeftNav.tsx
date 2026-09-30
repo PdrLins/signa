@@ -22,6 +22,7 @@ import {
   LogOut,
   Search,
   Wallet,
+  CalendarDays,
 } from 'lucide-react'
 
 // Pages reached through Settings (and the mobile "More" sheet) keep the
@@ -83,6 +84,7 @@ export function LeftNav() {
     { label: t.nav.check, href: '/check', icon: Search, feature: 'area.check' },
     { label: t.nav.positions, href: '/positions', icon: Briefcase, feature: 'area.positions' },
     { label: t.nav.holdings, href: '/holdings', icon: Wallet, feature: 'area.holdings' },
+    { label: t.nav.dividends, href: '/dividends', icon: CalendarDays, feature: 'area.dividends' },
     { label: t.nav.isItWorking, href: '/performance', icon: ChartLine, feature: 'area.performance' },
     { label: t.nav.brain, href: '/brain', icon: Brain, feature: 'area.brain' },
     { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle, feature: 'area.how_it_works' },

@@ -50,6 +50,8 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "area.performance": ("owner", "Is it working? (brain track record)"),
     "area.brain": ("owner", "Brain rules, knowledge and learning"),
     "area.holdings": ("free", "My holdings"),
+    "area.stock": ("free", "Stock page: price, dividends, events, Signa checks"),
+    "area.dividends": ("free", "Dividend calendar and expected income"),
     "area.watchlist": ("free", "Watchlist"),
     "area.how_it_works": ("free", "How it works"),
     "area.settings": ("free", "Settings"),

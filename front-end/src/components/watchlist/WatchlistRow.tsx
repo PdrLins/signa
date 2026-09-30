@@ -30,7 +30,7 @@ export const WatchlistRow = memo(function WatchlistRow({ item, signal, onRemove 
       className="flex items-center justify-between py-3 px-1"
       style={{ borderBottom: `0.5px solid ${theme.colors.border}` }}
     >
-      <Link href={`/signals/${item.symbol}`} className="flex items-center gap-3 flex-1 min-w-0">
+      <Link href={`/stocks/${encodeURIComponent(item.symbol)}`} className="flex items-center gap-3 flex-1 min-w-0">
         <div
           className="w-9 h-9 rounded-[9px] flex items-center justify-center text-[10px] font-bold shrink-0"
           style={{

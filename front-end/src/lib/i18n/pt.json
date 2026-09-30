@@ -27,7 +27,8 @@
     "closeMore": "Fechar menu",
     "check": "Checar ação",
     "holdings": "Minha carteira",
-    "holdingsShort": "Carteira"
+    "holdingsShort": "Carteira",
+    "dividends": "Dividendos"
   },
   "login": {
     "welcome": "Signa",
@@ -2124,5 +2125,177 @@
     "slots": "{used} de {limit} ações acompanhadas",
     "slotsUnlimited": "{used} ações acompanhadas",
     "plan": "Plano"
+  },
+  "dividendsPage": {
+    "title": "Dividendos",
+    "subtitle": "Próximas datas ex-dividendo e de pagamento dos seus ativos, e quanto dinheiro esperar.",
+    "includeWatchlist": "Incluir lista de observação",
+    "includeWatchlistHelp": "Mostra as datas de dividendos das ações da sua lista que você não tem (sem valores em dinheiro).",
+    "refreshing": "Atualizando…",
+    "cards": {
+      "next12m": "Previsto nos próximos 12 meses",
+      "next12mHelp": "Dinheiro dos seus ativos, convertido para CAD",
+      "fxMissing": "Alguns valores não puderam ser convertidos para CAD; veja a divisão.",
+      "nextPayment": "Próximo pagamento",
+      "nextPaymentNone": "Nenhum pagamento previsto",
+      "perShareOnly": "{amount} por ação",
+      "payers": "Pagam dividendos",
+      "payersValue": "{n} de {total}",
+      "yearly": "Renda anual {amount}",
+      "yield": "Rendimento projetado {pct}"
+    },
+    "chart": {
+      "title": "Dinheiro por mês",
+      "aria": "Dividendos previstos por mês, em CAD",
+      "bar": "{month}: {amount}",
+      "noData": "Adicione suas quantidades de ações para ver o valor por mês."
+    },
+    "agenda": {
+      "title": "Calendário",
+      "monthTotal": "Total {amount}",
+      "none": "Nenhum dividendo previsto nos próximos 12 meses.",
+      "ex": "Ex {date}",
+      "pays": "Paga {date}",
+      "paysUnknown": "Data de pagamento ainda não conhecida",
+      "perShare": "{amount}/ação",
+      "addShares": "Adicionar ações",
+      "addSharesHelp": "Adicione sua quantidade de ações para ver o valor em dinheiro",
+      "openStock": "Abrir {symbol}"
+    },
+    "tags": {
+      "estimated": "Estimado",
+      "estimatedHelp": "Projetado a partir do histórico de pagamentos; ainda não anunciado",
+      "payEstimated": "Data de pagamento estimada",
+      "special": "Especial",
+      "specialHelp": "Um pagamento extra, maior que o dividendo habitual",
+      "watchlist": "Observação",
+      "watchlistHelp": "Na sua lista de observação, não na carteira: nenhum valor contado",
+      "exPassed": "Data ex passou",
+      "exPassedHelp": "Você tem direito a este pagamento; ele ainda não foi pago"
+    },
+    "notes": {
+      "missingShares": "Adicione suas quantidades de ações para ver os valores de: {symbols}.",
+      "editHoldings": "Editar ativos",
+      "nonPayers": "Não pagam dividendos: {symbols}.",
+      "unknown": "Sem dados de dividendos no momento para: {symbols}.",
+      "disclaimer": "Datas e valores vêm de dados de mercado e podem mudar. Itens estimados são projetados a partir de pagamentos anteriores. Valores antes de impostos e retenções."
+    },
+    "reasons": {
+      "crypto": "cripto",
+      "no_dividend": "sem dividendo",
+      "suspended": "suspenso"
+    },
+    "empty": {
+      "title": "Nenhum ativo ainda",
+      "body": "Adicione as ações e ETFs que você tem para ver quando pagam e quanto dinheiro esperar.",
+      "cta": "Adicionar ativos"
+    },
+    "errors": {
+      "holdings_unavailable": "Os ativos não estão disponíveis agora. Tente mais tarde.",
+      "network": "Não foi possível conectar ao servidor. Verifique sua conexão.",
+      "internal": "Não foi possível carregar o calendário de dividendos. Tente novamente.",
+      "retry": "Tentar novamente"
+    }
+  },
+  "stock": {
+    "openPage": "Abrir a página de {symbol}",
+    "back": "Voltar",
+    "loadingLabel": "Carregando {symbol}",
+    "notFoundTitle": "Não encontramos {symbol}",
+    "notFoundBody": "Confira o ticker. Ações canadenses terminam em .TO (ENB.TO) e cripto em -USD (BTC-USD).",
+    "errorTitle": "Não foi possível carregar esta ação",
+    "retry": "Tentar de novo",
+    "assetTypes": {
+      "stock": "Ação",
+      "etf": "ETF",
+      "crypto": "Cripto"
+    },
+    "today": "hoje",
+    "asOf": "Em {time}",
+    "range52w": "Faixa de 52 semanas",
+    "low": "Mínima",
+    "high": "Máxima",
+    "marketCap": "Valor de mercado",
+    "sector": "Setor",
+    "chartTitle": "Preço",
+    "inHoldings": "Na sua carteira",
+    "checksTitle": "Verificações da Signa",
+    "checksSubtitle": "Regras simples sobre tendência, momento, volume negociado, resultados e dividendos.",
+    "disclaimer": "Apenas informação, não é recomendação. Estas verificações descrevem a ação; sozinhas, não superaram simplesmente manter o S&P 500 no nosso backtest.",
+    "statusLabel": {
+      "pass": "OK",
+      "warn": "Atenção",
+      "fail": "Falha",
+      "na": "N/A"
+    },
+    "checkAria": "{label}: {status}",
+    "ratings": {
+      "good": "bom",
+      "fair": "razoável",
+      "poor": "fraco",
+      "n/a": "sem nota"
+    },
+    "checks": {
+      "uptrend": {
+        "label": "Tendência de alta",
+        "uptrend": "O preço {price} está acima da média de 200 dias ({sma200}), e a média de 50 dias está acima da de 200.",
+        "below_sma200": "O preço {price} está abaixo da média de 200 dias ({sma200}).",
+        "sma50_below_sma200": "A média de 50 dias ({sma50}) está abaixo da média de 200 dias ({sma200}).",
+        "downtrend": "O preço {price} está abaixo da média de 200 dias ({sma200}) e a média de 50 dias está abaixo da de 200: tendência de baixa.",
+        "insufficient_history": "Menos de 200 dias de preços, então a tendência não é medida."
+      },
+      "not_overheated": {
+        "label": "Sem euforia",
+        "calm": "RSI {rsi} (limite {max_rsi}) e {ext_pct}% da média de 50 dias (limite {max_ext_pct}%).",
+        "rsi_overbought": "RSI {rsi} acima de {max_rsi}: o preço subiu rápido recentemente.",
+        "overextended_vs_sma50": "O preço está {ext_pct}% acima da média de 50 dias (mais de {max_ext_pct}%).",
+        "rsi_and_extended": "RSI {rsi} acima de {max_rsi} e o preço {ext_pct}% acima da média de 50 dias.",
+        "no_data": "Dados de preço insuficientes."
+      },
+      "liquidity": {
+        "label": "Liquidez",
+        "liquid": "Cerca de {dollar_volume} negociados por dia (média de 20 dias; mínimo {min}).",
+        "low_liquidity": "Só cerca de {dollar_volume} negociados por dia (abaixo de {min}): o spread pode ser maior e vender rápido, mais difícil.",
+        "no_data": "Sem dados de volume."
+      },
+      "earnings_soon": {
+        "label": "Resultados",
+        "earnings_later": "Próximo resultado em {date}, daqui a {trading_days} pregões.",
+        "earnings_soon": "Resultado em {date}, dentro de {trading_days} pregões: o preço pode saltar para qualquer lado.",
+        "no_date": "Nenhuma data de resultado anunciada ainda.",
+        "not_applicable": "Fundos e cripto não divulgam resultados."
+      },
+      "dividend_health": {
+        "label": "Saúde do dividendo",
+        "measured": "Nota {rating}. Dividend yield {yield}%, payout {payout}%, crescimento em 5 anos {cagr}%/ano.",
+        "none": "Não paga dividendos.",
+        "etf_distribution": "Distribuição do fundo de cerca de {yield}% ao ano; as regras de corte e crescimento valem só para dividendos de empresas.",
+        "suspended": "O dividendo parece suspenso.",
+        "not_applicable": "Cripto não paga dividendos.",
+        "unavailable": "Dados de dividendos indisponíveis no momento."
+      }
+    },
+    "eventsTitle": "Próximos eventos",
+    "events": {
+      "earnings": "Divulgação de resultados",
+      "exDividend": "Data ex-dividendo",
+      "payment": "Pagamento do dividendo",
+      "estimated": "estimada",
+      "inDays": "em {n} dias",
+      "today": "hoje",
+      "amount": "{amount} por ação",
+      "none": "Nenhum evento futuro conhecido.",
+      "exHelp": "Tenha as ações antes da data ex-dividendo para receber o pagamento."
+    },
+    "actions": {
+      "addWatchlist": "Adicionar à watchlist",
+      "removeWatchlist": "Remover da watchlist",
+      "inWatchlist": "Na watchlist",
+      "added": "{symbol} adicionada à sua watchlist",
+      "removed": "{symbol} removida da sua watchlist",
+      "failed": "Não foi possível atualizar a watchlist. Tente de novo.",
+      "openSignals": "Abrir em Sinais",
+      "checkAi": "Verificar com IA"
+    }
   }
 }

@@ -69,7 +69,7 @@ export function WatchlistTable({ signals, compact = false }: WatchlistTableProps
             : theme.colors.textSub
 
           return (
-            <Link key={item.id} href={`/signals/${item.symbol}`}>
+            <Link key={item.id} href={`/stocks/${encodeURIComponent(item.symbol)}`}>
               <div
                 className="flex items-center gap-1 px-2 py-1 rounded-md transition-opacity hover:opacity-80"
                 style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}` }}
