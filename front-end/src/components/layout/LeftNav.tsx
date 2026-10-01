@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { LangSwitcher } from '@/components/ui/LangSwitcher'
-import { ViewAsSwitch } from '@/components/dev/ViewAsSwitch'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
@@ -339,7 +338,6 @@ export function LeftNav() {
         style={{ backgroundColor: theme.colors.border }}
       />
       <LangSwitcher variant="rail" />
-      <ViewAsSwitch variant="rail" />
       <button
         type="button"
         onClick={() => {

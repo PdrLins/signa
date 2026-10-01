@@ -12,6 +12,7 @@ import { LeftNav } from '@/components/layout/LeftNav'
 import { BottomNav } from '@/components/layout/BottomNav'
 import { GlobalSearch } from '@/components/search/GlobalSearch'
 import { UpgradeSheet } from '@/components/upgrade/UpgradeSheet'
+import { ViewAsSwitch } from '@/components/dev/ViewAsSwitch'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -68,6 +69,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           (403 slot_limit / alert_limit anywhere). */}
       {ready && <GlobalSearch />}
       <UpgradeSheet />
+      <ViewAsSwitch variant="corner" />
       {/* Last login — fixed bottom right */}
       {lastLogin && (
         <div className="hidden md:block fixed bottom-4 right-6 z-40">
