@@ -23,6 +23,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db import queries
+from app.services import sessions
 from app.models.audit import AuditEvent
 from app.notifications.telegram_bot import send_otp_message
 
@@ -67,6 +68,8 @@ async def login(
     password: str,
     ip_address: str,
     user_agent: str,
+    client: str = "web",
+    device_name: str | None = None,
 ) -> dict:
     """Step 1: Validate credentials and send OTP via Telegram."""
     from app.db.supabase import get_client
@@ -134,7 +137,7 @@ async def login(
     if not settings.login_otp_enabled or not user.get("telegram_chat_id"):
         # Password-only login (LOGIN_OTP_ENABLED=false, or an account with no
         # Telegram linked, e.g. a free user): skip the code, issue the JWT.
-        token = _issue_access_token(user, ip_address, user_agent)
+        token = _issue_access_token(user, ip_address, user_agent, client, device_name)
         return {"message": "Logged in", "session_token": None, **token}
 
     # Generate OTP and session token
@@ -174,6 +177,8 @@ async def verify_otp_code(
     otp_code: str,
     ip_address: str,
     user_agent: str,
+    client: str = "web",
+    device_name: str | None = None,
 ) -> dict:
     """Step 2: Verify OTP and issue JWT."""
     otp_record = queries.get_otp_by_session_token(session_token)
@@ -244,14 +249,22 @@ async def verify_otp_code(
         ip_address=ip_address,
         user_agent=user_agent,
     )
-    return _issue_access_token(user, ip_address, user_agent)
+    return _issue_access_token(user, ip_address, user_agent, client, device_name)
 
 
-def _issue_access_token(user: dict, ip_address: str, user_agent: str) -> dict:
-    """Issue a JWT for an authenticated user and record the login."""
+def _issue_access_token(user: dict, ip_address: str, user_agent: str,
+                        client: str = "web", device_name: str | None = None) -> dict:
+    """Issue a JWT for an authenticated user, open a session for this device
+    (migration 017) and record the login. iOS also gets a refresh token."""
+    client = sessions.normalize_client(client)
+    sess = sessions.create(user, client, device_name, ip_address, user_agent)
+    minutes = sessions.access_minutes(client)
     access_token = create_access_token(
         user_id=user["id"],
         username=user["username"],
+        expires_delta=timedelta(minutes=minutes),
+        session_id=sess["session_id"],
+        client=client if sess["session_id"] else None,
     )
 
     # Capture previous last_login before updating
@@ -271,14 +284,23 @@ def _issue_access_token(user: dict, ip_address: str, user_agent: str) -> dict:
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "expires_in": settings.jwt_access_token_expire_minutes * 60,
+        "expires_in": minutes * 60,
         "last_login": previous_login,
+        "refresh_token": sess["refresh_token"],
+        "session_id": sess["session_id"],
+        "session_expires_at": sess["expires_at"],
     }
 
 
 def logout(token: str, user_id: str, ip_address: str, user_agent: str) -> None:
-    """Invalidate a JWT by adding it to the blacklist."""
+    """Invalidate a JWT by adding it to the blacklist, and end its session
+    (so the device's refresh token stops working too)."""
     payload = decode_token(token)
+    if payload and payload.get("sid"):
+        try:
+            sessions.revoke(payload["sid"], user_id, "logout")
+        except Exception as e:
+            logger.warning(f"logout: could not revoke session: {e}")
     if payload:
         jti = payload.get("jti")
         exp = payload.get("exp")
@@ -315,6 +337,10 @@ def refresh_token(payload: dict, ip_address: str, user_agent: str) -> dict:
     if queries.is_token_blacklisted(jti):
         raise TokenRefreshError("Token has been revoked")
 
+    sid = payload.get("sid")
+    if sid and not sessions.is_active(sid):
+        raise TokenRefreshError("Session has been revoked")
+
     # Absolute session cap: auth_time is carried across refreshes (falls back
     # to iat for tokens minted before this claim existed).
     now = datetime.now(timezone.utc)
@@ -332,7 +358,11 @@ def refresh_token(payload: dict, ip_address: str, user_agent: str) -> dict:
         logger.warning("Refresh rejected: token JTI already revoked or blacklist write failed")
         raise TokenRefreshError("Token has been revoked")
 
-    new_token = create_access_token(user_id=user_id, username=username, auth_time=int(float(auth_time)))
+    minutes = sessions.access_minutes(payload.get("cli") or "web")
+    new_token = create_access_token(user_id=user_id, username=username, auth_time=int(float(auth_time)),
+                                    expires_delta=timedelta(minutes=minutes),
+                                    session_id=sid, client=payload.get("cli"))
+    sessions.touch(sid, ip_address, user_agent)
 
     queries.insert_audit_log(
         event_type=AuditEvent.TOKEN_REFRESHED,
@@ -345,5 +375,47 @@ def refresh_token(payload: dict, ip_address: str, user_agent: str) -> dict:
     return {
         "access_token": new_token,
         "token_type": "bearer",
-        "expires_in": settings.jwt_access_token_expire_minutes * 60,
+        "expires_in": minutes * 60,
+    }
+
+
+def refresh_session(refresh_token: str, ip_address: str, user_agent: str) -> dict:
+    """iOS: exchange a refresh token for a new access token AND a new refresh
+    token (rotation, reuse detection: app.services.sessions.rotate).
+
+    Raises sessions.SessionError (-> 401 with its code) or the DB error when
+    migration 017 is missing."""
+    try:
+        r = sessions.rotate(refresh_token, ip_address, user_agent)
+    except sessions.SessionError as e:
+        queries.insert_audit_log(
+            event_type=AuditEvent.SESSION_REFUSED, success=False, ip_address=ip_address,
+            user_agent=user_agent, metadata={"reason": e.code},
+        )
+        raise
+    session = r["session"]
+    user_id = str(session["user_id"])
+    user = queries.get_user_by_id(user_id)
+    if not user:
+        sessions.revoke(str(session["id"]), None, "admin")
+        raise sessions.SessionError("session_revoked", "This account no longer exists.")
+    client = session.get("client") or "ios"
+    minutes = sessions.access_minutes(client)
+    created = sessions._ts(session.get("created_at"))
+    access = create_access_token(
+        user_id=user_id, username=user["username"], expires_delta=timedelta(minutes=minutes),
+        auth_time=int(created.timestamp()) if created else None,
+        session_id=str(session["id"]), client=client,
+    )
+    queries.insert_audit_log(
+        event_type=AuditEvent.TOKEN_REFRESHED, success=True, user_id=user_id,
+        ip_address=ip_address, user_agent=user_agent, metadata={"session_id": str(session["id"])},
+    )
+    return {
+        "access_token": access,
+        "token_type": "bearer",
+        "expires_in": minutes * 60,
+        "refresh_token": r["refresh_token"],
+        "session_id": str(session["id"]),
+        "session_expires_at": session.get("expires_at"),
     }

@@ -4,6 +4,8 @@ Validates JWT on protected routes.
 Sets request.state.user for downstream dependencies.
 """
 
+import asyncio
+
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
@@ -16,6 +18,7 @@ from app.core.utils import get_client_ip
 from app.core.cache import TTLCache
 from app.db.queries import insert_audit_log, is_token_blacklisted, touch_user_last_seen
 from app.models.audit import AuditEvent
+from app.services import sessions
 
 # users.last_seen_at (migration 014) is written at most once per hour per
 # user and process; it decides which symbols the quotes job refreshes.
@@ -26,6 +29,7 @@ PUBLIC_PATHS = {
     "/api/v1/auth/login",
     "/api/v1/auth/verify-otp",
     "/api/v1/auth/refresh",
+    "/api/v1/auth/token/refresh",
     "/api/v1/health",
     "/api/v1/telegram/webhook",
     "/docs",
@@ -66,6 +70,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
             _log_unauthorized(request, path, "revoked_token", payload.get("sub"))
             return _unauthorized_response("Token has been revoked")
 
+        # Signed-out device (migration 017): the token is tied to a session
+        # that was revoked or expired. Cached briefly (sessions.is_active).
+        sid = payload.get("sid")
+        if sid and not await asyncio.to_thread(sessions.is_active, sid):
+            _log_unauthorized(request, path, "session_revoked", payload.get("sub"))
+            return _unauthorized_response("Session has ended. Please sign in again.")
+
         # Set user on request state (consumed by get_current_user dependency)
         # Access level comes from the DB (cached 60s), not the token, so a
         # change applies without logging out.
@@ -75,6 +86,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "user_id": payload.get("sub"),
             "username": payload.get("username"),
             "jti": jti,
+            "sid": sid,
             "access_level": level,
             "real_access_level": access["level"],
             "slot_bonus": access["slot_bonus"],

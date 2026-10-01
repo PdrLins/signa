@@ -2788,7 +2788,21 @@
     "open": "Open {name}",
     "hideAmounts": "Hide amounts",
     "hideAmountsHelp": "Shows •••• instead of money values on this device.",
-    "brainSettingsDesc": "AI providers, scanning and signal thresholds."
+    "brainSettingsDesc": "AI providers, scanning and signal thresholds.",
+    "devices": {
+      "title": "Your devices",
+      "subtitle": "Where you're signed in. Sign out any device you don't recognise.",
+      "thisDevice": "This device",
+      "unknown": "Unknown device",
+      "lastUsed": "Last used {date}",
+      "since": "signed in {date}",
+      "signOut": "Sign out",
+      "signingOut": "Signing out…",
+      "signOutAria": "Sign out {device}",
+      "signOutOthers": "Sign out everywhere else",
+      "signedOut": "{device} is signed out.",
+      "othersSignedOut": "Signed out {n} other devices."
+    }
   },
   "notifications": {
     "title": "Notifications",

@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 60  # 1 hour (refresh for longer sessions)
     jwt_refresh_grace_hours: int = 4   # an expired token can be refreshed for this long
     jwt_max_session_hours: int = 24    # absolute cap since OTP login, across refreshes
+    # Sessions (migration 017): one per signed-in device. iOS gets a short
+    # access token plus a rotating refresh token; the web keeps the access-
+    # token refresh above (its session ends with jwt_max_session_hours).
+    ios_access_token_minutes: int = 15
+    session_refresh_days: int = 90         # sliding: extended on each refresh
+    session_absolute_days: int = 180       # hard cap since sign-in
+    session_owner_days: int = 30           # owner sessions: sliding AND absolute cap
+    session_check_cache_seconds: int = 60  # how long "session still active" is cached
     otp_expire_seconds: int = 30  # 30 seconds
     session_token_expire_seconds: int = 180
 

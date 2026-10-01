@@ -2788,7 +2788,21 @@
     "open": "Abrir {name}",
     "hideAmounts": "Ocultar valores",
     "hideAmountsHelp": "Mostra •••• no lugar dos valores neste aparelho.",
-    "brainSettingsDesc": "Provedores de IA, varredura e limites dos sinais."
+    "brainSettingsDesc": "Provedores de IA, varredura e limites dos sinais.",
+    "devices": {
+      "title": "Seus aparelhos",
+      "subtitle": "Onde você está conectado. Desconecte qualquer aparelho que você não reconheça.",
+      "thisDevice": "Este aparelho",
+      "unknown": "Aparelho desconhecido",
+      "lastUsed": "Usado em {date}",
+      "since": "conectado em {date}",
+      "signOut": "Desconectar",
+      "signingOut": "Desconectando…",
+      "signOutAria": "Desconectar {device}",
+      "signOutOthers": "Desconectar todos os outros",
+      "signedOut": "{device} foi desconectado.",
+      "othersSignedOut": "{n} outros aparelhos desconectados."
+    }
   },
   "notifications": {
     "title": "Notificações",

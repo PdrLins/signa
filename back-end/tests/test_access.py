@@ -163,6 +163,8 @@ def test_slot_limit_blocks_only_new_symbols(monkeypatch):
 UNGATED = {
     ("POST", "/api/v1/auth/login"), ("POST", "/api/v1/auth/verify-otp"), ("POST", "/api/v1/auth/logout"),
     ("POST", "/api/v1/auth/refresh"), ("GET", "/api/v1/auth/me"),
+    ("POST", "/api/v1/auth/token/refresh"), ("GET", "/api/v1/auth/sessions"),
+    ("DELETE", "/api/v1/auth/sessions/{session_id}"), ("POST", "/api/v1/auth/sessions/revoke-others"),
     ("GET", "/api/v1/health"), ("GET", "/api/v1/symbols/search"),
     ("GET", "/api/v1/stats/user-settings"), ("PUT", "/api/v1/stats/user-settings"),
     ("GET", "/api/v1/tickers/{ticker}/chart"),

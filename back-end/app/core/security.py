@@ -49,11 +49,16 @@ def create_access_token(
     username: str,
     expires_delta: timedelta | None = None,
     auth_time: int | None = None,
+    session_id: str | None = None,
+    client: str | None = None,
 ) -> str:
     """Create a JWT access token.
 
     `auth_time` is the Unix time of the original OTP login; it is preserved
     across refreshes so the total session length can be capped.
+    `session_id` (claim `sid`, migration 017) ties the token to a signed-in
+    device: revoking the session rejects the token. `client` (claim `cli`)
+    is "web" or "ios". Both are left out when not given (pre-016 tokens).
     """
     if expires_delta is None:
         expires_delta = timedelta(minutes=settings.jwt_access_token_expire_minutes)
@@ -67,6 +72,10 @@ def create_access_token(
         "jti": str(uuid4()),
         "auth_time": int(auth_time if auth_time is not None else now.timestamp()),
     }
+    if session_id:
+        payload["sid"] = session_id
+    if client:
+        payload["cli"] = client
 
     token = _jwt_encode(payload)
     return token

@@ -247,6 +247,21 @@ export const authApi = {
   logout: () => post<{ message: string }>('/auth/logout'),
   refresh: () => post<AuthResponse>('/auth/refresh'),
   me: () => get<MeResponse>('/auth/me'),
+  /** signed-in devices (migration 017) */
+  sessions: () => get<AuthSession[]>('/auth/sessions'),
+  revokeSession: (id: string) => del<void>(`/auth/sessions/${encodeURIComponent(id)}`),
+  revokeOtherSessions: () => post<{ revoked: number }>('/auth/sessions/revoke-others'),
+}
+
+export interface AuthSession {
+  id: string
+  client: 'web' | 'ios' | null
+  device_name: string | null
+  created_at: string | null
+  last_used_at: string | null
+  expires_at: string | null
+  /** the device making the request */
+  current: boolean
 }
 
 // Signals — backend wraps in { signals, count }

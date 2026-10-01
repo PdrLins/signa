@@ -38,6 +38,9 @@ TIER_STANDARD = (240, 60, False)     # 240 requests per minute, per signed-in us
 _AUTH_PATHS = {
     "/api/v1/auth/login",
     "/api/v1/auth/verify-otp",
+    # failed refreshes count too (guessing refresh tokens); good ones are free
+    "/api/v1/auth/refresh",
+    "/api/v1/auth/token/refresh",
 }
 
 _STRICT_PATHS = {
