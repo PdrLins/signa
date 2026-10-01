@@ -52,10 +52,38 @@ async def run_db(fn: Callable, *args: Any, **kwargs: Any) -> Any:
     return await run_db_for(PORTFOLIO_MIGRATION, fn, *args, **kwargs)
 
 
+_TRANSIENT_MARKERS = ("server disconnected", "disconnected", "remoteprotocol", "connectionterminated",
+                      "connection reset", "connection aborted", "eof occurred")
+
+
+def is_transient(err: BaseException) -> bool:
+    """A dropped/stale connection (Supabase closes idle HTTP/2 streams): worth a retry."""
+    text = f"{type(err).__name__} {err}".lower()
+    return any(m in text for m in _TRANSIENT_MARKERS)
+
+
 async def run_db_for(migration: str, fn: Callable, *args: Any, **kwargs: Any) -> Any:
-    """run_db, naming `migration` in a migration_required error."""
+    """run_db, naming `migration` in a migration_required error. A dropped
+    connection is retried up to twice with a fresh client before 503."""
+    from app.db.supabase import reset_client
+
+    for attempt in range(3):
+        try:
+            return await asyncio.to_thread(fn, *args, **kwargs)
+        except HTTPException:
+            raise
+        except Exception as e:
+            if attempt < 2 and is_transient(e) and not is_missing_schema(e):
+                logger.info(f"portfolio: connection dropped in {getattr(fn, '__name__', fn)}, retrying ({attempt + 1}/2)")
+                reset_client()
+                await asyncio.sleep(0.2 * (attempt + 1))
+                continue
+            return _raise_db_error(migration, fn, e)
+
+
+def _raise_db_error(migration: str, fn: Callable, e: Exception):
     try:
-        return await asyncio.to_thread(fn, *args, **kwargs)
+        raise e
     except HTTPException:
         raise
     except MigrationRequired:

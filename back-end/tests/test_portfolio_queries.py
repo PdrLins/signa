@@ -109,3 +109,39 @@ def test_upsert_after_013_matches_account_and_symbol(monkeypatch):
     ops = [c[0] for c in fake.calls]
     assert ops == ["select", "update", "insert"] and len(out) == 2
     assert fake.calls[2][3] == [{"symbol": "NVDA", "account_id": "b", "shares": 3, "user_id": "u"}]
+
+
+def test_run_db_retries_dropped_connection(monkeypatch):
+    import asyncio
+
+    import pytest
+    from fastapi import HTTPException
+
+    from app.core import api_errors
+    from app.db import supabase as sb
+
+    resets = []
+    monkeypatch.setattr(sb, "reset_client", lambda: resets.append(1))
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("Server disconnected")
+        return "ok"
+
+    assert asyncio.run(api_errors.run_db(flaky)) == "ok" and calls["n"] == 3 and len(resets) == 2
+
+    def always_down():
+        raise RuntimeError("Server disconnected")
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(api_errors.run_db(always_down))
+    assert e.value.detail["code"] == "storage_unavailable"
+
+    def other_error():
+        raise RuntimeError("boom")
+
+    calls["n"] = 0
+    with pytest.raises(HTTPException):
+        asyncio.run(api_errors.run_db(other_error))

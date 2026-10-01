@@ -144,8 +144,13 @@ def growth_1y(profile: dict, today: date) -> float | None:
     return last / prior - 1
 
 
-def safety_grade(profile: dict | None, asset_type: str, today: date) -> tuple[str | None, str]:
-    """(grade, detail code). grade None for non-payers / unknown."""
+def safety_grade(profile: dict | None, asset_type: str, today: date, option_income: bool = False) -> tuple[str | None, str]:
+    """(grade, detail code). grade None for non-payers / unknown.
+
+    Funds: uneven distributions are normal for broad index ETFs (XEQT, VFV
+    pay a different amount each quarter) -> "steady" with detail
+    "fund_distributions_vary". Only option-income funds are graded
+    "variable" for volatile payouts."""
     p = profile or {}
     if p.get("suspended") or p.get("recent_cut"):
         return "cut", "suspended" if p.get("suspended") else "recent_cut"
@@ -155,8 +160,11 @@ def safety_grade(profile: dict | None, asset_type: str, today: date) -> tuple[st
     fund = bool(p.get("is_fund")) or asset_type == "ETF"
     if fund:
         g1 = growth_1y(p, today)
-        if p.get("frequency") in (None, "irregular") or (cv is not None and cv > FUND_STEADY_CV):
+        volatile = p.get("frequency") in (None, "irregular") or (cv is not None and cv > FUND_STEADY_CV)
+        if volatile and option_income:
             return "variable", "volatile_distributions"
+        if volatile:
+            return "steady", "fund_distributions_vary"
         if g1 is not None and g1 >= FUND_GROWING_1Y:
             return "growing", "distribution_growing"
         return "steady", "steady_distributions"
@@ -294,10 +302,16 @@ def build_summary(scope: dict, profiles: dict[str, dict | None], today: date, pe
                   | {str(t.get("symbol") or "").upper() for t in scope.get("transactions") or []
                      if t.get("type") == "dividend" and t.get("symbol")})
     atype = {str(h.get("symbol")).upper(): str(h.get("asset_type") or "").upper() for h in holdings}
-    grades = {s: safety_grade(profiles.get(s), atype.get(s, ""), today) for s in syms}
+    from app.services.allocation import classify
+    names = {str(h.get("symbol")).upper(): h.get("name") for h in holdings}
+    option_income = {s for s in syms
+                     if classify(s, names.get(s) or (profiles.get(s) or {}).get("name"), atype.get(s)) == "option_income_etfs"}
+    grades = {s: safety_grade(profiles.get(s), atype.get(s, ""), today, s in option_income) for s in syms}
 
     def is_steady(sym: str) -> bool:
-        return grades.get(sym, (None,))[0] in STEADY_GRADES
+        # Income split: option-income funds and cut/at-risk payers are variable;
+        # everything else (stocks, broad ETFs) is steady income.
+        return sym not in option_income and grades.get(sym, (None,))[0] in STEADY_GRADES
 
     # --- forward events (always: payers, yield, upcoming)
     end12 = today + timedelta(days=365)

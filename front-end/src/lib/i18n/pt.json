@@ -3097,7 +3097,8 @@
         "rating_poor": "A avaliação de saúde do dividendo é ruim.",
         "volatile_payouts": "Os pagamentos mudam muito de um para outro.",
         "grows_5y": "Cresce há 5 anos sem cortes.",
-        "steady_payer": "Os pagamentos têm sido estáveis."
+        "steady_payer": "Os pagamentos têm sido estáveis.",
+        "fund_distributions_vary": "As distribuições variam de um pagamento para outro, o que é normal em fundos de índice."
       },
       "quality": "Qualidade da renda",
       "qualityAria": "Abrir a qualidade da renda de {symbol}",

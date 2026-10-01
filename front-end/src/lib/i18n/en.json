@@ -3097,7 +3097,8 @@
         "rating_poor": "Its dividend health check is poor.",
         "volatile_payouts": "Payments change a lot from one to the next.",
         "grows_5y": "It has grown for 5 years with no cut.",
-        "steady_payer": "Payments have been steady."
+        "steady_payer": "Payments have been steady.",
+        "fund_distributions_vary": "Distributions vary from one payment to the next, as is normal for index funds."
       },
       "quality": "Income quality",
       "qualityAria": "Open the income quality of {symbol}",

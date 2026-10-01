@@ -113,7 +113,10 @@ def test_safety_grades():
     hist = [{"ex_date": (TODAY - timedelta(days=30 * k)).isoformat(), "amount": a, "special": False}
             for k, a in enumerate([0.5, 0.2, 0.9, 0.3, 0.7])]
     assert ds.safety_grade({**ENB, "history": hist}, "STOCK", TODAY) == ("variable", "volatile_payouts")
-    assert ds.safety_grade({**XEQT, "history": hist}, "ETF", TODAY)[0] == "variable"
+    # Broad index ETF: uneven distributions are normal -> steady (noted).
+    assert ds.safety_grade({**XEQT, "history": hist}, "ETF", TODAY) == ("steady", "fund_distributions_vary")
+    # Option-income fund with the same volatility -> variable.
+    assert ds.safety_grade({**XEQT, "history": hist}, "ETF", TODAY, option_income=True) == ("variable", "volatile_distributions")
     assert ds.safety_grade(XEQT, "ETF", TODAY) == ("steady", "steady_distributions")
     assert ds.safety_grade(dividends.empty_profile("AMZN"), "STOCK", TODAY) == (None, "no_dividend")
 
