@@ -1,4 +1,5 @@
-"""Macro news pulse -- fetches trending market topics from X + web via Grok.
+"""Macro news pulse -- trending market topics from X + web via Grok, with
+Claude (local CLI + web search, $0) as the fallback when Grok is unavailable.
 
 Called once per scan to give the brain awareness of market-moving events
 before they show up in price data. Uses the xAI Responses API with live
@@ -32,17 +33,36 @@ MACRO_PULSE_PROMPT = (
 
 @ai_guarded("get_macro_pulse")
 async def get_macro_pulse() -> dict:
-    """Fetch trending market topics from Grok. Cached for settings.macro_pulse_cache_hours.
+    """Trending market topics, cached for settings.macro_pulse_cache_hours.
+
+    Grok first (X + web). When it can't answer (no credit, paused, budget,
+    error) and CLAUDE_LOCAL is on, Claude with web search answers instead.
+    Either way a result without cited sources is discarded.
 
     Returns dict with:
-    - trends: list of {topic, impact, sectors}
+    - trends: list of {topic, impact, sectors, detail}
     - summary: one-line market mood
-    - raw: full Grok response text
+    - citations: source URLs
+    - source: "grok" | "claude"
+    - error: set (and trends empty) when no source could answer
     """
     cached = _pulse_cache.get("pulse")
     if cached is not None:
         return cached
 
+    result = await _grok_pulse()
+    if result.get("error") and settings.claude_local and settings.macro_pulse_claude_fallback:
+        logger.info(f"Macro pulse: Grok unavailable ({result['error'][:80]}) — asking Claude with web search")
+        fallback = await _claude_pulse()
+        if not fallback.get("error"):
+            result = fallback
+    if not result.get("error"):
+        _pulse_cache.set("pulse", result, ttl=settings.macro_pulse_cache_hours * 3600)
+    return result
+
+
+async def _grok_pulse() -> dict:
+    """Grok live-search market mood (budget-checked, cost recorded)."""
     from app.services.budget_service import BudgetService
 
     budget = await BudgetService.get_instance()
@@ -146,10 +166,10 @@ async def get_macro_pulse() -> dict:
             "bearish_count": bearish,
             "raw": content,
             "citations": citations[:20],
+            "source": "grok",
         }
 
         logger.info(f"Macro pulse: {mood} ({bullish} bullish, {bearish} bearish, {len(trends)} trends)")
-        _pulse_cache.set("pulse", result, ttl=settings.macro_pulse_cache_hours * 3600)
         return result
 
     except Exception as e:
@@ -170,3 +190,85 @@ def _unavailable(error: str) -> dict:
         "citations": [],
         "error": error[:200],
     }
+
+
+CLAUDE_PULSE_PROMPT = (
+    "Search the web for news published between {from_date} and {to_date} UTC and "
+    "list up to 5 market-moving trends for stock investors in Canada and the US: "
+    "central bank decisions, inflation and jobs data, major earnings surprises, "
+    "trade and geopolitical events, sector rotation. Report only trends you found "
+    "in sources you actually retrieved, and give each one its source URLs. For each: "
+    "topic (one line), impact on stocks (BULLISH, BEARISH or NEUTRAL), affected "
+    "sectors or tickers, and one sentence of detail. If you find nothing reliable, "
+    "return an empty list."
+)
+
+CLAUDE_PULSE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "trends": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string"},
+                    "impact": {"type": "string", "enum": ["BULLISH", "BEARISH", "NEUTRAL"]},
+                    "sectors": {"type": "string"},
+                    "detail": {"type": "string"},
+                    "sources": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["topic", "impact", "sources"],
+            },
+        },
+    },
+    "required": ["trends"],
+}
+
+
+def build_claude_pulse(data: dict | None) -> dict:
+    """Turn Claude's JSON into the pulse shape. Trends without an http(s)
+    source are dropped; no sourced trend at all → unavailable."""
+    trends = []
+    citations: list[str] = []
+    for t in (data or {}).get("trends") or []:
+        if not isinstance(t, dict):
+            continue
+        urls = [u for u in (t.get("sources") or []) if isinstance(u, str) and u.startswith(("http://", "https://"))]
+        if not urls or not str(t.get("topic") or "").strip():
+            continue
+        impact = t.get("impact") if t.get("impact") in ("BULLISH", "BEARISH", "NEUTRAL") else "NEUTRAL"
+        trends.append({"topic": str(t["topic"]).strip()[:200], "impact": impact,
+                       "sectors": str(t.get("sectors") or "")[:200], "detail": str(t.get("detail") or "")[:300]})
+        citations.extend(u for u in urls if u not in citations)
+    if not trends:
+        return _unavailable("Claude web search returned no sourced trends")
+    bullish = sum(1 for t in trends if t["impact"] == "BULLISH")
+    bearish = sum(1 for t in trends if t["impact"] == "BEARISH")
+    mood = ("Mostly bullish market news" if bullish > bearish
+            else "Mostly bearish market news" if bearish > bullish else "Mixed market news")
+    return {"trends": trends[:5], "summary": mood, "bullish_count": bullish, "bearish_count": bearish,
+            "raw": "", "citations": citations[:20], "source": "claude"}
+
+
+async def _claude_pulse() -> dict:
+    """Market mood from Claude (local CLI) with only the WebSearch tool enabled."""
+    from app.ai import claude_local_client
+    from app.ai.grok_client import search_window
+    from app.ai.provider import _record_local
+
+    from_date, to_date = search_window()
+    data = None
+    try:
+        data = await claude_local_client.call_with_prompt(
+            CLAUDE_PULSE_PROMPT.format(from_date=from_date, to_date=to_date),
+            max_retries=1, json_schema=CLAUDE_PULSE_SCHEMA, tools=("WebSearch",),
+            timeout=settings.macro_pulse_claude_timeout_s,
+        )
+    except Exception as e:
+        logger.warning(f"Macro pulse (Claude) failed: {e}")
+    result = build_claude_pulse(data)
+    await _record_local("claude-local", "macro_pulse", "", not result.get("error"))
+    if not result.get("error"):
+        logger.info(f"Macro pulse (Claude): {result['summary']} ({len(result['trends'])} trends)")
+    return result

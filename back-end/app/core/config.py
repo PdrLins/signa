@@ -528,6 +528,11 @@ class Settings(BaseSettings):
     # Market-wide Grok "macro pulse": one live-search call, reused across
     # scans for this long so the Grok budget goes to per-stock news.
     macro_pulse_cache_hours: int = 6
+    # When Grok can't give the market mood (no credit, paused, failed), ask
+    # Claude with web search instead — local CLI only ($0 on the owner's
+    # subscription); the API path is not used for this.
+    macro_pulse_claude_fallback: bool = True
+    macro_pulse_claude_timeout_s: int = 180
     # Back-end log files (relative to back-end/); "" disables file logging.
     log_file_dir: str = "logs"
     # Scans are Grok-first (live X + web, cached 24h per ticker). PASS 2
