@@ -24,6 +24,8 @@ from app.scheduler.jobs import (
     quotes_refresh_after_close,
     usage_flush,
     virtual_portfolio_snapshot,
+    telegram_notifications,
+    telegram_notifications_live,
 )
 
 # Map scan_type to the async job handler. This preserves the existing
@@ -171,6 +173,31 @@ def init_scheduler() -> AsyncIOScheduler:
             id="check_status_snapshots",
             name="Signa check status snapshots (6:15 PM ET)",
             replace_existing=True,
+        )
+
+    # Per-user Telegram notifications for Premium (migration 016, no AI).
+    if settings.telegram_notifications_enabled:
+        scheduler.add_job(
+            telegram_notifications,
+            CronTrigger(hour=8, minute=30, timezone=settings.timezone),
+            id="telegram_notifications_morning",
+            name="Telegram notifications digest (8:30 AM ET daily)",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            telegram_notifications,
+            CronTrigger(hour=18, minute=30, day_of_week="mon-fri", timezone=settings.timezone),
+            id="telegram_notifications_evening",
+            name="Telegram notifications digest (6:30 PM ET weekdays)",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            telegram_notifications_live,
+            CronTrigger(minute="*/5", hour="9-16", day_of_week="mon-fri", timezone=settings.timezone),
+            id="telegram_notifications_live",
+            name="Telegram price alerts + big moves (every 5 min, session)",
+            replace_existing=True,
+            max_instances=1,
         )
 
     # Data-usage counters (cost control, migration 014): flush every 5 minutes.

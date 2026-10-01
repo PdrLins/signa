@@ -177,13 +177,15 @@ async def me(user: dict = Depends(get_current_user)):
     locked items) and followed-stock slots."""
     import asyncio
 
-    from app.services import slots
+    from app.services import referrals, slots
 
     level = user.get("access_level") or "free"
     levels = get_feature_levels()
     return {
         "user_id": user["user_id"],
         "username": user.get("username"),
+        # visible account ID = invite code (migration 019; null before it)
+        "account_id": await asyncio.to_thread(referrals.account_id_for, user["user_id"]),
         "access_level": level,
         # Dev tools ("View as"): the real level and whether the switch may be
         # shown (owner + DEV_TOOLS_ENABLED). Clients ignore these otherwise.

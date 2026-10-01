@@ -312,6 +312,27 @@ async def check_status_snapshots():
         logger.error(f"Check status snapshots failed: {e}")
 
 
+async def telegram_notifications(mode: str = "events"):
+    """Per-user Telegram notifications for Premium (migration 016,
+    app/services/telegram_notify.py): "events" digest 08:30 ET daily + 18:30 ET
+    weekdays; "live" (price alerts, big moves) every 5 min in the session."""
+    from app.core.config import settings
+
+    if not settings.telegram_notifications_enabled:
+        return
+    try:
+        from app.services.telegram_notify import run_delivery
+        result = await run_delivery(mode)
+        if result.get("lines"):
+            logger.info(f"Telegram notifications ({mode}): {result}")
+    except Exception as e:
+        logger.error(f"Telegram notifications ({mode}) failed: {e}")
+
+
+async def telegram_notifications_live():
+    await telegram_notifications("live")
+
+
 async def usage_flush():
     """Every 5 minutes — write the buffered data-usage counters (migration 014)."""
     import asyncio

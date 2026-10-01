@@ -53,7 +53,7 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "area.stock": ("free", "Stock page: price, dividends, events, Signa checks"),
     "area.dividends": ("free", "Dividend calendar and expected income"),
     "area.watchlist": ("free", "Watchlist"),
-    "area.how_it_works": ("free", "How it works"),
+    "area.how_it_works": ("owner", "How it works (explains the brain)"),
     "area.settings": ("free", "Settings"),
     "area.home": ("free", "Home: portfolio overview"),
     "area.insights": ("free", "Portfolio insights (allocation, performance)"),
@@ -85,6 +85,7 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "feature.intraday_chart": ("premium", "5-minute intraday chart (free: 15-minute bars)"),
     "feature.full_history": ("premium", "Full portfolio history (ALL range; free: up to 1 year)"),
     "feature.unlimited_alerts": ("premium", "No limit on active price alerts (free: FREE_ALERT_LIMIT)"),
+    "feature.telegram_alerts": ("premium", "Notifications on Telegram (connect a chat, receive alerts)"),
     # --- System capabilities ---
     "system.ai": ("owner", "Trigger AI calls (Grok, Claude, Codex)"),
     "system.unlimited_slots": ("premium", "No limit on followed stocks"),
@@ -92,14 +93,16 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
 
 # Slots = stocks a user follows (holdings + watchlist). None = unlimited.
 # Business rule: followed symbols are what users pay for. Free follows
-# FREE_SLOT_LIMIT (10) flat; premium and owner are unlimited
-# (system.unlimited_slots, migration 015). `users.slot_bonus` (invites) is
-# kept in the DB and still read, but it no longer raises the free limit:
-# SLOT_MAX caps free at the base. To bring invite rewards back, raise
-# SLOT_MAX["free"] above SLOT_BASE["free"].
+# FREE_SLOT_LIMIT (10) + REFERRAL_SLOTS_PER_FRIEND (5) per rewarded referral,
+# at most +REFERRAL_SLOTS_MAX (25) — migration 019, app/services/referrals.py.
+# Premium and owner are unlimited (system.unlimited_slots, migration 015).
+# `users.slot_bonus` is kept in the DB but ignored: the bonus is counted from
+# the referrals table. slot_limit() is the ONLY place the limit is computed
+# (slots.limit_for feeds it the rewarded count for /auth/me and every 403).
 FREE_SLOT_LIMIT = 10
+REFERRAL_SLOTS_PER_FRIEND = 5
+REFERRAL_SLOTS_MAX = 25
 SLOT_BASE: dict[str, Optional[int]] = {"free": FREE_SLOT_LIMIT, "premium": None, "owner": None}
-SLOT_MAX: dict[str, Optional[int]] = {"free": FREE_SLOT_LIMIT, "premium": None, "owner": None}
 
 # Active price alerts (app/services/price_alerts.py). None = unlimited
 # (feature.unlimited_alerts, premium).
@@ -202,15 +205,21 @@ def can(level: str, feature: str) -> bool:
     return level_allows(level, get_feature_levels().get(feature, "owner"))
 
 
-def slot_limit(level: str, slot_bonus: int = 0) -> Optional[int]:
+def referral_bonus(rewarded_referrals: int) -> int:
+    """Extra free slots from rewarded referrals: 5 each, at most 25."""
+    return min(REFERRAL_SLOTS_PER_FRIEND * max(0, int(rewarded_referrals or 0)), REFERRAL_SLOTS_MAX)
+
+
+def slot_limit(level: str, slot_bonus: int = 0, rewarded_referrals: int = 0) -> Optional[int]:
+    """Followed-stock limit; None = unlimited. `slot_bonus` (users.slot_bonus)
+    is accepted for old callers and ignored."""
     level = normalize_level(level)
     if can(level, "system.unlimited_slots"):
         return None
-    base, cap = SLOT_BASE.get(level), SLOT_MAX.get(level)
+    base = SLOT_BASE.get(level)
     if base is None:
         return None
-    total = base + max(0, slot_bonus)
-    return min(total, cap) if cap is not None else total
+    return base + referral_bonus(rewarded_referrals)
 
 
 def alert_limit(level: str) -> Optional[int]:

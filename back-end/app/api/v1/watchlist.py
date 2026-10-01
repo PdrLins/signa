@@ -112,6 +112,9 @@ async def add_to_watchlist(
 
     notes = body.notes if body else None
     item = watchlist_service.add_to_watchlist(user["user_id"], symbol, notes)
+    # an invited user's first follow rewards their referrer (migration 019)
+    from app.services import referrals
+    await referrals.after_follow(user["user_id"])
     return item
 
 

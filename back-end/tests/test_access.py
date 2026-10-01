@@ -55,8 +55,13 @@ def test_db_override_moves_a_feature(monkeypatch):
 
 def test_slot_limits():
     assert access.slot_limit("free") == 10
-    assert access.slot_limit("free", 10) == 10   # invite bonus no longer raises the free limit
+    assert access.slot_limit("free", 10) == 10   # users.slot_bonus is ignored
     assert access.slot_limit("free", 999) == 10
+    # migration 019: +5 per rewarded referral, at most +25
+    assert access.slot_limit("free", rewarded_referrals=1) == 15
+    assert access.slot_limit("free", rewarded_referrals=5) == 35
+    assert access.slot_limit("free", rewarded_referrals=9) == 35
+    assert access.slot_limit("premium", rewarded_referrals=3) is None
     assert access.slot_limit("premium") is None
     assert access.slot_limit("owner") is None
     assert DEFAULTS["system.unlimited_slots"] == "premium"
@@ -165,6 +170,7 @@ UNGATED = {
     ("POST", "/api/v1/auth/refresh"), ("GET", "/api/v1/auth/me"),
     ("POST", "/api/v1/auth/token/refresh"), ("GET", "/api/v1/auth/sessions"),
     ("DELETE", "/api/v1/auth/sessions/{session_id}"), ("POST", "/api/v1/auth/sessions/revoke-others"),
+    ("POST", "/api/v1/auth/register"), ("GET", "/api/v1/auth/referral/{code}"),   # public (migration 019)
     ("GET", "/api/v1/health"), ("GET", "/api/v1/symbols/search"),
     ("GET", "/api/v1/stats/user-settings"), ("PUT", "/api/v1/stats/user-settings"),
     ("GET", "/api/v1/tickers/{ticker}/chart"),

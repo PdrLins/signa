@@ -69,14 +69,34 @@ class Settings(BaseSettings):
     # macOS: block idle sleep while the back-end runs (app/core/keep_awake.py),
     # so scheduled scans and the watchdog run on time.
     keep_awake: bool = True
+    # Email sign-in (migration 018). Accounts without Telegram confirm each
+    # password sign-in with a code sent by email. Public sign-up stays OFF
+    # until the app is hosted (SIGNUP_ENABLED=true).
+    signup_enabled: bool = False
+    email_code_expire_seconds: int = 600
+    email_provider: str = "console"   # console (logs, dev) | resend | smtp
+    email_from: str = "Signa <no-reply@localhost>"
+    resend_api_key: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
     otp_expire_seconds: int = 30  # 30 seconds
     session_token_expire_seconds: int = 180
 
     # --- Telegram Webhook ---
     telegram_webhook_secret: str = ""  # Set via setWebhook secret_token param
+    # Bot @username without the @ (for t.me/<bot>?start=<code> links when a
+    # user connects Telegram). Optional: when empty it's read once via getMe.
+    telegram_bot_username: str = ""
 
     # --- CORS ---
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    # --- Referrals (migration 019) ---
+    # Public URL of the web app; GET /referrals then returns
+    # share_url = f"{WEB_APP_URL}/signup?code=<account id>". Optional (null when empty).
+    web_app_url: str = ""
 
     # --- Login second factor ---
     # True = password + Telegram code. False = password only; acceptable only
@@ -622,6 +642,10 @@ class Settings(BaseSettings):
     # Insights history jobs (migration 014): income forecast (18:00 ET) and
     # Signa check statuses per followed symbol (18:15 ET).
     portfolio_insights_jobs_enabled: bool = True
+    # Per-user Telegram notifications (migration 016, feature.telegram_alerts =
+    # premium): event digests at 08:30 ET daily + 18:30 ET weekdays, price
+    # alerts and big moves every 5 min during the session.
+    telegram_notifications_enabled: bool = True
 
     # --- Language ---
     language: str = "en"  # "en" or "pt"

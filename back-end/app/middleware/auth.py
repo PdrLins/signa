@@ -30,6 +30,7 @@ PUBLIC_PATHS = {
     "/api/v1/auth/verify-otp",
     "/api/v1/auth/refresh",
     "/api/v1/auth/token/refresh",
+    "/api/v1/auth/register",          # invite-only sign-up (migration 019)
     "/api/v1/health",
     "/api/v1/telegram/webhook",
     "/docs",
@@ -37,6 +38,8 @@ PUBLIC_PATHS = {
     "/openapi.json",
     "/",
 }
+# Public path prefixes (a path parameter follows): invite-code lookup.
+PUBLIC_PREFIXES = ("/api/v1/auth/referral/",)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -48,7 +51,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Public paths: no auth needed
-        if path in PUBLIC_PATHS or path.startswith("/docs") or path.startswith("/redoc"):
+        if (path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
+                or path.startswith("/docs") or path.startswith("/redoc")):
             return await call_next(request)
 
         # Extract token

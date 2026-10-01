@@ -15,7 +15,8 @@ class DeviceInfo(BaseModel):
 
 
 class LoginRequest(DeviceInfo):
-    username: str = Field(..., min_length=1, max_length=50)
+    # a username or, for email accounts (migration 018), the email address
+    username: str = Field(..., min_length=1, max_length=254)
     password: str = Field(..., min_length=1, max_length=128)
 
 
@@ -24,6 +25,8 @@ class LoginResponse(BaseModel):
     Password-only flow (LOGIN_OTP_ENABLED=false): access_token is set instead."""
     message: str = "OTP sent to your Telegram"
     session_token: Optional[str] = None
+    # where the code went: "telegram" | "email" (null when no code is needed)
+    code_via: Optional[str] = None
     access_token: Optional[str] = None
     token_type: Optional[str] = None
     expires_in: Optional[int] = None
@@ -66,3 +69,40 @@ class SessionView(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class SignupRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    password: str = Field(..., min_length=1, max_length=128)
+    language: Literal["en", "pt"] = "en"
+
+
+class CodeSentResponse(BaseModel):
+    """A code was (or, to avoid revealing accounts, may have been) emailed:
+    send it back with this session_token."""
+    session_token: str
+    message: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+
+
+class ResetPasswordRequest(BaseModel):
+    session_token: str = Field(..., min_length=1, max_length=128)
+    otp_code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+    new_password: str = Field(..., min_length=1, max_length=128)
+
+
+class EmailChangeRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class EmailConfirmRequest(BaseModel):
+    session_token: str = Field(..., min_length=1, max_length=128)
+    otp_code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str = Field(..., min_length=1, max_length=128)

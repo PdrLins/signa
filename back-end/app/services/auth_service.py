@@ -23,7 +23,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db import queries
-from app.services import sessions
+from app.services import identity, sessions
 from app.models.audit import AuditEvent
 from app.notifications.telegram_bot import send_otp_message
 
@@ -75,7 +75,8 @@ async def login(
     from app.db.supabase import get_client
     db = get_client()
 
-    user = queries.get_user_by_username(username.lower())
+    # a username, or an email address (migration 018; active or not)
+    user = identity.find_user_for_login(username) if "@" in username else queries.get_user_by_username(username.lower())
 
     # ── Check DB lockout ──
     if user:
@@ -120,6 +121,16 @@ async def login(
         # Same generic error whether or not this attempt triggered a lock.
         raise AuthenticationError(INVALID_CREDENTIALS)
 
+    # ── Inactive account: an unconfirmed sign-up gets a fresh code; any
+    # other inactive account looks like a wrong password. ──
+    if user.get("is_active") is False:
+        if user.get("email") and not user.get("email_verified_at"):
+            from app.services import email_sender
+            token, code = identity.issue_code(user["id"], "login", user["email"])
+            email_sender.send_code(user["email"], "signup", code, identity._language(user["id"]))
+            return {"message": "We sent a code to your email", "session_token": token, "code_via": "email"}
+        raise AuthenticationError(INVALID_CREDENTIALS)
+
     # ── Successful credentials — clear attempts in DB ──
     db.table("users").update({
         "login_attempts": 0,
@@ -134,9 +145,18 @@ async def login(
         user_agent=user_agent,
     )
 
+    if settings.login_otp_enabled and not user.get("telegram_chat_id") \
+            and user.get("email") and user.get("email_verified_at"):
+        # Email account (migration 018): the code goes to the verified email.
+        token = identity.send_login_code(user)
+        queries.insert_audit_log(event_type=AuditEvent.OTP_SENT, success=True, user_id=user["id"],
+                                 ip_address=ip_address, user_agent=user_agent, metadata={"via": "email"})
+        return {"message": "We sent a code to your email", "session_token": token,
+                "last_login": user.get("last_login"), "code_via": "email"}
+
     if not settings.login_otp_enabled or not user.get("telegram_chat_id"):
-        # Password-only login (LOGIN_OTP_ENABLED=false, or an account with no
-        # Telegram linked, e.g. a free user): skip the code, issue the JWT.
+        # Password-only login (LOGIN_OTP_ENABLED=false, or an account with
+        # neither Telegram nor a verified email): skip the code, issue the JWT.
         token = _issue_access_token(user, ip_address, user_agent, client, device_name)
         return {"message": "Logged in", "session_token": None, **token}
 
@@ -169,6 +189,7 @@ async def login(
         "message": "OTP sent to your Telegram",
         "session_token": session_token,
         "last_login": user.get("last_login"),
+        "code_via": "telegram",
     }
 
 
@@ -187,6 +208,10 @@ async def verify_otp_code(
         raise AuthenticationError("Invalid or expired session token")
 
     user_id = otp_record["user_id"]
+
+    # A reset or new-email code can't sign anyone in (migration 018 purpose)
+    if (otp_record.get("purpose") or "login") != "login":
+        raise AuthenticationError("Invalid or expired session token")
 
     # Check expiration
     expires_at = datetime.fromisoformat(otp_record["expires_at"])
@@ -236,6 +261,10 @@ async def verify_otp_code(
     # concurrent requests with the same OTP can't both get a token)
     if not queries.mark_otp_used(otp_record["id"]):
         raise AuthenticationError("Invalid or expired session token")
+
+    # A confirmed sign-up code activates the account (migration 018)
+    if otp_record.get("email"):
+        identity.activate_if_pending(otp_record)
 
     # Get user info (excludes password_hash)
     user = queries.get_user_by_id(user_id)

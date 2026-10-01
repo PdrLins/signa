@@ -19,6 +19,25 @@ CREATE TABLE IF NOT EXISTS users (
     last_login        TIMESTAMPTZ
 );
 
+-- Migration 019 (referrals): users.account_id VARCHAR(8) UNIQUE NOT NULL
+-- (visible account ID = invite code), users.referred_by UUID -> users(id).
+-- Later migrations (011+) add more users columns: see app/db/migrations/.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS account_id VARCHAR(8) UNIQUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by UUID REFERENCES users(id) ON DELETE SET NULL;
+
+-- REFERRALS (migration 019): who invited whom; 'rewarded' after the invited
+-- user's first follow (+5 free slots for the referrer, max +25).
+CREATE TABLE IF NOT EXISTS referrals (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    referrer_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    referred_id  UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    status       VARCHAR(10) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'rewarded')),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    rewarded_at  TIMESTAMPTZ,
+    CHECK (referrer_id <> referred_id)
+);
+CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals (referrer_id, status);
+
 -- 2. OTP CODES
 CREATE TABLE IF NOT EXISTS otp_codes (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -25,6 +25,8 @@ from app.api.v1 import allocation as allocation_api
 from app.api.v1 import dividend_summary as dividend_summary_api
 from app.api.v1 import events as events_api
 from app.api.v1 import portfolio_home as portfolio_home_api
+from app.api.v1 import referrals as referrals_api
+from app.api.v1 import register as register_api
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.middleware.audit import AuditMiddleware
@@ -162,6 +164,8 @@ app.include_router(dividend_summary_api.income_router, prefix=api_prefix)
 app.include_router(events_api.router, prefix=api_prefix)
 app.include_router(admin_usage_api.router, prefix=api_prefix)
 app.include_router(alerts_api.router, prefix=api_prefix)
+app.include_router(register_api.router, prefix=api_prefix)
+app.include_router(referrals_api.router, prefix=api_prefix)
 
 
 @app.post("/api/v1/telegram/webhook")
@@ -180,6 +184,15 @@ async def telegram_webhook(request: Request):
         message = data.get("message", {})
         chat_id = message.get("chat", {}).get("id")
         text = message.get("text", "")
+
+        # A user connecting their notification chat (any private chat, one-time
+        # code from the app — app/services/telegram_notify.py). Everything
+        # else from non-owner chats stays ignored below.
+        if isinstance(text, str) and text.startswith("/start "):
+            from app.services.telegram_notify import handle_start
+            code = text.split(maxsplit=1)[1]
+            if await handle_start(code, message.get("chat") or {}, message.get("from") or {}):
+                return {"ok": True}
 
         # Only respond to the bot owner
         if str(chat_id) != settings.telegram_chat_id:

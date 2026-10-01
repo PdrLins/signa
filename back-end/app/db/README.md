@@ -35,7 +35,8 @@ Shared across all users. No user_id filtering.
 
 | Table | Purpose |
 |-------|---------|
-| **users** | User accounts — username, bcrypt password hash, Telegram chat ID for OTP. |
+| **users** | User accounts — username, bcrypt password hash, Telegram chat ID for OTP. Migration 019: `account_id` (8-char visible account ID = invite code, unique) and `referred_by` (who invited them). |
+| **referrals** | Migration 019 — one row per invited user (`referrer_id`, `referred_id` UNIQUE, `status` pending → rewarded on the invited user's first followed stock, `rewarded_at`). Free slot limit = 10 + min(5 × rewarded, 25); `users.slot_bonus` is unused. |
 | **otp_codes** | One-time passwords for login 2FA — code hash, session token, expiry, attempt count. Expires after 2 minutes. |
 | **token_blacklist** | Revoked JWT tokens — checked on every authenticated request. Populated on logout. |
 | **brain_sessions** | Brain Editor 2FA sessions — OTP hash, brain token JTI, expiry. Separate from login OTP. 15-minute sessions. |

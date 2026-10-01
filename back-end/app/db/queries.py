@@ -23,13 +23,22 @@ def get_user_by_username(username: str) -> dict | None:
     client = get_client()
     result = (
         client.table("users")
-        .select("id, username, password_hash, telegram_chat_id, is_active, last_login, login_attempts, locked_until")
+        # "*": also email / email_verified_at once migration 018 adds them
+        .select("*")
         .eq("username", username.strip().lower())
         .eq("is_active", True)
         .limit(1)
         .execute()
     )
     return result.data[0] if result.data else None
+
+
+def get_user_by_email(email: str) -> dict | None:
+    """Look up a user by (lower-cased) email, active or not (an unconfirmed
+    sign-up is inactive). Migration 018; raises before it."""
+    client = get_client()
+    rows = client.table("users").select("*").eq("email", email.strip().lower()).limit(1).execute().data
+    return rows[0] if rows else None
 
 
 def get_user_by_id(user_id: str) -> dict | None:
@@ -1773,3 +1782,81 @@ def get_active_alert_follow_rows() -> list[dict]:
     """[{user_id, symbol}] of active alerts: their symbols need fresh quotes."""
     client = get_client()
     return _select_all_pages(lambda: client.table("price_alerts").select("user_id, symbol").eq("active", True))
+
+
+# ============================================================
+# TELEGRAM NOTIFICATIONS (migration 016)
+# ============================================================
+
+def get_telegram_link(user_id: str) -> dict | None:
+    """The user's notification chat {user_id, chat_id, username, linked_at} or None."""
+    client = get_client()
+    rows = client.table("telegram_links").select("*").eq("user_id", user_id).limit(1).execute().data or []
+    return rows[0] if rows else None
+
+
+def get_telegram_links() -> list[dict]:
+    """Every linked notification chat (delivery jobs)."""
+    client = get_client()
+    return _select_all_pages(lambda: client.table("telegram_links").select("user_id, chat_id, username"))
+
+
+def upsert_telegram_link(user_id: str, chat_id: str, username: str | None) -> dict:
+    """Link `chat_id` to the user. A chat belongs to one user: it is removed
+    from any other user first (linking from a second account moves it)."""
+    client = get_client()
+    client.table("telegram_links").delete().eq("chat_id", chat_id).neq("user_id", user_id).execute()
+    row = {"user_id": user_id, "chat_id": chat_id, "username": username,
+           "linked_at": datetime.now(timezone.utc).isoformat()}
+    result = client.table("telegram_links").upsert(row, on_conflict="user_id").execute()
+    return result.data[0] if result.data else row
+
+
+def delete_telegram_link(user_id: str) -> None:
+    get_client().table("telegram_links").delete().eq("user_id", user_id).execute()
+
+
+def replace_telegram_link_code(user_id: str, code_hash: str, expires_at: str) -> None:
+    """Store a new one-time code; the user's older unused codes stop working."""
+    client = get_client()
+    client.table("telegram_link_codes").delete().eq("user_id", user_id).is_("used_at", "null").execute()
+    client.table("telegram_link_codes").insert(
+        {"code_hash": code_hash, "user_id": user_id, "expires_at": expires_at}).execute()
+
+
+def get_pending_telegram_link_code(user_id: str, now_iso: str) -> dict | None:
+    """The user's newest unused, unexpired code {expires_at} or None."""
+    client = get_client()
+    rows = (client.table("telegram_link_codes").select("expires_at").eq("user_id", user_id)
+            .is_("used_at", "null").gt("expires_at", now_iso).order("expires_at", desc=True)
+            .limit(1).execute().data or [])
+    return rows[0] if rows else None
+
+
+def consume_telegram_link_code(code_hash: str, now_iso: str) -> str | None:
+    """Mark an unused, unexpired code used; returns its user_id, or None.
+    Conditional update (used_at IS NULL): a code can be spent only once."""
+    client = get_client()
+    rows = (client.table("telegram_link_codes").update({"used_at": now_iso})
+            .eq("code_hash", code_hash).is_("used_at", "null").gt("expires_at", now_iso)
+            .execute().data or [])
+    return str(rows[0]["user_id"]) if rows else None
+
+
+def get_delivered_keys(user_id: str, keys: list[str]) -> set[str]:
+    """Which of `keys` were already sent to the user."""
+    if not keys:
+        return set()
+    client = get_client()
+    rows = (client.table("notification_deliveries").select("dedupe_key").eq("user_id", user_id)
+            .in_("dedupe_key", keys).execute().data or [])
+    return {r["dedupe_key"] for r in rows}
+
+
+def insert_deliveries(user_id: str, items: list[tuple[str, str]]) -> None:
+    """Record sent notifications [(kind, dedupe_key)]; duplicates are ignored."""
+    if not items:
+        return
+    rows = [{"user_id": user_id, "kind": k, "dedupe_key": key} for k, key in items]
+    get_client().table("notification_deliveries").upsert(
+        rows, on_conflict="user_id,dedupe_key", ignore_duplicates=True).execute()

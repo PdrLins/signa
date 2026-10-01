@@ -192,18 +192,20 @@ def validate_update(user: dict, current: dict | None, patch: dict) -> dict:
 # ---------------------------------------------------------------- DB (sync)
 
 def get_profile(user: dict) -> dict:
-    from app.services import slots
+    from app.services import referrals, slots
     row = queries.get_profile_settings(user["user_id"])
-    return build_profile(user, row, queries.get_user_email(user["user_id"]), slots.slot_summary(user))
+    profile = build_profile(user, row, queries.get_user_email(user["user_id"]), slots.slot_summary(user))
+    return {**profile, "account_id": referrals.account_id_for(user["user_id"])}  # migration 019; null before
 
 
 def update_profile(user: dict, patch: dict) -> dict:
-    from app.services import slots
+    from app.services import referrals, slots
     current = queries.get_profile_settings(user["user_id"])
     clean = validate_update(user, current, patch)
     saved = queries.upsert_profile_settings(user["user_id"], clean) if clean else {}
-    return build_profile(user, {**(current or {}), **clean, **(saved or {})},
-                         queries.get_user_email(user["user_id"]), slots.slot_summary(user))
+    profile = build_profile(user, {**(current or {}), **clean, **(saved or {})},
+                            queries.get_user_email(user["user_id"]), slots.slot_summary(user))
+    return {**profile, "account_id": referrals.account_id_for(user["user_id"])}
 
 
 def get_country_and_currency(user_id: str) -> tuple[str | None, str]:

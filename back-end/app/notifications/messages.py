@@ -442,6 +442,83 @@ _MESSAGES = {
             "Nunca compartilhe este código."
         ),
     },
+    # ── Per-user Telegram notifications (migration 016, Premium) ──
+    "user_tg_connected": {
+        "en": "✅ <b>Signa is connected</b>\n\nYour Signa notifications will arrive here. "
+              "Choose which ones in the app: Profile → Notifications.",
+        "pt": "✅ <b>Signa conectado</b>\n\nSuas notificações do Signa vão chegar aqui. "
+              "Escolha quais no app: Perfil → Notificações.",
+    },
+    "user_tg_link_expired": {
+        "en": "This link has expired or was already used. Open Signa and tap <b>Connect Telegram</b> again.",
+        "pt": "Este link expirou ou já foi usado. Abra o Signa e toque em <b>Conectar Telegram</b> de novo.",
+    },
+    "user_tg_test": {
+        "en": "🔔 <b>Signa test</b>\n\nTelegram notifications are working.",
+        "pt": "🔔 <b>Teste do Signa</b>\n\nAs notificações pelo Telegram estão funcionando.",
+    },
+    "user_tg_header": {"en": "🔔 <b>Signa</b>", "pt": "🔔 <b>Signa</b>"},
+    # Referral rewarded (migration 019, app/services/referrals.py)
+    "user_tg_referral_rewarded": {
+        "en": "🎉 <b>Your friend joined Signa</b>\n\n+{per_friend} stocks to follow. Thanks for inviting them!",
+        "pt": "🎉 <b>Seu amigo entrou no Signa</b>\n\n+{per_friend} ações para acompanhar. Obrigado pelo convite!",
+    },
+    "user_tg_tomorrow": {"en": "tomorrow", "pt": "amanhã"},
+    "user_tg_today": {"en": "today", "pt": "hoje"},
+    "user_tg_on_date": {"en": "on {date}", "pt": "em {date}"},
+    "user_tg_exdiv": {
+        "en": "📅 <b>{symbol}</b> goes ex-dividend {when}{amount}",
+        "pt": "📅 <b>{symbol}</b> fica ex-dividendo {when}{amount}",
+    },
+    "user_tg_paid": {
+        "en": "💵 <b>{symbol}</b> pays its dividend today{amount}",
+        "pt": "💵 <b>{symbol}</b> paga o dividendo hoje{amount}",
+    },
+    "user_tg_raise": {
+        "en": "📈 <b>{symbol}</b> raised its dividend {pct} ({old} → {new} per share)",
+        "pt": "📈 <b>{symbol}</b> aumentou o dividendo {pct} ({old} → {new} por ação)",
+    },
+    "user_tg_cut": {
+        "en": "📉 <b>{symbol}</b> cut its dividend {pct} ({old} → {new} per share)",
+        "pt": "📉 <b>{symbol}</b> cortou o dividendo {pct} ({old} → {new} por ação)",
+    },
+    "user_tg_earnings": {
+        "en": "📊 <b>{symbol}</b> reports earnings {when}{move}",
+        "pt": "📊 <b>{symbol}</b> divulga resultados {when}{move}",
+    },
+    "user_tg_earnings_move": {
+        "en": " — usually moves ±{pct}",
+        "pt": " — costuma variar ±{pct}",
+    },
+    "user_tg_analyst": {
+        "en": "🧐 <b>{symbol}</b>: {firm} {action}{grades}",
+        "pt": "🧐 <b>{symbol}</b>: {firm} {action}{grades}",
+    },
+    "user_tg_analyst_up": {"en": "upgraded", "pt": "elevou"},
+    "user_tg_analyst_down": {"en": "downgraded", "pt": "rebaixou"},
+    "user_tg_analyst_init": {"en": "started coverage", "pt": "iniciou cobertura"},
+    "user_tg_analyst_other": {"en": "kept its rating", "pt": "manteve a recomendação"},
+    "user_tg_check": {
+        "en": "🔎 <b>{symbol}</b>: {n} Signa check(s) changed",
+        "pt": "🔎 <b>{symbol}</b>: {n} checagem(ns) do Signa mudou(aram)",
+    },
+    "user_tg_economy": {"en": "🏦 {title} tomorrow", "pt": "🏦 {title} amanhã"},
+    "user_tg_economy_boc_rate": {"en": "Bank of Canada rate decision", "pt": "Decisão de juros do Banco do Canadá"},
+    "user_tg_economy_fed_rate": {"en": "Fed rate decision", "pt": "Decisão de juros do Fed"},
+    "user_tg_economy_us_cpi": {"en": "US inflation (CPI)", "pt": "Inflação dos EUA (CPI)"},
+    "user_tg_economy_ca_cpi": {"en": "Canada inflation (CPI)", "pt": "Inflação do Canadá (CPI)"},
+    "user_tg_big_move": {
+        "en": "⚡ <b>{symbol}</b> is {pct} today",
+        "pt": "⚡ <b>{symbol}</b> está {pct} hoje",
+    },
+    "user_tg_alert_above": {
+        "en": "🎯 <b>{symbol}</b> reached {target} (now {price})",
+        "pt": "🎯 <b>{symbol}</b> chegou a {target} (agora {price})",
+    },
+    "user_tg_alert_below": {
+        "en": "🎯 <b>{symbol}</b> fell to {target} (now {price})",
+        "pt": "🎯 <b>{symbol}</b> caiu para {target} (agora {price})",
+    },
 }
 
 
@@ -482,3 +559,14 @@ def is_quiet_hours() -> bool:
     if start_mins > end_mins:  # spans midnight
         return now_mins >= start_mins or now_mins < end_mins
     return start_mins <= now_mins < end_mins
+
+
+def msg_for(lang: str | None, key: str, **kwargs) -> str:
+    """A template in a given user's language (per-user notifications). No
+    timestamp/context injection; unknown placeholders leave the template as is."""
+    lang = lang if lang in ("en", "pt") else "en"
+    template = _MESSAGES.get(key, {}).get(lang, _MESSAGES.get(key, {}).get("en", key))
+    try:
+        return template.format(**kwargs) if kwargs else template
+    except KeyError:
+        return template

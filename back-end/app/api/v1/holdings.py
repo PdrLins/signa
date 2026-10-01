@@ -306,6 +306,9 @@ async def upsert_holdings(body: UpsertRequest, user: dict = Depends(get_current_
         }
     saved = await _db(queries.upsert_holdings, uid, list(merged.values()))
     created = sum(1 for s in merged if s not in existing)
+    if saved:  # an invited user's first follow rewards their referrer (migration 019)
+        from app.services import referrals
+        await referrals.after_follow(uid)
     refreshing = _kick_refresh(uid)
     return {"items": [_with_account(hs.public_holding(h, None), accounts) for h in saved], "count": len(saved),
             "created": created, "updated": len(merged) - created, "refreshing": refreshing}

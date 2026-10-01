@@ -1,8 +1,9 @@
 """Tiered IP-based rate limiting for all endpoints.
 
-Three tiers:
+Tiers:
 - AUTH: 5 requests per 15 minutes (login, OTP)
 - STRICT: 3 requests per 5 minutes (scan trigger, learning analyze)
+- LOOKUP: 20 requests per 15 minutes per IP (invite-code lookup)
 - STANDARD: 240 requests per minute per signed-in user (per IP when there is
   no valid token). The web app proxies every call through 127.0.0.1, so an
   IP key would put all users in one bucket.
@@ -33,6 +34,7 @@ MAX_TRACKED_IPS = 10_000
 TIER_AUTH = (5, 15 * 60, True)       # 5 failed attempts per 15 min
 TIER_STRICT = (3, 5 * 60, False)     # 3 requests per 5 min
 TIER_STANDARD = (240, 60, False)     # 240 requests per minute, per signed-in user (else per IP)
+TIER_LOOKUP = (20, 15 * 60, False)   # invite-code lookups: 20 per 15 min per IP
 
 # Path → tier mapping
 _AUTH_PATHS = {
@@ -42,6 +44,14 @@ _AUTH_PATHS = {
     "/api/v1/auth/refresh",
     "/api/v1/auth/token/refresh",
 }
+
+# AUTH tier, but EVERY attempt counts (a successful sign-up creates an
+# account, so it must not be free to repeat).
+_AUTH_COUNT_ALL_PATHS = {
+    "/api/v1/auth/register",
+}
+# GET /auth/referral/{code}
+_LOOKUP_PREFIX = "/api/v1/auth/referral/"
 
 _STRICT_PATHS = {
     "/api/v1/scans/trigger",
@@ -75,6 +85,7 @@ _attempts: dict[str, OrderedDict[str, list[float]]] = {
     "auth": OrderedDict(),
     "strict": OrderedDict(),
     "standard": OrderedDict(),
+    "lookup": OrderedDict(),
 }
 _blocked: OrderedDict[str, float] = OrderedDict()
 
@@ -83,6 +94,10 @@ def _get_tier(path: str) -> tuple[str, int, int, bool]:
     """Return (tier_name, max_requests, window_seconds, count_only_failures)."""
     if path in _AUTH_PATHS:
         return ("auth", *TIER_AUTH)
+    if path in _AUTH_COUNT_ALL_PATHS:
+        return ("auth", TIER_AUTH[0], TIER_AUTH[1], False)
+    if path.startswith(_LOOKUP_PREFIX):
+        return ("lookup", *TIER_LOOKUP)
     if path in _STRICT_PATHS:
         return ("strict", *TIER_STRICT)
     return ("standard", *TIER_STANDARD)

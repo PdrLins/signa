@@ -166,5 +166,19 @@ def _no_price_alert_db(monkeypatch):
     monkeypatch.setattr(queries, "get_active_price_alerts", lambda symbols: [])
 
 
+@pytest.fixture(autouse=True)
+def _no_referrals_db(monkeypatch):
+    """Referrals / account IDs (migration 019) read Supabase: by default
+    behave like a database without 019 (account_id null, no slot bonus,
+    rewards no-op). Referral tests install tests/referral_fakes.ReferralDB."""
+    from app.services import referrals
+
+    class _No019:
+        def table(self, name):
+            raise RuntimeError(f'relation "{name}" does not exist (42P01)')
+    monkeypatch.setattr(referrals, "_db", lambda: _No019())
+    referrals.clear_caches()
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_access: use real access-level resolution (no owner default)")
