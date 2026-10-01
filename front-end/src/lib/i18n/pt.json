@@ -2251,7 +2251,8 @@
       "network": "Não foi possível conectar ao servidor. Verifique sua conexão.",
       "internal": "Não foi possível carregar o calendário de dividendos. Tente novamente.",
       "retry": "Tentar novamente"
-    }
+    },
+    "includeWatchlistCount": "Mostrar também {n} ações que você acompanha"
   },
   "stock": {
     "openPage": "Abrir a página de {symbol}",

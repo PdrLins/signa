@@ -6,6 +6,7 @@ import { ArrowLeft, CalendarDays } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore, INTL_LOCALES, type Locale } from '@/store/i18nStore'
 import { useDividendCalendar } from '@/hooks/useDividendCalendar'
+import { useWatchlist } from '@/hooks/useWatchlist'
 import { toHoldingsError } from '@/hooks/useHoldings'
 import { DASH, fill, shortDate } from '@/lib/insights'
 import { money, num } from '@/components/holdings/format'
@@ -254,6 +255,13 @@ export default function DividendCalendarPage() {
   const td = t.dividendsPage
   const [withWatchlist, setWithWatchlist] = useState(false)
   const q = useDividendCalendar(12, withWatchlist)
+  const watchlistQ = useWatchlist()
+  // Only offer the toggle when the watchlist has stocks you don't already
+  // hold (a held stock is always shown, once, as held).
+  const watchOnlyCount = useMemo(() => {
+    const held = new Set((q.data?.positions ?? []).filter((p) => p.owned).map((p) => p.symbol))
+    return (watchlistQ.data ?? []).filter((w) => !held.has(w.symbol)).length
+  }, [q.data, watchlistQ.data])
   const data = q.data
   const toggle = useCallback(() => setWithWatchlist((v) => !v), [])
 
@@ -277,7 +285,7 @@ export default function DividendCalendarPage() {
           </h1>
           <p className="text-[13px] md:text-sm mt-1 max-w-2xl" style={{ color: theme.colors.textSub }}>{td.subtitle}</p>
         </div>
-        {!empty && (
+        {!empty && (watchOnlyCount > 0 || withWatchlist) && (
           <button type="button" role="switch" aria-checked={withWatchlist} onClick={toggle}
             aria-label={td.includeWatchlist} title={td.includeWatchlistHelp}
             className="min-h-[44px] self-start md:self-auto px-3 rounded-xl text-[14px] font-medium flex items-center gap-2 focus-visible:outline focus-visible:outline-2"
@@ -287,7 +295,7 @@ export default function DividendCalendarPage() {
               <span className="absolute top-0.5 w-4 h-4 rounded-full transition-all"
                 style={{ left: withWatchlist ? 18 : 2, backgroundColor: theme.colors.surface }} />
             </span>
-            {td.includeWatchlist}
+            {fill(td.includeWatchlistCount, { n: watchOnlyCount })}
           </button>
         )}
       </header>

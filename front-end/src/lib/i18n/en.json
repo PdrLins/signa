@@ -2251,7 +2251,8 @@
       "network": "Couldn't reach the server. Check your connection.",
       "internal": "Couldn't load the dividend calendar. Try again.",
       "retry": "Try again"
-    }
+    },
+    "includeWatchlistCount": "Also show {n} stocks you follow"
   },
   "stock": {
     "openPage": "Open the {symbol} stock page",
