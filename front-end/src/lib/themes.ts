@@ -1,4 +1,7 @@
 export type ThemeId =
+  | 'evergreen'
+  | 'inkgold'
+  | 'daylight'
   | 'slate'
   | 'applestocks'
   | 'robinhood'
@@ -44,6 +47,82 @@ export interface Theme {
 }
 
 export const themes: Record<ThemeId, Theme> = {
+  // ── Signa's own themes (2026-09-30) ────────────────────────────────────
+  // Up/down use green/coral (what investors expect), separated by lightness
+  // too so they stay distinguishable for red-green colour blindness.
+  evergreen: {
+    id: 'evergreen',
+    name: 'Evergreen',
+    description: 'Green-black and jade. Calm, growth-minded.',
+    isDark: true,
+    colors: {
+      bg: '#0B1311',
+      surface: '#13201C',
+      surfaceAlt: '#1A2A25',
+      nav: '#08100E',
+      navActive: '#1A2A25',
+      text: '#E7F0EC',
+      textSub: '#8FA39B',
+      textHint: '#56675F',
+      primary: '#3DBE8B',
+      accent: '#7FDCB4',
+      up: '#3DBE8B',
+      down: '#EF7A63',
+      warning: '#E3B657',
+      border: 'rgba(120, 190, 160, 0.12)',
+      stripeRisk: 'linear-gradient(90deg, #3DBE8B, #7FDCB4)',
+      stripeSafe: 'linear-gradient(90deg, #2A8F68, #3DBE8B)',
+    },
+  },
+  inkgold: {
+    id: 'inkgold',
+    name: 'Ink & Gold',
+    description: 'Deep ink with a warm gold accent. Premium feel.',
+    isDark: true,
+    colors: {
+      bg: '#0C0E18',
+      surface: '#151827',
+      surfaceAlt: '#1D2133',
+      nav: '#090B13',
+      navActive: '#1D2133',
+      text: '#ECEAF2',
+      textSub: '#9A9CB3',
+      textHint: '#5C5F78',
+      primary: '#D6A846',
+      accent: '#EBC877',
+      up: '#4CC48D',
+      down: '#EC6E62',
+      warning: '#E0B65A',
+      border: 'rgba(200, 190, 240, 0.10)',
+      stripeRisk: 'linear-gradient(90deg, #D6A846, #EBC877)',
+      stripeSafe: 'linear-gradient(90deg, #A9832F, #D6A846)',
+    },
+  },
+  daylight: {
+    id: 'daylight',
+    name: 'Daylight',
+    description: 'Cool white and indigo. Clean in daylight.',
+    isDark: false,
+    colors: {
+      bg: '#F4F6F9',
+      surface: '#FFFFFF',
+      surfaceAlt: '#EEF0F6',
+      nav: '#FFFFFF',
+      navActive: '#EEF0F6',
+      text: '#141821',
+      textSub: '#5D6575',
+      textHint: '#9AA1AE',
+      primary: '#4F5BD5',
+      accent: '#3E49B8',
+      up: '#13875F',
+      down: '#C9473C',
+      warning: '#B7811C',
+      border: '#E2E5EC',
+      stripeRisk: 'linear-gradient(90deg, #4F5BD5, #3E49B8)',
+      stripeSafe: 'linear-gradient(90deg, #13875F, #1FA374)',
+    },
+  },
+  // ── Older themes ───────────────────────────────────────────────────────
   // Day 32 revamp: Linear / Mercury Bank inspired professional dark.
   // Near-black slate, cool muted off-white, single-accent slate-blue.
   // Up/down separated by HUE not red/green — wins are cool blue (calm),
@@ -222,4 +301,4 @@ export const themes: Record<ThemeId, Theme> = {
   },
 }
 
-export const DEFAULT_THEME: ThemeId = 'slate'
+export const DEFAULT_THEME: ThemeId = 'evergreen'
