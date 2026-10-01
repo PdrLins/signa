@@ -2,6 +2,7 @@
 
 import { Suspense, memo, useMemo } from 'react'
 import Link from 'next/link'
+import { useCardLink } from '@/hooks/useCardLink'
 import { AlertTriangle, ChevronRight, Info } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
@@ -66,10 +67,11 @@ function HomeInner() {
   )
 }
 
-function Card({ id, title, right, children }: { id: string; title: string; right?: React.ReactNode; children: React.ReactNode }) {
+function Card({ id, title, right, children, href }: { id: string; title: string; right?: React.ReactNode; children: React.ReactNode; href?: string }) {
   const theme = useTheme()
+  const cardLink = useCardLink(href)
   return (
-    <section aria-labelledby={id} className="rounded-2xl p-4 md:p-5 flex flex-col gap-3 min-w-0"
+    <section aria-labelledby={id} onClick={cardLink.onClick} className={`rounded-2xl p-4 md:p-5 flex flex-col gap-3 min-w-0 ${href ? 'hover:brightness-110' : ''} ${cardLink.className}`}
       style={{ backgroundColor: theme.colors.surface, border: `1px solid ${theme.colors.border}` }}>
       <div className="flex items-center justify-between gap-2 min-w-0">
         <h2 id={id} className="text-[15px] font-semibold" style={{ color: theme.colors.text }}>{title}</h2>
@@ -129,7 +131,7 @@ function DividendsCard({ scopeQuery }: { scopeQuery: string }) {
   const { fmt } = useMoney(d?.currency)
   const annual = d ? d.after_tax_total ?? d.forward_income : 0
   return (
-    <Card id="home-div" title={t.home.dividendsTitle} right={<MoreLink href={`/dividends${scopeQuery}`} label={t.home.seeDividends} />}>
+    <Card id="home-div" href={`/dividends${scopeQuery}`} title={t.home.dividendsTitle} right={<MoreLink href={`/dividends${scopeQuery}`} label={t.home.seeDividends} />}>
       {q.isLoading && <div className="h-24 rounded-xl animate-pulse" style={{ backgroundColor: theme.colors.surfaceAlt }} />}
       {!!q.error && !d && <QueryError error={q.error} onRetry={() => q.refetch()} />}
       {d && (

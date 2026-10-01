@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronUp, ExternalLink, Pencil, Trash2 } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
+import { useCardLink } from '@/hooks/useCardLink'
 import { useAccess } from '@/hooks/useAccess'
 import { useToast } from '@/hooks/useToast'
 import { holdingsApi } from '@/lib/api'
@@ -272,8 +273,9 @@ const HoldingCard = memo(function HoldingCard(props: ItemProps) {
   const chips = useMemo(() => holdingChips(h, th, maxWeight), [h, th, maxWeight])
   const ccy = h.currency ?? 'USD'
   const hasDetails = !!(h.last_review?.key_concern || st.red_flags?.length)
+  const cardLink = useCardLink(`/stocks/${encodeURIComponent(h.symbol)}`)
   return (
-    <li className="rounded-2xl p-4 flex flex-col gap-2.5 min-w-0"
+    <li onClick={cardLink.onClick} className={`rounded-2xl p-4 flex flex-col gap-2.5 min-w-0 hover:brightness-110 ${cardLink.className}`}
       style={{ backgroundColor: theme.colors.surface, border: `1px solid ${theme.colors.border}` }}>
       <div className="flex items-start justify-between gap-3 min-w-0">
         <div className="min-w-0">
@@ -336,9 +338,11 @@ const HoldingRow = memo(function HoldingRow(props: ItemProps) {
   const chips = useMemo(() => holdingChips(h, th, maxWeight), [h, th, maxWeight])
   const ccy = h.currency ?? 'USD'
   const td = 'px-3 py-3 align-top'
+  const rowLink = useCardLink(`/stocks/${encodeURIComponent(h.symbol)}`)
   return (
     <>
-      <tr style={{ borderTop: `1px solid ${theme.colors.border}` }}>
+      <tr onClick={rowLink.onClick} className={`hover:brightness-110 ${rowLink.className}`}
+        style={{ borderTop: `1px solid ${theme.colors.border}`, backgroundColor: theme.colors.surface }}>
         <th scope="row" className={`${td} text-left font-normal`}>
           <p className="font-mono font-semibold text-[14px]">
             <Link href={`/stocks/${encodeURIComponent(h.symbol)}`} className="underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2"

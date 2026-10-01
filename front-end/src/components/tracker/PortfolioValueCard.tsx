@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { ChevronDown, Maximize2, X } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
+import { useCardLink } from '@/hooks/useCardLink'
 import { useAccess } from '@/hooks/useAccess'
 import { useProfileOptions } from '@/hooks/useProfile'
 import { useMoney, usePortfolioHistory } from '@/hooks/usePortfolioInsights'
@@ -232,8 +233,9 @@ export function HomeValueCard({ summary, href }: { summary: PortfolioSummary; hr
   const signColor = useSignColor()
   const dc = summary.day_change
   const gain = summary.total_gain
+  const cardLink = useCardLink(href)
   return (
-    <section aria-labelledby="home-value" className="rounded-2xl p-4 md:p-5 flex flex-col gap-2 min-w-0"
+    <section aria-labelledby="home-value" onClick={cardLink.onClick} className={`rounded-2xl p-4 md:p-5 flex flex-col gap-2 min-w-0 hover:brightness-110 ${cardLink.className}`}
       style={{ backgroundColor: theme.colors.surface, border: `1px solid ${theme.colors.border}` }}>
       <div className="flex items-baseline justify-between gap-2">
         <h2 id="home-value" className="text-[13px] font-medium" style={{ color: theme.colors.textSub }}>{t.home.valueTitle}</h2>
