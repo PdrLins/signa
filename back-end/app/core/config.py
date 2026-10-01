@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     session_absolute_days: int = 180       # hard cap since sign-in
     session_owner_days: int = 30           # owner sessions: sliding AND absolute cap
     session_check_cache_seconds: int = 60  # how long "session still active" is cached
+    # macOS: block idle sleep while the back-end runs (app/core/keep_awake.py),
+    # so scheduled scans and the watchdog run on time.
+    keep_awake: bool = True
     otp_expire_seconds: int = 30  # 30 seconds
     session_token_expire_seconds: int = 180
 

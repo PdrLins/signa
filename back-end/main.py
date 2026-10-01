@@ -74,6 +74,9 @@ async def lifespan(app: FastAPI):
     _check_supabase_key_role()
     _warn_if_login_otp_disabled()
 
+    from app.core import keep_awake
+    keep_awake.start()   # macOS: scans and the watchdog must not freeze in idle sleep
+
     init_scheduler()
     start_scheduler()
     start_telegram_worker()
@@ -85,6 +88,7 @@ async def lifespan(app: FastAPI):
     yield
 
     stop_scheduler()
+    keep_awake.stop()
     await stop_telegram_worker()
 
     # Close the reusable Telegram HTTP client

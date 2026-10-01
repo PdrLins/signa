@@ -11,6 +11,23 @@ from loguru import logger
 from app.core.config import settings
 
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
+_FRED_KEY = re.compile(r"^[a-z0-9]{32}$")
+_fred_key_warned = False
+
+
+def fred_key_ok() -> bool:
+    """FRED keys are 32 lower-case letters/digits. A missing or placeholder
+    key would fail every series with HTTP 400 on every scan: skip FRED
+    instead and say so once per process."""
+    global _fred_key_warned
+    if _FRED_KEY.match(settings.fred_api_key or ""):
+        return True
+    if not _fred_key_warned:
+        _fred_key_warned = True
+        logger.warning("FRED_API_KEY is missing or not a real key: interest rates, inflation, yield curve and "
+                       "credit spread are left out of the macro snapshot. Get a free key at "
+                       "https://fred.stlouisfed.org/docs/api/api_key.html")
+    return False
 
 _SECRET_QS = re.compile(r"(api_key|apikey|key|token)=[^&\s'\"]+", re.IGNORECASE)
 
@@ -40,6 +57,8 @@ SERIES = {
 
 async def _fetch_fred_series(series_id: str, client: httpx.AsyncClient) -> Optional[float]:
     """Fetch the latest value for a FRED series."""
+    if not fred_key_ok():
+        return None
     try:
         params = {
             "series_id": series_id,
@@ -66,6 +85,8 @@ async def _fetch_fred_yoy_pct(series_id: str, client: httpx.AsyncClient) -> Opti
     to the AI prompt as "CPI (YoY): 320.1". Compute latest vs the
     observation 12 months earlier instead.
     """
+    if not fred_key_ok():
+        return None
     try:
         params = {
             "series_id": series_id,

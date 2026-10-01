@@ -4,8 +4,9 @@ import threading
 import time
 from functools import wraps
 
+import httpx
 from loguru import logger
-from supabase import Client, create_client
+from supabase import Client, ClientOptions, create_client
 
 from app.core.config import settings
 
@@ -13,6 +14,54 @@ _client: Client | None = None
 _lock = threading.Lock()
 _last_created: float = 0
 _MAX_AGE = 1800  # Recreate client every 30 min; with_retry handles stale connections
+
+
+# Supabase (behind Cloudflare) closes idle keep-alive connections; reusing
+# one fails with "Server disconnected without sending a response". That
+# killed whole scans and brain-watchdog runs. The transport below retries
+# such requests on a fresh connection: reads always, writes only when the
+# server provably sent nothing back (the request never reached it).
+_RETRY_ATTEMPTS = 3
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+_NOT_SENT = ("server disconnected without sending a response", "connectionterminated",
+             "connection reset", "broken pipe")
+
+
+def should_retry_disconnect(method: str, err: Exception) -> bool:
+    """True when a dropped connection may be retried without risking a
+    duplicate write. Pure (tested)."""
+    if not isinstance(err, (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError, httpx.ConnectError)):
+        return False
+    if method.upper() in _SAFE_METHODS or isinstance(err, httpx.ConnectError):
+        return True
+    text = str(err).lower()
+    return any(m in text for m in _NOT_SENT)
+
+
+class _ReconnectTransport(httpx.HTTPTransport):
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        request.read()   # buffered body, so it can be sent again
+        for attempt in range(_RETRY_ATTEMPTS):
+            try:
+                return super().handle_request(request)
+            except Exception as e:
+                if attempt == _RETRY_ATTEMPTS - 1 or not should_retry_disconnect(request.method, e):
+                    raise
+                logger.info(f"Supabase connection dropped ({type(e).__name__}) on {request.method} "
+                            f"{request.url.path}, retrying ({attempt + 1}/{_RETRY_ATTEMPTS - 1})")
+                time.sleep(0.25 * (attempt + 1))
+        raise RuntimeError("unreachable")
+
+
+def _http_client() -> httpx.Client:
+    # HTTP/1.1 with a short keep-alive: idle connections are dropped by us
+    # before the server drops them under us.
+    return httpx.Client(
+        transport=_ReconnectTransport(http2=False, limits=httpx.Limits(
+            max_connections=50, max_keepalive_connections=20, keepalive_expiry=20)),
+        timeout=httpx.Timeout(120.0, connect=10.0),
+        follow_redirects=True,
+    )
 
 
 def get_client() -> Client:
@@ -33,7 +82,8 @@ def get_client() -> Client:
             return _client
 
         was_first = _last_created == 0
-        _client = create_client(settings.supabase_url, settings.supabase_key)
+        _client = create_client(settings.supabase_url, settings.supabase_key,
+                                options=ClientOptions(httpx_client=_http_client()))
         _last_created = now
         if was_first:
             logger.info("Supabase client initialized")
