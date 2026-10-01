@@ -3,7 +3,7 @@
 import { memo, useId, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronUp, ExternalLink, Pencil, Trash2 } from 'lucide-react'
+import { Activity, ArrowLeftRight, Bell, ExternalLink, FileText, Pencil, Sparkles, Trash2 } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useCardLink } from '@/hooks/useCardLink'
@@ -17,8 +17,8 @@ import {
   errorText, holdingChips, money, num, pct, spct, useMaskedMoney, useToneColor, verdictTone, type Chip,
 } from './format'
 import { AccountSelect } from '@/components/holdings/AccountSelect'
+import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
 import type { Holding } from '@/types/holdings'
-
 
 export function ChipList({ chips }: { chips: Chip[] }) {
   const theme = useTheme()
@@ -69,20 +69,20 @@ function VerdictChip({ h }: { h: Holding }) {
   )
 }
 
-function Actions({ h, reviewing, reviewBusy, onReview, onEdit, editing, compact }: ItemProps & {
+/** Everything a holding can do, behind one "⋯" button (the row itself opens
+ *  the stock page). Owner-only AI items only appear for the owner. */
+function RowMenu({ h, reviewing, reviewBusy, onReview, onEdit, onToggleNotes, hasNotes }: ItemProps & {
   onEdit: () => void
-  editing: boolean
-  compact?: boolean
+  onToggleNotes: () => void
+  hasNotes: boolean
 }) {
-  const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const th = t.holdings
   const toast = useToast()
   const qc = useQueryClient()
   const [removing, setRemoving] = useState(false)
   const { can } = useAccess()
-  const btn = 'min-h-[44px] min-w-[44px] px-3 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5 focus-visible:outline focus-visible:outline-2 disabled:opacity-50'
-  const style = { backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text, outlineColor: theme.colors.primary }
+  const sym = encodeURIComponent(h.symbol)
 
   const remove = async () => {
     if (!window.confirm(fill(th.actions.confirmRemove, { symbol: h.symbol }))) return
@@ -91,38 +91,27 @@ function Actions({ h, reviewing, reviewBusy, onReview, onEdit, editing, compact 
       await holdingsApi.remove(h.id)
       qc.invalidateQueries({ queryKey: HOLDINGS_KEY })
       qc.invalidateQueries({ queryKey: ['auth', 'me'] }) // slot count
+      qc.invalidateQueries({ queryKey: ['following'] })
     } catch (e) {
       toast.show(errorText(toHoldingsError(e).code, th), 'error')
       setRemoving(false)
     }
   }
 
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {can('action.holdings.review') && <button type="button" className={btn} style={{ ...style, color: theme.colors.primary }}
-        disabled={reviewBusy} onClick={() => onReview(h.id)}
-        aria-label={`${h.last_review ? th.actions.reReview : th.actions.review} ${h.symbol}`}>
-        {reviewing ? th.actions.reviewing : h.last_review ? th.actions.reReview : th.actions.review}
-      </button>}
-      {can('area.check') && <Link href={checkHref(h.symbol, 'long')} className={btn} style={style}
-        aria-label={`${th.actions.checkLong} ${h.symbol}`}>
-        {!compact && th.actions.checkLong}
-        <ExternalLink size={14} aria-hidden="true" />
-      </Link>}
-      {can('area.signals') && <Link href={`/signals/${encodeURIComponent(h.symbol)}`} className={btn} style={style}
-        aria-label={`${th.actions.signals} ${h.symbol}`}>
-        {th.actions.signals}
-      </Link>}
-      {can('action.holdings.edit') && <button type="button" className={btn} style={style} onClick={onEdit} aria-expanded={editing}
-        aria-label={fill(th.edit.title, { symbol: h.symbol })}>
-        <Pencil size={14} aria-hidden="true" />{!compact && th.actions.edit}
-      </button>}
-      {can('action.holdings.edit') && <button type="button" className={btn} style={{ ...style, color: theme.colors.down }} onClick={remove}
-        disabled={removing} aria-label={`${th.actions.remove} ${h.symbol}`}>
-        <Trash2 size={14} aria-hidden="true" />
-      </button>}
-    </div>
-  )
+  const items: ActionMenuItem[] = [
+    ...(can('action.holdings.edit') ? [{ key: 'edit', label: th.menu.edit, icon: Pencil, onSelect: onEdit }] : []),
+    ...(can('action.transactions.edit') ? [{ key: 'trade', label: th.menu.trade, icon: ArrowLeftRight, href: `/profile/transactions?add=1&symbol=${sym}` }] : []),
+    ...(can('area.stock') ? [{ key: 'alert', label: th.menu.alert, icon: Bell, href: `/stocks/${sym}?alert=1` }] : []),
+    ...(can('action.holdings.review') ? [{
+      key: 'review', label: reviewing ? th.actions.reviewing : h.last_review ? th.actions.reReview : th.actions.review,
+      icon: Sparkles, onSelect: () => onReview(h.id), disabled: reviewBusy,
+    }] : []),
+    ...(hasNotes ? [{ key: 'notes', label: fill(th.actions.more, { symbol: h.symbol }), icon: FileText, onSelect: onToggleNotes }] : []),
+    ...(can('area.check') ? [{ key: 'check', label: th.actions.checkLong, icon: ExternalLink, href: checkHref(h.symbol, 'long') }] : []),
+    ...(can('area.signals') ? [{ key: 'signals', label: th.actions.signals, icon: Activity, href: `/signals/${sym}` }] : []),
+    ...(can('action.holdings.edit') ? [{ key: 'remove', label: th.actions.remove, icon: Trash2, onSelect: remove, danger: true, disabled: removing }] : []),
+  ]
+  return <ActionMenu items={items} label={fill(th.menu.label, { symbol: h.symbol })} />
 }
 
 function HoldingEditor({ h, onClose }: { h: Holding; onClose: () => void }) {
@@ -236,28 +225,12 @@ function ReviewDetails({ h }: { h: Holding }) {
   )
 }
 
-function PositionLine({ h }: { h: Holding }) {
-  const theme = useTheme()
+/** The list hides chips that say "all fine" (trend OK / unknown): only what needs a look. */
+function useListChips(h: Holding, maxWeight: number): Chip[] {
   const t = useI18nStore((s) => s.t)
-  const locale = useI18nStore((s) => s.locale)
-  const th = t.holdings
-  const p = h.position
-  const mm = useMaskedMoney()
-  if (!h.shares) return <p className="text-[12px]" style={{ color: theme.colors.textHint }}>{th.list.noShares}</p>
-  const ccy = h.currency ?? p?.currency ?? 'USD'
-  return (
-    <p className="text-[12px] tabular-nums flex flex-wrap gap-x-3 gap-y-0.5" style={{ color: theme.colors.textSub }}>
-      <span>{fill(th.list.shares, { n: num(h.shares, locale) })}{h.avg_cost ? ` · ${fill(th.list.avgCost, { cost: mm(h.avg_cost, ccy, locale) })}` : ''}</span>
-      {p?.value != null && <span>{th.list.value}: {mm(p.value, ccy, locale)}{ccy !== 'CAD' && p.value_cad != null ? ` (${mm(p.value_cad, 'CAD', locale, 0)})` : ''}</span>}
-      {p?.unrealized != null && (
-        <span style={{ color: changeColor(p.unrealized, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>
-          {th.list.gain}: {mm(p.unrealized, ccy, locale)} ({spct(p.unrealized_pct, 1)})
-        </span>
-      )}
-      {p?.weight_pct != null && (
-        <span style={{ color: p.overweight ? theme.colors.down : theme.colors.textSub }}>{th.list.weight}: {pct(p.weight_pct, 1)}</span>
-      )}
-    </p>
+  return useMemo(
+    () => holdingChips(h, t.holdings, maxWeight).filter((c) => !(c.key === 'trend' && (c.tone === 'up' || c.tone === 'neutral'))),
+    [h, t, maxWeight],
   )
 }
 
@@ -267,128 +240,128 @@ const HoldingCard = memo(function HoldingCard(props: ItemProps) {
   const t = useI18nStore((s) => s.t)
   const locale = useI18nStore((s) => s.locale)
   const th = t.holdings
+  const mm = useMaskedMoney()
   const [editing, setEditing] = useState(false)
   const [open, setOpen] = useState(false)
   const st = h.holding_status || {}
-  const chips = useMemo(() => holdingChips(h, th, maxWeight), [h, th, maxWeight])
-  const ccy = h.currency ?? 'USD'
-  const hasDetails = !!(h.last_review?.key_concern || st.red_flags?.length)
+  const p = h.position
+  const chips = useListChips(h, maxWeight)
+  const ccy = h.currency ?? p?.currency ?? 'USD'
+  const hasNotes = !!(h.last_review?.key_concern || st.red_flags?.length)
   const cardLink = useCardLink(`/stocks/${encodeURIComponent(h.symbol)}`)
+  const hasValue = p?.value != null
   return (
-    <li onClick={cardLink.onClick} className={`rounded-2xl p-4 flex flex-col gap-2.5 min-w-0 hover:brightness-110 ${cardLink.className}`}
+    <li onClick={cardLink.onClick} className={`rounded-2xl pl-4 pr-1 py-3 flex flex-col gap-1.5 min-w-0 hover:brightness-110 ${cardLink.className}`}
       style={{ backgroundColor: theme.colors.surface, border: `1px solid ${theme.colors.border}` }}>
-      <div className="flex items-start justify-between gap-3 min-w-0">
-        <div className="min-w-0">
-          <h3 className="font-mono font-semibold text-[16px]">
-            <Link href={`/stocks/${encodeURIComponent(h.symbol)}`} className="underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2"
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-mono font-semibold text-[15px] leading-tight">
+            <Link href={`/stocks/${encodeURIComponent(h.symbol)}`} className="focus-visible:outline focus-visible:outline-2 rounded"
               style={{ color: theme.colors.text, outlineColor: theme.colors.primary }} aria-label={fill(t.stock.openPage, { symbol: h.symbol })}>
               {h.symbol}
             </Link>
           </h3>
           <p className="text-[12px] truncate" style={{ color: theme.colors.textSub }}>
-            {h.name ?? DASH}{h.exchange ? ` · ${h.exchange}` : ''}
-          </p>
-          {h.account_name && (
-            <p className="text-[12px] truncate" style={{ color: theme.colors.textSub }}>{fill(th.accounts.inAccount, { name: h.account_name })}</p>
-          )}
-        </div>
-        <div className="text-right shrink-0">
-          <p className="text-[15px] font-semibold tabular-nums" style={{ color: theme.colors.text }}>
-            {st.price != null ? money(st.price, ccy, locale) : DASH}
-          </p>
-          <p className="text-[12px] tabular-nums" style={{ color: changeColor(st.day_change_pct, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>
-            {th.list.day} {spct(st.day_change_pct, 2)}
+            {h.name ?? DASH}{h.account_name ? ` · ${h.account_name}` : ''}
           </p>
         </div>
+        <div className="text-right shrink-0 tabular-nums">
+          <p className="text-[15px] font-semibold" style={{ color: theme.colors.text }}>
+            {hasValue ? mm(p!.value, ccy, locale) : st.price != null ? money(st.price, ccy, locale) : DASH}
+          </p>
+          <p className="text-[12.5px] font-medium" style={{ color: changeColor(st.day_change_pct, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>
+            {spct(st.day_change_pct, 2)} <span className="font-normal" style={{ color: theme.colors.textHint }}>{th.list.today}</span>
+          </p>
+        </div>
+        <RowMenu {...props} onEdit={() => setEditing((e) => !e)} onToggleNotes={() => setOpen((o) => !o)} hasNotes={hasNotes} />
       </div>
-      <p className="text-[12px] tabular-nums flex flex-wrap gap-x-3" style={{ color: theme.colors.textSub }}>
-        <span>{th.list.m1} <span style={{ color: changeColor(st.change_1m_pct, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>{spct(st.change_1m_pct, 1)}</span></span>
-        <span>{th.list.ytd} <span style={{ color: changeColor(st.ytd_pct, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>{spct(st.ytd_pct, 1)}</span></span>
-        {st.drawdown_pct != null && <span>{fill(th.chips.drawdown, { pct: spct(st.drawdown_pct, 0) })}</span>}
-        {st.stale && <span style={{ color: theme.colors.warning }}>{th.list.stale}</span>}
+      <p className="text-[12px] tabular-nums flex flex-wrap gap-x-3 gap-y-0.5 pr-3" style={{ color: theme.colors.textSub }}>
+        {h.shares ? <span>{fill(h.shares === 1 ? th.list.shareOne : th.list.shares, { n: num(h.shares, locale) })} · {st.price != null ? money(st.price, ccy, locale) : DASH}</span>
+          : <span style={{ color: theme.colors.textHint }}>{th.list.noShares}</span>}
+        {p?.unrealized != null && (
+          <span style={{ color: changeColor(p.unrealized, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>
+            {th.list.gain} {mm(p.unrealized, ccy, locale)} ({spct(p.unrealized_pct, 1)})
+          </span>
+        )}
+        {p?.weight_pct != null && (
+          <span style={{ color: p.overweight ? theme.colors.down : theme.colors.textSub }}>{pct(p.weight_pct, 1)}</span>
+        )}
       </p>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <VerdictChip h={h} />
-        <ChipList chips={chips} />
-      </div>
-      <PositionLine h={h} />
-      {hasDetails && (
-        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
-          className="self-start min-h-[44px] text-[13px] font-medium flex items-center gap-1 focus-visible:outline focus-visible:outline-2"
-          style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}>
-          {open ? th.actions.less : fill(th.actions.more, { symbol: h.symbol })}
-          {open ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
-        </button>
+      {(chips.length > 0 || h.last_review) && (
+        <div className="flex flex-wrap items-center gap-1.5 pr-3">
+          {h.last_review && <VerdictChip h={h} />}
+          <ChipList chips={chips} />
+        </div>
       )}
-      {open && <ReviewDetails h={h} />}
-      <Actions {...props} onEdit={() => setEditing((e) => !e)} editing={editing} compact />
-      {editing && <HoldingEditor h={h} onClose={() => setEditing(false)} />}
+      {open && <div className="pr-3"><ReviewDetails h={h} /></div>}
+      {editing && <div className="pr-3"><HoldingEditor h={h} onClose={() => setEditing(false)} /></div>}
     </li>
   )
 })
 
-const HoldingRow = memo(function HoldingRow(props: ItemProps) {
-  const { h, maxWeight } = props
+const HoldingRow = memo(function HoldingRow(props: ItemProps & { showVerdict: boolean }) {
+  const { h, maxWeight, showVerdict } = props
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const locale = useI18nStore((s) => s.locale)
   const th = t.holdings
+  const mm = useMaskedMoney()
   const [editing, setEditing] = useState(false)
+  const [open, setOpen] = useState(false)
   const st = h.holding_status || {}
-  const chips = useMemo(() => holdingChips(h, th, maxWeight), [h, th, maxWeight])
-  const ccy = h.currency ?? 'USD'
-  const td = 'px-3 py-3 align-top'
+  const p = h.position
+  const chips = useListChips(h, maxWeight)
+  const ccy = h.currency ?? p?.currency ?? 'USD'
+  const hasNotes = !!(h.last_review?.key_concern || st.red_flags?.length)
+  const td = 'px-3 py-2.5 align-middle'
   const rowLink = useCardLink(`/stocks/${encodeURIComponent(h.symbol)}`)
+  const cols = showVerdict ? 10 : 9
   return (
     <>
       <tr onClick={rowLink.onClick} className={`hover:brightness-110 ${rowLink.className}`}
         style={{ borderTop: `1px solid ${theme.colors.border}`, backgroundColor: theme.colors.surface }}>
         <th scope="row" className={`${td} text-left font-normal`}>
           <p className="font-mono font-semibold text-[14px]">
-            <Link href={`/stocks/${encodeURIComponent(h.symbol)}`} className="underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2"
+            <Link href={`/stocks/${encodeURIComponent(h.symbol)}`} className="focus-visible:outline focus-visible:outline-2 rounded"
               style={{ color: theme.colors.text, outlineColor: theme.colors.primary }} aria-label={fill(t.stock.openPage, { symbol: h.symbol })}>
               {h.symbol}
             </Link>
           </p>
-          <p className="text-[12px] max-w-[220px] truncate" style={{ color: theme.colors.textSub }} title={h.name ?? undefined}>{h.name ?? DASH}</p>
-          {h.account_name && (
-            <p className="text-[12px] max-w-[220px] truncate" style={{ color: theme.colors.textHint }}>{fill(th.accounts.inAccount, { name: h.account_name })}</p>
-          )}
+          <p className="text-[12px] max-w-[240px] truncate" style={{ color: theme.colors.textSub }} title={h.name ?? undefined}>
+            {h.name ?? DASH}{h.account_name ? ` · ${h.account_name}` : ''}
+          </p>
         </th>
         <td className={`${td} text-right tabular-nums`}>
           <p className="text-[14px]" style={{ color: theme.colors.text }}>{st.price != null ? money(st.price, ccy, locale) : DASH}</p>
           <p className="text-[12px]" style={{ color: changeColor(st.day_change_pct, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>{spct(st.day_change_pct, 2)}</p>
         </td>
+        <td className={`${td} text-right tabular-nums text-[14px]`} style={{ color: theme.colors.text }}>
+          {p?.value != null ? mm(p.value, ccy, locale) : <span style={{ color: theme.colors.textHint }}>{DASH}</span>}
+          {h.shares ? <p className="text-[12px]" style={{ color: theme.colors.textSub }}>{fill(h.shares === 1 ? th.list.shareOne : th.list.shares, { n: num(h.shares, locale) })}</p> : null}
+        </td>
+        <td className={`${td} text-right tabular-nums text-[13px]`} style={{ color: changeColor(p?.unrealized, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>
+          {p?.unrealized != null ? <>{mm(p.unrealized, ccy, locale)}<p className="text-[12px]">{spct(p.unrealized_pct, 1)}</p></> : DASH}
+        </td>
         <td className={`${td} text-right tabular-nums text-[13px]`} style={{ color: changeColor(st.change_1m_pct, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>{spct(st.change_1m_pct, 1)}</td>
         <td className={`${td} text-right tabular-nums text-[13px]`} style={{ color: changeColor(st.ytd_pct, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>{spct(st.ytd_pct, 1)}</td>
-        <td className={td}>
-          <ChipList chips={chips} />
-          {st.drawdown_pct != null && (
-            <p className="text-[12px] mt-1 tabular-nums" style={{ color: theme.colors.textSub }}>{fill(th.chips.drawdown, { pct: spct(st.drawdown_pct, 0) })}</p>
-          )}
-        </td>
         <td className={`${td} text-right tabular-nums text-[13px]`}>
-          {h.position?.weight_pct != null ? (
-            <span style={{ color: h.position.overweight ? theme.colors.down : theme.colors.text }}>{pct(h.position.weight_pct, 1)}</span>
+          {p?.weight_pct != null ? (
+            <span style={{ color: p.overweight ? theme.colors.down : theme.colors.text }}>{pct(p.weight_pct, 1)}</span>
           ) : <span style={{ color: theme.colors.textHint }}>{DASH}</span>}
-          {h.position?.unrealized_pct != null && (
-            <p className="text-[12px]" style={{ color: changeColor(h.position.unrealized_pct, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>{spct(h.position.unrealized_pct, 1)}</p>
-          )}
         </td>
-        <td className={td}>
-          <VerdictChip h={h} />
-          {h.last_review?.key_concern && (
-            <p className="text-[12px] mt-1 max-w-[240px] line-clamp-2" style={{ color: theme.colors.textSub }} title={h.last_review.key_concern}>{h.last_review.key_concern}</p>
-          )}
-        </td>
-        <td className={td}>
-          <Actions {...props} onEdit={() => setEditing((e) => !e)} editing={editing} compact />
+        <td className={td}><ChipList chips={chips} /></td>
+        {showVerdict && <td className={td}><VerdictChip h={h} /></td>}
+        <td className={`${td} w-[52px]`}>
+          <RowMenu {...props} onEdit={() => setEditing((e) => !e)} onToggleNotes={() => setOpen((o) => !o)} hasNotes={hasNotes} />
         </td>
       </tr>
-      {editing && (
-        <tr>
-          <td colSpan={8} className="px-3 pb-3">
-            <HoldingEditor h={h} onClose={() => setEditing(false)} />
+      {(editing || open) && (
+        <tr style={{ backgroundColor: theme.colors.surface }}>
+          <td colSpan={cols} className="px-3 pb-3">
+            <div className="flex flex-col gap-2">
+              {open && <ReviewDetails h={h} />}
+              {editing && <HoldingEditor h={h} onClose={() => setEditing(false)} />}
+            </div>
           </td>
         </tr>
       )}
@@ -406,10 +379,11 @@ export function HoldingsList({ items, maxWeight, reviewingId, reviewBusy, onRevi
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const th = t.holdings
+  const showVerdict = useAccess().can('action.holdings.review')
   const thc = 'px-3 py-2 text-[12px] font-medium whitespace-nowrap'
   return (
     <>
-      <ul className="flex flex-col gap-3 lg:hidden">
+      <ul className="flex flex-col gap-2 lg:hidden">
         {items.map((h) => (
           <HoldingCard key={h.id} h={h} maxWeight={maxWeight} reviewing={reviewingId === h.id}
             reviewBusy={reviewBusy} onReview={onReview} />
@@ -423,18 +397,20 @@ export function HoldingsList({ items, maxWeight, reviewingId, reviewBusy, onRevi
             <tr style={{ color: theme.colors.textSub }}>
               <th scope="col" className={thc}>{th.list.symbol}</th>
               <th scope="col" className={`${thc} text-right`}>{th.list.price} / {th.list.day}</th>
+              <th scope="col" className={`${thc} text-right`}>{th.list.value}</th>
+              <th scope="col" className={`${thc} text-right`}>{th.list.gain}</th>
               <th scope="col" className={`${thc} text-right`}>{th.list.m1}</th>
               <th scope="col" className={`${thc} text-right`}>{th.list.ytd}</th>
+              <th scope="col" className={`${thc} text-right`}>{th.list.weight}</th>
               <th scope="col" className={thc}>{th.list.status}</th>
-              <th scope="col" className={`${thc} text-right`}>{th.list.weight} / {th.list.gain}</th>
-              <th scope="col" className={thc}>{th.list.verdict}</th>
-              <th scope="col" className={thc}>{th.list.actions}</th>
+              {showVerdict && <th scope="col" className={thc}>{th.list.verdict}</th>}
+              <th scope="col" className={thc}><span className="sr-only">{th.list.actions}</span></th>
             </tr>
           </thead>
           <tbody>
             {items.map((h) => (
               <HoldingRow key={h.id} h={h} maxWeight={maxWeight} reviewing={reviewingId === h.id}
-                reviewBusy={reviewBusy} onReview={onReview} />
+                reviewBusy={reviewBusy} onReview={onReview} showVerdict={showVerdict} />
             ))}
           </tbody>
         </table>

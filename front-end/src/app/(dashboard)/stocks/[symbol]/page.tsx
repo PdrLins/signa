@@ -1,10 +1,9 @@
 'use client'
 
-import { Suspense, useCallback, useMemo, useState } from 'react'
-import Link from 'next/link'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Briefcase, ExternalLink, Plus, SearchX, Star, X } from 'lucide-react'
+import { Activity, ArrowLeft, Bell, Briefcase, ExternalLink, Plus, SearchX, Star, X } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useAccess } from '@/hooks/useAccess'
@@ -24,6 +23,9 @@ import { StockPosition } from '@/components/stock/StockPosition'
 import { StockStatistics } from '@/components/stock/StockStatistics'
 import { StockAlerts } from '@/components/stock/StockAlerts'
 import { AddHoldingForm } from '@/components/holdings/AddHoldingForm'
+import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs'
+import { useAlerts } from '@/hooks/useAlerts'
 import type { SymbolMatch } from '@/types/symbols'
 import type { StockPage } from '@/types/stock'
 
@@ -127,7 +129,17 @@ function Header({ data }: { data: StockPage }) {
   )
 }
 
-function Actions({ data, adding, onToggleAdd }: { data: StockPage; adding: boolean; onToggleAdd: () => void }) {
+/** Follow · Add to holdings · Alert, plus the owner's AI pages in a "⋯"
+ *  menu. Rendered at the top on desktop and as a bar pinned above the tab
+ *  bar on phones (`sticky`), so the main actions never scroll away. */
+function Actions({ data, adding, onToggleAdd, onAlert, alertCount, sticky = false }: {
+  data: StockPage
+  adding: boolean
+  onToggleAdd: () => void
+  onAlert: () => void
+  alertCount: number
+  sticky?: boolean
+}) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const ta = t.stock.actions
@@ -140,18 +152,25 @@ function Actions({ data, adding, onToggleAdd }: { data: StockPage; adding: boole
 
   const canWatch = can('action.watchlist.edit')
   const canAdd = can('action.holdings.edit')
-  const canSignals = can('area.signals')
-  const canCheck = can('area.check')
-  if (!canWatch && !canAdd && !canSignals && !canCheck) return null
+  const canAlert = can('area.stock')
+  const owner: ActionMenuItem[] = [
+    ...(can('area.signals') ? [{ key: 'signals', label: ta.openSignals, icon: Activity, href: `/signals/${encodeURIComponent(symbol)}` }] : []),
+    ...(can('area.check') ? [{ key: 'check', label: ta.checkAi, icon: ExternalLink, href: checkHref(symbol, 'long') }] : []),
+  ]
+  if (!canWatch && !canAdd && !canAlert && !owner.length) return null
 
   const primary = { backgroundColor: theme.colors.primary, color: theme.colors.surface, outlineColor: theme.colors.primary }
   const secondary = { backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text, outlineColor: theme.colors.primary }
+  const cls = `${BTN} ${sticky ? 'flex-1 px-2' : ''}`
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className={sticky
+      ? 'md:hidden sticky bottom-[84px] z-30 flex gap-2 p-2 rounded-2xl shadow-xl'
+      : 'hidden md:flex flex-wrap gap-2'}
+      style={sticky ? { backgroundColor: theme.colors.surface, border: `1px solid ${theme.colors.border}` } : undefined}>
       {canWatch && (
         <button type="button" onClick={toggle} disabled={busy} aria-pressed={following}
           aria-label={fill(following ? ta.unfollowAria : ta.followAria, { symbol })}
-          className={BTN} style={following ? secondary : primary}>
+          className={cls} style={following ? secondary : primary}>
           <Star size={16} aria-hidden="true" fill={following ? theme.colors.warning : 'none'}
             style={{ color: following ? theme.colors.warning : theme.colors.surface }} />
           {following ? ta.following : ta.follow}
@@ -160,22 +179,21 @@ function Actions({ data, adding, onToggleAdd }: { data: StockPage; adding: boole
       {canAdd && (
         <button type="button" onClick={onToggleAdd} aria-expanded={adding}
           aria-label={adding ? ta.closeAdd : fill(ta.addHoldingsAria, { symbol })}
-          className={BTN} style={secondary}>
+          className={cls} style={secondary}>
           {adding ? <X size={16} aria-hidden="true" /> : <Plus size={16} aria-hidden="true" />}
-          {adding ? ta.closeAdd : ta.addHoldings}
+          {adding ? ta.closeAdd : sticky ? ta.addShort : ta.addHoldings}
         </button>
       )}
-      {canSignals && (
-        <Link href={`/signals/${encodeURIComponent(symbol)}`} className={BTN} style={secondary}
-          aria-label={`${ta.openSignals} ${symbol}`}>
-          {ta.openSignals}
-        </Link>
+      {canAlert && (
+        <button type="button" onClick={onAlert} aria-label={fill(ta.alertAria, { symbol })} className={cls} style={secondary}>
+          <Bell size={16} aria-hidden="true" />{ta.alert}
+          {alertCount > 0 && (
+            <span className="text-[11px] font-semibold px-1.5 rounded-full tabular-nums"
+              style={{ backgroundColor: theme.colors.primary + '26', color: theme.colors.primary }}>{alertCount}</span>
+          )}
+        </button>
       )}
-      {canCheck && (
-        <Link href={checkHref(symbol, 'long')} className={BTN} style={secondary} aria-label={`${ta.checkAi} ${symbol}`}>
-          {ta.checkAi}<ExternalLink size={14} aria-hidden="true" />
-        </Link>
-      )}
+      {owner.length > 0 && <ActionMenu items={owner} label={fill(ta.moreAria, { symbol })} align="right" />}
     </div>
   )
 }
@@ -203,18 +221,38 @@ export default function StockPageView() {
   )
 }
 
+type StockTab = 'overview' | 'dividends' | 'alerts'
+
 function StockPageInner() {
   const params = useParams()
   const search = useSearchParams()
   const [adding, setAdding] = useState(search.get('add') === '1')
   const toggleAdd = useCallback(() => setAdding((a) => !a), [])
   const closeAdd = useCallback(() => setAdding(false), [])
+  const [tab, setTab] = useState<StockTab>(search.get('alert') === '1' ? 'alerts' : search.get('tab') === 'dividends' ? 'dividends' : 'overview')
+  const tabsRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const ts = t.stock
   const raw = decodeURIComponent(String(params.symbol ?? '')).toUpperCase()
   const { data, isLoading, error, refetch, isFetching } = useStock(raw)
+  const alertsQ = useAlerts(raw, !!data)
+  const alertCount = useMemo(() => (alertsQ.data?.items ?? []).filter((a) => a.active).length, [alertsQ.data])
+  const openAlerts = useCallback(() => {
+    setTab('alerts')
+    requestAnimationFrame(() => tabsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }, [])
+  const tabOptions = useMemo(() => [
+    { value: 'overview' as const, label: ts.tabs.overview },
+    { value: 'dividends' as const, label: ts.tabs.dividends },
+    { value: 'alerts' as const, label: alertCount ? fill(ts.tabs.alertsN, { n: alertCount }) : ts.tabs.alerts },
+  ], [ts, alertCount])
+
+  // ?alert=1 (from a holding's menu) lands on the alerts tab, scrolled into view
+  useEffect(() => {
+    if (data && search.get('alert') === '1') requestAnimationFrame(() => tabsRef.current?.scrollIntoView({ block: 'start' }))
+  }, [data, search])
 
   const notFound = error instanceof CheckApiError && (error.status === 404 || error.status === 400)
 
@@ -254,25 +292,40 @@ function StockPageInner() {
     )
   }
 
+  const actions = (sticky: boolean) => (
+    <Actions data={data} adding={adding} onToggleAdd={toggleAdd} onAlert={openAlerts} alertCount={alertCount} sticky={sticky} />
+  )
+
   return (
     <div className="space-y-4 pb-4 min-w-0">
       {back}
       <Header data={data} />
-      <Actions data={data} adding={adding} onToggleAdd={toggleAdd} />
+      {actions(false)}
       {adding && <AddToHoldings data={data} onClose={closeAdd} />}
       {data.position && <StockPosition position={data.position} symbol={data.symbol} />}
       <Panel>
         <PriceChart symbol={data.symbol} defaultRange="3M" title={ts.chartTitle} />
       </Panel>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start min-w-0">
-        <StockStatistics stats={data.statistics} symbol={data.symbol} currency={data.currency} />
-        <StockAlerts symbol={data.symbol} currency={data.currency} price={data.quote.price} />
+      <div ref={tabsRef} className="scroll-mt-4">
+        <SegmentedTabs value={tab} options={tabOptions} onChange={setTab} label={ts.tabs.label} idBase="stock-tab" />
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start min-w-0">
-        <StockChecks checks={data.checks} symbol={data.symbol} currency={data.currency} />
-        <StockEvents events={data.events} symbol={data.symbol} currency={data.currency} />
+      <div role="tabpanel" id="stock-tab-panel" aria-labelledby={`stock-tab-${tab}`} className="min-w-0">
+        {tab === 'overview' && (
+          <div className="flex flex-col gap-4 min-w-0">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start min-w-0">
+              <StockEvents events={data.events} symbol={data.symbol} currency={data.currency}
+                onDividends={data.events.ex_dividend || data.events.dividend_payment ? () => setTab('dividends') : undefined} />
+              <StockStatistics stats={data.statistics} symbol={data.symbol} currency={data.currency} />
+            </div>
+            <StockChecks checks={data.checks} symbol={data.symbol} currency={data.currency} />
+          </div>
+        )}
+        {tab === 'dividends' && (
+          <DividendPanel profile={data.dividend.profile} rules={data.dividend.rules} symbol={data.symbol} currency={data.currency} />
+        )}
+        {tab === 'alerts' && <StockAlerts symbol={data.symbol} currency={data.currency} price={data.quote.price} />}
       </div>
-      <DividendPanel profile={data.dividend.profile} rules={data.dividend.rules} symbol={data.symbol} currency={data.currency} />
+      {actions(true)}
     </div>
   )
 }

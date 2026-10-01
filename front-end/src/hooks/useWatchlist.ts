@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { watchlistApi } from '@/lib/api'
-import type { WatchlistItem } from '@/types/watchlist'
+import type { FollowingOverview, WatchlistItem } from '@/types/watchlist'
 
 export function useWatchlist() {
   return useQuery<WatchlistItem[]>({
@@ -9,6 +9,20 @@ export function useWatchlist() {
       const res = await watchlistApi.getAll()
       return res.items
     },
+  })
+}
+
+export const FOLLOWING_KEY = ['following'] as const
+
+/** The Following tab: watched + held symbols with prices and sparklines.
+ *  Prices are shared server-side quotes (delayed), so a 60s poll is cheap. */
+export function useFollowing(enabled = true) {
+  return useQuery<FollowingOverview>({
+    queryKey: FOLLOWING_KEY,
+    queryFn: () => watchlistApi.overview(),
+    enabled,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
   })
 }
 
@@ -38,6 +52,7 @@ export function useAddTicker() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['watchlist'] })
       queryClient.invalidateQueries({ queryKey: ['auth', 'me'] }) // slot count
+      queryClient.invalidateQueries({ queryKey: FOLLOWING_KEY })
     },
   })
 }
@@ -62,6 +77,7 @@ export function useRemoveTicker() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['watchlist'] })
       queryClient.invalidateQueries({ queryKey: ['auth', 'me'] }) // slot count
+      queryClient.invalidateQueries({ queryKey: FOLLOWING_KEY })
     },
   })
 }

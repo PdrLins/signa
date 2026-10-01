@@ -50,7 +50,11 @@ const EventRow = memo(function EventRow({ row, estLabel }: { row: Row; estLabel:
 })
 
 /** Next earnings, ex-dividend and payment dates ("estimated" when projected). */
-export function StockEvents({ events, symbol, currency }: { events: Events; symbol: string; currency: string | null }) {
+export function StockEvents({ events, symbol, currency, onDividends }: {
+  events: Events; symbol: string; currency: string | null
+  /** shows a "Dividend details" link (switches the stock page to its Dividends tab) */
+  onDividends?: () => void
+}) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const locale = useI18nStore((s) => s.locale)
@@ -93,6 +97,13 @@ export function StockEvents({ events, symbol, currency }: { events: Events; symb
           </ul>
           {events.ex_dividend && (
             <p className="text-[11.5px] leading-snug" style={{ color: theme.colors.textHint }}>{te.exHelp}</p>
+          )}
+          {onDividends && (
+            <button type="button" onClick={onDividends}
+              className="self-start min-h-[44px] px-1 text-[13px] font-medium rounded focus-visible:outline focus-visible:outline-2"
+              style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}>
+              {te.dividendDetails}
+            </button>
           )}
         </div>
       )}

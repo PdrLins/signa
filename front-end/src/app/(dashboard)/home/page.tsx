@@ -185,7 +185,7 @@ function WorthALook() {
   const tips = useMemo<Tip[]>(() => {
     const out: Tip[] = []
     for (const w of alloc.data?.warnings ?? []) {
-      out.push({ key: `w-${w.code}-${w.params.symbol ?? ''}`, text: warningText(w, t), href: `/insights${query ? `${query}&` : '?'}tab=allocation`, tone: 'warning' })
+      out.push({ key: `w-${w.code}-${w.params.symbol ?? ''}`, text: warningText(w, t), href: `/holdings${query ? `${query}&` : '?'}tab=allocation`, tone: 'warning' })
     }
     for (const p of div.data?.payers ?? []) {
       if (p.safety === 'watch' || p.safety === 'cut') {
@@ -251,7 +251,7 @@ function ComingUpCard({ scopeQuery, currency }: { scopeQuery: string; currency: 
   const q = useUpcomingEvents(scope, 30)
   const items = useMemo(() => (q.data?.items ?? []).filter((e) => !e.recent).slice(0, 4), [q.data])
   return (
-    <Card id="home-next" title={t.home.comingUp} right={<MoreLink href={`/coming-up${scopeQuery}`} label={t.home.seeAll} aria={t.home.seeAllComingUp} />}>
+    <Card id="home-next" title={t.home.comingUp} right={<MoreLink href={`/dividends${scopeQuery ? `${scopeQuery}&` : '?'}tab=upcoming`} label={t.home.seeAll} aria={t.home.seeAllComingUp} />}>
       {q.isLoading && <div className="h-24 rounded-xl animate-pulse" style={{ backgroundColor: theme.colors.surfaceAlt }} />}
       {!!q.error && !q.data && <QueryError error={q.error} onRetry={() => q.refetch()} />}
       {q.data && (items.length === 0 ? (

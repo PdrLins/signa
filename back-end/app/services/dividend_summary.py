@@ -40,7 +40,9 @@ variable = variable | watch | cut, and symbols with no usable profile.
 Growth (portfolio, weighted by each payer's expected income)
   growth_5y_pct  profile growth_5y_cagr (stocks with 5y history)
   growth_1y_pct  regular payments per share of the last 365 days vs the 365
-                 days before (needs both windows populated)
+                 days before (needs both windows populated with the SAME
+                 number of payments: a payment that slipped across the
+                 boundary or a schedule change is not growth or a cut)
   coverage_pct   share of income that had a growth figure
 
 Payment months: 12 booleans (Jan..Dec) — months with an event in the next
@@ -136,10 +138,11 @@ def payout_cv(profile: dict, today: date) -> float | None:
 
 def growth_1y(profile: dict, today: date) -> float | None:
     reg = [(d, a) for d, a, s in _history(profile) if not s]
-    last = sum(a for d, a in reg if 0 <= (today - d).days <= 365)
-    prior = sum(a for d, a in reg if 365 < (today - d).days <= 730)
+    last_w = [a for d, a in reg if 0 <= (today - d).days <= 365]
+    prior_w = [a for d, a in reg if 365 < (today - d).days <= 730]
+    last, prior = sum(last_w), sum(prior_w)
     has_prior = any((today - d).days > 700 for d, _ in reg)   # history reaches back ~2 years
-    if not last or not prior or not has_prior:
+    if not last or not prior or not has_prior or len(last_w) != len(prior_w):
         return None
     return last / prior - 1
 

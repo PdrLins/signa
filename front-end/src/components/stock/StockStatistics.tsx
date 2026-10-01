@@ -5,7 +5,6 @@ import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore, intlLocale } from '@/store/i18nStore'
 import { DASH, nativePrice } from '@/lib/insights'
 import { Panel } from '@/components/insights/Panel'
-import { compactMoney } from '@/components/stock/StockChecks'
 import type { StockStatistics as Stats } from '@/types/stock'
 
 function compactNum(v: number | null | undefined): string {
@@ -30,7 +29,9 @@ const Cell = memo(function Cell({ label, value }: { label: string; value: string
   )
 })
 
-/** Key statistics grid (shared part of GET /stocks/{symbol}); nulls show "—". */
+/** Key statistics grid (shared part of GET /stocks/{symbol}). Stats without
+ *  a value (most of them for ETFs) are left out; the 52-week range and market
+ *  cap are in the page header and the yield on the Dividends tab. */
 export function StockStatistics({ stats, symbol, currency }: { stats: Stats | undefined; symbol: string; currency: string }) {
   const t = useI18nStore((s) => s.t)
   const ts = t.stock.stats
@@ -40,17 +41,14 @@ export function StockStatistics({ stats, symbol, currency }: { stats: Stats | un
       lo === null && hi === null ? DASH : `${nativePrice(lo, symbol, currency)} – ${nativePrice(hi, symbol, currency)}`
     return [
       { key: 'day', label: ts.dayRange, value: range(stats.day_low, stats.day_high) },
-      { key: '52w', label: ts.range52w, value: range(stats.low_52w, stats.high_52w) },
-      { key: 'cap', label: ts.marketCap, value: compactMoney(stats.market_cap, currency) },
       { key: 'pe', label: ts.pe, value: fixed(stats.pe_ratio) },
       { key: 'fpe', label: ts.forwardPe, value: fixed(stats.forward_pe) },
-      { key: 'yield', label: ts.yield, value: stats.dividend_yield === null ? DASH : `${fixed(stats.dividend_yield * 100)}%` },
       { key: 'vol', label: ts.volume, value: compactNum(stats.volume) },
       { key: 'avgvol', label: ts.avgVolume, value: compactNum(stats.avg_volume) },
       { key: 'beta', label: ts.beta, value: fixed(stats.beta) },
-    ]
+    ].filter((c) => c.value !== DASH)
   }, [stats, symbol, currency, ts])
-  if (!stats) return null
+  if (!stats || cells.length === 0) return null
   return (
     <Panel title={ts.title}>
       <dl className="grid grid-cols-2 sm:grid-cols-3 gap-2">

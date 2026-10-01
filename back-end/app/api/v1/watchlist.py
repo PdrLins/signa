@@ -9,7 +9,8 @@ from app.core.access import require_feature
 from app.services import slots
 from app.core.dependencies import get_current_user
 from app.models.watchlist import WatchlistAddRequest
-from app.services import watchlist_service
+from app.services import following, watchlist_service
+from app.core.api_errors import run_db
 
 router = APIRouter(prefix="/watchlist", tags=["Watchlist"])
 
@@ -21,7 +22,24 @@ async def get_watchlist(user: dict = Depends(get_current_user)):
     return {"items": items, "count": len(items)}
 
 
-@router.get("/search", dependencies=[Depends(require_feature("area.watchlist"))])
+@router.get("/overview", dependencies=[Depends(require_feature("area.watchlist"))])
+async def watchlist_overview(user: dict = Depends(get_current_user)):
+    """Following, in one call (web Following tab and iOS). No AI.
+
+    {"as_of": ISO | null, "delayed_minutes": 15,
+     "watched": [Row + {"added_at": ISO, "in_holdings": bool}],   # watchlist, newest first
+     "held":    [Row + {"in_holdings": true}],                    # held symbols not on the watchlist
+     "slots": {"used", "limit", "remaining"} | null,               # limit null = unlimited
+     "suggestions": [{"key": "popular_ca" | "popular_us" | "monthly_income" | "dividend_growers",
+                      "items": [{"symbol", "name"}]}]}            # never already-followed symbols
+    Row = {"symbol", "name" | null, "price" | null, "change_pct" | null (today),
+           "change_1m_pct" | null, "currency" | null, "as_of" | null,
+           "spark": [float, ...]}   # up to 22 daily closes, oldest first (may be empty)
+    """
+    return await run_db(following.load_following, user)
+
+
+@router.get("/search",dependencies=[Depends(require_feature("area.watchlist"))])
 async def search_tickers(q: str = Query(..., min_length=1, max_length=10), user: dict = Depends(get_current_user)):
     """Search for valid tickers via yfinance. Returns matching symbols with name and exchange."""
     import yfinance as yf

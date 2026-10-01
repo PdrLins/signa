@@ -54,7 +54,8 @@ function TransactionsInner() {
   const [symbol, setSymbol] = useState('')
   const [type, setType] = useState<TxType | ''>('')
   const [limit, setLimit] = useState(PAGE)
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useState(params.get('add') === '1')
+  const presetSymbol = (params.get('symbol') ?? '').toUpperCase()
   const [importOpen, setImportOpen] = useState(params.get('import') === '1')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -128,7 +129,7 @@ function TransactionsInner() {
                 style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}>{tt.manageAccounts}</Link>
             </p>
           )}
-          <TransactionForm accounts={accounts} defaultAccountId={accountId} busy={busy} error={error} onSubmit={create}
+          <TransactionForm accounts={accounts} defaultAccountId={accountId} defaultSymbol={presetSymbol} busy={busy} error={error} onSubmit={create}
             onCancel={() => { setAdding(false); setError(null) }} />
         </SectionCard>
       )}

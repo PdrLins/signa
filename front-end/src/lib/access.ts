@@ -21,6 +21,7 @@ const ROUTE_AREAS: [string, string][] = [
   ['/dividends', 'area.dividends'],
   ['/portfolio', 'area.holdings'],
   ['/watchlist', 'area.watchlist'],
+  ['/following', 'area.watchlist'],
   ['/how-it-works', 'area.how_it_works'],
   ['/settings', 'area.settings'],
   ['/integrations', 'area.integrations'],
@@ -44,8 +45,8 @@ const HOME_CANDIDATES: [string, string][] = [
   ['/holdings', 'area.holdings'],
   ['/today', 'area.today'],
   ['/holdings', 'area.holdings'],
-  ['/watchlist', 'area.watchlist'],
-  ['/settings', 'area.settings'],
+  ['/following', 'area.watchlist'],
+  ['/profile', 'area.profile'],
 ]
 
 export function homePath(can: (feature: string) => boolean): string {

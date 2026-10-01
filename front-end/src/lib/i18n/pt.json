@@ -35,7 +35,9 @@
     "profile": "Perfil",
     "brainGroup": "Brain",
     "brainToday": "Painel",
-    "trackerGroup": "Carteira"
+    "trackerGroup": "Carteira",
+    "following": "Seguindo",
+    "brainSettings": "Ajustes do cérebro"
   },
   "login": {
     "welcome": "Signa",
@@ -1981,7 +1983,10 @@
       "stale": "Dados antigos",
       "shares": "{n} cotas",
       "avgCost": "médio {cost}",
-      "noShares": "Quantidade não informada"
+      "noShares": "Quantidade não informada",
+      "today": "hoje",
+      "missingShares": "{n} sem quantidade. Informe a quantidade para ver valor e ganho.",
+      "shareOne": "{n} cota"
     },
     "chips": {
       "trendOk": "Tendência OK",
@@ -2161,6 +2166,33 @@
       "importAccount": "Conta para todas as linhas",
       "inAccount": "Em {name}",
       "noneInAccount": "Nenhum ativo nesta conta ainda."
+    },
+    "subtitleShort": "Suas posições reais, com preço ao longo do dia.",
+    "tabs": {
+      "label": "Seções de ativos",
+      "list": "Lista",
+      "performance": "Desempenho",
+      "allocation": "Alocação"
+    },
+    "addMenu": {
+      "label": "Adicionar à carteira",
+      "button": "Adicionar",
+      "stock": "Adicionar uma ação",
+      "paste": "Colar uma lista",
+      "trade": "Registrar uma operação",
+      "csv": "Importar um CSV",
+      "accounts": "Gerenciar contas",
+      "refresh": "Atualizar preços e verificações"
+    },
+    "menu": {
+      "label": "Ações para {symbol}",
+      "edit": "Editar quantidade e custo",
+      "trade": "Registrar uma operação",
+      "alert": "Criar alerta de preço"
+    },
+    "brainNotes": {
+      "title": "Notas do cérebro",
+      "subtitle": "Análises de IA ({n} de {total} analisados) e onde investir dinheiro novo. Só você vê isto."
     }
   },
   "access": {
@@ -2342,7 +2374,8 @@
       "today": "hoje",
       "amount": "{amount} por ação",
       "none": "Nenhum evento futuro conhecido.",
-      "exHelp": "Tenha as ações antes da data ex-dividendo para receber o pagamento."
+      "exHelp": "Tenha as ações antes da data ex-dividendo para receber o pagamento.",
+      "dividendDetails": "Detalhes dos dividendos"
     },
     "actions": {
       "addWatchlist": "Adicionar à watchlist",
@@ -2361,7 +2394,11 @@
       "unfollowed": "Você deixou de acompanhar {symbol}",
       "addHoldings": "Adicionar à carteira",
       "addHoldingsAria": "Adicionar {symbol} à sua carteira",
-      "closeAdd": "Fechar"
+      "closeAdd": "Fechar",
+      "addShort": "Adicionar",
+      "alert": "Alerta",
+      "alertAria": "Alertas de preço de {symbol}",
+      "moreAria": "Mais opções para {symbol}"
     },
     "position": {
       "title": "Sua posição",
@@ -2420,6 +2457,13 @@
       "avgVolume": "Volume médio (3 meses)",
       "volume": "Volume",
       "beta": "Beta"
+    },
+    "tabs": {
+      "label": "Seções da ação",
+      "overview": "Visão geral",
+      "dividends": "Dividendos",
+      "alerts": "Alertas",
+      "alertsN": "Alertas · {n}"
     }
   },
   "tracker": {
@@ -2614,7 +2658,8 @@
       "buyYours": "Qual comprar é decisão sua.",
       "planLeft": "Sobram {amount} depois que cada parte chega ao alvo.",
       "planNote": "Conta feita sobre seus próprios alvos, não é recomendação.",
-      "emptyScope": "Nada nesta conta ainda."
+      "emptyScope": "Nada nesta conta ainda.",
+      "setTargets": "Definir metas a partir da minha carteira atual"
     }
   },
   "comingUpPage": {
@@ -2692,7 +2737,9 @@
       "notifications": "Notificações",
       "data": "Seus dados",
       "about": "Sobre",
-      "account": "Conta"
+      "account": "Conta",
+      "display": "Exibição",
+      "brain": "Cérebro"
     },
     "displayName": "Nome de exibição",
     "displayNamePlaceholder": "Como devemos te chamar?",
@@ -2738,7 +2785,10 @@
     "deleteConfirm": "Sim, excluir minha conta",
     "deleteUnavailable": "Ainda não é possível excluir a conta pelo app. Nada foi excluído.",
     "saved": "Salvo",
-    "open": "Abrir {name}"
+    "open": "Abrir {name}",
+    "hideAmounts": "Ocultar valores",
+    "hideAmountsHelp": "Mostra •••• no lugar dos valores neste aparelho.",
+    "brainSettingsDesc": "Provedores de IA, varredura e limites dos sinais."
   },
   "notifications": {
     "title": "Notificações",
@@ -3036,7 +3086,8 @@
       "onCost": "Rendimento sobre o custo",
       "growth5y": "Crescimento, 5 anos",
       "growth1y": "Crescimento, 1 ano",
-      "coverage": "cobre {pct} da renda"
+      "coverage": "cobre {pct} da renda",
+      "growth1yNone": "Ainda não comparável: o calendário de pagamentos mudou"
     },
     "tax": {
       "open": "Abrir contas e impostos",
@@ -3054,7 +3105,9 @@
       "estimated": "Estimado",
       "estimatedHelp": "Projetado a partir do histórico de pagamentos; ainda não anunciado",
       "locked": "Data ex passou",
-      "lockedHelp": "Você tem direito a este pagamento; ele ainda não foi pago"
+      "lockedHelp": "Você tem direito a este pagamento; ele ainda não foi pago",
+      "nextExpected": "Próximo previsto: {month}, cerca de {amount}.",
+      "seeEvents": "Ver todas as datas, resultados e eventos"
     },
     "change": {
       "title": "Por que sua renda mudou",
@@ -3103,7 +3156,13 @@
       "quality": "Qualidade da renda",
       "qualityAria": "Abrir a qualidade da renda de {symbol}",
       "nonPayers": "Sem dividendos: {symbols}."
-    }
+    },
+    "tabs": {
+      "label": "Seções de dividendos",
+      "overview": "Visão geral",
+      "upcoming": "Próximos eventos"
+    },
+    "calendarShort": "Calendário"
   },
   "divTax": {
     "title": "Contas e impostos",
@@ -3294,5 +3353,32 @@
       "owner": "Dono"
     },
     "note": "Só em desenvolvimento. Mostra o que cada plano vê; nada é salvo no banco."
+  },
+  "brainSettings": {
+    "title": "Ajustes do cérebro",
+    "subtitle": "Provedores de IA, varredura, limites dos sinais e o vigia. Só você vê isto."
+  },
+  "following": {
+    "title": "Seguindo",
+    "subtitle": "Ações que você segue, com o preço de hoje.",
+    "follow": "Seguir",
+    "unlimited": "Siga mais com o Premium",
+    "emptyTitle": "Você ainda não segue nenhuma ação",
+    "emptyBody": "Siga uma ação para ver o preço dela aqui todo dia. Toque em Seguir ou escolha uma das ideias abaixo.",
+    "watching": "Acompanhando · {n}",
+    "youOwn": "Você tem · {n}",
+    "youOwnHint": "Ações da sua carteira são seguidas automaticamente.",
+    "owned": "Na sua carteira",
+    "unfollow": "Deixar de seguir",
+    "unfollowAria": "Deixar de seguir {symbol}",
+    "ideasTitle": "Ideias para seguir",
+    "ideasHint": "Escolhas populares. Seguir só adiciona a ação a esta lista.",
+    "followAria": "Seguir {symbol} ({name})",
+    "groups": {
+      "popular_ca": "Populares no Canadá",
+      "popular_us": "Populares nos EUA",
+      "monthly_income": "Paga todo mês",
+      "dividend_growers": "Aumenta o dividendo"
+    }
   }
 }

@@ -29,10 +29,12 @@ function todayIso(): string {
 
 const str = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v))
 
-export function TransactionForm({ initial, accounts, defaultAccountId = '', busy, error, onSubmit, onCancel }: {
+export function TransactionForm({ initial, accounts, defaultAccountId = '', defaultSymbol = '', busy, error, onSubmit, onCancel }: {
   initial?: Transaction
   accounts: Account[]
   defaultAccountId?: string
+  /** prefill for a new transaction (e.g. "Record a trade" from a holding) */
+  defaultSymbol?: string
   busy: boolean
   error: string | null
   onSubmit: (body: TransactionInput) => void
@@ -50,7 +52,7 @@ export function TransactionForm({ initial, accounts, defaultAccountId = '', busy
   const [type, setType] = useState<TxType>(initial?.type ?? 'buy')
   const [date, setDate] = useState(initial?.trade_date ?? todayIso())
   const [accountId, setAccountId] = useState(initial?.account_id ?? defaultAccountId)
-  const [symbol, setSymbol] = useState(initial?.symbol ?? '')
+  const [symbol, setSymbol] = useState(initial?.symbol ?? defaultSymbol)
   const [qty, setQty] = useState(str(initial?.quantity))
   const [price, setPrice] = useState(str(initial?.price))
   const [amount, setAmount] = useState(str(initial?.amount))

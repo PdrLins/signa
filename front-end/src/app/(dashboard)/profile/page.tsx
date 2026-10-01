@@ -1,8 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useId, useMemo, useState } from 'react'
+import Link from 'next/link'
 import {
-  Bell, Download, FileText, Landmark, LogOut, ReceiptText, Shield, Trash2, Upload,
+  Bell, HelpCircle, Landmark, LogOut, Plug, ReceiptText, ScrollText, SlidersHorizontal, Trash2, Upload,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTheme } from '@/hooks/useTheme'
@@ -15,11 +16,13 @@ import { fill } from '@/lib/insights'
 import { countryName, currencyName } from '@/lib/intlNames'
 import { isMigrationRequired, trackerErrorText } from '@/lib/trackerErrors'
 import {
-  LinkRow, LoadError, MigrationNotice, SectionCard, Segmented, SoonBadge, StaticRow, ToggleRow, TrackerHeader,
+  LinkRow, LoadError, MigrationNotice, SectionCard, Segmented, SoonBadge, ToggleRow, TrackerHeader,
   useButtonStyles, useFieldStyle,
 } from '@/components/profile/ui'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { SlotMeter } from '@/components/upgrade/SlotMeter'
+import { ThemePicker } from '@/components/profile/ThemePicker'
+import { usePrivacyStore } from '@/store/privacyStore'
 import type { ProfileUpdate, TaxView } from '@/types/profile'
 
 export default function ProfilePage() {
@@ -38,6 +41,10 @@ export default function ProfilePage() {
   const f = useFieldStyle()
   const btn = useButtonStyles()
   const ids = { name: useId(), ccy: useId(), cmp: useId(), country: useId() }
+  const amountsHidden = usePrivacyStore((s) => s.hidden)
+  const toggleHidden = usePrivacyStore((s) => s.toggle)
+  const loadPrivacy = usePrivacyStore((s) => s.load)
+  useEffect(() => { loadPrivacy() }, [loadPrivacy])
 
   const profile = q.data
   const [name, setName] = useState('')
@@ -125,12 +132,26 @@ export default function ProfilePage() {
               <div className="min-w-0"><dt style={{ color: theme.colors.textSub }}>{tp.plan}</dt>
                 <dd style={{ color: theme.colors.text }}>{t.access.levels[profile.access_level]}</dd></div>
             </dl>
-            <SlotMeter />
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <SlotMeter />
+              <Link href="/pricing" className="text-[13px] font-medium min-h-[44px] inline-flex items-center rounded focus-visible:outline focus-visible:outline-2"
+                style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}>
+                {t.pricing.seePlans}
+              </Link>
+            </div>
+          </SectionCard>
+
+          <SectionCard title={tp.sections.display}>
             <div className="flex flex-col gap-1">
               <span className="text-[12px]" style={{ color: theme.colors.textSub }}>{tp.language}</span>
               <Segmented<Locale> label={tp.language} value={locale} disabled={busy}
                 options={[{ value: 'en', label: tp.languages.en }, { value: 'pt', label: tp.languages.pt }]}
                 onChange={changeLanguage} />
+            </div>
+            <ToggleRow label={tp.hideAmounts} desc={tp.hideAmountsHelp} checked={amountsHidden} onChange={() => toggleHidden()} />
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[12px]" style={{ color: theme.colors.textSub }}>{t.settings.themeLabel}</span>
+              <ThemePicker />
             </div>
           </SectionCard>
 
@@ -205,16 +226,24 @@ export default function ProfilePage() {
           {can('action.import.csv') && (
             <LinkRow href="/profile/transactions?import=1" icon={Upload} label={tp.import} desc={tp.importDesc} />
           )}
-          <StaticRow icon={Download} label={tp.export} desc={tp.exportDesc} badge={t.tracker.comingSoon} />
         </div>
       </SectionCard>
 
+      {can('area.brain') && (
+        <SectionCard title={tp.sections.brain}>
+          <div className="flex flex-col gap-2">
+            <LinkRow href="/brain/settings" icon={SlidersHorizontal} label={t.nav.brainSettings} desc={tp.brainSettingsDesc} />
+            {can('area.integrations') && <LinkRow href="/integrations" icon={Plug} label={t.nav.integrations} desc={t.settingsLinks.integrations} />}
+            {can('area.logs') && <LinkRow href="/logs" icon={ScrollText} label={t.nav.logs} desc={t.settingsLinks.logs} />}
+          </div>
+        </SectionCard>
+      )}
+
       <SectionCard title={tp.sections.about}>
         <p className="text-[13px]" style={{ color: theme.colors.textSub }}>{t.tracker.notAdvice}</p>
-        <div className="flex flex-col gap-2">
-          <StaticRow icon={Shield} label={tp.privacy} badge={t.tracker.comingSoon} />
-          <StaticRow icon={FileText} label={tp.terms} badge={t.tracker.comingSoon} />
-        </div>
+        {can('area.how_it_works') && (
+          <LinkRow href="/how-it-works" icon={HelpCircle} label={t.settingsLinks.howItWorksTitle} desc={t.settingsLinks.howItWorks} />
+        )}
       </SectionCard>
 
       <SectionCard title={tp.sections.account}>

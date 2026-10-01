@@ -2,6 +2,7 @@
 
 import { memo, useState, useMemo, useEffect } from 'react'
 import { LangSwitcher } from '@/components/ui/LangSwitcher'
+import { ViewAsSwitch } from '@/components/dev/ViewAsSwitch'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
@@ -23,9 +24,7 @@ import {
   Wallet,
   CalendarDays,
   Sun,
-  PieChart,
   UserRound,
-  CalendarClock,
 } from 'lucide-react'
 import { isNavActive, type NavItem } from '@/components/layout/LeftNav'
 
@@ -61,14 +60,11 @@ export function BottomNav() {
     const main: NavItem[] = [
       { label: t.nav.home, href: '/home', icon: Sun, feature: 'area.home' },
       { label: t.nav.holdingsShort, href: '/holdings', icon: Wallet, feature: 'area.holdings' },
+      { label: t.nav.following, href: '/following', icon: Star, feature: 'area.watchlist' },
       { label: t.nav.dividends, href: '/dividends', icon: CalendarDays, feature: 'area.dividends' },
-      { label: t.nav.insights, href: '/insights', icon: PieChart, feature: 'area.insights' },
     ].filter((i) => can(i.feature))
     const more: NavItem[] = [
       { label: t.nav.profile, href: '/profile', icon: UserRound, feature: 'area.profile' },
-      { label: t.nav.comingUp, href: '/coming-up', icon: CalendarClock, feature: 'area.coming_up' },
-      { label: t.nav.watchlist, href: '/watchlist', icon: Star, feature: 'area.watchlist' },
-      { label: t.nav.settings, href: '/settings', icon: Settings, feature: 'area.settings' },
       { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle, feature: 'area.how_it_works' },
     ].filter((i) => can(i.feature))
     const brain: NavItem[] = [
@@ -78,6 +74,7 @@ export function BottomNav() {
       { label: t.nav.positions, href: '/positions', icon: Briefcase, feature: 'area.positions' },
       { label: t.nav.isItWorkingShort, href: '/performance', icon: ChartLine, feature: 'area.performance' },
       { label: t.nav.brain, href: '/brain', icon: Brain, feature: 'area.brain' },
+      { label: t.nav.brainSettings, href: '/brain/settings', icon: Settings, feature: 'area.brain' },
       { label: t.nav.integrations, href: '/integrations', icon: Plug, feature: 'area.integrations' },
       { label: t.nav.logs, href: '/logs', icon: ScrollText, feature: 'area.logs' },
     ].filter((i) => can(i.feature))
@@ -91,7 +88,7 @@ export function BottomNav() {
   }, [t, can])
 
   const moreActive = (href: string) =>
-    href === '/brain' || href === '/positions' ? isNavActive(href, pathname) : (pathname === href || pathname.startsWith(href + '/'))
+    href === '/brain' || href === '/positions' || href === '/brain/settings' ? isNavActive(href, pathname) : (pathname === href || pathname.startsWith(href + '/'))
 
 
   const isMoreActive = useMemo(
@@ -149,8 +146,9 @@ export function BottomNav() {
                 </ul>
               </section>
             )}
-            <div className="mt-4 pt-4 flex justify-center" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
+            <div className="mt-4 pt-4 flex flex-wrap items-center justify-center gap-3" style={{ borderTop: `1px solid ${theme.colors.border}` }}>
               <LangSwitcher />
+              <ViewAsSwitch variant="inline" />
             </div>
           </div>
         </div>

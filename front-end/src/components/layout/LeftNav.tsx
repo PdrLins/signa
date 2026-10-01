@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { LangSwitcher } from '@/components/ui/LangSwitcher'
+import { ViewAsSwitch } from '@/components/dev/ViewAsSwitch'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/useTheme'
@@ -23,14 +24,13 @@ import {
   Wallet,
   CalendarDays,
   Sun,
-  PieChart,
+  Star,
   UserRound,
   type LucideIcon,
 } from 'lucide-react'
 
-// Pages reached through Settings (and the mobile "More" sheet) keep the
-// Settings rail item highlighted.
-const SETTINGS_CHILDREN = ['/settings', '/integrations', '/logs', '/watchlist', '/how-it-works']
+// Pages reached through Brain settings keep its rail item highlighted.
+const SETTINGS_CHILDREN = ['/brain/settings', '/integrations', '/logs']
 
 export interface NavItem {
   label: string
@@ -40,9 +40,9 @@ export interface NavItem {
 }
 
 export function isNavActive(href: string, pathname: string): boolean {
-  if (href === '/settings') return SETTINGS_CHILDREN.some((p) => pathname === p || pathname.startsWith(p + '/'))
+  if (href === '/brain/settings') return SETTINGS_CHILDREN.some((p) => pathname === p || pathname.startsWith(p + '/'))
   if (href === '/positions') return pathname === '/positions' || pathname.startsWith('/brain/performance')
-  if (href === '/brain') return pathname === '/brain' || (pathname.startsWith('/brain/') && !pathname.startsWith('/brain/performance'))
+  if (href === '/brain') return pathname === '/brain' || (pathname.startsWith('/brain/') && !pathname.startsWith('/brain/performance') && !pathname.startsWith('/brain/settings'))
   return pathname === href || pathname.startsWith(href + '/')
 }
 
@@ -87,13 +87,13 @@ export function LeftNav() {
   const dotColor = open ? theme.colors.up : theme.colors.textHint
 
   // The tracker (everyone), then the owner's brain pages under a "Brain"
-  // heading (only for users whose plan includes them), then Profile and
-  // Settings (which links onward to Integrations, Logs, Watchlist, Guide).
+  // heading (only for users whose plan includes them, Brain settings links
+  // onward to Integrations and Logs), then Profile.
   const TRACKER: NavItem[] = [
     { label: t.nav.home, href: '/home', icon: Sun, feature: 'area.home' },
     { label: t.nav.holdingsShort, href: '/holdings', icon: Wallet, feature: 'area.holdings' },
+    { label: t.nav.following, href: '/following', icon: Star, feature: 'area.watchlist' },
     { label: t.nav.dividends, href: '/dividends', icon: CalendarDays, feature: 'area.dividends' },
-    { label: t.nav.insights, href: '/insights', icon: PieChart, feature: 'area.insights' },
   ].filter((item) => can(item.feature))
   const BRAIN: NavItem[] = [
     { label: t.nav.brainToday, href: '/today', icon: LayoutDashboard, feature: 'area.today' },
@@ -102,10 +102,10 @@ export function LeftNav() {
     { label: t.nav.positions, href: '/positions', icon: Briefcase, feature: 'area.positions' },
     { label: t.nav.isItWorking, href: '/performance', icon: ChartLine, feature: 'area.performance' },
     { label: t.nav.brain, href: '/brain', icon: Brain, feature: 'area.brain' },
+    { label: t.nav.brainSettings, href: '/brain/settings', icon: Settings, feature: 'area.brain' },
   ].filter((item) => can(item.feature))
   const ACCOUNT: NavItem[] = [
     { label: t.nav.profile, href: '/profile', icon: UserRound, feature: 'area.profile' },
-    { label: t.nav.settings, href: '/settings', icon: Settings, feature: 'area.settings' },
   ].filter((item) => can(item.feature))
 
   const renderItem = (item: NavItem) => {
@@ -339,6 +339,7 @@ export function LeftNav() {
         style={{ backgroundColor: theme.colors.border }}
       />
       <LangSwitcher variant="rail" />
+      <ViewAsSwitch variant="rail" />
       <button
         type="button"
         onClick={() => {

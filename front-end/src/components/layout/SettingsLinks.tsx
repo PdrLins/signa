@@ -5,22 +5,19 @@ import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useAccess } from '@/hooks/useAccess'
 import { useMemo } from 'react'
-import { Plug, ScrollText, HelpCircle, Star, ChevronRight, UserRound } from 'lucide-react'
+import { Plug, ScrollText, ChevronRight } from 'lucide-react'
 
-/** Onward links from Settings to the pages that left the main nav. */
+/** Brain settings → Integrations and Logs (owner pages outside the main nav). */
 export function SettingsLinks() {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const { can } = useAccess()
   const links = useMemo(() => [
-    { feature: 'area.profile', href: '/profile', label: t.nav.profile, desc: t.settingsLinks.profile, icon: UserRound },
-    { feature: 'area.watchlist', href: '/watchlist', label: t.nav.watchlist, desc: t.settingsLinks.watchlist, icon: Star },
     { feature: 'area.integrations', href: '/integrations', label: t.nav.integrations, desc: t.settingsLinks.integrations, icon: Plug },
     { feature: 'area.logs', href: '/logs', label: t.nav.logs, desc: t.settingsLinks.logs, icon: ScrollText },
-    { feature: 'area.how_it_works', href: '/how-it-works', label: t.settingsLinks.howItWorksTitle, desc: t.settingsLinks.howItWorks, icon: HelpCircle },
   ].filter((l) => can(l.feature)), [t, can])
   return (
-    <nav aria-label={t.settingsLinks.label} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+    <nav aria-label={t.settingsLinks.label} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3">
       {links.map((l) => (
         <Link
           key={l.href}

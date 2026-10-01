@@ -126,6 +126,11 @@ def test_growth_1y_and_months_pattern():
              "special": False} for k in range(9)]
     assert ds.growth_1y({"history": hist}, TODAY) == pytest.approx(0.10)
     assert ds.growth_1y({"history": hist[:4]}, TODAY) is None          # no prior year
+    # a quarter that slipped out of the last 12 months (3 payments vs 4) is
+    # a timing gap, not a 27% cut
+    slipped = [h for i, h in enumerate(hist) if i != 0]
+    slipped = [{**h, "ex_date": (TODAY - timedelta(days=91 * k + 100)).isoformat()} for k, h in enumerate(slipped)]
+    assert ds.growth_1y({"history": slipped}, TODAY) is None
     evs = dividend_calendar.profile_events(MSFT, TODAY)
     months = ds.months_pattern(evs, MSFT, TODAY)
     assert sum(months) == 4 and months[11] is True                      # Dec 2 pay date

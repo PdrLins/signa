@@ -1,6 +1,7 @@
 'use client'
 
-import { Suspense, memo, useMemo, useState } from 'react'
+import { Suspense, memo, useCallback, useMemo, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { CalendarDays, ChevronRight, Receipt } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
@@ -14,6 +15,8 @@ import { HomeHeader } from '@/components/home/HomeHeader'
 import { SymbolLink, SymbolListText } from '@/components/tracker/SymbolLink'
 import { SectionCard, SoonBadge, useButtonStyles } from '@/components/profile/ui'
 import { MonthlyBars } from '@/components/tracker/MonthlyBars'
+import { EventsTimeline } from '@/components/tracker/EventsTimeline'
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs'
 import { Tag } from '@/components/tracker/EventRow'
 import {
   ChipGroup, EmptyHoldings, Freshness, HideAmountsButton, QueryError, SafetyChip, ScopeSelect, SkeletonCards, Stat, useSignColor,
@@ -22,6 +25,7 @@ import type en from '@/lib/i18n/en.json'
 import type { DividendPayer, DividendSummary, UpcomingPayment } from '@/types/tracker'
 
 type TD = typeof en['divSummary']
+type DivTab = 'overview' | 'upcoming'
 
 export default function DividendsPage() {
   return (
@@ -38,9 +42,25 @@ function DividendsInner() {
   const { can } = useAccess()
   const btn = useButtonStyles()
   const { scope, query, setScope, scoped } = useScope()
+  const params = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const canUpcoming = can('area.coming_up')
+  const tab: DivTab = canUpcoming && params.get('tab') === 'upcoming' ? 'upcoming' : 'overview'
+  const setTab = useCallback((next: DivTab) => {
+    const sp = new URLSearchParams(params.toString())
+    if (next === 'overview') sp.delete('tab')
+    else sp.set('tab', next)
+    const qs = sp.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }, [params, pathname, router])
+  const tabOptions = useMemo(() => [
+    { value: 'overview' as const, label: td.tabs.overview },
+    { value: 'upcoming' as const, label: td.tabs.upcoming },
+  ], [td])
   const year = new Date().getFullYear()
   const [period, setPeriod] = useState('next12m')
-  const q = useDividendSummary(scope, period)
+  const q = useDividendSummary(scope, period, tab === 'overview')
   const d = q.data
   const profile = useProfile(can('area.profile'))
   // option-income payers → link to the income-quality page
@@ -60,7 +80,18 @@ function DividendsInner() {
   return (
     <div className="space-y-4 pb-4 min-w-0">
       <HomeHeader title={td.title} actions={<HideAmountsButton />} />
-      <ScopeSelect scope={scope} onChange={setScope} />
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 min-w-0">
+        {canUpcoming && <SegmentedTabs value={tab} options={tabOptions} onChange={setTab} label={td.tabs.label} idBase="div-tab" />}
+        <div className="flex items-center gap-2 min-w-0 sm:ml-auto">
+          <ScopeSelect scope={scope} onChange={setScope} />
+          <Link href="/dividends/calendar" className={btn.secondary.className} style={btn.secondary.style}>
+            <CalendarDays size={16} aria-hidden="true" />{td.calendarShort}
+          </Link>
+        </div>
+      </div>
+
+      <div role={canUpcoming ? 'tabpanel' : undefined} id="div-tab-panel" aria-labelledby={canUpcoming ? `div-tab-${tab}` : undefined} className="min-w-0">
+      {tab === 'upcoming' ? <EventsTimeline /> : <div className="space-y-4 min-w-0">
       <ChipGroup value={period} options={periods} onChange={setPeriod} label={td.periodLabel} />
 
       {q.isLoading && <SkeletonCards heights={[150, 180, 160]} />}
@@ -78,15 +109,14 @@ function DividendsInner() {
             <PayersCard d={d} td={td} optionIncome={optionIncome} canQuality={can('area.insights')} scopeQuery={query} />
           </div>
           <div className="flex flex-col gap-4 min-w-0">
-            <UpcomingCard d={d} td={td} />
-            <Link href="/dividends/calendar" className={btn.secondary.className} style={btn.secondary.style}>
-              <CalendarDays size={16} aria-hidden="true" />{td.fullCalendar}
-            </Link>
+            <UpcomingCard d={d} td={td} onAll={canUpcoming ? () => setTab('upcoming') : undefined} />
             <Freshness asOf={d.as_of} delayed={d.delayed_minutes} />
             <p className="text-[12px]" style={{ color: theme.colors.textHint }}>{t.dividendsPage.notes.disclaimer}</p>
           </div>
         </div>
       )}
+      </div>}
+      </div>
     </div>
   )
 }
@@ -129,7 +159,8 @@ function Headline({ d, td, taxView }: { d: DividendSummary; td: TD; taxView: 'be
         <Stat label={td.stats.growth5y} value={spct(d.growth.growth_5y_pct, 1)} color={signColor(d.growth.growth_5y_pct)}
           sub={d.growth.coverage_5y_pct != null ? fill(td.stats.coverage, { pct: pct(d.growth.coverage_5y_pct, 0) }) : undefined} />
         <Stat label={td.stats.growth1y} value={spct(d.growth.growth_1y_pct, 1)} color={signColor(d.growth.growth_1y_pct)}
-          sub={d.growth.coverage_1y_pct != null ? fill(td.stats.coverage, { pct: pct(d.growth.coverage_1y_pct, 0) }) : undefined} />
+          sub={d.growth.growth_1y_pct == null ? td.stats.growth1yNone
+            : d.growth.coverage_1y_pct != null ? fill(td.stats.coverage, { pct: pct(d.growth.coverage_1y_pct, 0) }) : undefined} />
       </div>
       {d.tax && (
         <Link href="/dividends/tax" aria-label={td.tax.open}
@@ -189,16 +220,39 @@ const UpcomingRow = memo(function UpcomingRow({ u, currency, td }: { u: Upcoming
   )
 })
 
-function UpcomingCard({ d, td }: { d: DividendSummary; td: TD }) {
+function UpcomingCard({ d, td, onAll }: { d: DividendSummary; td: TD; onAll?: () => void }) {
   const theme = useTheme()
+  const locale = useI18nStore((s) => s.locale)
+  const { fmt } = useMoney(d.currency)
+  // Nothing in 60 days: say when the next money is expected (the monthly
+  // bars), so this card never looks empty while the calendar has an estimate.
+  const next = useMemo(() => {
+    if (d.kind !== 'expected' || d.upcoming.length) return null
+    const m = d.months.find((x) => x.total > 0)
+    if (!m) return null
+    const date = new Date(`${m.month}-15T12:00:00Z`)
+    const month = Number.isNaN(date.getTime()) ? m.month
+      : date.toLocaleDateString(INTL_LOCALES[locale], { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    return fill(td.upcoming.nextExpected, { month, amount: fmt(m.after_tax ?? m.total) })
+  }, [d, td, locale, fmt])
   return (
     <SectionCard title={td.upcoming.title} subtitle={td.upcoming.subtitle}>
       {d.upcoming.length === 0 ? (
-        <p className="text-[13px]" style={{ color: theme.colors.textSub }}>{td.upcoming.none}</p>
+        <div className="flex flex-col gap-1">
+          <p className="text-[13px]" style={{ color: theme.colors.textSub }}>{td.upcoming.none}</p>
+          {next && <p className="text-[13px] font-medium" style={{ color: theme.colors.text }}>{next}</p>}
+        </div>
       ) : (
         <ul className="-mt-2">
           {d.upcoming.map((u, i) => <UpcomingRow key={`${u.symbol}-${u.account_id}-${u.ex_date}-${i}`} u={u} currency={d.currency} td={td} />)}
         </ul>
+      )}
+      {onAll && (
+        <button type="button" onClick={onAll}
+          className="self-start min-h-[44px] px-1 text-[13px] font-medium rounded focus-visible:outline focus-visible:outline-2"
+          style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}>
+          {td.upcoming.seeEvents}
+        </button>
       )}
     </SectionCard>
   )

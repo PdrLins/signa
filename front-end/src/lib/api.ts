@@ -3,7 +3,7 @@ import { TOKEN_KEY } from '@/lib/constants'
 import { useAuthStore } from '@/store/authStore'
 import { useViewAsStore } from '@/store/viewAsStore'
 import type { SignalsResponse, SignalFilters, DailyStats, ScanTodayRecord } from '@/types/signal'
-import type { WatchlistItem, WatchlistResponse, WatchlistAddRequest } from '@/types/watchlist'
+import type { FollowingOverview, WatchlistItem, WatchlistResponse, WatchlistAddRequest } from '@/types/watchlist'
 import type { ScansResponse } from '@/types/scan'
 import type { TodayInsights, PerformanceInsights, BacktestInsights, SignalTrail, SignalVerdict } from '@/types/insights'
 import type { CheckJob, CheckMode, CompareJob } from '@/types/check'
@@ -262,6 +262,7 @@ export const signalsApi = {
 // Watchlist — backend wraps in { items, count }
 export const watchlistApi = {
   getAll: () => get<WatchlistResponse>('/watchlist'),
+  overview: () => get<FollowingOverview>('/watchlist/overview'),
   add: (ticker: string, body?: WatchlistAddRequest) => post<WatchlistItem>(`/watchlist/${ticker}`, body),
   remove: (ticker: string) => del<{ message: string }>(`/watchlist/${ticker}`),
 }

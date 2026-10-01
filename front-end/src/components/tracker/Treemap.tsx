@@ -11,6 +11,22 @@ import type { AllocationTile } from '@/types/tracker'
 interface Rect { x: number; y: number; w: number; h: number }
 interface Placed extends Rect { tile: AllocationTile }
 
+/** Smallest tile's drawn share. One big holding (an all-in-one ETF at 98%)
+ *  would otherwise leave slivers too thin to see or tap. Small tiles are
+ *  drawn at least this big; the order of sizes stays true and labels keep
+ *  the real weight. With many tiles the floor shrinks (all floors together
+ *  never take more than half the map). */
+export const MIN_TILE_SHARE = 0.06
+
+/** Layout weights with the small-tile floor applied. Pure. */
+export function displayWeights(tiles: AllocationTile[]): AllocationTile[] {
+  const items = tiles.filter((t) => t.weight_pct > 0)
+  if (items.length < 2) return items
+  const total = items.reduce((s, t) => s + t.weight_pct, 0)
+  const floor = Math.min(MIN_TILE_SHARE, 0.5 / items.length) * total
+  return items.map((t) => (t.weight_pct < floor ? { ...t, weight_pct: floor } : t))
+}
+
 /** Binary-split treemap: halve the (descending) list by weight, split the
  *  rectangle along its longer side in the same proportion, recurse. Pure. */
 export function layoutTreemap(tiles: AllocationTile[], rect: Rect): Placed[] {
@@ -82,7 +98,12 @@ const Tile = memo(function Tile({ p, by }: { p: Placed; by: 'day' | 'total' }) {
 export const Treemap = memo(function Treemap({ tiles, by }: { tiles: AllocationTile[]; by: 'day' | 'total' }) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
-  const placed = useMemo(() => layoutTreemap(tiles, { x: 0, y: 0, w: W, h: H }), [tiles])
+  // lay out with capped weights, then put the real tiles (real weights) back
+  const placed = useMemo(() => {
+    const real = new Map(tiles.map((x) => [x.symbol, x]))
+    return layoutTreemap(displayWeights(tiles), { x: 0, y: 0, w: W, h: H })
+      .map((p) => ({ ...p, tile: real.get(p.tile.symbol) ?? p.tile }))
+  }, [tiles])
   return (
     <div role="group" aria-label={t.insightsPage.allocation.mapAria} className="relative w-full rounded-xl overflow-hidden"
       style={{ aspectRatio: `${W} / ${H}`, backgroundColor: theme.colors.surfaceAlt }}>

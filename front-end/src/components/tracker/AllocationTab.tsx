@@ -75,12 +75,26 @@ function TargetsEditor({ a }: { a: Allocation }) {
   const baseId = useId()
   const current = useMemo(() => new Map(a.mix.map((m) => [m.class, m.pct])), [a.mix])
   const [vals, setVals] = useState<Record<string, string>>({})
+  // No targets yet: a short explanation and one button, not six empty fields.
+  const [editing, setEditing] = useState(!!a.targets)
   // Reset the form whenever the saved targets change.
   useEffect(() => {
     const next: Record<string, string> = {}
     for (const c of CLASSES) next[c] = a.targets && a.targets[c] ? String(a.targets[c]) : ''
     setVals(next)
+    setEditing(!!a.targets)
   }, [a.targets])
+  // "Set targets" starts from today's mix (whole numbers that add up to 100).
+  const startFromMix = () => {
+    const raw = CLASSES.map((c) => Math.round(current.get(c) ?? 0))
+    const diff = 100 - raw.reduce((s, n) => s + n, 0)
+    const big = raw.indexOf(Math.max(...raw))
+    if (big >= 0) raw[big] += diff
+    const next: Record<string, string> = {}
+    CLASSES.forEach((c, i) => { next[c] = raw[i] > 0 ? String(raw[i]) : '' })
+    setVals(next)
+    setEditing(true)
+  }
   const nums = CLASSES.map((c) => (vals[c]?.trim() ? Number(vals[c].replace(',', '.')) : 0))
   const invalid = nums.some((n) => !Number.isFinite(n) || n < 0 || n > 100)
   const sum = invalid ? NaN : nums.reduce((s, n) => s + n, 0)
@@ -97,6 +111,15 @@ function TargetsEditor({ a }: { a: Allocation }) {
     onSuccess: () => toast.show(ta.targetsCleared, 'success', 2000),
     onError: (e) => toast.show(trackerErrorText(e, t), 'error'),
   })
+  if (!editing) {
+    return (
+      <SectionCard title={ta.targetsTitle} subtitle={ta.targetsHelp}>
+        <button type="button" onClick={startFromMix} className={`${btn.primary.className} self-start`} style={btn.primary.style}>
+          {ta.setTargets}
+        </button>
+      </SectionCard>
+    )
+  }
   return (
     <SectionCard title={ta.targetsTitle} subtitle={ta.targetsHelp}>
       <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); if (ok) onSave() }}>
@@ -128,6 +151,11 @@ function TargetsEditor({ a }: { a: Allocation }) {
           <button type="submit" disabled={!ok || save.isPending} className={btn.primary.className} style={btn.primary.style}>
             {save.isPending ? t.tracker.saving : ta.saveTargets}
           </button>
+          {!a.targets && (
+            <button type="button" onClick={() => setEditing(false)} className={btn.secondary.className} style={btn.secondary.style}>
+              {t.tracker.cancel}
+            </button>
+          )}
           {a.targets && (
             <button type="button" onClick={onClear} disabled={save.isPending} className={btn.secondary.className} style={btn.secondary.style}>
               {ta.clearTargets}
@@ -251,7 +279,7 @@ export function AllocationTab({ scope, scoped }: { scope: Scope; scoped: boolean
       </div>
       <div className="flex flex-col gap-4 min-w-0">
         <TargetsEditor a={a} />
-        <DepositPlan a={a} scope={scope} />
+        {a.targets && <DepositPlan a={a} scope={scope} />}
       </div>
     </div>
   )

@@ -35,7 +35,9 @@
     "profile": "Profile",
     "brainGroup": "Brain",
     "brainToday": "Dashboard",
-    "trackerGroup": "Portfolio"
+    "trackerGroup": "Portfolio",
+    "following": "Following",
+    "brainSettings": "Brain settings"
   },
   "login": {
     "welcome": "Signa",
@@ -1981,7 +1983,10 @@
       "stale": "Stale data",
       "shares": "{n} shares",
       "avgCost": "avg {cost}",
-      "noShares": "Shares not entered"
+      "noShares": "Shares not entered",
+      "today": "today",
+      "missingShares": "{n} without shares. Add shares to see their value and gain.",
+      "shareOne": "{n} share"
     },
     "chips": {
       "trendOk": "Trend OK",
@@ -2161,6 +2166,33 @@
       "importAccount": "Account for all rows",
       "inAccount": "In {name}",
       "noneInAccount": "No holdings in this account yet."
+    },
+    "subtitleShort": "Your real positions, priced through the day.",
+    "tabs": {
+      "label": "Holdings sections",
+      "list": "List",
+      "performance": "Performance",
+      "allocation": "Allocation"
+    },
+    "addMenu": {
+      "label": "Add to your portfolio",
+      "button": "Add",
+      "stock": "Add a stock",
+      "paste": "Paste a list",
+      "trade": "Record a trade",
+      "csv": "Import a CSV",
+      "accounts": "Manage accounts",
+      "refresh": "Refresh prices and checks"
+    },
+    "menu": {
+      "label": "Actions for {symbol}",
+      "edit": "Edit shares and cost",
+      "trade": "Record a trade",
+      "alert": "Set a price alert"
+    },
+    "brainNotes": {
+      "title": "Brain notes",
+      "subtitle": "AI reviews ({n} of {total} reviewed) and where new cash could go. Only you see this."
     }
   },
   "access": {
@@ -2342,7 +2374,8 @@
       "today": "today",
       "amount": "{amount} per share",
       "none": "No upcoming events known.",
-      "exHelp": "Own the shares before the ex-dividend date to receive the payment."
+      "exHelp": "Own the shares before the ex-dividend date to receive the payment.",
+      "dividendDetails": "Dividend details"
     },
     "actions": {
       "addWatchlist": "Add to watchlist",
@@ -2361,7 +2394,11 @@
       "unfollowed": "You no longer follow {symbol}",
       "addHoldings": "Add to holdings",
       "addHoldingsAria": "Add {symbol} to your holdings",
-      "closeAdd": "Close"
+      "closeAdd": "Close",
+      "addShort": "Add",
+      "alert": "Alert",
+      "alertAria": "Price alerts for {symbol}",
+      "moreAria": "More for {symbol}"
     },
     "position": {
       "title": "Your position",
@@ -2420,6 +2457,13 @@
       "avgVolume": "Avg. volume (3 mo)",
       "volume": "Volume",
       "beta": "Beta"
+    },
+    "tabs": {
+      "label": "Stock sections",
+      "overview": "Overview",
+      "dividends": "Dividends",
+      "alerts": "Alerts",
+      "alertsN": "Alerts · {n}"
     }
   },
   "tracker": {
@@ -2614,7 +2658,8 @@
       "buyYours": "Which one to buy is your call.",
       "planLeft": "{amount} is left over once every part reaches its target.",
       "planNote": "Arithmetic on your own targets, not a recommendation.",
-      "emptyScope": "Nothing in this account yet."
+      "emptyScope": "Nothing in this account yet.",
+      "setTargets": "Set targets from my current mix"
     }
   },
   "comingUpPage": {
@@ -2692,7 +2737,9 @@
       "notifications": "Notifications",
       "data": "Your data",
       "about": "About",
-      "account": "Account"
+      "account": "Account",
+      "display": "Display",
+      "brain": "Brain"
     },
     "displayName": "Display name",
     "displayNamePlaceholder": "What should we call you?",
@@ -2738,7 +2785,10 @@
     "deleteConfirm": "Yes, delete my account",
     "deleteUnavailable": "Deleting an account from the app isn't available yet. Nothing was deleted.",
     "saved": "Saved",
-    "open": "Open {name}"
+    "open": "Open {name}",
+    "hideAmounts": "Hide amounts",
+    "hideAmountsHelp": "Shows •••• instead of money values on this device.",
+    "brainSettingsDesc": "AI providers, scanning and signal thresholds."
   },
   "notifications": {
     "title": "Notifications",
@@ -3036,7 +3086,8 @@
       "onCost": "Yield on cost",
       "growth5y": "Growth, 5 years",
       "growth1y": "Growth, 1 year",
-      "coverage": "covers {pct} of income"
+      "coverage": "covers {pct} of income",
+      "growth1yNone": "Not comparable yet: the payment timing changed"
     },
     "tax": {
       "open": "Open accounts and tax",
@@ -3054,7 +3105,9 @@
       "estimated": "Estimated",
       "estimatedHelp": "Projected from the payment history; not announced yet",
       "locked": "Ex-date passed",
-      "lockedHelp": "You are entitled to this payment; it has not been paid yet"
+      "lockedHelp": "You are entitled to this payment; it has not been paid yet",
+      "nextExpected": "Next expected: {month}, about {amount}.",
+      "seeEvents": "See all dates, earnings and events"
     },
     "change": {
       "title": "Why your income changed",
@@ -3103,7 +3156,13 @@
       "quality": "Income quality",
       "qualityAria": "Open the income quality of {symbol}",
       "nonPayers": "No dividend: {symbols}."
-    }
+    },
+    "tabs": {
+      "label": "Dividend sections",
+      "overview": "Overview",
+      "upcoming": "Coming up"
+    },
+    "calendarShort": "Calendar"
   },
   "divTax": {
     "title": "Accounts and tax",
@@ -3294,5 +3353,32 @@
       "owner": "Owner"
     },
     "note": "Dev only. Previews what each plan sees; nothing is saved to the database."
+  },
+  "brainSettings": {
+    "title": "Brain settings",
+    "subtitle": "AI providers, scanning, signal thresholds and the watchdog. Only you see this."
+  },
+  "following": {
+    "title": "Following",
+    "subtitle": "Stocks you follow, with today's price.",
+    "follow": "Follow",
+    "unlimited": "Follow more with Premium",
+    "emptyTitle": "You're not following any stocks yet",
+    "emptyBody": "Follow a stock to see its price here every day. Tap Follow, or pick one of the ideas below.",
+    "watching": "Watching · {n}",
+    "youOwn": "You own · {n}",
+    "youOwnHint": "Stocks in your holdings are followed automatically.",
+    "owned": "In your holdings",
+    "unfollow": "Unfollow",
+    "unfollowAria": "Unfollow {symbol}",
+    "ideasTitle": "Ideas to follow",
+    "ideasHint": "Popular picks. Following one only adds it to this list.",
+    "followAria": "Follow {symbol} ({name})",
+    "groups": {
+      "popular_ca": "Popular in Canada",
+      "popular_us": "Popular in the US",
+      "monthly_income": "Pays monthly",
+      "dividend_growers": "Raises its dividend"
+    }
   }
 }
