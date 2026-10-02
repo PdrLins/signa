@@ -425,3 +425,9 @@ def test_api_income_quality(monkeypatch):
     body = c.get("/api/v1/portfolio/income-quality/qqcl.to").json()
     assert body["symbol"] == "QQCL.TO" and body["underlying"] == "QQQ" and body["comparison"]["currency_mismatch"]
     assert c.get("/api/v1/portfolio/income-quality/$$$").json()["detail"]["code"] == "invalid_symbol"
+
+
+def test_funds_skip_the_earnings_calendar():
+    from app.services.dividends import skip_calendar
+    assert skip_calendar({"quoteType": "ETF"}) and skip_calendar({"quoteType": "MUTUALFUND"})
+    assert not skip_calendar({"quoteType": "EQUITY"}) and not skip_calendar({}) and not skip_calendar(None)

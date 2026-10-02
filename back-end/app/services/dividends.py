@@ -576,12 +576,22 @@ def _fetch_raw(symbol: str, info: dict | None = None) -> dict:
         out["dividends"] = t.dividends
     except Exception as e:
         logger.debug(f"dividends: history({symbol}) failed: {e}")
+    # Funds have no earnings calendar: Yahoo answers 404 "No fundamentals
+    # data found" (printed by yfinance) and it slowed every page that builds
+    # dividend profiles. Their dates come from the dividend history + info.
+    if skip_calendar(out["info"]):
+        return out
     try:
         cal = t.calendar
         out["calendar"] = cal if isinstance(cal, dict) else {}
     except Exception as e:
         logger.debug(f"dividends: calendar({symbol}) failed: {e}")
     return out
+
+
+def skip_calendar(info: dict | None) -> bool:
+    """True for funds (ETF / mutual fund / money market): no earnings calendar. Pure."""
+    return str((info or {}).get("quoteType") or "").upper() in ("ETF", "MUTUALFUND", "MONEYMARKET")
 
 
 async def get_dividend_profile(symbol: str, info: dict | None = None, price: float | None = None) -> dict:
