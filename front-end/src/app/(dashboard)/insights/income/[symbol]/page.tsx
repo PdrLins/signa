@@ -9,7 +9,8 @@ import { useIncomeQuality, useScope } from '@/hooks/usePortfolioInsights'
 import { fill, shortDate, signedPct } from '@/lib/insights'
 import { pct, spct } from '@/components/holdings/format'
 import { SectionCard, TrackerHeader } from '@/components/profile/ui'
-import { QueryError, SkeletonCards, Stat, useSignColor } from '@/components/tracker/ui'
+import { PremiumHint, QueryError, SkeletonCards, Stat, useSignColor } from '@/components/tracker/ui'
+import { useAccess } from '@/hooks/useAccess'
 import type { IncomeQuality } from '@/types/tracker'
 
 export default function IncomeQualityPage() {
@@ -76,7 +77,8 @@ function Inner() {
   const params = useParams<{ symbol: string }>()
   const symbol = decodeURIComponent(params.symbol ?? '').toUpperCase()
   const { query } = useScope()
-  const query_ = useIncomeQuality(symbol)
+  const canQuality = useAccess().can('feature.income_quality')   // Premium
+  const query_ = useIncomeQuality(symbol, canQuality)
   const q = query_.data
   const signColor = useSignColor()
   const tr = q?.total_return_5y ?? null
@@ -87,6 +89,7 @@ function Inner() {
       <TrackerHeader title={fill(tq.title, { symbol })} subtitle={q?.name ?? undefined}
         backHref={`/dividends${query}`} backLabel={t.divSummary.backToDividends} />
 
+      {!canQuality && <PremiumHint body={tq.premium} />}
       {query_.isLoading && <SkeletonCards heights={[140, 160, 160]} />}
       {!!query_.error && !q && <QueryError error={query_.error} onRetry={() => query_.refetch()} />}
 

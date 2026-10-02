@@ -124,6 +124,21 @@ export interface StockFund {
   turnover?: number | null
 }
 
+/** Premium: comparable funds (feature.similar_funds); fields optional until the back-end shape is final. */
+export interface SimilarFund {
+  symbol: string
+  name?: string | null
+  /** PERCENT a year */
+  expense_ratio?: number | null
+  /** PERCENT */
+  yield?: number | null
+  /** PERCENT */
+  return_1y_pct?: number | null
+  return_5y_pct?: number | null
+  /** the page's own fund (first row) */
+  current?: boolean
+}
+
 export interface StockAbout {
   description: string | null
   country: string | null
@@ -145,6 +160,10 @@ export interface StockPage {
   industry: string | null
   fund?: StockFund | null
   about?: StockAbout | null
+  /** Premium only (null/absent otherwise) */
+  similar?: SimilarFund[] | null
+  /** Free: similar funds exist but need Premium (show the hint) */
+  similar_locked?: boolean
   quote: StockQuote
   dividend: {
     profile: DividendProfile

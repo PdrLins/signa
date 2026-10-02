@@ -75,8 +75,15 @@ async def get_stock(
         "top_holdings": [{"symbol", "name", "weight" (PERCENT)}],   # up to 15
         "holdings_listed" (int), "top10_weight" (PERCENT), "fund_of_funds" (bool),
         "sector_weights": {key: PERCENT}, "asset_classes": {key: PERCENT},   # largest first
-        "pe", "pb", "turnover" (PERCENT)
+        "pe", "pb", "turnover" (PERCENT),
+        "regions": null | {"us" | "canada" | "intl_developed" | "emerging": PERCENT}   # approximate:
+                   # fund-of-funds holdings mapped to regions, or a single-region index (services/fund_regions.py)
       },                                                      # each field nullable; cached ~12 h
+      "similar": null | [{"symbol", "name", "expense_ratio" (PERCENT), "yield" (null),
+                          "return_1y_pct", "return_5y_pct" (total return, PERCENT), "current" (bool)}],
+                 # ETFs with curated peers (services/similar_funds.py), Premium (feature.similar_funds);
+                 # the page's own fund is the first row (current: true). Cached ~12 h.
+      "similar_locked": bool,   # Free: similar funds exist but need Premium (show the hint)
       "about": null | {"description" (longBusinessSummary, <= 3000 chars), "country", "city",
                        "state", "website", "employees" (int)},       # each nullable (Yahoo info)
       "generated_at": ISO datetime (the shared body is cached ~15 min),

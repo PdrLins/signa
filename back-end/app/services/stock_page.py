@@ -182,7 +182,16 @@ async def _fund(symbol: str, asset_type: str, info: dict) -> dict | None:
         logger.warning(f"stock_page: fund info({symbol}) failed: {e}")
         return None
     useful = ("expense_ratio", "aum", "family", "category", "top_holdings", "sector_weights", "asset_classes")
-    return fund if any(fund.get(k) for k in useful) else None
+    if not any(fund.get(k) for k in useful):
+        return None
+    # approximate regions (Yahoo has none): fund-of-funds holdings or a single-region index
+    try:
+        from app.services.fund_regions import regions_for
+        fund["regions"] = regions_for(symbol, fund)
+    except Exception as e:
+        logger.debug(f"stock_page: regions({symbol}) failed: {e}")
+        fund["regions"] = None
+    return fund
 
 
 # ============================================================
@@ -747,4 +756,13 @@ async def get_stock_page(raw_symbol: str, user: dict) -> dict:
     if can(level, "feature.extended_hours"):
         view = await asyncio.to_thread(quotes_service.extended_for_symbol, body["symbol"], base_quote)
     quote = {**base_quote, **quotes_service.extended_payload(level, body["symbol"], view)}
-    return {**body, "quote": quote, "followed": fol, "position": pos, "slots": slot}
+    # similar funds (ETFs with curated peers): Premium gets the rows, Free a lock flag
+    from app.services import similar_funds
+    similar, similar_locked = None, False
+    if body.get("asset_type") == "etf" and similar_funds.has_peers(body["symbol"]):
+        if can(level, "feature.similar_funds"):
+            similar = await asyncio.to_thread(similar_funds.get_similar, body["symbol"], body.get("name"))
+        else:
+            similar_locked = True
+    return {**body, "quote": quote, "followed": fol, "position": pos, "slots": slot,
+            "similar": similar, "similar_locked": similar_locked}

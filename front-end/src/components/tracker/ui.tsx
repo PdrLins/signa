@@ -123,9 +123,13 @@ export function PremiumHint({ body }: { body?: string }) {
     <div role="status" className="rounded-2xl p-4 flex items-start gap-3 min-w-0"
       style={{ backgroundColor: theme.colors.surfaceAlt, border: `1px solid ${theme.colors.border}` }}>
       <Sparkles size={18} aria-hidden="true" className="shrink-0 mt-0.5" style={{ color: theme.colors.primary }} />
-      <div className="min-w-0 flex flex-col gap-1">
+      <div className="min-w-0 flex flex-col items-start gap-1">
         <SoonBadge label={t.tracker.premium} tone="primary" />
         <p className="text-[13px]" style={{ color: theme.colors.textSub }}>{body ?? t.trackerUi.premiumBody}</p>
+        <Link href="/pricing" className="self-start min-h-[36px] inline-flex items-center text-[13px] font-medium rounded focus-visible:outline focus-visible:outline-2"
+          style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}>
+          {t.pricing.seePlans}
+        </Link>
       </div>
     </div>
   )

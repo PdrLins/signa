@@ -2510,7 +2510,15 @@
       },
       "topHoldings": "Top holdings",
       "showAll": "Show all {n}",
-      "showFewer": "Show fewer"
+      "showFewer": "Show fewer",
+      "regionsTitle": "Regions",
+      "regions": {
+        "us": "United States",
+        "canada": "Canada",
+        "intl_developed": "Developed markets (Europe, Japan…)",
+        "emerging": "Emerging markets"
+      },
+      "regionsNote": "Approximate: from the funds it holds, or the index it tracks."
     },
     "about": {
       "title": "About",
@@ -2526,6 +2534,17 @@
       "shares": "{n} shares",
       "estimated": "estimated",
       "perShare": "{amount} per share"
+    },
+    "similar": {
+      "title": "Similar funds",
+      "fund": "Fund",
+      "fee": "Yearly fee",
+      "yield": "Yield",
+      "return1y": "1-yr return",
+      "return5y": "5-yr return",
+      "premium": "Compare this fund with similar ones (fee, yield, return) with Premium.",
+      "thisFund": "This fund",
+      "note": "Funds that track the same thing. Returns include distributions."
     }
   },
   "tracker": {
@@ -2730,7 +2749,8 @@
       "planLeft": "{amount} is left over once every part reaches its target.",
       "planNote": "Arithmetic on your own targets, not a recommendation.",
       "emptyScope": "Nothing in this account yet.",
-      "setTargets": "Set targets from my current mix"
+      "setTargets": "Set targets from my current mix",
+      "planPremium": "Set a target mix and see where your next deposit should go with Premium. Your current mix above stays free."
     }
   },
   "comingUpPage": {
@@ -3367,7 +3387,8 @@
     "currencyMismatch": "The two trade in different currencies, so part of the gap is the exchange rate.",
     "returnNote": "A high yield does not mean a high return: what counts is price change plus payments.",
     "payoutsTitle": "How much the payments vary",
-    "payoutsHelp": "Each payment per share over the last 12 months."
+    "payoutsHelp": "Each payment per share over the last 12 months.",
+    "premium": "Income quality (how much of a covered-call ETF's payout is real income, and its return vs what it holds) is part of Premium."
   },
   "upgrade": {
     "slotTitle": "You follow {limit} stocks — the free limit",
@@ -3377,7 +3398,7 @@
       "stocks": "Unlimited stocks to follow",
       "alerts": "Unlimited price alerts",
       "prices": "Prices every minute, plus pre-market and after-hours",
-      "charts": "Intraday and full-history charts",
+      "charts": "Full-history charts",
       "tax": "After-tax dividends in Canada and the US"
     },
     "cta": "Upgrade to Premium",
@@ -3432,13 +3453,15 @@
     "freeFeatures": [
       "Follow up to 10 stocks, ETFs or crypto",
       "Your own accounts and people, named your way",
+      "Account types (TFSA, RRSP, IRA, 401(k)…) for Canada and the US",
       "Transactions by hand or from a CSV file",
-      "Portfolio chart up to 1 year, prices every 15 minutes",
+      "Portfolio chart up to 1 year with a 5-minute intraday chart, prices every 15 minutes",
       "Dividend calendar, income per month and upcoming payments",
-      "Dividend safety grades and income quality",
+      "Dividend safety grades",
       "Coming up: earnings, ex-dividend dates and key economic events",
       "Signa checks on every stock: trend, overheating, trading volume, earnings, dividend health",
-      "Allocation, target mix and where your next deposit should go",
+      "ETF details: fees, holdings, sectors and asset mix",
+      "Allocation mix and holdings map",
       "Performance, with an optional comparison to an index",
       "3 price alerts",
       "English and Português"
@@ -3446,10 +3469,13 @@
     "premiumFeatures": [
       "Unlimited stocks",
       "Unlimited price alerts",
-      "Prices every minute and a 5-minute intraday chart",
+      "Prices every minute",
       "Pre-market and after-hours prices for US stocks",
       "5-year and full-history charts",
-      "Account types (TFSA, RRSP, IRA, 401(k)…) with after-tax dividends and tax tips, for Canada and the US"
+      "Target mix and where your next deposit should go",
+      "Income quality of covered-call ETFs",
+      "Similar funds compared side by side",
+      "After-tax dividends and tax tips for Canada and the US"
     ],
     "compareTitle": "Compare plans",
     "rows": {
@@ -3459,11 +3485,14 @@
       "intraday": "1-day chart detail",
       "history": "Chart history",
       "tax": "After-tax dividends (Canada / US)",
-      "allocation": "Allocation and targets",
+      "allocation": "Allocation mix and holdings map",
       "events": "Coming up feed",
       "checks": "Signa checks",
       "extended": "Pre-market and after-hours prices (US stocks)",
-      "crypto": "Crypto prices 24/7"
+      "crypto": "Crypto prices 24/7",
+      "plan": "Target mix and deposit plan",
+      "incomeQuality": "Income quality of covered-call ETFs",
+      "similar": "Similar funds compared"
     },
     "values": {
       "ten": "10",

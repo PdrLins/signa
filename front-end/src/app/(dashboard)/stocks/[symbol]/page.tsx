@@ -27,7 +27,7 @@ import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs'
 import { useAlerts } from '@/hooks/useAlerts'
 import { ExtendedLine } from '@/components/tracker/ExtendedLine'
-import { AboutCard, FundCards, NextPayoutCard } from '@/components/stock/FundCards'
+import { AboutCard, FundCards, NextPayoutCard, SimilarFunds } from '@/components/stock/FundCards'
 import { AssetBadge } from '@/components/holdings/HoldingsList'
 import type { SymbolMatch } from '@/types/symbols'
 import type { StockPage } from '@/types/stock'
@@ -330,6 +330,7 @@ function StockPageInner() {
                 estimated={!!(data.events.ex_dividend.estimated || data.events.dividend_payment?.estimated)} />
             )}
             {data.fund && <FundCards fund={data.fund} currency={data.currency} position={data.position} />}
+            {(data.similar?.length || data.similar_locked) && <SimilarFunds items={data.similar} locked={data.similar_locked} />}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start min-w-0">
               <StockEvents events={data.events} symbol={data.symbol} currency={data.currency}
                 onDividends={data.events.ex_dividend || data.events.dividend_payment ? () => setTab('dividends') : undefined} />

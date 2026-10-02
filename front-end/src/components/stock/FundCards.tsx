@@ -9,6 +9,7 @@ import { Panel } from '@/components/insights/Panel'
 import { compactMoney } from '@/components/stock/StockChecks'
 import { money, useMaskedMoney } from '@/components/holdings/format'
 import { DASH, fill, shortDate } from '@/lib/insights'
+import { PremiumHint } from '@/components/tracker/ui'
 import type { StockFund, StockPosition } from '@/types/stock'
 
 const pctText = (v: number | null | undefined, d = 2) =>
@@ -27,6 +28,7 @@ export function FundCards({ fund, currency, position }: {
         <AboutFund fund={fund} currency={currency} />
         {fund.expense_ratio != null && <FeeMeter fee={fund.expense_ratio} position={position} />}
         {Object.keys(fund.asset_classes ?? {}).length > 0 && <AssetMix mix={fund.asset_classes} />}
+        {fund.regions && Object.keys(fund.regions).length > 0 && <RegionsCard regions={fund.regions} />}
       </div>
       <div className="flex flex-col gap-4 min-w-0">
         {Object.keys(fund.sector_weights ?? {}).length > 0 && <Sectors weights={fund.sector_weights} />}
@@ -117,14 +119,31 @@ function usePalette() {
 }
 
 function AssetMix({ mix }: { mix: Record<string, number> }) {
+  const t = useI18nStore((s) => s.t)
+  const tf = t.stock.fund
+  return <MixCard title={tf.assetMix} mix={mix}
+    label={(k) => (tf.assetClasses as Record<string, string>)[k] ?? k.replace(/Position$/, '')} />
+}
+
+/** Approximate regions (fund-of-funds holdings or a single-region index). */
+function RegionsCard({ regions }: { regions: Record<string, number> }) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const tf = t.stock.fund
+  return <MixCard title={tf.regionsTitle} mix={regions}
+    label={(k) => (tf.regions as Record<string, string>)[k] ?? k}
+    note={<p className="mt-2 text-[12px]" style={{ color: theme.colors.textHint }}>{tf.regionsNote}</p>} />
+}
+
+/** Stacked bar + legend for a {key: PERCENT} breakdown. */
+function MixCard({ title, mix, label, note }: {
+  title: string; mix: Record<string, number>; label: (k: string) => string; note?: React.ReactNode
+}) {
+  const theme = useTheme()
   const palette = usePalette()
   const rows = useMemo(() => Object.entries(mix).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]), [mix])
-  const label = (k: string) => (tf.assetClasses as Record<string, string>)[k] ?? k.replace(/Position$/, '')
   return (
-    <Panel title={tf.assetMix}>
+    <Panel title={title}>
       <div className="flex h-3 rounded-full overflow-hidden" role="img"
         aria-label={rows.map(([k, v]) => `${label(k)} ${pctText(v, 1)}`).join(', ')}>
         {rows.map(([k, v], i) => (
@@ -140,6 +159,7 @@ function AssetMix({ mix }: { mix: Record<string, number> }) {
           </li>
         ))}
       </ul>
+      {note}
     </Panel>
   )
 }
@@ -268,6 +288,51 @@ export function NextPayoutCard({ amountPerShare, shares, currency, payDate, exDa
         {parts.join(' · ')}{estimated ? ` (${tn.estimated})` : ''}
       </p>
       <p className="text-[12px] mt-1" style={{ color: theme.colors.textHint }}>{fill(tn.perShare, { amount: money(amountPerShare, currency, locale, 4) })}</p>
+    </Panel>
+  )
+}
+
+
+/** Similar funds compared (Premium, feature.similar_funds). Free gets
+ *  similar_locked=true from the server → a Premium hint instead. */
+export function SimilarFunds({ items, locked }: { items: import('@/types/stock').SimilarFund[] | null | undefined; locked?: boolean }) {
+  const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
+  const ts = t.stock.similar
+  if (locked) return <Panel title={ts.title}><PremiumHint body={ts.premium} /></Panel>
+  if (!items || items.length === 0) return null
+  const cols = [
+    { key: 'expense_ratio' as const, label: ts.fee },
+    { key: 'yield' as const, label: ts.yield },
+    { key: 'return_1y_pct' as const, label: ts.return1y },
+    { key: 'return_5y_pct' as const, label: ts.return5y },
+  ].filter((c) => items.some((i) => i[c.key] != null))
+  return (
+    <Panel title={ts.title}>
+      <p className="text-[12px] -mt-1 mb-2" style={{ color: theme.colors.textHint }}>{ts.note}</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px] min-w-[360px]">
+          <thead>
+            <tr style={{ color: theme.colors.textSub }}>
+              <th scope="col" className="text-left font-medium py-1.5">{ts.fund}</th>
+              {cols.map((c) => <th key={c.key} scope="col" className="text-right font-medium py-1.5">{c.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((f) => (
+              <tr key={f.symbol} style={{ borderTop: `1px solid ${theme.colors.border}`, backgroundColor: f.current ? theme.colors.primary + '14' : undefined }}>
+                <th scope="row" className="text-left font-normal py-2 pr-2">
+                  <Link href={`/stocks/${encodeURIComponent(f.symbol)}`} className="font-mono font-semibold rounded focus-visible:outline focus-visible:outline-2"
+                    style={{ color: theme.colors.text, outlineColor: theme.colors.primary }}>{f.symbol}</Link>
+                  {f.current && <span className="ml-1.5 text-[11px] font-semibold" style={{ color: theme.colors.primary }}>{ts.thisFund}</span>}
+                  {f.name && <span className="block text-[12px] truncate max-w-[220px]" style={{ color: theme.colors.textSub }}>{f.name}</span>}
+                </th>
+                {cols.map((c) => <td key={c.key} className="text-right tabular-nums py-2" style={{ color: theme.colors.text }}>{pctText(f[c.key] ?? null, c.key === 'expense_ratio' ? 2 : 1)}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </Panel>
   )
 }

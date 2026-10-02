@@ -15,7 +15,8 @@ import { pct } from '@/components/holdings/format'
 import { SectionCard, Segmented, useButtonStyles, useFieldStyle } from '@/components/profile/ui'
 import { Treemap } from '@/components/tracker/Treemap'
 import { className as classLabel, warningText } from '@/components/tracker/text'
-import { ChipGroup, EmptyHoldings, Freshness, QueryError, SkeletonCards } from '@/components/tracker/ui'
+import { ChipGroup, EmptyHoldings, Freshness, PremiumHint, QueryError, SkeletonCards } from '@/components/tracker/ui'
+import { useAccess } from '@/hooks/useAccess'
 import type { AllocClass, Allocation, AllocationPlan, Scope } from '@/types/tracker'
 
 const CLASSES: AllocClass[] = ['stocks', 'broad_etfs', 'option_income_etfs', 'cash_like', 'crypto', 'other']
@@ -236,6 +237,7 @@ export function AllocationTab({ scope, scoped }: { scope: Scope; scoped: boolean
   const t = useI18nStore((s) => s.t)
   const ta = t.insightsPage.allocation
   const q = useAllocation(scope)
+  const canPlan = useAccess().can('feature.allocation_plan')
   const [by, setBy] = useState<'day' | 'total'>('day')
   const a = q.data
   if (q.isLoading) return <SkeletonCards heights={[140, 260, 200]} />
@@ -278,8 +280,15 @@ export function AllocationTab({ scope, scoped }: { scope: Scope; scoped: boolean
         </SectionCard>
       </div>
       <div className="flex flex-col gap-4 min-w-0">
-        <TargetsEditor a={a} />
-        {a.targets && <DepositPlan a={a} scope={scope} />}
+        {canPlan ? (
+          <>
+            <TargetsEditor a={a} />
+            {a.targets && <DepositPlan a={a} scope={scope} />}
+          </>
+        ) : (
+          // target mix + deposit plan: Premium (feature.allocation_plan); the mix above stays free
+          <SectionCard title={ta.targetsTitle}><PremiumHint body={ta.planPremium} /></SectionCard>
+        )}
       </div>
     </div>
   )

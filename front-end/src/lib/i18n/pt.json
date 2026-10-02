@@ -2510,7 +2510,15 @@
       },
       "topHoldings": "Maiores posições",
       "showAll": "Ver todas as {n}",
-      "showFewer": "Ver menos"
+      "showFewer": "Ver menos",
+      "regionsTitle": "Regiões",
+      "regions": {
+        "us": "Estados Unidos",
+        "canada": "Canadá",
+        "intl_developed": "Mercados desenvolvidos (Europa, Japão…)",
+        "emerging": "Mercados emergentes"
+      },
+      "regionsNote": "Aproximado: pelos fundos que ele detém ou pelo índice que acompanha."
     },
     "about": {
       "title": "Sobre",
@@ -2526,6 +2534,17 @@
       "shares": "{n} cotas",
       "estimated": "estimado",
       "perShare": "{amount} por cota"
+    },
+    "similar": {
+      "title": "Fundos parecidos",
+      "fund": "Fundo",
+      "fee": "Taxa anual",
+      "yield": "Dividend yield",
+      "return1y": "Retorno 1 ano",
+      "return5y": "Retorno 5 anos",
+      "premium": "Compare este fundo com outros parecidos (taxa, yield, retorno) com o Premium.",
+      "thisFund": "Este fundo",
+      "note": "Fundos que acompanham a mesma coisa. Retornos incluem distribuições."
     }
   },
   "tracker": {
@@ -2730,7 +2749,8 @@
       "planLeft": "Sobram {amount} depois que cada parte chega ao alvo.",
       "planNote": "Conta feita sobre seus próprios alvos, não é recomendação.",
       "emptyScope": "Nada nesta conta ainda.",
-      "setTargets": "Definir metas a partir da minha carteira atual"
+      "setTargets": "Definir metas a partir da minha carteira atual",
+      "planPremium": "Defina um mix alvo e veja onde colocar o próximo aporte com o Premium. Seu mix atual acima continua grátis."
     }
   },
   "comingUpPage": {
@@ -3367,7 +3387,8 @@
     "currencyMismatch": "Os dois são negociados em moedas diferentes, então parte da diferença é câmbio.",
     "returnNote": "Rendimento alto não significa retorno alto: o que conta é a variação de preço mais os pagamentos.",
     "payoutsTitle": "Quanto os pagamentos variam",
-    "payoutsHelp": "Cada pagamento por cota nos últimos 12 meses."
+    "payoutsHelp": "Cada pagamento por cota nos últimos 12 meses.",
+    "premium": "Qualidade da renda (quanto do pagamento de um ETF de covered call é renda de verdade, e o retorno dele vs o que ele detém) faz parte do Premium."
   },
   "upgrade": {
     "slotTitle": "Você acompanha {limit} ações — o limite gratuito",
@@ -3377,7 +3398,7 @@
       "stocks": "Ações acompanhadas sem limite",
       "alerts": "Alertas de preço sem limite",
       "prices": "Preços a cada minuto, mais pré-mercado e após o fechamento",
-      "charts": "Gráficos intradiários e de todo o histórico",
+      "charts": "Gráficos de todo o histórico",
       "tax": "Dividendos após impostos no Canadá e nos EUA"
     },
     "cta": "Assinar o Premium",
@@ -3432,13 +3453,15 @@
     "freeFeatures": [
       "Acompanhe até 10 ações, ETFs ou cripto",
       "Suas próprias contas e pessoas, com os nomes que quiser",
+      "Tipos de conta (TFSA, RRSP, IRA, 401(k)…) para Canadá e EUA",
       "Transações à mão ou por arquivo CSV",
-      "Gráfico da carteira até 1 ano, preços a cada 15 minutos",
+      "Gráfico da carteira até 1 ano com gráfico intradiário de 5 minutos, preços a cada 15 minutos",
       "Calendário de dividendos, renda por mês e próximos pagamentos",
-      "Nota de segurança dos dividendos e qualidade da renda",
+      "Nota de segurança dos dividendos",
       "Próximos eventos: resultados, datas ex-dividendo e eventos econômicos importantes",
       "Verificações do Signa em cada ação: tendência, sobrecompra, volume, resultados, saúde do dividendo",
-      "Alocação, mix alvo e onde colocar o próximo aporte",
+      "Detalhes de ETFs: taxas, ativos, setores e composição",
+      "Mix da carteira e mapa de ativos",
       "Desempenho, com comparação opcional a um índice",
       "3 alertas de preço",
       "English e Português"
@@ -3446,10 +3469,13 @@
     "premiumFeatures": [
       "Ações ilimitadas",
       "Alertas de preço ilimitados",
-      "Preços a cada minuto e gráfico intradiário de 5 minutos",
+      "Preços a cada minuto",
       "Preços do pré-mercado e após o fechamento para ações dos EUA",
       "Gráficos de 5 anos e histórico completo",
-      "Tipos de conta (TFSA, RRSP, IRA, 401(k)…) com dividendos após impostos e dicas fiscais, para Canadá e EUA"
+      "Mix alvo e onde colocar o próximo aporte",
+      "Qualidade da renda de ETFs de covered call",
+      "Fundos parecidos comparados lado a lado",
+      "Dividendos após impostos e dicas fiscais para Canadá e EUA"
     ],
     "compareTitle": "Compare os planos",
     "rows": {
@@ -3459,11 +3485,14 @@
       "intraday": "Detalhe do gráfico de 1 dia",
       "history": "Histórico do gráfico",
       "tax": "Dividendos após impostos (Canadá / EUA)",
-      "allocation": "Alocação e metas",
+      "allocation": "Mix da carteira e mapa de ativos",
       "events": "Próximos eventos",
       "checks": "Verificações do Signa",
       "extended": "Preços do pré-mercado e após o fechamento (ações dos EUA)",
-      "crypto": "Preços de cripto 24/7"
+      "crypto": "Preços de cripto 24/7",
+      "plan": "Mix alvo e plano de aporte",
+      "incomeQuality": "Qualidade da renda de ETFs de covered call",
+      "similar": "Fundos parecidos comparados"
     },
     "values": {
       "ten": "10",
