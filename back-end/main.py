@@ -82,6 +82,8 @@ async def lifespan(app: FastAPI):
     init_scheduler()
     start_scheduler()
     start_telegram_worker()
+    from app.notifications import telegram_updates
+    telegram_updates.start_polling()   # local: bot messages without a public webhook
 
     # Catch up any missed scans (e.g., app was down during scheduled time)
     from app.scheduler.jobs import catch_up_missed_scans
@@ -91,6 +93,7 @@ async def lifespan(app: FastAPI):
 
     stop_scheduler()
     keep_awake.stop()
+    await telegram_updates.stop_polling()
     await stop_telegram_worker()
 
     # Close the reusable Telegram HTTP client
@@ -164,6 +167,8 @@ app.include_router(dividend_summary_api.income_router, prefix=api_prefix)
 app.include_router(events_api.router, prefix=api_prefix)
 app.include_router(admin_usage_api.router, prefix=api_prefix)
 app.include_router(alerts_api.router, prefix=api_prefix)
+from app.api.v1 import two_factor as two_factor_api  # noqa: E402
+app.include_router(two_factor_api.router, prefix=api_prefix)
 app.include_router(register_api.router, prefix=api_prefix)
 app.include_router(referrals_api.router, prefix=api_prefix)
 
@@ -181,40 +186,11 @@ async def telegram_webhook(request: Request):
 
     try:
         data = await request.json()
-        message = data.get("message", {})
-        chat_id = message.get("chat", {}).get("id")
-        text = message.get("text", "")
-
-        # A user connecting their notification chat (any private chat, one-time
-        # code from the app — app/services/telegram_notify.py). Everything
-        # else from non-owner chats stays ignored below.
-        if isinstance(text, str) and text.startswith("/start "):
-            from app.services.telegram_notify import handle_start
-            code = text.split(maxsplit=1)[1]
-            if await handle_start(code, message.get("chat") or {}, message.get("from") or {}):
-                return {"ok": True}
-
-        # Only respond to the bot owner
-        if str(chat_id) != settings.telegram_chat_id:
-            return {"ok": True}
-
-        if text.startswith("/"):
-            parts = text.split(maxsplit=1)
-            command = parts[0].lstrip("/").split("@")[0]
-            args = parts[1] if len(parts) > 1 else ""
-
-            # Look up the user by their Telegram chat ID
-            from app.db import queries as db_queries
-            tg_user = db_queries.get_user_by_telegram_chat_id(str(chat_id))
-            user_id = tg_user["id"] if tg_user else ""
-
-            response_text = await handle_command(command, args, user_id=user_id)
-
-            if chat_id and response_text:
-                await send_message(str(chat_id), response_text)
-
     except Exception:
-        logger.exception("Telegram webhook error")
+        return {"ok": True}
+    # Same handler as polling (app/notifications/telegram_updates.py)
+    from app.notifications.telegram_updates import process_update
+    await process_update(data if isinstance(data, dict) else {})
 
     return {"ok": True}
 

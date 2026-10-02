@@ -1519,6 +1519,24 @@ def get_quote_rows(symbols: list[str]) -> list[dict]:
     return read(QUOTE_COLUMNS)
 
 
+def get_quote_extended_rows(symbols: list[str]) -> list[dict]:
+    """{symbol, ext_price, ext_change_pct, ext_session, ext_as_of} (migration
+    021; raises before it)."""
+    if not symbols:
+        return []
+    client = get_client()
+    out: list[dict] = []
+    for i in range(0, len(symbols), 200):
+        out.extend(client.table("quotes").select("symbol, ext_price, ext_change_pct, ext_session, ext_as_of")
+                   .in_("symbol", symbols[i:i + 200]).execute().data or [])
+    return out
+
+
+def update_quote_extended(symbol: str, row: dict) -> None:
+    """Store a pre/after-hours price on an existing quotes row (migration 021)."""
+    get_client().table("quotes").update(row).eq("symbol", symbol).execute()
+
+
 def upsert_quotes(rows: list[dict], chunk: int = 500) -> int:
     client = get_client()
     if not _quotes_have_source():

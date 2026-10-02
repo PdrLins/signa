@@ -19,6 +19,10 @@ export interface StockQuote {
   market_cap: number | null
   /** ISO datetime of the price */
   as_of: string | null
+  /** Premium: pre-market / after-hours price (migration 021) */
+  extended?: import('./tracker').ExtendedQuote | null
+  /** Free: this US stock is trading pre/after hours right now */
+  extended_locked?: boolean
 }
 
 /** One rule-based check. The UI renders t.stock.checks[key][detail_code]

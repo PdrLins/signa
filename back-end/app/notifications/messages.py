@@ -449,6 +449,26 @@ _MESSAGES = {
         "pt": "✅ <b>Signa conectado</b>\n\nSuas notificações do Signa vão chegar aqui. "
               "Escolha quais no app: Perfil → Notificações.",
     },
+    "user_2fa_code": {
+        "en": "🔐 <b>Signa two-step sign-in</b>\n\nYour code: <code>{code}</code>\n\n"
+              "Type it in the Signa app to turn on two-step sign-in. It expires in 10 minutes. "
+              "If you didn't ask for this, ignore this message.",
+        "pt": "🔐 <b>Verificação em duas etapas do Signa</b>\n\nSeu código: <code>{code}</code>\n\n"
+              "Digite no app Signa para ativar a verificação em duas etapas. Ele expira em 10 minutos. "
+              "Se você não pediu isto, ignore esta mensagem.",
+    },
+    "user_2fa_on": {
+        "en": "✅ <b>Two-step sign-in is on</b>\n\nFrom now on, Signa sends your sign-in codes to this chat.",
+        "pt": "✅ <b>Verificação em duas etapas ativada</b>\n\nA partir de agora, o Signa envia seus códigos de acesso para este chat.",
+    },
+    "user_2fa_off": {
+        "en": "Two-step sign-in was turned off for your Signa account. If this wasn't you, change your password now.",
+        "pt": "A verificação em duas etapas foi desativada na sua conta Signa. Se não foi você, troque sua senha agora.",
+    },
+    "user_2fa_link_expired": {
+        "en": "This link has expired or was already used. Open Signa → Profile → Two-step sign-in and start again.",
+        "pt": "Este link expirou ou já foi usado. Abra o Signa → Perfil → Verificação em duas etapas e comece de novo.",
+    },
     "user_tg_link_expired": {
         "en": "This link has expired or was already used. Open Signa and tap <b>Connect Telegram</b> again.",
         "pt": "Este link expirou ou já foi usado. Abra o Signa e toque em <b>Conectar Telegram</b> de novo.",

@@ -251,6 +251,47 @@ export const authApi = {
   sessions: () => get<AuthSession[]>('/auth/sessions'),
   revokeSession: (id: string) => del<void>(`/auth/sessions/${encodeURIComponent(id)}`),
   revokeOtherSessions: () => post<{ revoked: number }>('/auth/sessions/revoke-others'),
+  /** two-step sign-in (migration 020) */
+  // errors come back as CheckApiError {code, extra} (403 wrong_password included)
+  twoFactor: () => twoFactorCall<TwoFactorStatus>('get', '/auth/2fa'),
+  twoFactorStart: (useConnectedChat = false) => twoFactorCall<TwoFactorSetup>('post', '/auth/2fa/telegram/start', { use_connected_chat: useConnectedChat }),
+  twoFactorResend: () => twoFactorCall<TwoFactorSetup>('post', '/auth/2fa/telegram/resend'),
+  twoFactorConfirm: (code: string) => twoFactorCall<{ enabled: boolean; method: string }>('post', '/auth/2fa/telegram/confirm', { code }),
+  twoFactorCancel: () => twoFactorCall<void>('delete', '/auth/2fa/setup'),
+  twoFactorDisable: (password: string) => twoFactorCall<{ enabled: boolean }>('post', '/auth/2fa/disable', { password }),
+}
+
+/** Two-step sign-in calls: every {detail: {code}} error (403 wrong_password,
+ *  409, 410 setup_expired, 422 invalid_code, 502, 503) becomes a CheckApiError. */
+async function twoFactorCall<T>(method: 'get' | 'post' | 'delete', url: string, data?: unknown): Promise<T> {
+  const res = await client.request<T | { detail?: unknown }>({
+    method, url, data,
+    validateStatus: (s) => (s >= 200 && s < 300) || [400, 403, 404, 409, 410, 422, 429, 502, 503].includes(s),
+  })
+  if (res.status >= 400) {
+    const detail = (res.data as { detail?: unknown } | undefined)?.detail
+    const obj = detail && typeof detail === 'object' && !Array.isArray(detail) ? (detail as { code?: string; message?: string }) : null
+    const code = obj?.code ?? (res.status === 429 ? 'rate_limited' : 'internal')
+    throw new CheckApiError(code, obj?.message ?? (typeof detail === 'string' ? detail : 'Request failed.'), res.status, obj ? { ...obj } : {})
+  }
+  return res.data as T
+}
+
+export interface TwoFactorSetup {
+  step: 'open_telegram' | 'enter_code'
+  /** t.me link (only in the /start response) */
+  url: string | null
+  chat_label: string | null
+  expires_at: string
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean
+  method: 'telegram' | 'sms' | null
+  can_disable: boolean
+  telegram: { available: boolean; bot_username: string | null; connected_chat: string | null }
+  sms: { available: boolean }
+  setup: TwoFactorSetup | null
 }
 
 export interface AuthSession {

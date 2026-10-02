@@ -261,6 +261,25 @@ async def quotes_refresh_after_close():
     await quotes_refresh(force=True)
 
 
+async def quotes_offhours():
+    """Every minute, any day: crypto 24/7 and US pre/after-hours prices for
+    Premium followers, outside the regular session (app/services/quotes.py
+    refresh_offhours). Skips itself during the session."""
+    import asyncio
+
+    from app.core.config import settings
+
+    if not (settings.quotes_refresh_enabled and settings.quotes_offhours_enabled):
+        return
+    try:
+        from app.services.quotes import refresh_offhours
+        result = await asyncio.to_thread(refresh_offhours)
+        if result.get("crypto") or result.get("extended"):
+            logger.debug(f"Quotes off-hours: {result}")
+    except Exception as e:
+        logger.error(f"Quotes off-hours refresh failed: {e}")
+
+
 async def portfolio_snapshots():
     """16:30 ET weekdays — per-user / per-account value, cash and cost basis
     in the user's home currency (app/services/portfolio_snapshots.py)."""

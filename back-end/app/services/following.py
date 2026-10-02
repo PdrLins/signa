@@ -187,4 +187,12 @@ def load_following(user: dict) -> dict:
         slots = slots_service.slot_summary(user)
     except Exception:
         slots = None
-    return build_following(watch_rows, holding_rows, quotes, closes, _display_names(symbols), country, slots)
+    out = build_following(watch_rows, holding_rows, quotes, closes, _display_names(symbols), country, slots)
+    # pre-market / after-hours (Premium, migration 021): per row "extended" + "extended_locked"
+    from app.core.access import can
+    level = user.get("access_level") or "free"
+    ext = quotes_service.get_extended(symbols) if can(level, "feature.extended_hours") else {}
+    for row in out["watched"] + out["held"]:
+        view = quotes_service.extended_view(quotes.get(row["symbol"]), ext.get(row["symbol"]))
+        row.update(quotes_service.extended_payload(level, row["symbol"], view))
+    return out

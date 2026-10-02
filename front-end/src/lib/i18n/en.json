@@ -2802,6 +2802,51 @@
       "signOutOthers": "Sign out everywhere else",
       "signedOut": "{device} is signed out.",
       "othersSignedOut": "Signed out {n} other devices."
+    },
+    "twoFactor": {
+      "title": "Two-step sign-in",
+      "subtitle": "After your password, Signa asks for a code sent to your phone. Someone with your password still can't get in.",
+      "on": "On. Your sign-in codes go to your Telegram.",
+      "ownerRequired": "The owner account always keeps two-step sign-in on.",
+      "turnOff": "Turn off",
+      "passwordToTurnOff": "Enter your password to turn it off",
+      "turnedOff": "Two-step sign-in is off.",
+      "offExplain": "Off. Choose where Signa sends your codes:",
+      "telegramDesc": "Free. Codes arrive in a chat with the Signa bot.",
+      "telegramUnavailable": "Not available yet: Telegram isn't set up on this server.",
+      "setUp": "Set up",
+      "useConnected": "Use {chat}",
+      "sms": "Text message (SMS)",
+      "smsDesc": "Codes by text message.",
+      "steps": {
+        "install": "Install Telegram on your phone or computer if you don't have it.",
+        "open": "Tap Open Telegram below. The {bot} chat opens.",
+        "start": "Tap Start at the bottom of the chat.",
+        "code": "The bot sends you a 6-digit code. Come back here and type it."
+      },
+      "openTelegram": "Open Telegram",
+      "newLink": "Get a new link",
+      "waiting": "Waiting for you to tap Start in Telegram…",
+      "codeSent": "We sent a 6-digit code to {chat} in Telegram.",
+      "codeLabel": "Code",
+      "turnOn": "Turn on",
+      "resend": "Send a new code",
+      "resent": "New code sent.",
+      "turnedOn": "Two-step sign-in is on.",
+      "errors": {
+        "generic": "Something went wrong. Please try again.",
+        "invalid_code": "That code is not right.",
+        "invalid_code_left": "That code is not right. {n} tries left.",
+        "setup_expired": "This setup expired. Please start again.",
+        "chat_in_use": "This Telegram already signs in to another Signa account.",
+        "wrong_password": "That password is not right.",
+        "telegram_not_configured": "Telegram isn't set up on this server yet.",
+        "telegram_send_failed": "Telegram didn't accept the message. Try again.",
+        "not_connected": "Connect Telegram first, or use the link.",
+        "already_enabled": "Two-step sign-in is already on.",
+        "owner_cannot_disable": "The owner account must keep two-step sign-in.",
+        "rate_limited": "Too many tries. Wait a few minutes."
+      }
     }
   },
   "notifications": {
@@ -3069,6 +3114,11 @@
       "estimated": "Based on today's shares; add transactions for the exact past.",
       "addTransactions": "Add transactions",
       "noIntraday": "No intraday prices yet today. Showing the previous close and the latest value."
+    },
+    "extended": {
+      "pre": "Pre-market",
+      "post": "After hours",
+      "locked": "See pre-market and after-hours prices with Premium"
     }
   },
   "divSummary": {
@@ -3253,7 +3303,7 @@
     "perks": {
       "stocks": "Unlimited stocks to follow",
       "alerts": "Unlimited price alerts",
-      "prices": "Prices refreshed every minute",
+      "prices": "Prices every minute, plus pre-market and after-hours",
       "charts": "Intraday and full-history charts",
       "tax": "After-tax dividends in Canada and the US"
     },
@@ -3324,6 +3374,7 @@
       "Unlimited stocks",
       "Unlimited price alerts",
       "Prices every minute and a 5-minute intraday chart",
+      "Pre-market and after-hours prices for US stocks",
       "5-year and full-history charts",
       "Account types (TFSA, RRSP, IRA, 401(k)…) with after-tax dividends and tax tips, for Canada and the US"
     ],
@@ -3337,7 +3388,9 @@
       "tax": "After-tax dividends (Canada / US)",
       "allocation": "Allocation and targets",
       "events": "Coming up feed",
-      "checks": "Signa checks"
+      "checks": "Signa checks",
+      "extended": "Pre-market and after-hours prices (US stocks)",
+      "crypto": "Crypto prices 24/7"
     },
     "values": {
       "ten": "10",
@@ -3393,6 +3446,9 @@
       "popular_us": "Popular in the US",
       "monthly_income": "Pays monthly",
       "dividend_growers": "Raises its dividend"
-    }
+    },
+    "extendedTitle": "Pre-market / after-hours change vs the last regular price",
+    "preShort": "Pre",
+    "postShort": "AH"
   }
 }

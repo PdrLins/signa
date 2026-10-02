@@ -120,9 +120,14 @@ def load_scope(user: dict, account_id: str | None = None, person_id: str | None 
     country = settings_row.get("country")
     stored_tax = settings_row.get("dividend_tax_view")
     quotes_map: dict[str, dict] = {}
+    ext_map: dict[str, dict] = {}
     if with_quotes:
-        from app.services.quotes import get_quotes
-        quotes_map = get_quotes({str(h.get("symbol") or "").upper() for h in scope["holdings"] if h.get("symbol")})
+        from app.core.access import can
+        from app.services.quotes import get_extended, get_quotes
+        held_syms = {str(h.get("symbol") or "").upper() for h in scope["holdings"] if h.get("symbol")}
+        quotes_map = get_quotes(held_syms)
+        if can(level, "feature.extended_hours"):   # pre/after-hours prices (migration 021)
+            ext_map = get_extended(held_syms)
     try:
         usdcad = get_usdcad_rate()
     except Exception:
@@ -141,6 +146,7 @@ def load_scope(user: dict, account_id: str | None = None, person_id: str | None 
         "holdings": scope["holdings"],
         "transactions": scope["transactions"],
         "quotes": quotes_map,
+        "quotes_ext": ext_map,
         "usdcad": usdcad,
     }
 

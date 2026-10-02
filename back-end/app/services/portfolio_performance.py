@@ -224,6 +224,12 @@ def summary_body(scope: dict) -> dict:
     unconverted = [{"symbol": p["symbol"], "currency": p["currency"], "value": pc.r2(p["value"])}
                    for p in positions if not p["converted"]] + cash_unconv + led_unconv
     estimated = bool(meta["estimated_prices"] or unpriced or unconverted or missing_cost)
+    ext = extended_change(positions, scope.get("quotes") or {}, scope.get("quotes_ext") or {}, home, usdcad, mv)
+    from app.core.access import can
+    from app.services import quotes as quotes_service
+    phase = quotes_service.market_phase()
+    ext_locked = (not can(scope.get("level") or "free", "feature.extended_hours") and phase in ("pre", "post")
+                  and any(quotes_service.is_us_equity(p["symbol"]) and p["shares"] for p in positions))
     return {
         "currency": home,
         "market_value": pc.r2(mv),
@@ -252,7 +258,44 @@ def summary_body(scope: dict) -> dict:
             "unconverted": unconverted,
         },
         "usdcad": usdcad,
+        # US market phase: "pre" | "regular" | "post" | "closed" (ET, NYSE calendar)
+        "market_phase": phase,
+        # Premium: change since the regular-session price from pre-market /
+        # after-hours trades (null when none) — {"session", "abs", "pct", "as_of", "symbols"}
+        "extended": ext,
+        # Free: true while held US stocks trade pre/after hours (show the Premium hint)
+        "extended_locked": ext_locked,
     }
+
+
+def extended_change(positions: list[dict], quotes: dict, ext_rows: dict, home: str,
+                    usdcad: float | None, market_value: float) -> dict | None:
+    """Value change from pre/after-hours prices vs the regular price, in home
+    currency. Only positions with a current extended price count. Pure apart
+    from the clock (quotes.extended_view)."""
+    from app.services import quotes as quotes_service
+
+    total = 0.0
+    n = 0
+    session = as_of = None
+    for p in positions:
+        if not p.get("shares") or p.get("price") is None:
+            continue
+        v = quotes_service.extended_view(quotes.get(p["symbol"]), ext_rows.get(p["symbol"]))
+        if not v:
+            continue
+        fx = pc.to_home(1.0, p["currency"], home, usdcad)
+        if fx is None:
+            continue
+        total += p["shares"] * (v["price"] - p["price"]) * fx
+        n += 1
+        session = session or v["session"]
+        as_of = max(as_of, v["as_of"]) if as_of else v["as_of"]
+    if not n:
+        return None
+    return {"session": session, "abs": pc.r2(total),
+            "pct": pc.r2(total / market_value * 100) if market_value else None,
+            "as_of": as_of, "symbols": n}
 
 
 # ============================================================
@@ -292,24 +335,26 @@ def parse_intraday(data, symbols: list[str]) -> dict[str, list[tuple[datetime, f
     return out
 
 
-def _download_intraday(symbols: list[str], interval: str) -> dict[str, list[tuple[datetime, float]]]:
-    """One batched intraday download (today's session, no pre/post). Blocking.
-    Tests replace this function."""
+def _download_intraday(symbols: list[str], interval: str, prepost: bool = False) -> dict[str, list[tuple[datetime, float]]]:
+    """One batched intraday download of the latest trading day; prepost=True
+    adds pre-market and after-hours bars (Premium, feature.extended_hours).
+    Blocking. Tests replace this function."""
     import yfinance as yf
 
-    data = yf.download(symbols, period="1d", interval=interval, prepost=False, progress=False,
+    data = yf.download(symbols, period="1d", interval=interval, prepost=prepost, progress=False,
                        threads=False, auto_adjust=False, group_by="column")
     return parse_intraday(data, symbols)
 
 
-def get_intraday_bars(symbols: list[str], interval: str) -> dict[str, list[tuple[datetime, float]]]:
+def get_intraday_bars(symbols: list[str], interval: str, prepost: bool = False) -> dict[str, list[tuple[datetime, float]]]:
     """{symbol: bars} shared across users, cached INTRADAY_TTL. Never raises."""
     from app.services import usage_metrics
 
     out: dict[str, list] = {}
     missing = []
+    tag = f"{interval}{':x' if prepost else ''}"
     for s in dict.fromkeys(x for x in symbols if x):
-        hit = _intraday_cache.get(f"{interval}:{s}")
+        hit = _intraday_cache.get(f"{tag}:{s}")
         if hit is None:
             missing.append(s)
         elif hit is not False:
@@ -318,16 +363,16 @@ def get_intraday_bars(symbols: list[str], interval: str) -> dict[str, list[tuple
         return out
     usage_metrics.record("provider_calls.intraday")
     try:
-        got = _download_intraday(missing, interval) or {}
+        got = (_download_intraday(missing, interval, True) if prepost else _download_intraday(missing, interval)) or {}
     except Exception as e:
         logger.warning(f"intraday bars failed for {len(missing)} symbols: {e}")
         got = {}
     for s in missing:
         if got.get(s):
-            _intraday_cache.set(f"{interval}:{s}", got[s])
+            _intraday_cache.set(f"{tag}:{s}", got[s])
             out[s] = got[s]
         else:
-            _intraday_cache.set(f"{interval}:{s}", False, ttl=INTRADAY_MISS_TTL)
+            _intraday_cache.set(f"{tag}:{s}", False, ttl=INTRADAY_MISS_TTL)
     return out
 
 
@@ -632,7 +677,9 @@ def history_body(scope: dict, rng: str, interval: str, compare: str | None, toda
     sources = {"snapshots": 0, "estimated": 0, "history_truncated": False}
     if rng == "1D":
         syms = [p["symbol"] for p in live["merged"] if p.get("shares") and p.get("price")]
-        bars = get_intraday_bars(syms + ([compare] if compare else []), interval) if (syms or compare) else {}
+        from app.core.access import can
+        prepost = can(scope.get("level") or "free", "feature.extended_hours")
+        bars = get_intraday_bars(syms + ([compare] if compare else []), interval, prepost) if (syms or compare) else {}
         points = intraday_series(live["merged"], bars, home, scope["usdcad"], live["cash"])
         reason = None
         if not points:
@@ -673,7 +720,15 @@ def history_body(scope: dict, rng: str, interval: str, compare: str | None, toda
         },
         "as_of": live["meta"]["as_of"],
         "delayed_minutes": live["meta"]["delayed_minutes"],
+        # 1D only: the regular session's bounds, so clients can show the
+        # pre-market / after-hours part (Premium bars) differently
+        "session": _session_bounds(today) if rng == "1D" else None,
     }
+
+
+def _session_bounds(day: date) -> dict:
+    return {"open": datetime.combine(day, time(9, 30), tzinfo=ET).astimezone(timezone.utc).isoformat(),
+            "close": datetime.combine(day, time(16, 0), tzinfo=ET).astimezone(timezone.utc).isoformat()}
 
 
 def _start_price(series, base: date):

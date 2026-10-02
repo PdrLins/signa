@@ -190,16 +190,18 @@ def test_history_1d_interval_by_level(monkeypatch, db):
     seen = []
     t0 = datetime.combine(TODAY, datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=14)
 
-    def fake(symbols, interval):
-        seen.append((tuple(symbols), interval))
+    def fake(symbols, interval, prepost=False):
+        seen.append((tuple(symbols), interval, prepost))
         return {"XEQT.TO": [(t0, 39.5), (t0 + timedelta(minutes=5), 40.0)]}
     monkeypatch.setattr(perf, "_download_intraday", fake)
     body = _client(monkeypatch, "premium").get("/api/v1/portfolio/history?range=1D").json()
     assert body["interval"] == "5m" and [p["value"] for p in body["series"]] == [395.0, 400.0]
     assert body["estimated"] is False
+    assert seen[-1][2] is True                        # Premium: pre/after-hours bars (migration 021)
+    assert body["session"]["open"] < body["session"]["close"]
     perf.clear_cache()
     body = _client(monkeypatch, "free").get("/api/v1/portfolio/history?range=1d").json()
-    assert body["interval"] == "15m" and seen[-1][1] == "15m"
+    assert body["interval"] == "15m" and seen[-1][1] == "15m" and seen[-1][2] is False
     # cached per symbol: a second call does not download again
     _client(monkeypatch, "free").get("/api/v1/portfolio/history?range=1D")
     assert len(seen) == 2

@@ -321,6 +321,11 @@ async def get_fundamentals(ticker: str) -> dict:
             "pre_market_change_pct": info.get("preMarketChangePercent"),
             "short_percent_of_float": _fraction(info.get("shortPercentOfFloat")),
         }
+        # Yahoo sometimes sends numbers as text ("Infinity" P/E for a company
+        # with no earnings). A str there made scoring crash on `float < str`
+        # and silently dropped the stock from the scan (ZETA, 2 Oct).
+        for k in _NUMERIC_FUNDAMENTALS:
+            result[k] = _finite_number(result.get(k))
         # Richer equity data (estimate revisions, relative-strength
         # benchmarks, short-interest trend, insider buying). Cached ~12h
         # per ticker inside enrichment; never fails the fundamentals call.
@@ -334,6 +339,21 @@ async def get_fundamentals(ticker: str) -> dict:
     except Exception as e:
         logger.error(f"Failed to fetch fundamentals for {ticker}: {e}")
         return {}
+
+
+_NUMERIC_FUNDAMENTALS = ('pe_ratio', 'forward_pe', 'eps', 'eps_growth', 'debt_to_equity', 'market_cap', 'beta', 'profit_margin', 'revenue_growth', '52w_high', '52w_low', 'regular_market_price', 'regular_market_change', 'regular_market_change_pct', 'post_market_price', 'post_market_change', 'post_market_change_pct', 'pre_market_price', 'pre_market_change', 'pre_market_change_pct')
+
+
+def _finite_number(v):
+    """A real, finite number or None ("Infinity", "NaN", "", inf -> None). Pure."""
+    import math
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if isinstance(v, (int, float)) and math.isfinite(x) else (x if math.isfinite(x) else None)
 
 
 async def get_period_changes(ticker: str) -> dict:

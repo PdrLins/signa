@@ -23,7 +23,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db import queries
-from app.services import identity, sessions
+from app.services import identity, sessions, two_factor
 from app.models.audit import AuditEvent
 from app.notifications.telegram_bot import send_otp_message
 
@@ -145,20 +145,11 @@ async def login(
         user_agent=user_agent,
     )
 
-    if settings.login_otp_enabled and not user.get("telegram_chat_id") \
-            and user.get("email") and user.get("email_verified_at"):
-        # Email account (migration 018): the code goes to the verified email.
-        token = identity.send_login_code(user)
-        queries.insert_audit_log(event_type=AuditEvent.OTP_SENT, success=True, user_id=user["id"],
-                                 ip_address=ip_address, user_agent=user_agent, metadata={"via": "email"})
-        return {"message": "We sent a code to your email", "session_token": token,
-                "last_login": user.get("last_login"), "code_via": "email"}
-
-    if not settings.login_otp_enabled or not user.get("telegram_chat_id"):
-        # Password-only login (LOGIN_OTP_ENABLED=false, or an account with
-        # neither Telegram nor a verified email): skip the code, issue the JWT.
+    if not settings.login_otp_enabled or not two_factor.is_enabled(user):
+        # Password-only sign-in: two-step sign-in is off for this account
+        # (migration 020), or LOGIN_OTP_ENABLED=false.
         token = _issue_access_token(user, ip_address, user_agent, client, device_name)
-        return {"message": "Logged in", "session_token": None, **token}
+        return {"message": "Logged in", "session_token": None, "code_via": None, **token}
 
     # Generate OTP and session token
     otp_code = generate_otp()

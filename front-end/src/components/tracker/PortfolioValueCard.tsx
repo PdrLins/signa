@@ -15,6 +15,7 @@ import {
   ChipGroup, Freshness, LiveValue, PremiumHint, QueryError, arrow, isUpgrade, useSignColor,
 } from '@/components/tracker/ui'
 import type { HistoryRange, PortfolioSummary, Scope } from '@/types/tracker'
+import { ExtendedLine } from '@/components/tracker/ExtendedLine'
 
 const ValueChart = dynamic(() => import('@/components/tracker/ValueChart'), { ssr: false })
 
@@ -101,7 +102,8 @@ export function PortfolioValueCard({ scope, summary }: { scope: Scope; summary: 
       <div role="img" aria-label={fill(tv.chartAria, { range: rangeLabel, change: signedPct(change.pct) })}>
         <ValueChart series={series} compare={h.compare?.available ? h.compare.series : null}
           baseline={change.base} color={color} height={height}
-          formatValue={formatValue} formatTime={formatTime} seriesLabel={tv.you} compareLabel={compareLabel} />
+          formatValue={formatValue} formatTime={formatTime} seriesLabel={tv.you} compareLabel={compareLabel}
+          marks={range === '1D' && h.session ? [h.session.open, h.session.close] : undefined} />
       </div>
     )
   )
@@ -121,6 +123,11 @@ export function PortfolioValueCard({ scope, summary }: { scope: Scope; summary: 
             </LiveValue>
             <span className="ml-1.5 font-normal text-[12.5px]" style={{ color: theme.colors.textSub }}>{rangeLabel}</span>
           </p>
+          {(summary.extended || summary.extended_locked) && (
+            <ExtendedLine session={summary.extended?.session} value={summary.extended?.abs}
+              amount={summary.extended?.abs != null ? fmt(Math.abs(summary.extended.abs)) : null}
+              pct={summary.extended?.pct} asOf={summary.extended?.as_of} locked={!summary.extended && summary.extended_locked} />
+          )}
           <p className="text-[13px] mt-0.5" style={{ color: theme.colors.textSub }}>
             {gain.dividends_included ? tv.totalGainDivs : tv.totalGain}{' '}
             <span className="font-semibold tabular-nums" style={{ color: signColor(gain.abs) }}>
@@ -253,6 +260,11 @@ export function HomeValueCard({ summary, href }: { summary: PortfolioSummary; hr
         </LiveValue>
         <span className="ml-1.5 font-normal text-[12.5px]" style={{ color: theme.colors.textSub }}>{tv.today}</span>
       </p>
+      {(summary.extended || summary.extended_locked) && (
+        <ExtendedLine session={summary.extended?.session} value={summary.extended?.abs}
+          amount={summary.extended?.abs != null ? fmt(Math.abs(summary.extended.abs)) : null}
+          pct={summary.extended?.pct} asOf={summary.extended?.as_of} locked={!summary.extended && summary.extended_locked} />
+      )}
       <div className="text-[13px] flex flex-col gap-0.5" style={{ color: theme.colors.textSub }}>
         <p>
           {tv.totalGain}{' '}

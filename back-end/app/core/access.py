@@ -85,6 +85,7 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "feature.intraday_chart": ("premium", "5-minute intraday chart (free: 15-minute bars)"),
     "feature.full_history": ("premium", "Full portfolio history (ALL range; free: up to 1 year)"),
     "feature.unlimited_alerts": ("premium", "No limit on active price alerts (free: FREE_ALERT_LIMIT)"),
+    "feature.extended_hours": ("premium", "Pre-market and after-hours prices (US stocks)"),
     "feature.telegram_alerts": ("premium", "Notifications on Telegram (connect a chat, receive alerts)"),
     # --- System capabilities ---
     "system.ai": ("owner", "Trigger AI calls (Grok, Claude, Codex)"),

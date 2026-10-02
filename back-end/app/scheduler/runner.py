@@ -22,6 +22,7 @@ from app.scheduler.jobs import (
     pre_market_scan,
     quotes_refresh,
     quotes_refresh_after_close,
+    quotes_offhours,
     usage_flush,
     virtual_portfolio_snapshot,
     telegram_notifications,
@@ -148,6 +149,17 @@ def init_scheduler() -> AsyncIOScheduler:
             name="Quotes refresh after close (4:05 PM ET)",
             replace_existing=True,
         )
+        if settings.quotes_offhours_enabled:
+            scheduler.add_job(
+                quotes_offhours,
+                CronTrigger(minute="*", timezone=settings.timezone),
+                id="quotes_offhours",
+                name="Quotes outside the session (crypto 24/7, US pre/after-hours)",
+                replace_existing=True,
+                misfire_grace_time=30,
+                coalesce=True,
+                max_instances=1,
+            )
     if settings.portfolio_snapshots_enabled:
         scheduler.add_job(
             portfolio_snapshots,

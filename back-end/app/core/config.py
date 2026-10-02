@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     # macOS: block idle sleep while the back-end runs (app/core/keep_awake.py),
     # so scheduled scans and the watchdog run on time.
     keep_awake: bool = True
+    # Receive bot messages by polling Telegram (getUpdates) when there's no
+    # public webhook (local Mac). Stops by itself if a webhook is set.
+    telegram_polling: bool = True
     # Email sign-in (migration 018). Accounts without Telegram confirm each
     # password sign-in with a code sent by email. Public sign-up stays OFF
     # until the app is hosted (SIGNUP_ENABLED=true).
@@ -638,6 +641,11 @@ class Settings(BaseSettings):
     # users seen in the last quotes_active_user_days days are refreshed.
     quotes_refresh_seconds_free: int = 900
     quotes_refresh_seconds_premium: int = 60
+    # Outside the regular session (migration 021): followed crypto refreshes
+    # 24/7 at the same plan rates; US stocks followed by Premium users get
+    # pre-market (4:00-9:30 ET) and after-hours (16:00-20:00 ET) prices.
+    quotes_offhours_enabled: bool = True
+    quotes_refresh_seconds_extended: int = 120
     quotes_active_user_days: int = 7
     # Insights history jobs (migration 014): income forecast (18:00 ET) and
     # Signa check statuses per followed symbol (18:15 ET).

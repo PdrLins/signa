@@ -17,6 +17,8 @@ export interface ValueChartProps {
   formatTime: (t: string) => string
   seriesLabel: string
   compareLabel?: string
+  /** vertical dotted lines at these ISO times (1D: market open / close) */
+  marks?: string[]
 }
 
 interface Row {
@@ -25,7 +27,7 @@ interface Row {
   c: number | null
 }
 
-function ValueChart({ series, compare, baseline, color, height, formatValue, formatTime, seriesLabel, compareLabel }: ValueChartProps) {
+function ValueChart({ series, compare, baseline, color, height, formatValue, formatTime, seriesLabel, compareLabel, marks }: ValueChartProps) {
   const theme = useTheme()
   const rows = useMemo<Row[]>(() => {
     const byT = new Map<string, Row>()
@@ -37,6 +39,12 @@ function ValueChart({ series, compare, baseline, color, height, formatValue, for
     }
     return Array.from(byT.values()).sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0))
   }, [series, compare])
+  // a mark sits on the first point at/after its time, only when points exist on both sides
+  const markTs = useMemo(() => (marks ?? []).map((m) => {
+    const ms = Date.parse(m)
+    if (!rows.length || Date.parse(rows[0].t) >= ms) return null
+    return rows.find((r) => Date.parse(r.t) >= ms)?.t ?? null
+  }).filter((x): x is string => !!x), [marks, rows])
 
   return (
     <div style={{ height }} className="w-full min-w-0">
@@ -47,6 +55,9 @@ function ValueChart({ series, compare, baseline, color, height, formatValue, for
           {baseline !== null && (
             <ReferenceLine y={baseline} stroke={theme.colors.textSub} strokeDasharray="2 4" strokeWidth={1} ifOverflow="extendDomain" />
           )}
+          {markTs.map((t) => (
+            <ReferenceLine key={t} x={t} stroke={theme.colors.textHint} strokeDasharray="2 3" strokeWidth={1} />
+          ))}
           <Tooltip
             cursor={{ stroke: theme.colors.border, strokeWidth: 1 }}
             content={({ active, payload, label }) => {

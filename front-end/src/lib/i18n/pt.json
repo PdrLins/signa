@@ -2802,6 +2802,51 @@
       "signOutOthers": "Desconectar todos os outros",
       "signedOut": "{device} foi desconectado.",
       "othersSignedOut": "{n} outros aparelhos desconectados."
+    },
+    "twoFactor": {
+      "title": "Verificação em duas etapas",
+      "subtitle": "Depois da senha, o Signa pede um código enviado ao seu celular. Quem tiver sua senha ainda não consegue entrar.",
+      "on": "Ativada. Seus códigos de acesso vão para o seu Telegram.",
+      "ownerRequired": "A conta do dono sempre mantém a verificação em duas etapas ativada.",
+      "turnOff": "Desativar",
+      "passwordToTurnOff": "Digite sua senha para desativar",
+      "turnedOff": "Verificação em duas etapas desativada.",
+      "offExplain": "Desativada. Escolha para onde o Signa envia seus códigos:",
+      "telegramDesc": "Grátis. Os códigos chegam em um chat com o bot do Signa.",
+      "telegramUnavailable": "Ainda não disponível: o Telegram não está configurado neste servidor.",
+      "setUp": "Configurar",
+      "useConnected": "Usar {chat}",
+      "sms": "Mensagem de texto (SMS)",
+      "smsDesc": "Códigos por SMS.",
+      "steps": {
+        "install": "Instale o Telegram no celular ou computador, se ainda não tiver.",
+        "open": "Toque em Abrir Telegram abaixo. O chat {bot} abre.",
+        "start": "Toque em Iniciar (Start) no fim do chat.",
+        "code": "O bot envia um código de 6 dígitos. Volte aqui e digite."
+      },
+      "openTelegram": "Abrir Telegram",
+      "newLink": "Gerar novo link",
+      "waiting": "Esperando você tocar em Iniciar no Telegram…",
+      "codeSent": "Enviamos um código de 6 dígitos para {chat} no Telegram.",
+      "codeLabel": "Código",
+      "turnOn": "Ativar",
+      "resend": "Enviar novo código",
+      "resent": "Novo código enviado.",
+      "turnedOn": "Verificação em duas etapas ativada.",
+      "errors": {
+        "generic": "Algo deu errado. Tente de novo.",
+        "invalid_code": "Código incorreto.",
+        "invalid_code_left": "Código incorreto. Restam {n} tentativas.",
+        "setup_expired": "Esta configuração expirou. Comece de novo.",
+        "chat_in_use": "Este Telegram já é usado para entrar em outra conta Signa.",
+        "wrong_password": "Senha incorreta.",
+        "telegram_not_configured": "O Telegram ainda não está configurado neste servidor.",
+        "telegram_send_failed": "O Telegram não aceitou a mensagem. Tente de novo.",
+        "not_connected": "Conecte o Telegram primeiro, ou use o link.",
+        "already_enabled": "A verificação em duas etapas já está ativada.",
+        "owner_cannot_disable": "A conta do dono precisa manter a verificação em duas etapas.",
+        "rate_limited": "Muitas tentativas. Espere alguns minutos."
+      }
     }
   },
   "notifications": {
@@ -3069,6 +3114,11 @@
       "estimated": "Baseado nas suas cotas de hoje; adicione transações para o passado exato.",
       "addTransactions": "Adicionar transações",
       "noIntraday": "Ainda sem preços intradiários hoje. Mostrando o fechamento anterior e o valor mais recente."
+    },
+    "extended": {
+      "pre": "Pré-mercado",
+      "post": "Após o fechamento",
+      "locked": "Veja preços do pré-mercado e após o fechamento com o Premium"
     }
   },
   "divSummary": {
@@ -3253,7 +3303,7 @@
     "perks": {
       "stocks": "Ações acompanhadas sem limite",
       "alerts": "Alertas de preço sem limite",
-      "prices": "Preços atualizados a cada minuto",
+      "prices": "Preços a cada minuto, mais pré-mercado e após o fechamento",
       "charts": "Gráficos intradiários e de todo o histórico",
       "tax": "Dividendos após impostos no Canadá e nos EUA"
     },
@@ -3324,6 +3374,7 @@
       "Ações ilimitadas",
       "Alertas de preço ilimitados",
       "Preços a cada minuto e gráfico intradiário de 5 minutos",
+      "Preços do pré-mercado e após o fechamento para ações dos EUA",
       "Gráficos de 5 anos e histórico completo",
       "Tipos de conta (TFSA, RRSP, IRA, 401(k)…) com dividendos após impostos e dicas fiscais, para Canadá e EUA"
     ],
@@ -3337,7 +3388,9 @@
       "tax": "Dividendos após impostos (Canadá / EUA)",
       "allocation": "Alocação e metas",
       "events": "Próximos eventos",
-      "checks": "Verificações do Signa"
+      "checks": "Verificações do Signa",
+      "extended": "Preços do pré-mercado e após o fechamento (ações dos EUA)",
+      "crypto": "Preços de cripto 24/7"
     },
     "values": {
       "ten": "10",
@@ -3393,6 +3446,9 @@
       "popular_us": "Populares nos EUA",
       "monthly_income": "Paga todo mês",
       "dividend_growers": "Aumenta o dividendo"
-    }
+    },
+    "extendedTitle": "Variação no pré-mercado / após o fechamento em relação ao último preço regular",
+    "preShort": "Pré",
+    "postShort": "AF"
   }
 }

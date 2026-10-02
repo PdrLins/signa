@@ -617,4 +617,12 @@ async def get_stock_page(raw_symbol: str, user: dict) -> dict:
         asyncio.to_thread(position, user, symbols),
         asyncio.to_thread(slots, user),
     )
-    return {**body, "followed": fol, "position": pos, "slots": slot}
+    # pre-market / after-hours price (Premium, migration 021); per user, never cached in the body
+    from app.core.access import can
+    from app.services import quotes as quotes_service
+    level = user.get("access_level") or "free"
+    view = None
+    if can(level, "feature.extended_hours"):
+        view = await asyncio.to_thread(quotes_service.extended_for_symbol, body["symbol"], body.get("quote"))
+    quote = {**(body.get("quote") or {}), **quotes_service.extended_payload(level, body["symbol"], view)}
+    return {**body, "quote": quote, "followed": fol, "position": pos, "slots": slot}

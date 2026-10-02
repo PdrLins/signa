@@ -43,6 +43,9 @@ _AUTH_PATHS = {
     # failed refreshes count too (guessing refresh tokens); good ones are free
     "/api/v1/auth/refresh",
     "/api/v1/auth/token/refresh",
+    # two-step sign-in: wrong codes / passwords count (migration 020)
+    "/api/v1/auth/2fa/telegram/confirm",
+    "/api/v1/auth/2fa/disable",
 }
 
 # AUTH tier, but EVERY attempt counts (a successful sign-up creates an

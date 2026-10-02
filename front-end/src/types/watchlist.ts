@@ -28,6 +28,9 @@ export interface FollowingRow {
   spark: number[]
   in_holdings: boolean
   added_at?: string
+  /** Premium: pre-market / after-hours price */
+  extended?: import('./tracker').ExtendedQuote | null
+  extended_locked?: boolean
 }
 
 export type SuggestionGroupKey = 'popular_ca' | 'popular_us' | 'monthly_income' | 'dividend_growers'

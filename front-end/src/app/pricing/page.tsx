@@ -20,6 +20,8 @@ export default function PricingPage() {
     { label: tp.rows.stocks, free: tp.values.ten, premium: tp.values.unlimited },
     { label: tp.rows.alerts, free: tp.values.three, premium: tp.values.unlimited },
     { label: tp.rows.prices, free: tp.values.min15, premium: tp.values.min1 },
+    { label: tp.rows.extended, free: tp.values.no, premium: tp.values.yes },
+    { label: tp.rows.crypto, free: tp.values.yes, premium: tp.values.yes },
     { label: tp.rows.intraday, free: tp.values.m15, premium: tp.values.m5 },
     { label: tp.rows.history, free: tp.values.y1, premium: tp.values.all },
     { label: tp.rows.tax, free: tp.values.no, premium: tp.values.yes },

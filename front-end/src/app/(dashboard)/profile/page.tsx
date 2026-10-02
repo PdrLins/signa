@@ -23,6 +23,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { SlotMeter } from '@/components/upgrade/SlotMeter'
 import { ThemePicker } from '@/components/profile/ThemePicker'
 import { DevicesCard } from '@/components/profile/DevicesCard'
+import { TwoFactorCard } from '@/components/profile/TwoFactorCard'
 import { usePrivacyStore } from '@/store/privacyStore'
 import type { ProfileUpdate, TaxView } from '@/types/profile'
 
@@ -246,6 +247,8 @@ export default function ProfilePage() {
           <LinkRow href="/how-it-works" icon={HelpCircle} label={t.settingsLinks.howItWorksTitle} desc={t.settingsLinks.howItWorks} />
         )}
       </SectionCard>
+
+      <TwoFactorCard />
 
       <DevicesCard />
 

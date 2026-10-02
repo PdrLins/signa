@@ -26,6 +26,7 @@ import { AddHoldingForm } from '@/components/holdings/AddHoldingForm'
 import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs'
 import { useAlerts } from '@/hooks/useAlerts'
+import { ExtendedLine } from '@/components/tracker/ExtendedLine'
 import type { SymbolMatch } from '@/types/symbols'
 import type { StockPage } from '@/types/stock'
 
@@ -107,6 +108,13 @@ function Header({ data }: { data: StockPage }) {
               {chg == null ? DASH : `${signedPct(chg, 2)} ${ts.today}`}
             </p>
             {asOf && <p className="text-[11px]" style={{ color: theme.colors.textHint }}>{fill(ts.asOf, { time: asOf })}</p>}
+            {(q.extended || q.extended_locked) && (
+              <div className="sm:flex sm:justify-end mt-1">
+                <ExtendedLine session={q.extended?.session} pct={q.extended?.change_pct} asOf={q.extended?.as_of}
+                  amount={q.extended?.price != null ? nativePrice(q.extended.price, data.symbol, data.currency) : null}
+                  locked={!q.extended && q.extended_locked} />
+              </div>
+            )}
           </div>
         </div>
         {(q.low_52w != null && q.high_52w != null && q.price != null) || q.market_cap != null ? (

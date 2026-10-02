@@ -140,6 +140,12 @@ const Row = memo(function Row({ row, first, canEdit }: { row: FollowingRow; firs
           {row.price != null ? nativePrice(row.price, row.symbol, row.currency ?? undefined) : DASH}
         </p>
         <p className="text-[12.5px] font-medium" style={{ color }}>{chg == null ? DASH : signedPct(chg, 2)}</p>
+        {row.extended && (
+          <p className="text-[11px] font-medium" title={tf.extendedTitle}
+            style={{ color: (row.extended.change_pct ?? 0) >= 0 ? theme.colors.up : theme.colors.down }}>
+            {row.extended.session === 'pre' ? tf.preShort : tf.postShort} {signedPct(row.extended.change_pct, 2)}
+          </p>
+        )}
       </div>
       {canEdit ? (
         <button type="button" onClick={() => unfollow(row.symbol)} disabled={busy}

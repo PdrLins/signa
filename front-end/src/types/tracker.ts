@@ -39,6 +39,31 @@ export interface PortfolioSummary extends Freshness {
     unconverted?: unknown[]
   }
   usdcad: number | null
+  /** US market phase (ET): pre-market 4:00-9:30, after-hours 16:00-20:00 */
+  market_phase?: MarketPhase
+  /** Premium: change from pre/after-hours trades vs the regular price (null when none) */
+  extended?: ExtendedChange | null
+  /** Free: held US stocks are trading pre/after hours (show the Premium hint) */
+  extended_locked?: boolean
+}
+
+export type MarketPhase = 'pre' | 'regular' | 'post' | 'closed'
+
+export interface ExtendedChange {
+  session: 'pre' | 'post'
+  abs: number | null
+  pct: number | null
+  as_of: string
+  symbols: number
+}
+
+/** One symbol's pre-market / after-hours price (stock page, Following). */
+export interface ExtendedQuote {
+  session: 'pre' | 'post'
+  price: number | null
+  /** PERCENT vs the regular-session price */
+  change_pct: number | null
+  as_of: string
 }
 
 // ── /portfolio/history ──
@@ -68,6 +93,8 @@ export interface PortfolioHistory extends Freshness {
     range_return_pct: number | null
     available: boolean
   }
+  /** 1D: the regular session's bounds (Premium 1D includes pre/after-hours bars) */
+  session?: { open: string; close: string } | null
 }
 
 // ── /portfolio/performance ──
