@@ -70,6 +70,30 @@ async def get_ticker_detail(
     }
 
 
+def chart_points(df) -> list[dict]:
+    """OHLCV rows -> chart points. yfinance sometimes returns a bar with NaN
+    prices (often today's unfinished bar): it is skipped, since NaN can't be
+    sent as JSON (it made the whole chart answer 500). A missing volume is 0."""
+    import math
+
+    out = []
+    for idx, row in df.iterrows():
+        try:
+            o, h, lo, c = (float(row[k]) for k in ("Open", "High", "Low", "Close"))
+        except (TypeError, ValueError, KeyError):
+            continue
+        if not all(math.isfinite(v) for v in (o, h, lo, c)):
+            continue
+        try:
+            vol = float(row["Volume"])
+            vol = int(vol) if math.isfinite(vol) else 0
+        except (TypeError, ValueError, KeyError):
+            vol = 0
+        out.append({"date": idx.isoformat(), "open": round(o, 2), "high": round(h, 2),
+                    "low": round(lo, 2), "close": round(c, 2), "volume": vol})
+    return out
+
+
 @router.get("/{ticker}/chart")
 async def get_ticker_chart(
     ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10}$"),
@@ -111,17 +135,9 @@ async def get_ticker_chart(
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
-    # Build chart data points
-    data_points = []
-    for idx, row in df.iterrows():
-        data_points.append({
-            "date": idx.isoformat(),
-            "open": round(float(row["Open"]), 2),
-            "high": round(float(row["High"]), 2),
-            "low": round(float(row["Low"]), 2),
-            "close": round(float(row["Close"]), 2),
-            "volume": int(row["Volume"]),
-        })
+    data_points = chart_points(df)
+    if not data_points:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No price data for {ticker}")
 
     # Summary stats
     current = data_points[-1]["close"] if data_points else 0
