@@ -43,8 +43,15 @@ async def get_stock(
       "sector": str | null, "industry": str | null,
       "quote": {"price", "change_pct" (1 day), "high_52w", "low_52w",
                 "market_cap", "as_of" (ISO datetime)},          # each nullable
+                # price / change_pct / as_of come from the shared quotes table (the price
+                # `position`, /holdings and /portfolio/summary use) when its row is at least
+                # as recent as the cached page quote (Yahoo info, ~15 min cache)
       "dividend": {
         "profile": {...},        # services/dividends.get_dividend_profile (yield etc. are FRACTIONS)
+                                 # + "growth_1y_pct", "growth_3y_pct", "growth_5y_pct", "growth_10y_pct":
+                                 #   dividend CAGR, PERCENT per year (trailing annual total vs N years
+                                 #   earlier, same math as growth_5y_cagr which is a FRACTION); null when
+                                 #   the history is too short / irregular, and for funds
         "rating": "good" | "fair" | "poor" | "n/a",
         "rating_code": "measured" | "none" | "etf_distribution" | "suspended" | "not_applicable" | "unavailable",
         "rules": [{"code", "effect": positive|negative|caution|info, "text", "params"}]
@@ -62,6 +69,16 @@ async def get_stock(
                      "dividend_yield" (FRACTION, 0.035 = 3.5%),
                      "avg_volume" (~3 months, shares), "volume" (today, shares),
                      "beta"},                                 # each nullable
+      "fund": null (not an ETF, or no fund data) | {           # ETFs: long_term_check.build_fund_info
+        "expense_ratio" (PERCENT, 0.2 = 0.20%/yr), "expense_ratio_source", "aum" (listing currency),
+        "yield" (PERCENT), "family", "category", "legal_type", "inception_date" (yyyy-mm-dd),
+        "top_holdings": [{"symbol", "name", "weight" (PERCENT)}],   # up to 15
+        "holdings_listed" (int), "top10_weight" (PERCENT), "fund_of_funds" (bool),
+        "sector_weights": {key: PERCENT}, "asset_classes": {key: PERCENT},   # largest first
+        "pe", "pb", "turnover" (PERCENT)
+      },                                                      # each field nullable; cached ~12 h
+      "about": null | {"description" (longBusinessSummary, <= 3000 chars), "country", "city",
+                       "state", "website", "employees" (int)},       # each nullable (Yahoo info)
       "generated_at": ISO datetime (the shared body is cached ~15 min),
 
       # ---- this user, never cached ----
@@ -72,8 +89,9 @@ async def get_stock(
         "price", "home_currency",
         "market_value" (native), "market_value_home" (USD/CAD converted, else null),
         "weight_pct" (of the portfolio's priced market value, home currency, excl. cash),
-        "today_pl": {"abs", "pct", "abs_home"},
-        "open_pl": {"abs", "pct", "abs_home"},                # unrealized vs avg cost
+        "today_pl": {"abs", "pct", "abs_home"},               # null without a live quote
+        "open_pl": {"abs", "pct", "abs_home"},                # unrealized vs avg cost, over the
+                                                              # lots that have an avg_cost
         "dividends_received": float | null,                   # ledger (null without transactions)
         "realized_pl": float | null,                          # ledger (null without transactions)
         "total_gain": {"abs", "pct", "abs_home"},             # open + dividends + realized; pct of cost

@@ -85,6 +85,9 @@ def db(monkeypatch):
     monkeypatch.setattr(queries, "get_watchlist", lambda uid: [])
     monkeypatch.setattr(queries, "get_accounts", lambda uid: [])
     monkeypatch.setattr("app.services.price_cache.get_usdcad_rate", lambda: 1.4)
+    d.quotes = {}   # SYMBOL -> shared live quote (no network)
+    monkeypatch.setattr("app.services.quotes.get_quotes",
+                        lambda syms: {s.upper(): dict(d.quotes[s.upper()]) for s in syms if s.upper() in d.quotes})
     return d
 
 
@@ -141,6 +144,57 @@ def test_list_is_user_scoped_with_math(client, db):
     x = next(i for i in body["items"] if i["symbol"] == "XEQT.TO")
     assert x["position"]["unrealized"] == 500.0
     assert body["review_all"]["allowed"] is True
+
+
+def test_list_prices_with_live_quote_and_falls_back_to_last_close(client, db):
+    db.add(U1, "XEQT.TO", currency="CAD", shares=100, avg_cost=25,
+           holding_status={"price": 30.0, "prev_close": 29.0, "as_of": "2026-09-30", "ytd_pct": 20.0})
+    db.add(U1, "NVDA", currency="USD", shares=10,
+           holding_status={"price": 100.0, "prev_close": 98.0, "ytd_base": 80.0, "as_of": "2026-09-30"})
+    db.add(U1, "ZZZ", currency="USD", shares=1)   # nothing prices it
+    db.quotes["XEQT.TO"] = {"symbol": "XEQT.TO", "price": 32.0, "prev_close": 30.0, "currency": "CAD",
+                            "as_of": "2026-10-01T15:00:00+00:00"}
+    body = client.get("/api/v1/holdings", headers=_auth()).json()
+    x = next(i for i in body["items"] if i["symbol"] == "XEQT.TO")
+    n = next(i for i in body["items"] if i["symbol"] == "NVDA")
+    z = next(i for i in body["items"] if i["symbol"] == "ZZZ")
+    assert x["quote"] == {"price": 32.0, "prev_close": 30.0, "change_pct": pytest.approx(6.6667, abs=1e-4),
+                          "change": 2.0, "as_of": "2026-10-01T15:00:00+00:00", "live": True,
+                          "price_source": "quote", "ytd_pct_live": 28.0}   # base 30 / 1.2 = 25
+    assert x["position"]["value"] == 3200.0 and x["position"]["unrealized"] == 700.0
+    # no live quote: last close, and yesterday's move is NOT reported as today's
+    assert n["quote"]["live"] is False and n["quote"]["price"] == 100.0
+    assert n["quote"]["price_source"] == "last_close"
+    assert n["quote"]["change"] is None and n["quote"]["change_pct"] is None and n["quote"]["prev_close"] is None
+    assert n["quote"]["ytd_pct_live"] == 25.0
+    assert body["totals"]["as_of"] == "2026-09-30"
+    assert z["quote"] is None and z["position"]["value"] is None
+    assert body["totals"]["value_cad"] == 3200.0 + 1000 * 1.4
+    assert x["position"]["weight_pct"] == pytest.approx(3200 / 4600 * 100, abs=0.01)
+    assert x["holding_status"]["price"] == 30.0   # the monitor's row is untouched
+
+
+def test_symbol_weight_spans_accounts(client, db, monkeypatch):
+    monkeypatch.setattr(settings, "holdings_max_weight_pct", 30.0)
+    db.add(U1, "NVDA", currency="USD", shares=2, account_id="a1")
+    db.add(U1, "NVDA", currency="USD", shares=2, account_id="a2")
+    db.add(U1, "VFV.TO", currency="CAD", shares=10)
+    db.quotes["NVDA"] = {"symbol": "NVDA", "price": 100.0, "prev_close": 100.0, "currency": "USD"}
+    db.quotes["VFV.TO"] = {"symbol": "VFV.TO", "price": 100.0, "prev_close": 100.0, "currency": "CAD"}
+    body = client.get("/api/v1/holdings", headers=_auth()).json()
+    nv = [i["position"] for i in body["items"] if i["symbol"] == "NVDA"]
+    # total = 560 + 1000; each NVDA lot is 17.9% (< 30) but NVDA is 35.9% (> 30)
+    assert all(p["weight_pct"] == pytest.approx(17.95, abs=0.01) for p in nv)
+    assert all(p["symbol_weight_pct"] == pytest.approx(35.9, abs=0.01) and p["overweight"] for p in nv)
+
+
+def test_list_quotes_failure_falls_back(client, db, monkeypatch):
+    def boom(syms):
+        raise RuntimeError("yahoo down")
+    monkeypatch.setattr("app.services.quotes.get_quotes", boom)
+    db.add(U1, "XEQT.TO", currency="CAD", shares=10, holding_status={"price": 30.0})
+    body = client.get("/api/v1/holdings", headers=_auth()).json()
+    assert body["items"][0]["quote"]["live"] is False and body["totals"]["value_cad"] == 300.0
 
 
 def test_table_missing_returns_503(client, monkeypatch):

@@ -45,7 +45,7 @@ import type {
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
 const PUBLIC_ROUTES = ['/auth/login', '/auth/verify-otp']
-const PUBLIC_EXACT = ['/health']
+const PUBLIC_EXACT = ['/health', '/version']
 
 export const client = axios.create({
   baseURL: API_URL,
@@ -649,5 +649,7 @@ export const portfolioInsightsApi = {
 }
 
 export const healthApi = {
-  check: () => get<{ status: string; app: string; uptime_seconds: number; scheduler_running: boolean }>('/health'),
+  /** public: {"backend": "1.0.3"} */
+  version: () => get<{ backend: string }>('/version'),
+  check: () => get<{ status: string; app: string; version?: string; uptime_seconds: number; scheduler_running: boolean }>('/health'),
 }

@@ -24,6 +24,7 @@ import { SlotMeter } from '@/components/upgrade/SlotMeter'
 import { ThemePicker } from '@/components/profile/ThemePicker'
 import { DevicesCard } from '@/components/profile/DevicesCard'
 import { TwoFactorCard } from '@/components/profile/TwoFactorCard'
+import { AppVersion } from '@/components/ui/AppVersion'
 import { usePrivacyStore } from '@/store/privacyStore'
 import type { ProfileUpdate, TaxView } from '@/types/profile'
 
@@ -246,6 +247,7 @@ export default function ProfilePage() {
         {can('area.how_it_works') && (
           <LinkRow href="/how-it-works" icon={HelpCircle} label={t.settingsLinks.howItWorksTitle} desc={t.settingsLinks.howItWorks} />
         )}
+        <AppVersion />
       </SectionCard>
 
       <TwoFactorCard />

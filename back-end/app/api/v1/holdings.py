@@ -184,6 +184,20 @@ async def _usdcad() -> float | None:
         return None
 
 
+async def _live_quotes(rows: list[dict]) -> dict[str, dict]:
+    """Shared live quotes for the holdings (quotes.get_quotes — the source of
+    /portfolio/summary). Fails soft to {} (rows then use holding_status)."""
+    from app.services import quotes as quotes_service
+    syms = {str(h.get("symbol") or "").upper() for h in rows if h.get("symbol")}
+    if not syms:
+        return {}
+    try:
+        return await asyncio.to_thread(quotes_service.get_quotes, syms) or {}
+    except Exception as e:
+        logger.debug(f"holdings: live quotes unavailable ({e})")
+        return {}
+
+
 def _kick_refresh(user_id: str) -> bool:
     """Start a background monitor run for this user (no-op when one runs)."""
     if hm.is_running():
@@ -234,9 +248,30 @@ async def list_holdings(
     person_id: Optional[UUID] = Query(None),
     user: dict = Depends(get_current_user),
 ):
-    """Response: {"items": [Holding + "account_id", "account_name", "person_id"], "count",
+    """Response: {"items": [Holding + "account_id", "account_name", "person_id", "quote"], "count",
     "totals", "monitor_running", "review_running", "review_all", "settings",
-    "filter": {"account_id", "person_id"}}. Totals/weights cover the filtered items."""
+    "filter": {"account_id", "person_id"}}. Totals/weights cover the filtered items.
+
+    Prices: each holding is valued at its shared live quote (quotes table,
+    delayed ~15 min — the same price as /portfolio/summary, so totals.value_cad
+    equals its market_value for the same scope when home currency is CAD),
+    falling back to the monitor's last close (holding_status.price, still
+    written by the monitor for its checks). Per item:
+        "quote": {"price", "prev_close" | null, "change_pct" | null (PERCENT, today),
+                "change" | null (native currency, price - prev_close), "as_of" (ISO),
+                "live" (bool), "price_source": "quote" | "last_close",
+                "ytd_pct_live" | null (PERCENT, price vs previous year's last close)}
+               | null (unpriced)
+      e.g. {"price": 32.1, "prev_close": 31.8, "change_pct": 0.9434, "change": 0.3,
+            "as_of": "2026-10-02T14:45:00+00:00", "live": true, "price_source": "quote",
+            "ytd_pct_live": 12.4}
+    price_source "last_close" (no live quote): change / change_pct / prev_close
+    are null — the day move is unknown, never yesterday's move shown as today's.
+    position.value / value_cad / unrealized / weight_pct use quote.price;
+    position.currency follows the quote's currency when there is one.
+    position.weight_pct = this row (one account's lot); position.symbol_weight_pct
+    = the symbol across all accounts in the filter; position.overweight uses
+    symbol_weight_pct. totals.as_of = the oldest price time among priced rows."""
     rows = await _db(queries.get_holdings, user["user_id"])
     accounts = await _accounts(user["user_id"])
     if (account_id or person_id) and accounts is None:
@@ -247,8 +282,10 @@ async def list_holdings(
         mine = {str(a["id"]) for a in accounts or [] if str(a.get("person_id")) == str(person_id)}
         rows = [h for h in rows if str(h.get("account_id")) in mine]
     usdcad = await _usdcad()
-    per, totals = hs.portfolio_math(rows, usdcad)
-    items = [_with_account(hs.public_holding(h, per.get(str(h.get("id")))), accounts) for h in rows]
+    quotes = await _live_quotes(rows)
+    per, totals = hs.portfolio_math(rows, usdcad, quotes=quotes)
+    items = [_with_account(hs.public_holding(h, per.get(str(h.get("id"))), hs.holding_quote(h, quotes),
+                                             with_quote=True), accounts) for h in rows]
     last_all = await _review_all_last(user["user_id"])
     return {
         "items": items,
@@ -534,7 +571,7 @@ async def allocate_ideas(
     uid = user["user_id"]
     rows = await _db(queries.get_holdings, uid)
     usdcad = await _usdcad()
-    per, _totals = hs.portfolio_math(rows, usdcad)
+    per, _totals = hs.portfolio_math(rows, usdcad, quotes=await _live_quotes(rows))
     extra: list[dict] = []
     if include_watchlist:
         extra = await _watchlist_rows(uid, {h["symbol"] for h in rows})

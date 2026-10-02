@@ -429,7 +429,8 @@ def refresh_session(refresh_token: str, ip_address: str, user_agent: str) -> dic
     )
     queries.insert_audit_log(
         event_type=AuditEvent.TOKEN_REFRESHED, success=True, user_id=user_id,
-        ip_address=ip_address, user_agent=user_agent, metadata={"session_id": str(session["id"])},
+        ip_address=ip_address, user_agent=user_agent,
+        metadata={"session_id": str(session["id"]), "retry": bool(r.get("retry"))},
     )
     return {
         "access_token": access,

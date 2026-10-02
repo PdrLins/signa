@@ -32,6 +32,7 @@ PUBLIC_PATHS = {
     "/api/v1/auth/token/refresh",
     "/api/v1/auth/register",          # invite-only sign-up (migration 019)
     "/api/v1/health",
+    "/api/v1/version",
     "/api/v1/telegram/webhook",
     "/docs",
     "/redoc",

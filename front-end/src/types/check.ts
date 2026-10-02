@@ -53,6 +53,11 @@ export interface DividendProfile {
   last_payments: { ex_date: string; amount: number; special: boolean }[]
   /** FRACTION per year */
   growth_5y_cagr: number | null
+  /** dividend growth per year, PERCENT (stock page only; null when history is short, and for funds) */
+  growth_1y_pct?: number | null
+  growth_3y_pct?: number | null
+  growth_5y_pct?: number | null
+  growth_10y_pct?: number | null
   years_without_cut: number | null
   last_cut_date: string | null
   recent_cut: boolean

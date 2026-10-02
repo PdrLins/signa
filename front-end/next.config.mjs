@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs'
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+
 const isDev = process.env.NODE_ENV !== 'production'
 
 // API base baked in at build time (scripts/start.sh / launch.json set
@@ -27,6 +31,9 @@ const connectSrc = ["'self'", ...(apiOrigin ? [apiOrigin, apiWsOrigin] : []), ..
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Web version (package.json, bumped on every front-end commit by
+  // .githooks/pre-commit), shown in Profile → About next to the server's.
+  env: { NEXT_PUBLIC_APP_VERSION: pkg.version },
   async rewrites() {
     return [{ source: '/api/v1/:path*', destination: `${backendOrigin}/api/v1/:path*` }]
   },

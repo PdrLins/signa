@@ -27,6 +27,8 @@ import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs'
 import { useAlerts } from '@/hooks/useAlerts'
 import { ExtendedLine } from '@/components/tracker/ExtendedLine'
+import { AboutCard, FundCards, NextPayoutCard } from '@/components/stock/FundCards'
+import { AssetBadge } from '@/components/holdings/HoldingsList'
 import type { SymbolMatch } from '@/types/symbols'
 import type { StockPage } from '@/types/stock'
 
@@ -90,6 +92,7 @@ function Header({ data }: { data: StockPage }) {
           <div className="min-w-0">
             <h1 className="text-2xl font-bold flex flex-wrap items-baseline gap-x-2" style={{ color: theme.colors.text }}>
               <span className="font-mono">{data.symbol}</span>
+              <AssetBadge type={data.asset_type} />
               {data.name && <span className="text-[15px] font-medium break-words" style={{ color: theme.colors.textSub }}>{data.name}</span>}
             </h1>
             <p className="text-[12.5px] mt-0.5" style={{ color: theme.colors.textHint }}>{meta}</p>
@@ -320,11 +323,19 @@ function StockPageInner() {
       <div role="tabpanel" id="stock-tab-panel" aria-labelledby={`stock-tab-${tab}`} className="min-w-0">
         {tab === 'overview' && (
           <div className="flex flex-col gap-4 min-w-0">
+            {data.position && data.position.shares > 0 && data.events.ex_dividend?.amount != null && (
+              <NextPayoutCard amountPerShare={data.events.ex_dividend.amount} shares={data.position.shares}
+                currency={data.currency} payDate={data.events.dividend_payment?.date ?? null}
+                exDate={data.events.ex_dividend.date}
+                estimated={!!(data.events.ex_dividend.estimated || data.events.dividend_payment?.estimated)} />
+            )}
+            {data.fund && <FundCards fund={data.fund} currency={data.currency} position={data.position} />}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start min-w-0">
               <StockEvents events={data.events} symbol={data.symbol} currency={data.currency}
                 onDividends={data.events.ex_dividend || data.events.dividend_payment ? () => setTab('dividends') : undefined} />
-              <StockStatistics stats={data.statistics} symbol={data.symbol} currency={data.currency} />
+              <StockStatistics stats={data.statistics} symbol={data.symbol} currency={data.currency} price={data.quote.price} />
             </div>
+            {data.about?.description && <AboutCard about={data.about} />}
             <StockChecks checks={data.checks} symbol={data.symbol} currency={data.currency} />
           </div>
         )}

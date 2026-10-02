@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useMemo } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Briefcase, Plus, Star } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
@@ -15,7 +15,8 @@ import { SearchButton } from '@/components/search/GlobalSearch'
 import { SlotMeter } from '@/components/upgrade/SlotMeter'
 import { SparkLine } from '@/components/ui/SparkLine'
 import { Freshness, QueryError, SkeletonCards } from '@/components/tracker/ui'
-import type { FollowingRow } from '@/types/watchlist'
+import type { FollowingRow, SuggestionItem } from '@/types/watchlist'
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs'
 
 /** Following: every stock the user follows, priced, one tap from its page.
  *  Followed symbols are what the free plan limits (10), so following is
@@ -159,38 +160,84 @@ const Row = memo(function Row({ row, first, canEdit }: { row: FollowingRow; firs
   )
 })
 
-function Suggestions({ groups }: { groups: { key: string; items: { symbol: string; name: string }[] }[] }) {
+/** Ideas to follow: one group at a time (segmented control in the server's
+ *  group order) with a one-line "why", shown as normal rows. A row followed
+ *  here stays in place with a gold star until the page is opened again (the
+ *  server leaves followed symbols out of the next answer). */
+function Suggestions({ groups }: { groups: { key: string; items: SuggestionItem[] }[] }) {
   const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const tf = t.following
   const { follow, busy, pendingSymbol } = useFollow()
+  // first answer per group, so a followed row doesn't jump away on refetch
+  const [snap, setSnap] = useState<Record<string, SuggestionItem[]>>({})
+  const [followed, setFollowed] = useState<Set<string>>(new Set())
+  const [active, setActive] = useState<string>(groups[0]?.key ?? '')
+  useEffect(() => {
+    setSnap((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const g of groups) {
+        if (!next[g.key]) { next[g.key] = g.items; changed = true }
+        else {   // refresh prices of rows still listed, keep the followed ones
+          const fresh = new Map(g.items.map((i) => [i.symbol, i]))
+          const merged = next[g.key].map((i) => fresh.get(i.symbol) ?? i)
+          if (merged.some((m, i) => m !== next[g.key][i])) { next[g.key] = merged; changed = true }
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [groups])
+  useEffect(() => { if (!groups.some((g) => g.key === active) && groups[0]) setActive(groups[0].key) }, [groups, active])
+
+  const options = useMemo(() => groups.map((g) => ({
+    value: g.key, label: (tf.groupsShort as Record<string, string>)[g.key] ?? g.key,
+  })), [groups, tf])
+  const items = snap[active] ?? []
+  const onFollow = (symbol: string) => {
+    follow(symbol)
+    setFollowed((s) => new Set(s).add(symbol))
+  }
+
   return (
     <section aria-labelledby="following-ideas" className="flex flex-col gap-3 min-w-0">
       <div>
         <h2 id="following-ideas" className="text-[15px] font-semibold" style={{ color: theme.colors.text }}>{tf.ideasTitle}</h2>
         <p className="text-[12px]" style={{ color: theme.colors.textHint }}>{tf.ideasHint}</p>
       </div>
-      {groups.map((g) => (
-        <div key={g.key} className="flex flex-col gap-1.5 min-w-0">
-          <h3 className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: theme.colors.textSub }}>
-            {(tf.groups as Record<string, string>)[g.key] ?? g.key}
-          </h3>
-          <ul className="flex gap-2 overflow-x-auto pb-1 min-w-0">
-            {g.items.map((it) => (
-              <li key={it.symbol} className="shrink-0">
-                <button type="button" onClick={() => follow(it.symbol)} disabled={busy && pendingSymbol === it.symbol}
-                  aria-label={fill(tf.followAria, { symbol: it.symbol, name: it.name })} title={it.name}
-                  className="min-h-[44px] pl-2.5 pr-3.5 rounded-full text-[13px] inline-flex items-center gap-1.5 max-w-[240px] disabled:opacity-50 focus-visible:outline focus-visible:outline-2"
-                  style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text, border: `1px solid ${theme.colors.border}`, outlineColor: theme.colors.primary }}>
-                  <Plus size={14} aria-hidden="true" style={{ color: theme.colors.primary }} />
-                  <span className="font-mono font-semibold">{it.symbol.replace(/\.TO$/, '')}</span>
-                  <span className="truncate" style={{ color: theme.colors.textSub }}>{it.name}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+      <SegmentedTabs value={active} options={options} onChange={setActive} label={tf.ideasTitle} idBase="ideas-tab" />
+      <p className="text-[13px] -mt-1" style={{ color: theme.colors.textSub }}>{(tf.groupsWhy as Record<string, string>)[active] ?? ''}</p>
+      <ul id="ideas-tab-panel" role="tabpanel" aria-labelledby={`ideas-tab-${active}`}
+        className="rounded-2xl overflow-hidden" style={{ backgroundColor: theme.colors.surface, border: `1px solid ${theme.colors.border}` }}>
+        {items.map((it, i) => {
+          const on = followed.has(it.symbol)
+          const chg = it.change_pct ?? null
+          const color = chg == null || chg === 0 ? theme.colors.textSub : chg > 0 ? theme.colors.up : theme.colors.down
+          return (
+            <li key={it.symbol} className="flex items-center gap-3 pl-4 pr-1 py-2 min-w-0"
+              style={{ borderTop: i ? `1px solid ${theme.colors.border}` : undefined }}>
+              <Link href={`/stocks/${encodeURIComponent(it.symbol)}`} className="min-w-0 flex-1 rounded focus-visible:outline focus-visible:outline-2"
+                style={{ outlineColor: theme.colors.primary }}>
+                <span className="block font-mono font-semibold text-[14px]" style={{ color: theme.colors.text }}>{it.symbol}</span>
+                <span className="block text-[12px] truncate" style={{ color: theme.colors.textSub }}>{it.name}</span>
+              </Link>
+              {it.price != null && (
+                <div className="text-right shrink-0 tabular-nums">
+                  <p className="text-[14px] font-semibold" style={{ color: theme.colors.text }}>{nativePrice(it.price, it.symbol, it.currency ?? undefined)}</p>
+                  {chg != null && <p className="text-[12px] font-medium" style={{ color }}>{signedPct(chg, 2)}</p>}
+                </div>
+              )}
+              <button type="button" onClick={() => !on && onFollow(it.symbol)} disabled={on || (busy && pendingSymbol === it.symbol)}
+                aria-pressed={on} aria-label={on ? fill(tf.followedAria, { symbol: it.symbol }) : fill(tf.followAria, { symbol: it.symbol, name: it.name })}
+                title={on ? tf.followedTitle : tf.follow}
+                className="shrink-0 min-h-[44px] min-w-[44px] rounded-full inline-flex items-center justify-center focus-visible:outline focus-visible:outline-2"
+                style={{ color: on ? theme.colors.warning : theme.colors.textSub, outlineColor: theme.colors.primary }}>
+                <Star size={18} aria-hidden="true" fill={on ? theme.colors.warning : 'none'} />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
     </section>
   )
 }

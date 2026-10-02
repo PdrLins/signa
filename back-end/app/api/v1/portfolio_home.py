@@ -10,7 +10,8 @@ GET /api/v1/portfolio/summary?account_id=&person_id=            area.home
 {
   "currency": "CAD",
   "market_value": 12345.67, "cash": 500.0, "total": 12845.67,
-  "day_change": {"abs": 120.5 | null, "pct": 0.95 | null},
+  "day_change": {"abs": 120.5 | null, "pct": 0.95 | null},   # live quotes only: positions priced
+                                           # from the last close (prices_from_last_close) are left out
   "total_gain": {"abs": 2100.0 | null, "pct": 19.6 | null,
                  "unrealized": 1800.0 | null, "realized": 150.0 | null,
                  "dividends": 150.0 | null, "dividends_included": true},   # realized/dividends need transactions

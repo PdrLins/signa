@@ -98,6 +98,41 @@ export interface StockPosition {
   }[]
 }
 
+/** ETFs only (null otherwise); each field nullable. PERCENT unless noted. */
+export interface StockFund {
+  /** PERCENT a year (0.2 = 0.20%) */
+  expense_ratio: number | null
+  expense_ratio_source?: string | null
+  /** fund size, listing currency */
+  aum: number | null
+  yield?: number | null
+  family: string | null
+  category: string | null
+  legal_type?: string | null
+  inception_date: string | null
+  top_holdings: { symbol: string | null; name: string | null; weight: number | null }[]
+  holdings_listed: number | null
+  top10_weight: number | null
+  fund_of_funds: boolean | null
+  /** key -> PERCENT, largest first */
+  sector_weights: Record<string, number>
+  /** stockPosition / bondPosition / cashPosition / … -> PERCENT */
+  asset_classes: Record<string, number>
+  regions?: Record<string, number> | null
+  pe?: number | null
+  pb?: number | null
+  turnover?: number | null
+}
+
+export interface StockAbout {
+  description: string | null
+  country: string | null
+  city: string | null
+  state: string | null
+  website: string | null
+  employees: number | null
+}
+
 export interface StockPage {
   /** resolved symbol (XEQT -> XEQT.TO) */
   symbol: string
@@ -108,6 +143,8 @@ export interface StockPage {
   asset_type: StockAssetType
   sector: string | null
   industry: string | null
+  fund?: StockFund | null
+  about?: StockAbout | null
   quote: StockQuote
   dividend: {
     profile: DividendProfile

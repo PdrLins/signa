@@ -20,8 +20,26 @@ export interface HoldingPosition {
   book_value: number | null
   unrealized: number | null
   unrealized_pct: number | null
+  /** this row's share (one account's lot) */
   weight_pct: number | null
+  /** the symbol across all accounts in the filter (used for "overweight") */
+  symbol_weight_pct?: number | null
   overweight: boolean
+}
+
+/** The shared live quote a holding is valued at (GET /holdings item.quote). */
+export interface HoldingQuote {
+  price: number
+  prev_close: number | null
+  /** today, PERCENT; null when not live */
+  change_pct: number | null
+  /** per share, native currency; null when not live */
+  change: number | null
+  as_of: string | null
+  live: boolean
+  price_source: 'quote' | 'last_close'
+  /** PERCENT vs the previous year's last close */
+  ytd_pct_live: number | null
 }
 
 export interface HoldingStatus {
@@ -84,6 +102,8 @@ export interface Holding {
   created_at: string
   updated_at: string
   position: HoldingPosition | null
+  /** null = unpriced */
+  quote?: HoldingQuote | null
   flags: { covered_call: boolean; leveraged: boolean; cash_like: boolean; us_large_tech_fund: boolean }
 }
 

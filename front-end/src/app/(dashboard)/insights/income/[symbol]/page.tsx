@@ -4,7 +4,7 @@ import { Suspense, memo, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import { AlertTriangle } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
-import { useI18nStore } from '@/store/i18nStore'
+import { intlLocale, useI18nStore } from '@/store/i18nStore'
 import { useIncomeQuality, useScope } from '@/hooks/usePortfolioInsights'
 import { fill, shortDate, signedPct } from '@/lib/insights'
 import { pct, spct } from '@/components/holdings/format'
@@ -120,7 +120,7 @@ function Inner() {
                 </ul>
                 {q.comparison?.difference_pct != null && (
                   <p className="text-[13px] tabular-nums" style={{ color: signColor(q.comparison.difference_pct) }}>
-                    {fill(q.comparison.difference_pct >= 0 ? tq.ahead : tq.behind, { pts: pct(Math.abs(q.comparison.difference_pct), 1), symbol: q.underlying ?? '' })}
+                    {fill(q.comparison.difference_pct >= 0 ? tq.ahead : tq.behind, { pts: Math.abs(q.comparison.difference_pct).toLocaleString(intlLocale(), { maximumFractionDigits: 1 }), symbol: q.underlying ?? '' })}
                   </p>
                 )}
                 {q.comparison?.currency_mismatch && <p className="text-[12px]" style={{ color: theme.colors.textHint }}>{tq.currencyMismatch}</p>}

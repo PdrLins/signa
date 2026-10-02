@@ -43,7 +43,10 @@ Data rules
     "suspended": counts as a cut.
   * recent_cut: a cut within RECENT_CUT_MONTHS (24).
   * 5-year growth: trailing annual total (last p regular payments, p =
-    payments per year) now vs ~5 years earlier, as a CAGR.
+    payments per year) now vs ~5 years earlier, as a CAGR (growth_5y_cagr,
+    FRACTION). The same math over 1 / 3 / 5 / 10 years is in the profile
+    as growth_1y_pct / growth_3y_pct / growth_5y_pct / growth_10y_pct
+    (PERCENT per year; null when history is short/irregular or for funds).
   * Next ex-date / pay date: an announced date in the future (calendar /
     info) is used as-is (estimated=false); otherwise projected from the
     last ex-date + the usual gap and flagged estimated=true.
@@ -317,6 +320,22 @@ def dividend_cagr(regular: list[Payment], frequency: str | None, years: int = GR
     return (s_now / s_then) ** (365.25 / span_days) - 1
 
 
+GROWTH_WINDOWS = (1, 3, 5, 10)
+
+
+def growth_pcts(regular: list[Payment], frequency: str | None, is_fund: bool) -> dict:
+    """{"growth_1y_pct", "growth_3y_pct", "growth_5y_pct", "growth_10y_pct"}:
+    dividend_cagr over each window as a PERCENT per year (1y = trailing
+    annual total vs the year before), rounded to 2 decimals; None when the
+    history is too short / irregular, and for funds (like growth_5y_cagr:
+    distributions follow the holdings, growth rules don't apply). Pure."""
+    out = {}
+    for years in GROWTH_WINDOWS:
+        g = None if is_fund else dividend_cagr(regular, frequency, years=years)
+        out[f"growth_{years}y_pct"] = round(g * 100, 2) if g is not None else None
+    return out
+
+
 def years_without_cut(regular: list[Payment], cuts: list[date], today: date) -> float | None:
     if not regular:
         return None
@@ -391,6 +410,7 @@ def empty_profile(symbol: str, reason: str = "no_dividend") -> dict:
         "next_ex_date": None, "next_pay_date": None, "next_amount": None,
         "next_estimated": None, "next_pay_estimated": None,
         "upcoming": [], "last_payments": [], "growth_5y_cagr": None,
+        "growth_1y_pct": None, "growth_3y_pct": None, "growth_5y_pct": None, "growth_10y_pct": None,
         "years_without_cut": None, "last_cut_date": None, "recent_cut": False,
         "is_fund": False, "sector": None, "industry": None,
         "history": [], "name": None, "category": None,
@@ -506,6 +526,7 @@ def build_profile(symbol: str, info: dict | None, raw_dividends: Any, calendar: 
         "upcoming": schedule,
         "last_payments": _last_payments(payments, specials),
         "growth_5y_cagr": round(cagr, 6) if cagr is not None else None,
+        **growth_pcts(regular, freq, is_fund),
         "years_without_cut": ywc,
         "last_cut_date": last_cut.isoformat() if last_cut else None,
         "recent_cut": recent,

@@ -12,6 +12,15 @@ iOS (client "ios") also gets an opaque refresh token:
   * reuse detection: a used token presented again means it was copied, so the
     whole session is revoked (reason "reuse_detected") and the user signs in
     again on every device that shared it
+  * grace for lost responses: the new token is DERIVED from the old one
+    (successor_token: HMAC under the server secret), so the server can tell,
+    without storing any plaintext, that a used token is the IMMEDIATE
+    predecessor of the session's current one. Presented again less than
+    settings.session_refresh_grace_seconds (30) after its rotation, while that
+    successor is still unused, it gets the SAME refresh token again (+ a fresh
+    access token) instead of reuse_detected — once per rotation (remembered
+    per process; another worker may allow one more retry inside the window).
+    Older tokens, a second retry, or a retry after the window -> reuse_detected.
 Lifetimes: iOS sessions slide forward settings.session_refresh_days on each
 refresh, capped at settings.session_absolute_days since sign-in; owner
 sessions are capped at settings.session_owner_days. Web sessions end with the
@@ -25,9 +34,12 @@ is_active() says True, and the API routes answer 503 migration_required.
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import re
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -41,6 +53,8 @@ CLIENTS = ("web", "ios")
 
 # session id -> active (bool). Revocations in this process clear the entry at once.
 _active_cache = TTLCache(max_size=20000, default_ttl=60)
+# hashes of rotated tokens whose grace retry was already answered (once per rotation)
+_grace_used = TTLCache(max_size=20000, default_ttl=600)
 
 
 class SessionError(Exception):
@@ -61,6 +75,16 @@ def hash_token(token: str) -> str:
 
 def new_refresh_token() -> str:
     return secrets.token_urlsafe(48)
+
+
+def successor_token(token: str) -> str:
+    """The refresh token that replaces `token` on rotation: HMAC-SHA512 of it
+    under the server secret, 48 bytes url-safe (same shape as
+    new_refresh_token). Deterministic, so a retried refresh can be answered
+    with the same token without storing plaintext. Pure."""
+    mac = hmac.new(settings.jwt_secret_key.encode("utf-8"), b"signa-refresh-v1:" + token.encode("utf-8"),
+                   hashlib.sha512).digest()[:48]
+    return base64.urlsafe_b64encode(mac).decode("ascii").rstrip("=")
 
 
 def normalize_client(client: Optional[str]) -> str:
@@ -205,6 +229,9 @@ def rotate(refresh_token: str, ip: str, user_agent: str) -> dict:
     sid = str(tok["session_id"])
 
     if tok.get("used_at"):
+        retry = _grace_retry(db, refresh_token, tok, now)
+        if retry is not None:
+            return retry
         revoke(sid, None, "reuse_detected")
         raise SessionError("reuse_detected", "This sign-in was used from another place and has been ended. Please sign in again.")
 
@@ -222,11 +249,21 @@ def rotate(refresh_token: str, ip: str, user_agent: str) -> dict:
     # same token exactly one wins; the other is treated as reuse.
     won = db.table("auth_refresh_tokens").update({"used_at": now.isoformat()}) \
         .eq("token_hash", h).is_("used_at", "null").execute().data
-    if not won:
+    if not won:   # a concurrent refresh with the same token won: answer like a retry
+        again = db.table("auth_refresh_tokens").select("token_hash, session_id, used_at") \
+            .eq("token_hash", h).limit(1).execute().data
+        retry = None
+        for attempt in range(3):   # the winner may not have stored the successor yet
+            retry = _grace_retry(db, refresh_token, again[0], now) if again else None
+            if retry is not None or not again:
+                break
+            time.sleep(0.1 * (attempt + 1))
+        if retry is not None:
+            return retry
         revoke(sid, None, "reuse_detected")
         raise SessionError("reuse_detected", "This sign-in was used from another place and has been ended. Please sign in again.")
 
-    new_token = new_refresh_token()
+    new_token = successor_token(refresh_token)
     db.table("auth_refresh_tokens").insert({"token_hash": hash_token(new_token), "session_id": sid}).execute()
     level = _level(str(session["user_id"]))
     new_exp = slide(absolute or now, level, now)
@@ -236,6 +273,40 @@ def rotate(refresh_token: str, ip: str, user_agent: str) -> dict:
     }).eq("id", sid).execute()
     session = {**session, "expires_at": new_exp.isoformat(), "last_used_at": now.isoformat()}
     return {"session": session, "refresh_token": new_token, "level": level}
+
+
+def _grace_retry(db, refresh_token: str, tok: dict, now: datetime) -> Optional[dict]:
+    """rotate() result for an idempotent retry, or None (-> reuse_detected).
+
+    Allowed only when: grace is on, the token was rotated less than
+    settings.session_refresh_grace_seconds ago, its successor_token is the
+    session's CURRENT token (stored and still unused — so the presented token
+    is its immediate predecessor), the session is active, and this rotation
+    has not been retried yet (once, remembered per process)."""
+    grace = settings.session_refresh_grace_seconds
+    used_at = _ts(tok.get("used_at"))
+    if grace <= 0 or used_at is None or not (timedelta(0) <= now - used_at < timedelta(seconds=grace)):
+        return None
+    h = str(tok["token_hash"])
+    if _grace_used.get(h):
+        return None
+    sid = str(tok["session_id"])
+    successor = successor_token(refresh_token)
+    nxt = db.table("auth_refresh_tokens").select("token_hash, session_id, used_at") \
+        .eq("token_hash", hash_token(successor)).limit(1).execute().data
+    if not nxt or str(nxt[0]["session_id"]) != sid or nxt[0].get("used_at"):
+        return None
+    srows = db.table("auth_sessions").select("*").eq("id", sid).limit(1).execute().data
+    if not srows or srows[0].get("revoked_at"):
+        return None
+    session = srows[0]
+    exp, absolute = _ts(session.get("expires_at")), _ts(session.get("absolute_expires_at"))
+    if (exp and now >= exp) or (absolute and now >= absolute):
+        return None
+    _grace_used.set(h, True, ttl=max(grace * 2, 60))
+    logger.info(f"sessions: refresh retry within {grace}s answered for {sid}")
+    return {"session": session, "refresh_token": successor, "level": _level(str(session["user_id"])),
+            "retry": True}
 
 
 def is_active(sid: Optional[str]) -> bool:

@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     session_absolute_days: int = 180       # hard cap since sign-in
     session_owner_days: int = 30           # owner sessions: sliding AND absolute cap
     session_check_cache_seconds: int = 60  # how long "session still active" is cached
+    # iOS: presenting the refresh token that was rotated less than this many
+    # seconds ago (the response was lost) returns the same new pair once
+    # instead of reuse_detected (app/services/sessions.py). 0 = off.
+    session_refresh_grace_seconds: int = 30
     # macOS: block idle sleep while the back-end runs (app/core/keep_awake.py),
     # so scheduled scans and the watchdog run on time.
     keep_awake: bool = True

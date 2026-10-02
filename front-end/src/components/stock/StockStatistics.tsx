@@ -32,25 +32,44 @@ const Cell = memo(function Cell({ label, value }: { label: string; value: string
 /** Key statistics grid (shared part of GET /stocks/{symbol}). Stats without
  *  a value (most of them for ETFs) are left out; the 52-week range and market
  *  cap are in the page header and the yield on the Dividends tab. */
-export function StockStatistics({ stats, symbol, currency }: { stats: Stats | undefined; symbol: string; currency: string }) {
+export function StockStatistics({ stats, symbol, currency, price }: {
+  stats: Stats | undefined; symbol: string; currency: string; price?: number | null
+}) {
+  const theme = useTheme()
   const t = useI18nStore((s) => s.t)
   const ts = t.stock.stats
   const cells = useMemo(() => {
     if (!stats) return []
-    const range = (lo: number | null, hi: number | null) =>
-      lo === null && hi === null ? DASH : `${nativePrice(lo, symbol, currency)} – ${nativePrice(hi, symbol, currency)}`
     return [
-      { key: 'day', label: ts.dayRange, value: range(stats.day_low, stats.day_high) },
       { key: 'pe', label: ts.pe, value: fixed(stats.pe_ratio) },
       { key: 'fpe', label: ts.forwardPe, value: fixed(stats.forward_pe) },
       { key: 'vol', label: ts.volume, value: compactNum(stats.volume) },
       { key: 'avgvol', label: ts.avgVolume, value: compactNum(stats.avg_volume) },
       { key: 'beta', label: ts.beta, value: fixed(stats.beta) },
     ].filter((c) => c.value !== DASH)
-  }, [stats, symbol, currency, ts])
-  if (!stats || cells.length === 0) return null
+  }, [stats, ts])
+  const day = stats && stats.day_low != null && stats.day_high != null && stats.day_high >= stats.day_low
+    ? { lo: stats.day_low, hi: stats.day_high } : null
+  if (!stats || (cells.length === 0 && !day)) return null
+  const mark = day && price != null && day.hi > day.lo
+    ? Math.min(100, Math.max(0, ((price - day.lo) / (day.hi - day.lo)) * 100)) : 50
   return (
     <Panel title={ts.title}>
+      {day && (
+        <div className="mb-3 min-w-0">
+          <p className="text-[12px] mb-1.5" style={{ color: theme.colors.textSub }}>{ts.dayRange}</p>
+          <div className="h-1.5 rounded-full relative" style={{ backgroundColor: theme.colors.surfaceAlt }} role="img"
+            aria-label={`${ts.dayRange}: ${nativePrice(day.lo, symbol, currency)} – ${nativePrice(day.hi, symbol, currency)}`}>
+            {price != null && (
+              <div className="absolute w-3 h-3 rounded-full -top-[3px]"
+                style={{ backgroundColor: theme.colors.primary, border: `2px solid ${theme.colors.surface}`, left: `${mark}%`, transform: 'translateX(-50%)' }} />
+            )}
+          </div>
+          <div className="flex justify-between mt-1.5 text-[11.5px] tabular-nums" style={{ color: theme.colors.textHint }}>
+            <span>{nativePrice(day.lo, symbol, currency)}</span><span>{nativePrice(day.hi, symbol, currency)}</span>
+          </div>
+        </div>
+      )}
       <dl className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {cells.map((c) => <Cell key={c.key} label={c.label} value={c.value} />)}
       </dl>

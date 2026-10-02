@@ -1,7 +1,7 @@
 'use client'
 
-import { Suspense, memo, useCallback, useMemo, useState } from 'react'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { Suspense, memo, useEffect, useMemo, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { CalendarDays, ChevronRight, Receipt } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
@@ -15,8 +15,6 @@ import { HomeHeader } from '@/components/home/HomeHeader'
 import { SymbolLink, SymbolListText } from '@/components/tracker/SymbolLink'
 import { SectionCard, SoonBadge, useButtonStyles } from '@/components/profile/ui'
 import { MonthlyBars } from '@/components/tracker/MonthlyBars'
-import { EventsTimeline } from '@/components/tracker/EventsTimeline'
-import { SegmentedTabs } from '@/components/ui/SegmentedTabs'
 import { Tag } from '@/components/tracker/EventRow'
 import {
   ChipGroup, EmptyHoldings, Freshness, HideAmountsButton, QueryError, SafetyChip, ScopeSelect, SkeletonCards, Stat, useSignColor,
@@ -25,7 +23,6 @@ import type en from '@/lib/i18n/en.json'
 import type { DividendPayer, DividendSummary, UpcomingPayment } from '@/types/tracker'
 
 type TD = typeof en['divSummary']
-type DivTab = 'overview' | 'upcoming'
 
 export default function DividendsPage() {
   return (
@@ -44,23 +41,18 @@ function DividendsInner() {
   const { scope, query, setScope, scoped } = useScope()
   const params = useSearchParams()
   const router = useRouter()
-  const pathname = usePathname()
   const canUpcoming = can('area.coming_up')
-  const tab: DivTab = canUpcoming && params.get('tab') === 'upcoming' ? 'upcoming' : 'overview'
-  const setTab = useCallback((next: DivTab) => {
+  // Coming up is its own page again; old links (?tab=upcoming) go there
+  useEffect(() => {
+    if (params.get('tab') !== 'upcoming') return
     const sp = new URLSearchParams(params.toString())
-    if (next === 'overview') sp.delete('tab')
-    else sp.set('tab', next)
+    sp.delete('tab')
     const qs = sp.toString()
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-  }, [params, pathname, router])
-  const tabOptions = useMemo(() => [
-    { value: 'overview' as const, label: td.tabs.overview },
-    { value: 'upcoming' as const, label: td.tabs.upcoming },
-  ], [td])
+    router.replace(`/coming-up${qs ? `?${qs}` : ''}`)
+  }, [params, router])
   const year = new Date().getFullYear()
   const [period, setPeriod] = useState('next12m')
-  const q = useDividendSummary(scope, period, tab === 'overview')
+  const q = useDividendSummary(scope, period)
   const d = q.data
   const profile = useProfile(can('area.profile'))
   // option-income payers → link to the income-quality page
@@ -81,7 +73,6 @@ function DividendsInner() {
     <div className="space-y-4 pb-4 min-w-0">
       <HomeHeader title={td.title} actions={<HideAmountsButton />} />
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 min-w-0">
-        {canUpcoming && <SegmentedTabs value={tab} options={tabOptions} onChange={setTab} label={td.tabs.label} idBase="div-tab" />}
         <div className="flex items-center gap-2 min-w-0 sm:ml-auto">
           <ScopeSelect scope={scope} onChange={setScope} />
           <Link href="/dividends/calendar" className={btn.secondary.className} style={btn.secondary.style}>
@@ -90,8 +81,7 @@ function DividendsInner() {
         </div>
       </div>
 
-      <div role={canUpcoming ? 'tabpanel' : undefined} id="div-tab-panel" aria-labelledby={canUpcoming ? `div-tab-${tab}` : undefined} className="min-w-0">
-      {tab === 'upcoming' ? <EventsTimeline /> : <div className="space-y-4 min-w-0">
+      <div className="space-y-4 min-w-0">
       <ChipGroup value={period} options={periods} onChange={setPeriod} label={td.periodLabel} />
 
       {q.isLoading && <SkeletonCards heights={[150, 180, 160]} />}
@@ -109,13 +99,12 @@ function DividendsInner() {
             <PayersCard d={d} td={td} optionIncome={optionIncome} canQuality={can('area.insights')} scopeQuery={query} />
           </div>
           <div className="flex flex-col gap-4 min-w-0">
-            <UpcomingCard d={d} td={td} onAll={canUpcoming ? () => setTab('upcoming') : undefined} />
+            <UpcomingCard d={d} td={td} allHref={canUpcoming ? `/coming-up${query}` : undefined} />
             <Freshness asOf={d.as_of} delayed={d.delayed_minutes} />
             <p className="text-[12px]" style={{ color: theme.colors.textHint }}>{t.dividendsPage.notes.disclaimer}</p>
           </div>
         </div>
       )}
-      </div>}
       </div>
     </div>
   )
@@ -220,7 +209,7 @@ const UpcomingRow = memo(function UpcomingRow({ u, currency, td }: { u: Upcoming
   )
 })
 
-function UpcomingCard({ d, td, onAll }: { d: DividendSummary; td: TD; onAll?: () => void }) {
+function UpcomingCard({ d, td, allHref }: { d: DividendSummary; td: TD; allHref?: string }) {
   const theme = useTheme()
   const locale = useI18nStore((s) => s.locale)
   const { fmt } = useMoney(d.currency)
@@ -247,12 +236,12 @@ function UpcomingCard({ d, td, onAll }: { d: DividendSummary; td: TD; onAll?: ()
           {d.upcoming.map((u, i) => <UpcomingRow key={`${u.symbol}-${u.account_id}-${u.ex_date}-${i}`} u={u} currency={d.currency} td={td} />)}
         </ul>
       )}
-      {onAll && (
-        <button type="button" onClick={onAll}
-          className="self-start min-h-[44px] px-1 text-[13px] font-medium rounded focus-visible:outline focus-visible:outline-2"
+      {allHref && (
+        <Link href={allHref}
+          className="self-start min-h-[44px] inline-flex items-center px-1 text-[13px] font-medium rounded focus-visible:outline focus-visible:outline-2"
           style={{ color: theme.colors.primary, outlineColor: theme.colors.primary }}>
           {td.upcoming.seeEvents}
-        </button>
+        </Link>
       )}
     </SectionCard>
   )

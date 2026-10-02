@@ -225,6 +225,60 @@ function ReviewDetails({ h }: { h: Holding }) {
   )
 }
 
+/** Price + day move for a row: the shared live quote (same price as the
+ *  portfolio summary), else the monitor's last close. A move is labelled
+ *  "today" only when the quote is live; otherwise it's the last session's,
+ *  or nothing ("At last close"). */
+export function rowPrice(h: Holding) {
+  const st = h.holding_status || {}
+  const q = h.quote ?? null
+  const price = q?.price ?? st.price ?? null
+  const live = !!q?.live
+  const dayPct = live ? q?.change_pct ?? null : st.day_change_pct ?? null
+  const dayAbs = live && q?.change != null && h.shares ? q.change * h.shares : null
+  const ytd = q?.ytd_pct_live ?? st.ytd_pct ?? null
+  return { price, live, dayPct, dayAbs, ytd }
+}
+
+/** "+0.94% today", "−0.3% last session" or "At last close". */
+const DayMove = memo(function DayMove({ h, ccy, withAmount, className }: {
+  h: Holding; ccy: string; withAmount?: boolean; className?: string
+}) {
+  const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
+  const locale = useI18nStore((s) => s.locale)
+  const th = t.holdings
+  const mm = useMaskedMoney()
+  const { live, dayPct, dayAbs } = rowPrice(h)
+  if (dayPct == null) {
+    return <p className={className} style={{ color: theme.colors.textHint }}>{th.list.atLastClose}</p>
+  }
+  const color = changeColor(dayPct, theme.colors.up, theme.colors.down, theme.colors.textSub)
+  return (
+    <p className={className} style={{ color }}>
+      {withAmount && dayAbs != null && <>{dayAbs >= 0 ? '+' : '−'}{mm(Math.abs(dayAbs), ccy, locale)} </>}
+      {spct(dayPct, 2)}{' '}
+      <span className="font-normal" style={{ color: theme.colors.textHint }}>{live ? th.list.today : th.list.lastSession}</span>
+    </p>
+  )
+})
+
+/** ETF / Stock / Crypto label (ETFs tinted). */
+export const AssetBadge = memo(function AssetBadge({ type }: { type: string | null | undefined }) {
+  const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
+  const k = String(type || '').toLowerCase()
+  if (!['etf', 'stock', 'crypto'].includes(k)) return null
+  const label = (t.stock.assetTypes as Record<string, string>)[k] ?? k
+  const etf = k === 'etf'
+  return (
+    <span className="inline-block align-middle text-[10px] font-semibold uppercase tracking-wide px-1.5 py-px rounded"
+      style={{ backgroundColor: etf ? theme.colors.primary + '22' : theme.colors.surfaceAlt, color: etf ? theme.colors.primary : theme.colors.textSub }}>
+      {label}
+    </span>
+  )
+})
+
 /** The list hides chips that say "all fine" (trend OK / unknown): only what needs a look. */
 function useListChips(h: Holding, maxWeight: number): Chip[] {
   const t = useI18nStore((s) => s.t)
@@ -250,16 +304,18 @@ const HoldingCard = memo(function HoldingCard(props: ItemProps) {
   const hasNotes = !!(h.last_review?.key_concern || st.red_flags?.length)
   const cardLink = useCardLink(`/stocks/${encodeURIComponent(h.symbol)}`)
   const hasValue = p?.value != null
+  const { price } = rowPrice(h)
   return (
     <li onClick={cardLink.onClick} className={`rounded-2xl pl-4 pr-1 py-3 flex flex-col gap-1.5 min-w-0 hover:brightness-110 ${cardLink.className}`}
       style={{ backgroundColor: theme.colors.surface, border: `1px solid ${theme.colors.border}` }}>
       <div className="flex items-center gap-2 min-w-0">
         <div className="min-w-0 flex-1">
-          <h3 className="font-mono font-semibold text-[15px] leading-tight">
+          <h3 className="font-mono font-semibold text-[15px] leading-tight flex items-center gap-1.5">
             <Link href={`/stocks/${encodeURIComponent(h.symbol)}`} className="focus-visible:outline focus-visible:outline-2 rounded"
               style={{ color: theme.colors.text, outlineColor: theme.colors.primary }} aria-label={fill(t.stock.openPage, { symbol: h.symbol })}>
               {h.symbol}
             </Link>
+            <AssetBadge type={h.asset_type} />
           </h3>
           <p className="text-[12px] truncate" style={{ color: theme.colors.textSub }}>
             {h.name ?? DASH}{h.account_name ? ` · ${h.account_name}` : ''}
@@ -267,16 +323,17 @@ const HoldingCard = memo(function HoldingCard(props: ItemProps) {
         </div>
         <div className="text-right shrink-0 tabular-nums">
           <p className="text-[15px] font-semibold" style={{ color: theme.colors.text }}>
-            {hasValue ? mm(p!.value, ccy, locale) : st.price != null ? money(st.price, ccy, locale) : DASH}
+            {hasValue ? mm(p!.value, ccy, locale) : price != null ? money(price, ccy, locale) : DASH}
           </p>
-          <p className="text-[12.5px] font-medium" style={{ color: changeColor(st.day_change_pct, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>
-            {spct(st.day_change_pct, 2)} <span className="font-normal" style={{ color: theme.colors.textHint }}>{th.list.today}</span>
-          </p>
+          {hasValue && ccy !== 'CAD' && p!.value_cad != null && (
+            <p className="text-[11.5px]" style={{ color: theme.colors.textHint }}>≈ {mm(p!.value_cad, 'CAD', locale, 0)}</p>
+          )}
+          <DayMove h={h} ccy={ccy} className="text-[12.5px] font-medium" />
         </div>
         <RowMenu {...props} onEdit={() => setEditing((e) => !e)} onToggleNotes={() => setOpen((o) => !o)} hasNotes={hasNotes} />
       </div>
       <p className="text-[12px] tabular-nums flex flex-wrap gap-x-3 gap-y-0.5 pr-3" style={{ color: theme.colors.textSub }}>
-        {h.shares ? <span>{fill(h.shares === 1 ? th.list.shareOne : th.list.shares, { n: num(h.shares, locale) })} · {st.price != null ? money(st.price, ccy, locale) : DASH}</span>
+        {h.shares ? <span>{fill(h.shares === 1 ? th.list.shareOne : th.list.shares, { n: num(h.shares, locale) })} · {price != null ? money(price, ccy, locale) : DASH}</span>
           : <span style={{ color: theme.colors.textHint }}>{th.list.noShares}</span>}
         {p?.unrealized != null && (
           <span style={{ color: changeColor(p.unrealized, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>
@@ -313,6 +370,7 @@ const HoldingRow = memo(function HoldingRow(props: ItemProps & { showVerdict: bo
   const chips = useListChips(h, maxWeight)
   const ccy = h.currency ?? p?.currency ?? 'USD'
   const hasNotes = !!(h.last_review?.key_concern || st.red_flags?.length)
+  const { price, ytd } = rowPrice(h)
   const td = 'px-3 py-2.5 align-middle'
   const rowLink = useCardLink(`/stocks/${encodeURIComponent(h.symbol)}`)
   const cols = showVerdict ? 10 : 9
@@ -321,29 +379,33 @@ const HoldingRow = memo(function HoldingRow(props: ItemProps & { showVerdict: bo
       <tr onClick={rowLink.onClick} className={`hover:brightness-110 ${rowLink.className}`}
         style={{ borderTop: `1px solid ${theme.colors.border}`, backgroundColor: theme.colors.surface }}>
         <th scope="row" className={`${td} text-left font-normal`}>
-          <p className="font-mono font-semibold text-[14px]">
+          <p className="font-mono font-semibold text-[14px] flex items-center gap-1.5">
             <Link href={`/stocks/${encodeURIComponent(h.symbol)}`} className="focus-visible:outline focus-visible:outline-2 rounded"
               style={{ color: theme.colors.text, outlineColor: theme.colors.primary }} aria-label={fill(t.stock.openPage, { symbol: h.symbol })}>
               {h.symbol}
             </Link>
+            <AssetBadge type={h.asset_type} />
           </p>
           <p className="text-[12px] max-w-[240px] truncate" style={{ color: theme.colors.textSub }} title={h.name ?? undefined}>
             {h.name ?? DASH}{h.account_name ? ` · ${h.account_name}` : ''}
           </p>
         </th>
         <td className={`${td} text-right tabular-nums`}>
-          <p className="text-[14px]" style={{ color: theme.colors.text }}>{st.price != null ? money(st.price, ccy, locale) : DASH}</p>
-          <p className="text-[12px]" style={{ color: changeColor(st.day_change_pct, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>{spct(st.day_change_pct, 2)}</p>
+          <p className="text-[14px]" style={{ color: theme.colors.text }}>{price != null ? money(price, ccy, locale) : DASH}</p>
+          <DayMove h={h} ccy={ccy} withAmount className="text-[12px]" />
         </td>
         <td className={`${td} text-right tabular-nums text-[14px]`} style={{ color: theme.colors.text }}>
           {p?.value != null ? mm(p.value, ccy, locale) : <span style={{ color: theme.colors.textHint }}>{DASH}</span>}
+          {p?.value != null && ccy !== 'CAD' && p.value_cad != null && (
+            <p className="text-[11.5px]" style={{ color: theme.colors.textHint }}>≈ {mm(p.value_cad, 'CAD', locale, 0)}</p>
+          )}
           {h.shares ? <p className="text-[12px]" style={{ color: theme.colors.textSub }}>{fill(h.shares === 1 ? th.list.shareOne : th.list.shares, { n: num(h.shares, locale) })}</p> : null}
         </td>
         <td className={`${td} text-right tabular-nums text-[13px]`} style={{ color: changeColor(p?.unrealized, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>
           {p?.unrealized != null ? <>{mm(p.unrealized, ccy, locale)}<p className="text-[12px]">{spct(p.unrealized_pct, 1)}</p></> : DASH}
         </td>
         <td className={`${td} text-right tabular-nums text-[13px]`} style={{ color: changeColor(st.change_1m_pct, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>{spct(st.change_1m_pct, 1)}</td>
-        <td className={`${td} text-right tabular-nums text-[13px]`} style={{ color: changeColor(st.ytd_pct, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>{spct(st.ytd_pct, 1)}</td>
+        <td className={`${td} text-right tabular-nums text-[13px]`} style={{ color: changeColor(ytd, theme.colors.up, theme.colors.down, theme.colors.textSub) }}>{spct(ytd, 1)}</td>
         <td className={`${td} text-right tabular-nums text-[13px]`}>
           {p?.weight_pct != null ? (
             <span style={{ color: p.overweight ? theme.colors.down : theme.colors.text }}>{pct(p.weight_pct, 1)}</span>

@@ -153,6 +153,15 @@ class Fakes:
             monkeypatch.setattr(sp, "position", lambda user, symbols: None)
             monkeypatch.setattr(sp, "slots", lambda user: {"used": 3, "limit": 10, "remaining": 7})
         monkeypatch.setattr(hm, "earnings_info", self.earnings)
+        self.live: dict[str, dict] = {}       # shared quotes rows (no DB)
+        self.funds: dict[str, dict] = {}      # funds_data per symbol (no network)
+        self.fund_fetches: list[str] = []
+        monkeypatch.setattr(sp, "_stored_quote", lambda symbol: self.live.get(symbol))
+
+        def fund(symbol):
+            self.fund_fetches.append(symbol)
+            return self.funds.get(symbol, {})
+        monkeypatch.setattr("app.services.long_term_check.fetch_funds_data", lambda symbol, ticker=None: fund(symbol))
         monkeypatch.setattr(access, "assert_ai_allowed", lambda what="": self.ai_calls.append(what))
 
     def fetch(self, symbol):
@@ -351,3 +360,116 @@ def test_api_position_and_slots_from_the_users_db(monkeypatch):
     assert body["position"]["shares"] == 5 and body["position"]["weight_pct"] == 100.0
     assert body["position"]["per_account"][0]["account_name"] == "TFSA"
     assert body["slots"] == {"used": 1, "limit": 10, "remaining": 9}
+
+
+# ---------------------------------------------------------------- fund / about / live quote / growth
+
+ETF_INFO = {"quoteType": "ETF", "longName": "iShares Core Equity ETF Portfolio", "exchange": "TOR",
+            "currency": "CAD", "netExpenseRatio": 0.2, "totalAssets": 5.2e9, "fundFamily": "BlackRock",
+            "category": "Global Equity Balanced", "longBusinessSummary": "  The ETF seeks long-term\n growth.  "}
+FUND_DATA = {"overview": {"legalType": "Exchange Traded Fund"},
+             "holdings": [{"symbol": "XUS.TO", "name": "iShares Core S&P 500 Index ETF", "weight": 45.1},
+                          {"symbol": "XIC.TO", "name": "iShares Core S&P/TSX Capped Composite ETF", "weight": 25.0}],
+             "sector_weights": {"technology": 24.5}, "asset_classes": {"stockPosition": 99.6}}
+
+
+@pytest.mark.real_access
+def test_etf_page_has_fund_and_about_and_fund_is_cached(monkeypatch):
+    fakes = Fakes(monkeypatch, data={"XEQT.TO": {"history": _history(), "info": dict(ETF_INFO)}})
+    fakes.funds["XEQT.TO"] = FUND_DATA
+    c = _client(monkeypatch, "free")
+    body = c.get("/api/v1/stocks/XEQT.TO").json()
+    f = body["fund"]
+    assert f["expense_ratio"] == 0.2 and f["aum"] == 5.2e9 and f["family"] == "BlackRock"
+    assert f["legal_type"] == "Exchange Traded Fund" and f["top_holdings"][0]["weight"] == 45.1
+    assert f["holdings_listed"] == 2 and f["top10_weight"] == 70.1 and f["fund_of_funds"] is True
+    assert f["sector_weights"] == {"technology": 24.5} and f["asset_classes"] == {"stockPosition": 99.6}
+    assert body["about"]["description"] == "The ETF seeks long-term growth."
+    assert body["about"]["employees"] is None
+    sp._page_cache.clear()          # page rebuilt -> fund data from its own 12h cache
+    c.get("/api/v1/stocks/XEQT.TO")
+    assert fakes.fund_fetches == ["XEQT.TO"]
+
+
+@pytest.mark.real_access
+def test_stock_page_has_no_fund_and_about_from_info(monkeypatch):
+    info = {**INFO, "longBusinessSummary": "Microsoft develops software.", "country": "United States",
+            "city": "Redmond", "state": "WA", "website": "https://www.microsoft.com", "fullTimeEmployees": 228000}
+    fakes = Fakes(monkeypatch, data={"MSFT": {"history": _history(), "info": info}})
+    body = _client(monkeypatch, "free").get("/api/v1/stocks/MSFT").json()
+    assert body["fund"] is None and fakes.fund_fetches == []
+    assert body["about"] == {"description": "Microsoft develops software.", "country": "United States",
+                             "city": "Redmond", "state": "WA", "website": "https://www.microsoft.com",
+                             "employees": 228000}
+
+
+@pytest.mark.real_access
+def test_fund_failure_and_timeout_fail_soft(monkeypatch):
+    fakes = Fakes(monkeypatch, data={"XEQT.TO": {"history": _history(), "info": {"quoteType": "ETF",
+                                                                                   "exchange": "TOR"}}})
+
+    def boom(symbol, ticker=None):
+        raise RuntimeError("yahoo down")
+    monkeypatch.setattr("app.services.long_term_check.fetch_funds_data", boom)
+    r = _client(monkeypatch, "free").get("/api/v1/stocks/XEQT.TO")
+    assert r.status_code == 200 and r.json()["fund"] is None and r.json()["about"] is None
+
+    import time as _time
+    sp.clear_cache()
+    monkeypatch.setattr(sp, "FUND_TIMEOUT_S", 0.05)
+    monkeypatch.setattr("app.services.long_term_check.fetch_funds_data",
+                        lambda symbol, ticker=None: _time.sleep(0.5) or FUND_DATA)
+    r = _client(monkeypatch, "free").get("/api/v1/stocks/XEQT.TO")
+    assert r.status_code == 200 and r.json()["fund"] is None
+    assert fakes.ai_calls == []
+
+
+def test_about_caps_long_descriptions():
+    a = sp.build_about({"longBusinessSummary": "word " * 2000})
+    assert len(a["description"]) <= sp.ABOUT_MAX_CHARS + 1 and a["description"].endswith("…")
+    assert sp.build_about({}) is None
+
+
+@pytest.mark.real_access
+def test_header_quote_overlaid_with_newer_shared_quote(monkeypatch):
+    fakes = Fakes(monkeypatch)
+    c = _client(monkeypatch, "free")
+    fakes.live["MSFT"] = {"symbol": "MSFT", "price": 130.0, "prev_close": 125.0, "as_of": "2099-01-01T15:00:00+00:00"}
+    q = c.get("/api/v1/stocks/MSFT").json()["quote"]
+    assert (q["price"], q["change_pct"], q["as_of"]) == (130.0, 4.0, "2099-01-01T15:00:00+00:00")
+    assert q["high_52w"] == 125.0                   # the rest stays from the page
+    fakes.live["MSFT"] = {"symbol": "MSFT", "price": 1.0, "prev_close": 1.0, "as_of": "2000-01-01T15:00:00+00:00"}
+    q = c.get("/api/v1/stocks/MSFT").json()["quote"]
+    assert q["price"] == 121.0                      # an older shared row never wins
+
+
+def test_position_cost_only_over_lots_with_cost_and_today_needs_live_quote():
+    holdings = [{"symbol": "MSFT", "account_id": "a1", "shares": 10, "avg_cost": 100, "currency": "USD"},
+                {"symbol": "MSFT", "account_id": "a2", "shares": 30, "avg_cost": None, "currency": "USD"}]
+    p = sp.build_position({"MSFT"}, _scope(holdings, quotes={"MSFT": {"price": 150.0, "prev_close": 140.0,
+                                                                      "currency": "USD"}}))
+    assert p["avg_cost"] == 100.0 and p["market_value"] == 6000.0
+    assert p["open_pl"]["abs"] == 500.0 and p["open_pl"]["pct"] == 50.0
+    stale = [{**h, "holding_status": {"price": 150.0, "prev_close": 140.0}} for h in holdings]
+    p = sp.build_position({"MSFT"}, _scope(stale))
+    assert p["price_source"] == "last_close" and p["today_pl"]["abs"] is None
+
+
+def test_dividend_growth_windows():
+    from datetime import date
+    # quarterly, +10%/yr for 12 years
+    pays = []
+    for y in range(2014, 2026):
+        for m in (3, 6, 9, 12):
+            pays.append((date(y, m, 15), round(1.0 * 1.1 ** (y - 2014), 6)))
+    idx = pd.DatetimeIndex([pd.Timestamp(d) for d, _ in pays])
+    raw = pd.Series([a for _, a in pays], index=idx)
+    prof = dividends.build_profile("KO", {"quoteType": "EQUITY", "dividendRate": 3.0}, raw, {},
+                                   date(2026, 1, 10), price=60.0)
+    for k in ("growth_1y_pct", "growth_3y_pct", "growth_5y_pct", "growth_10y_pct"):
+        assert prof[k] == pytest.approx(10.0, abs=0.3), k
+    assert prof["growth_5y_pct"] == pytest.approx(prof["growth_5y_cagr"] * 100, abs=0.01)
+    short = dividends.build_profile("NEW", {"quoteType": "EQUITY"}, raw[-8:], {}, date(2026, 1, 10))
+    assert short["growth_1y_pct"] is not None and short["growth_3y_pct"] is None and short["growth_10y_pct"] is None
+    fund = dividends.build_profile("XEQT.TO", {"quoteType": "ETF"}, raw, {}, date(2026, 1, 10))
+    assert fund["growth_1y_pct"] is None

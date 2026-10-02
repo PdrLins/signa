@@ -158,7 +158,13 @@ export function DividendPanel({ profile, rules, symbol, currency, rrWithDividend
       { k: td.fiveYearYield, v: fracPct(profile.five_year_avg_yield, 2) },
       { k: td.nextEx, v: profile.next_ex_date ? shortDate(profile.next_ex_date, locale, true) : DASH, est: !!profile.next_ex_date && !!profile.next_estimated },
       { k: td.nextPay, v: profile.next_pay_date ? shortDate(profile.next_pay_date, locale, true) : DASH, est: !!profile.next_pay_date && !!profile.next_pay_estimated },
-      { k: td.growth, v: profile.growth_5y_cagr != null ? fill(td.growthValue, { pct: fracPct(profile.growth_5y_cagr, 1, true) }) : DASH },
+      // stock page: growth over 1/3/5/10 years (PERCENT per year); else the 5-year CAGR (FRACTION)
+      ...(['growth_1y_pct', 'growth_3y_pct', 'growth_5y_pct', 'growth_10y_pct'] as const).some((g) => profile[g] != null)
+        ? (['growth_1y_pct', 'growth_3y_pct', 'growth_5y_pct', 'growth_10y_pct'] as const).map((g) => ({
+          k: fill(td.growthN, { n: g.replace('growth_', '').replace('y_pct', '') }),
+          v: profile[g] != null ? fill(td.growthValue, { pct: fracPct((profile[g] as number) / 100, 1, true) }) : DASH,
+        }))
+        : [{ k: td.growth, v: profile.growth_5y_cagr != null ? fill(td.growthValue, { pct: fracPct(profile.growth_5y_cagr, 1, true) }) : DASH }],
       { k: td.yearsNoCut, v: profile.years_without_cut != null ? fill(td.yearsValue, { n: numText(profile.years_without_cut, 0) }) : DASH },
     ] as { k: string; v: string; est?: boolean }[]
   }, [profile, td, ccy, locale])

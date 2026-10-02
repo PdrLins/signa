@@ -1,6 +1,8 @@
 """Health check and configuration routes — protected."""
 
 import time
+
+from app.core.version import APP_VERSION
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
@@ -73,9 +75,18 @@ async def health_check():
     return {
         "status": "ok",
         "app": "Signa",
+        "version": APP_VERSION,   # back-end/VERSION, bumped on every back-end commit
         "uptime_seconds": round(time.time() - _start_time, 2),
         "scheduler_running": scheduler.running,
     }
+
+
+@router.get("/version")
+async def version():
+    """Public: the back-end version (back-end/VERSION, bumped on every commit
+    that touches back-end/). Clients show it next to their own version.
+    {"backend": "1.0.3"}"""
+    return {"backend": APP_VERSION}
 
 
 @router.get("/health/integrations", dependencies=[Depends(require_feature("area.integrations"))])

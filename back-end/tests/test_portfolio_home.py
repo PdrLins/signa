@@ -67,6 +67,36 @@ def test_summary_math_without_transactions(monkeypatch, db):
     assert body["estimated"] is False
 
 
+@pytest.mark.parametrize("scope", ["", "account", "person"])
+def test_holdings_value_matches_summary_market_value(monkeypatch, db, scope):
+    from app.api.v1 import holdings as holdings_api
+    a, b = _setup(db)
+    p = db.insert_person(U1, {"name": "Ana"})["id"]
+    db.accounts[b]["person_id"] = p
+    db.add_holding(U1, "VFV.TO", None, shares=4, avg_cost=100,
+                   holding_status={"price": 120.0, "prev_close": 119.0})   # no quote: last close
+    # the monitor's stale close must not leak into the value
+    for h in db.holdings.values():
+        h.setdefault("holding_status", {"price": 1.0})
+    qs = {"": "", "account": f"?account_id={a}", "person": f"?person_id={p}"}[scope]
+    c = make_client(monkeypatch, portfolio_home.router, holdings_api.router)
+    summary = c.get(f"/api/v1/portfolio/summary{qs}").json()
+    hold = c.get(f"/api/v1/holdings{qs}").json()
+    assert hold["totals"]["value_cad"] == pytest.approx(summary["market_value"], abs=0.01)
+    items_sum = sum(i["position"]["value_cad"] for i in hold["items"] if i["position"]["value_cad"] is not None)
+    assert items_sum == pytest.approx(summary["market_value"], abs=0.01 * len(hold["items"]))
+
+
+def test_summary_day_change_ignores_last_close_positions(monkeypatch, db):
+    _setup(db)
+    a = next(iter(db.accounts))
+    db.add_holding(U1, "OLD.TO", a, shares=10, holding_status={"price": 50.0, "prev_close": 40.0})
+    body = _client(monkeypatch).get("/api/v1/portfolio/summary").json()
+    assert body["market_value"] == pytest.approx(330 + 3 * 150 * 1.4 + 500)
+    assert body["day_change"]["abs"] == pytest.approx(10 + 3 * 10 * 1.4)   # OLD.TO's +100 is yesterday's
+    assert body["day_change"]["pct"] == pytest.approx(52 / 908 * 100, abs=0.01)
+
+
 def test_summary_with_transactions_adds_realized_and_dividends(monkeypatch, db):
     a, b = _setup(db)
     db.insert_transactions(U1, [

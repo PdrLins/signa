@@ -2,7 +2,8 @@
   "app": {
     "name": "Signa",
     "title": "Signa — AI Signal Engine",
-    "description": "AI-powered stock signal engine scanning TSX, NYSE, and NASDAQ"
+    "description": "AI-powered stock signal engine scanning TSX, NYSE, and NASDAQ",
+    "versions": "Web {web} · Server {server}"
   },
   "nav": {
     "overview": "Overview",
@@ -1892,7 +1893,8 @@
         "yield_trap": "Yield {yield}% is far above its 5-year average of {avg}%: the market may expect a cut (possible yield trap).",
         "cap_verdict": "Recent cut and a payout above 100%: the verdict is capped at “Reasonable, with caveats”.",
         "suspended": "The dividend appears suspended (last payment {date})."
-      }
+      },
+      "growthN": "Dividend growth, {n} yr"
     }
   },
   "holdings": {
@@ -1986,7 +1988,9 @@
       "noShares": "Shares not entered",
       "today": "today",
       "missingShares": "{n} without shares. Add shares to see their value and gain.",
-      "shareOne": "{n} share"
+      "shareOne": "{n} share",
+      "atLastClose": "At last close",
+      "lastSession": "last session"
     },
     "chips": {
       "trendOk": "Trend OK",
@@ -2464,6 +2468,64 @@
       "dividends": "Dividends",
       "alerts": "Alerts",
       "alertsN": "Alerts · {n}"
+    },
+    "fund": {
+      "aboutTitle": "About this fund",
+      "category": "Category",
+      "family": "Fund company",
+      "fee": "Yearly fee",
+      "feeValue": "{pct} a year",
+      "size": "Fund size",
+      "holdings": "Holdings",
+      "top10": "Top 10 share",
+      "since": "Started",
+      "fundOfFunds": "Holds other funds: this ETF is a package of other ETFs.",
+      "feeTitle": "Yearly fee",
+      "perYear": "a year",
+      "feeAria": "Yearly fee {pct}, on a scale from 0% to 1% or more",
+      "feeYours": "{pct} a year ≈ {amount} a year on your {value}",
+      "feeExplain": "The yearly fee the fund company charges. Lower is better.",
+      "assetMix": "Asset mix",
+      "assetClasses": {
+        "stockPosition": "Stocks",
+        "bondPosition": "Bonds",
+        "cashPosition": "Cash",
+        "preferredPosition": "Preferred shares",
+        "convertiblePosition": "Convertibles",
+        "otherPosition": "Other"
+      },
+      "sectorsTitle": "Sectors",
+      "sectors": {
+        "technology": "Technology",
+        "financial_services": "Financials",
+        "healthcare": "Health care",
+        "consumer_cyclical": "Consumer discretionary",
+        "consumer_defensive": "Consumer staples",
+        "industrials": "Industrials",
+        "basic_materials": "Materials",
+        "energy": "Energy",
+        "utilities": "Utilities",
+        "realestate": "Real estate",
+        "communication_services": "Communication"
+      },
+      "topHoldings": "Top holdings",
+      "showAll": "Show all {n}",
+      "showFewer": "Show fewer"
+    },
+    "about": {
+      "title": "About",
+      "more": "Show more",
+      "less": "Show less",
+      "employees": "{n} employees"
+    },
+    "nextPayout": {
+      "title": "Your next payout",
+      "pays": "Pays {date}",
+      "ownBefore": "own it before {date}",
+      "exOn": "Goes ex-dividend {date}",
+      "shares": "{n} shares",
+      "estimated": "estimated",
+      "perShare": "{amount} per share"
     }
   },
   "tracker": {
@@ -2585,7 +2647,16 @@
     "comingUp": "Coming up",
     "seeAll": "See all",
     "seeAllComingUp": "See everything coming up",
-    "nothingSoon": "Nothing in the next 30 days."
+    "nothingSoon": "Nothing in the next 30 days.",
+    "bell": "Coming up",
+    "bellNew": "Coming up: something of yours happens today",
+    "today": {
+      "paysOne": "{symbol} pays you {amount} today",
+      "paysOneNoCash": "{symbol} pays its dividend today",
+      "paysMany": "{n} dividends pay you {amount} today",
+      "exOne": "{symbol} goes ex-dividend today",
+      "exMany": "{n} of your stocks go ex-dividend today"
+    }
   },
   "insightsPage": {
     "title": "Insights",
@@ -2631,7 +2702,7 @@
       "mapHelp": "Bigger tile, bigger share of your portfolio.",
       "colorBy": "Colour tiles by",
       "byDay": "Today",
-      "byTotal": "Total gain",
+      "byTotal": "Open gain",
       "noTiles": "No priced holdings to show.",
       "unpriced": "No price available, so left out: {symbols}.",
       "warningsTitle": "Concentration",
@@ -3113,7 +3184,9 @@
       "expand": "Show the chart full screen",
       "estimated": "Based on today's shares; add transactions for the exact past.",
       "addTransactions": "Add transactions",
-      "noIntraday": "No intraday prices yet today. Showing the previous close and the latest value."
+      "noIntraday": "No intraday prices yet today. Showing the previous close and the latest value.",
+      "totalValue": "Total value",
+      "includesCash": "Includes {amount} cash"
     },
     "extended": {
       "pre": "Pre-market",
@@ -3449,6 +3522,20 @@
     },
     "extendedTitle": "Pre-market / after-hours change vs the last regular price",
     "preShort": "Pre",
-    "postShort": "AH"
+    "postShort": "AH",
+    "groupsShort": {
+      "popular_us": "US",
+      "monthly_income": "Monthly",
+      "dividend_growers": "Growers",
+      "popular_ca": "Canada"
+    },
+    "groupsWhy": {
+      "popular_us": "The names most US investors start with.",
+      "popular_ca": "Big, well-known Canadian companies.",
+      "monthly_income": "Pays every month instead of every quarter.",
+      "dividend_growers": "Has raised its dividend year after year."
+    },
+    "followedAria": "{symbol} followed",
+    "followedTitle": "Following"
   }
 }

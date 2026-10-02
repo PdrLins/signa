@@ -205,8 +205,11 @@ def summary_body(scope: dict) -> dict:
     merged = pc.merge_positions_by_symbol(positions)
     mv = sum(p["value_home"] for p in positions if p["value_home"] is not None)
     cash, cash_unconv = scope_cash(scope["accounts"], home, usdcad)
-    day_abs = sum(p["day_change_home"] for p in positions if p["day_change_home"] is not None)
-    day_base = sum(p["prev_value_home"] for p in positions if p["day_change_home"] is not None)
+    # today's move only from live quotes: a "last_close" fallback (monitor's
+    # holding_status) carries YESTERDAY's prev_close -> yesterday's move
+    today = [p for p in positions if p["day_change_home"] is not None and p.get("price_source") == "quote"]
+    day_abs = sum(p["day_change_home"] for p in today)
+    day_base = sum(p["prev_value_home"] for p in today)
     cost = sum(p["cost_home"] for p in positions if p["gain_home"] is not None)
     unreal = sum(p["gain_home"] for p in positions if p["gain_home"] is not None)
     txs = scope.get("transactions") or []

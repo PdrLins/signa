@@ -398,14 +398,75 @@ def holding_price(h: dict) -> float | None:
     return _num((h.get("holding_status") or {}).get("price"))
 
 
+def _ytd_base(st: dict) -> float | None:
+    """Previous year's last close from the monitor's status: stored
+    `ytd_base`, else derived from price / (1 + ytd_pct/100)."""
+    base = _num(st.get("ytd_base"))
+    if base:
+        return base
+    price, ytd = _num(st.get("price")), _num(st.get("ytd_pct"))
+    if price and ytd is not None and ytd > -100:
+        return price / (1 + ytd / 100)
+    return None
+
+
+def holding_quote(h: dict, quotes: dict[str, dict] | None) -> dict | None:
+    """The price a holding is valued at: the shared live quote (`quotes`
+    table, same source as /portfolio/summary) when there is one, else the
+    monitor's last close (holding_status). Pure.
+
+    {"price", "prev_close", "change_pct" (PERCENT, today), "change" (native
+    currency, price - prev_close), "as_of" (ISO), "live" (bool),
+    "price_source": "quote" | "last_close", "ytd_pct_live" (PERCENT)}
+    or None when nothing prices it. With price_source "last_close" the
+    day change is unknown: change / change_pct are null (the monitor's
+    prev_close would show yesterday's move as today's). ytd_pct_live =
+    price vs the previous year's last close (holding_status ytd base; null
+    when unknown or when the quote is from a later year than the status)."""
+    sym = str(h.get("symbol") or "").upper()
+    q = (quotes or {}).get(sym) or {}
+    st = h.get("holding_status") or {}
+    price = _num(q.get("price"))
+    if price is not None:
+        prev, as_of, live = _num(q.get("prev_close")), q.get("as_of"), True
+    else:
+        price, prev, as_of, live = _num(st.get("price")), None, st.get("as_of"), False
+    if price is None:
+        return None
+    base = _ytd_base(st)
+    same_year = not (as_of and st.get("as_of")) or str(as_of)[:4] == str(st.get("as_of"))[:4]
+    return {
+        "price": price,
+        "prev_close": prev,
+        "change_pct": _r((price / prev - 1) * 100, 4) if prev else None,
+        "change": _r(price - prev, 4) if prev else None,
+        "as_of": as_of,
+        "live": live,
+        "price_source": "quote" if live else "last_close",
+        "ytd_pct_live": _r((price / base - 1) * 100) if base and same_year else None,
+    }
+
+
 def portfolio_math(holdings: list[dict], usdcad: float | None,
-                   max_weight_pct: float | None = None) -> tuple[dict[str, dict], dict]:
+                   max_weight_pct: float | None = None,
+                   quotes: dict[str, dict] | None = None) -> tuple[dict[str, dict], dict]:
     """Per-holding position figures + portfolio totals.
 
     Only holdings with shares AND a price have a value; weights are shares
     of the total value of those holdings (labelled as such in the UI). A
     gain needs avg_cost too. Everything is in the holding's own currency
     plus a CAD figure (USD x CAD=X); totals are CAD only.
+
+    `quotes` ({SYMBOL: quote row}, quotes.get_quotes): when given, a holding
+    is priced with its live quote (falling back to holding_status.price) —
+    the same price /portfolio/summary uses, so totals match its market value.
+    Without it the monitor's last close is used (unchanged behaviour).
+
+    weight_pct = this ROW's share (one account's lot); symbol_weight_pct =
+    the symbol's share across all its rows (accounts) — `overweight` uses
+    symbol_weight_pct, so a stock split over TFSA + RRSP is judged as one.
+    Totals carry "as_of" (the oldest quote time among priced rows, when
+    `quotes` is given; else null).
     """
     max_w = settings.holdings_max_weight_pct if max_weight_pct is None else max_weight_pct
     per: dict[str, dict] = {}
@@ -414,12 +475,21 @@ def portfolio_math(holdings: list[dict], usdcad: float | None,
     gain_cad = 0.0
     fx_missing = False
     with_shares = 0
+    as_ofs: list[str] = []
     for h in holdings:
         hid = str(h.get("id") or h.get("symbol"))
-        ccy = holding_currency(h)
         shares = _num(h.get("shares"))
         cost = _num(h.get("avg_cost"))
-        price = holding_price(h)
+        if quotes is None:
+            ccy = holding_currency(h)
+            price = holding_price(h)
+        else:
+            q = quotes.get(str(h.get("symbol") or "").upper()) or {}
+            ccy = str(q.get("currency") or holding_currency(h)).upper()   # as value_positions
+            hq = holding_quote(h, quotes) or {}
+            price = hq.get("price")
+            if price is not None and hq.get("as_of"):
+                as_ofs.append(str(hq["as_of"]))
         value = shares * price if shares and price else None
         value_cad = to_cad(value, ccy, usdcad)
         book = shares * cost if shares and cost else None
@@ -437,13 +507,21 @@ def portfolio_math(holdings: list[dict], usdcad: float | None,
                 gain_cad += value_cad - book_cad
         per[hid] = {
             "currency": ccy, "value": _r(value), "value_cad": _r(value_cad), "book_value": _r(book),
-            "unrealized": _r(gain), "unrealized_pct": _r(gain_pct), "weight_pct": None, "overweight": False,
+            "unrealized": _r(gain), "unrealized_pct": _r(gain_pct), "weight_pct": None,
+            "symbol_weight_pct": None, "overweight": False, "_symbol": str(h.get("symbol") or "").upper(),
         }
+    sym_cad: dict[str, float] = {}
     for hid, p in per.items():
+        if p["value_cad"] is not None:
+            sym_cad[p["_symbol"]] = sym_cad.get(p["_symbol"], 0.0) + p["value_cad"]
+    for hid, p in per.items():
+        sym = p.pop("_symbol")
         if p["value_cad"] is not None and total_cad > 0:
             w = p["value_cad"] / total_cad * 100
+            sw = sym_cad[sym] / total_cad * 100
             p["weight_pct"] = round(w, 2)
-            p["overweight"] = w > max_w
+            p["symbol_weight_pct"] = round(sw, 2)
+            p["overweight"] = sw > max_w
     totals = {
         "currency": "CAD",
         "value_cad": _r(total_cad) if total_cad > 0 else None,
@@ -455,6 +533,7 @@ def portfolio_math(holdings: list[dict], usdcad: float | None,
         "usdcad": usdcad,
         "fx_missing": fx_missing,
         "max_weight_pct": max_w,
+        "as_of": min(as_ofs) if as_ofs else None,
     }
     return per, totals
 
@@ -645,7 +724,9 @@ def allocate_score(h: dict, weight: dict | None) -> tuple[float, list[dict]]:
         elif vs200 is not None and 0 <= vs200 <= 10:
             add("near_trend", 0.5, pct_vs_sma200=vs200)
 
-    w = (weight or {}).get("weight_pct")
+    w = (weight or {}).get("symbol_weight_pct")   # the symbol across accounts
+    if w is None:
+        w = (weight or {}).get("weight_pct")
     max_w = settings.holdings_max_weight_pct
     if (weight or {}).get("overweight"):
         add("overweight", -4.0, weight_pct=w, max_pct=max_w)
@@ -731,11 +812,15 @@ def allocate_ideas(holdings: list[dict], weights: dict[str, dict], extra: list[d
     }
 
 
-def public_holding(h: dict, weight: dict | None) -> dict[str, Any]:
-    """API shape of one holding (alert_state is internal)."""
+def public_holding(h: dict, weight: dict | None, quote: dict | None = None,
+                   with_quote: bool = False) -> dict[str, Any]:
+    """API shape of one holding (alert_state is internal). with_quote adds
+    "quote" (holding_quote shape or None)."""
     out = {k: v for k, v in h.items() if k not in ("alert_state", "user_id")}
     out["position"] = weight
     out["flags"] = fund_flags(str(h.get("symbol") or ""))
+    if with_quote:
+        out["quote"] = quote
     return out
 
 

@@ -113,10 +113,15 @@ export function PortfolioValueCard({ scope, summary }: { scope: Scope; summary: 
       style={{ backgroundColor: theme.colors.surface, border: `1px solid ${theme.colors.border}` }}>
       <div className="flex items-start justify-between gap-3 min-w-0">
         <div className="min-w-0">
-          <h2 id="pv-title" className="text-[13px] font-medium" style={{ color: theme.colors.textSub }}>{tv.marketValue}</h2>
+          <h2 id="pv-title" className="text-[13px] font-medium" style={{ color: theme.colors.textSub }}>
+            {(summary.cash ?? 0) > 0 ? tv.totalValue : tv.marketValue}
+          </h2>
           <p className="text-[30px] md:text-[34px] font-bold leading-tight" style={{ color: theme.colors.text }}>
             <LiveValue value={String(summary.total)}>{fmt(summary.total)}</LiveValue>
           </p>
+          {(summary.cash ?? 0) > 0 && (
+            <p className="text-[12px]" style={{ color: theme.colors.textHint }}>{fill(tv.includesCash, { amount: fmt(summary.cash) })}</p>
+          )}
           <p className="text-[14px] font-semibold" style={{ color }}>
             <LiveValue value={`${change.abs}`}>
               {change.abs === null ? '—' : `${arrow(change.abs)}${fmt(Math.abs(change.abs))} ${signedPct(change.pct)}`}
@@ -254,6 +259,9 @@ export function HomeValueCard({ summary, href }: { summary: PortfolioSummary; hr
       <p className="text-[30px] font-bold leading-tight" style={{ color: theme.colors.text }}>
         <LiveValue value={String(summary.total)}>{fmt(summary.total)}</LiveValue>
       </p>
+      {(summary.cash ?? 0) > 0 && (
+        <p className="text-[12px]" style={{ color: theme.colors.textHint }}>{fill(tv.includesCash, { amount: fmt(summary.cash) })}</p>
+      )}
       <p className="text-[14px] font-semibold" style={{ color: signColor(dc.abs) }}>
         <LiveValue value={`${dc.abs}`}>
           {dc.abs === null ? '—' : `${arrow(dc.abs)}${fmt(Math.abs(dc.abs))} ${signedPct(dc.pct)}`}

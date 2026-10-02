@@ -2,7 +2,8 @@
   "app": {
     "name": "Signa",
     "title": "Signa — Motor de Sinais com IA",
-    "description": "Motor de sinais de investimento com IA escaneando TSX, NYSE e NASDAQ"
+    "description": "Motor de sinais de investimento com IA escaneando TSX, NYSE e NASDAQ",
+    "versions": "Web {web} · Servidor {server}"
   },
   "nav": {
     "overview": "Painel",
@@ -1892,7 +1893,8 @@
         "yield_trap": "Yield de {yield}% bem acima da média de 5 anos ({avg}%): o mercado pode esperar um corte (possível armadilha de yield).",
         "cap_verdict": "Corte recente e payout acima de 100%: o veredito fica limitado a “Razoável, com ressalvas”.",
         "suspended": "O dividendo parece suspenso (último pagamento em {date})."
-      }
+      },
+      "growthN": "Crescimento do dividendo, {n} a"
     }
   },
   "holdings": {
@@ -1986,7 +1988,9 @@
       "noShares": "Quantidade não informada",
       "today": "hoje",
       "missingShares": "{n} sem quantidade. Informe a quantidade para ver valor e ganho.",
-      "shareOne": "{n} cota"
+      "shareOne": "{n} cota",
+      "atLastClose": "No último fechamento",
+      "lastSession": "último pregão"
     },
     "chips": {
       "trendOk": "Tendência OK",
@@ -2464,6 +2468,64 @@
       "dividends": "Dividendos",
       "alerts": "Alertas",
       "alertsN": "Alertas · {n}"
+    },
+    "fund": {
+      "aboutTitle": "Sobre este fundo",
+      "category": "Categoria",
+      "family": "Gestora",
+      "fee": "Taxa anual",
+      "feeValue": "{pct} ao ano",
+      "size": "Tamanho do fundo",
+      "holdings": "Ativos",
+      "top10": "Peso dos 10 maiores",
+      "since": "Início",
+      "fundOfFunds": "Investe em outros fundos: este ETF é um pacote de outros ETFs.",
+      "feeTitle": "Taxa anual",
+      "perYear": "ao ano",
+      "feeAria": "Taxa anual {pct}, numa escala de 0% a 1% ou mais",
+      "feeYours": "{pct} ao ano ≈ {amount} por ano sobre seus {value}",
+      "feeExplain": "A taxa anual que a gestora cobra. Quanto menor, melhor.",
+      "assetMix": "Composição",
+      "assetClasses": {
+        "stockPosition": "Ações",
+        "bondPosition": "Renda fixa",
+        "cashPosition": "Caixa",
+        "preferredPosition": "Ações preferenciais",
+        "convertiblePosition": "Conversíveis",
+        "otherPosition": "Outros"
+      },
+      "sectorsTitle": "Setores",
+      "sectors": {
+        "technology": "Tecnologia",
+        "financial_services": "Financeiro",
+        "healthcare": "Saúde",
+        "consumer_cyclical": "Consumo discricionário",
+        "consumer_defensive": "Consumo básico",
+        "industrials": "Indústria",
+        "basic_materials": "Materiais",
+        "energy": "Energia",
+        "utilities": "Serviços públicos",
+        "realestate": "Imobiliário",
+        "communication_services": "Comunicação"
+      },
+      "topHoldings": "Maiores posições",
+      "showAll": "Ver todas as {n}",
+      "showFewer": "Ver menos"
+    },
+    "about": {
+      "title": "Sobre",
+      "more": "Ver mais",
+      "less": "Ver menos",
+      "employees": "{n} funcionários"
+    },
+    "nextPayout": {
+      "title": "Seu próximo pagamento",
+      "pays": "Paga em {date}",
+      "ownBefore": "tenha antes de {date}",
+      "exOn": "Data ex-dividendo {date}",
+      "shares": "{n} cotas",
+      "estimated": "estimado",
+      "perShare": "{amount} por cota"
     }
   },
   "tracker": {
@@ -2585,7 +2647,16 @@
     "comingUp": "Próximos",
     "seeAll": "Ver tudo",
     "seeAllComingUp": "Ver todos os próximos eventos",
-    "nothingSoon": "Nada nos próximos 30 dias."
+    "nothingSoon": "Nada nos próximos 30 dias.",
+    "bell": "Próximos eventos",
+    "bellNew": "Próximos eventos: algo seu acontece hoje",
+    "today": {
+      "paysOne": "{symbol} paga {amount} para você hoje",
+      "paysOneNoCash": "{symbol} paga o dividendo hoje",
+      "paysMany": "{n} dividendos pagam {amount} para você hoje",
+      "exOne": "{symbol} fica ex-dividendo hoje",
+      "exMany": "{n} das suas ações ficam ex-dividendo hoje"
+    }
   },
   "insightsPage": {
     "title": "Análises",
@@ -2631,7 +2702,7 @@
       "mapHelp": "Quanto maior o bloco, maior a parte da sua carteira.",
       "colorBy": "Colorir blocos por",
       "byDay": "Hoje",
-      "byTotal": "Ganho total",
+      "byTotal": "Ganho em aberto",
       "noTiles": "Nenhum ativo com preço para mostrar.",
       "unpriced": "Sem preço disponível, por isso ficaram de fora: {symbols}.",
       "warningsTitle": "Concentração",
@@ -3113,7 +3184,9 @@
       "expand": "Mostrar o gráfico em tela cheia",
       "estimated": "Baseado nas suas cotas de hoje; adicione transações para o passado exato.",
       "addTransactions": "Adicionar transações",
-      "noIntraday": "Ainda sem preços intradiários hoje. Mostrando o fechamento anterior e o valor mais recente."
+      "noIntraday": "Ainda sem preços intradiários hoje. Mostrando o fechamento anterior e o valor mais recente.",
+      "totalValue": "Valor total",
+      "includesCash": "Inclui {amount} em caixa"
     },
     "extended": {
       "pre": "Pré-mercado",
@@ -3449,6 +3522,20 @@
     },
     "extendedTitle": "Variação no pré-mercado / após o fechamento em relação ao último preço regular",
     "preShort": "Pré",
-    "postShort": "AF"
+    "postShort": "AF",
+    "groupsShort": {
+      "popular_us": "EUA",
+      "monthly_income": "Mensais",
+      "dividend_growers": "Crescentes",
+      "popular_ca": "Canadá"
+    },
+    "groupsWhy": {
+      "popular_us": "Os nomes com que a maioria dos investidores nos EUA começa.",
+      "popular_ca": "Grandes empresas canadenses conhecidas.",
+      "monthly_income": "Paga todo mês em vez de a cada trimestre.",
+      "dividend_growers": "Aumentou o dividendo ano após ano."
+    },
+    "followedAria": "{symbol} seguido",
+    "followedTitle": "Seguindo"
   }
 }

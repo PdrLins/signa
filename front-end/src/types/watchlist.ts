@@ -33,6 +33,16 @@ export interface FollowingRow {
   extended_locked?: boolean
 }
 
+export interface SuggestionItem {
+  symbol: string
+  name: string
+  /** optional: shared quote when available */
+  price?: number | null
+  /** today, PERCENT */
+  change_pct?: number | null
+  currency?: string | null
+}
+
 export type SuggestionGroupKey = 'popular_ca' | 'popular_us' | 'monthly_income' | 'dividend_growers'
 
 export interface FollowingOverview {
@@ -41,5 +51,5 @@ export interface FollowingOverview {
   watched: FollowingRow[]
   held: FollowingRow[]
   slots: { used: number; limit: number | null; remaining: number | null } | null
-  suggestions: { key: SuggestionGroupKey; items: { symbol: string; name: string }[] }[]
+  suggestions: { key: SuggestionGroupKey; items: SuggestionItem[] }[]
 }

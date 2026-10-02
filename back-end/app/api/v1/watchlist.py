@@ -31,7 +31,10 @@ async def watchlist_overview(user: dict = Depends(get_current_user)):
      "held":    [Row + {"in_holdings": true}],                    # held symbols not on the watchlist
      "slots": {"used", "limit", "remaining"} | null,               # limit null = unlimited
      "suggestions": [{"key": "popular_ca" | "popular_us" | "monthly_income" | "dividend_growers",
-                      "items": [{"symbol", "name"}]}]}            # never already-followed symbols
+                      "items": [{"symbol", "name", "price" | null, "change_pct" | null (PERCENT, today),
+                                 "currency" | null}]}]}          # never already-followed symbols
+    Suggestion prices: the shared quotes row when updated in the last 15 min, else
+    one batched live download cached 15 min for everyone (delayed ~15 min).
     Row = {"symbol", "name" | null, "price" | null, "change_pct" | null (today),
            "change_1m_pct" | null, "currency" | null, "as_of" | null,
            "spark": [float, ...]}   # up to 22 daily closes, oldest first (may be empty)

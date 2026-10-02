@@ -3,6 +3,7 @@
   refresh_quotes(symbols)  ONE batched yfinance download for all the symbols
                            (chunks of QUOTE_BATCH, not one call per symbol),
                            upserted into `quotes`. Returns {symbol: quote}.
+  get_stored_quotes(syms)  reads the table only (no live fetch).
   get_quotes(symbols)      reads the table; symbols missing from it are
                            fetched live (and stored). Never raises: a symbol
                            nobody can price is simply absent.
@@ -184,21 +185,30 @@ def refresh_quotes(symbols: Iterable[str]) -> dict[str, dict]:
     return quotes
 
 
-def get_quotes(symbols: Iterable[str]) -> dict[str, dict]:
-    """Stored quotes; symbols missing from the table are fetched live."""
+def get_stored_quotes(symbols: Iterable[str]) -> dict[str, dict]:
+    """Stored quotes only (no live fetch for missing symbols). Never raises."""
     from app.db import queries
 
     syms = _clean(symbols)
-    if not syms:
-        return {}
     out: dict[str, dict] = {}
+    if not syms:
+        return out
     try:
         for r in queries.get_quote_rows(syms):
             if r.get("symbol") and _f(r.get("price")):
                 out[str(r["symbol"]).upper()] = {**r, **{k: _f(r.get(k)) for k in
                                                          ("price", "prev_close", "change_pct", "day_high", "day_low")}}
     except Exception as e:
-        logger.debug(f"quotes table unavailable, fetching live: {e}")
+        logger.debug(f"quotes table unavailable: {e}")
+    return out
+
+
+def get_quotes(symbols: Iterable[str]) -> dict[str, dict]:
+    """Stored quotes; symbols missing from the table are fetched live."""
+    syms = _clean(symbols)
+    if not syms:
+        return {}
+    out = get_stored_quotes(syms)
     missing = [s for s in syms if s not in out]
     if missing:
         out.update(refresh_quotes(missing))

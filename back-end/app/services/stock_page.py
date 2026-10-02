@@ -9,7 +9,11 @@ It must cost nothing per user:
   * Shared market data only (yfinance), cached per symbol and shared by
     every user: the page body for 15 minutes (PAGE_TTL), the dividend
     profile ~12h (services/dividends.py), earnings dates ~12h
-    (signals/earnings.py).
+    (signals/earnings.py), ETF fund data (`fund`, funds_data via
+    long_term_check) ~12h, fetched in parallel and never waited on longer
+    than FUND_TIMEOUT_S (then null).
+  * The header quote is overlaid per request with the shared `quotes` row
+    (overlay_live_quote) when it is at least as recent as the cached one.
   * The per-user part ("followed": holdings / watchlist, "position": the
     user's shares across accounts, "slots") is read from the DB on every
     request and never cached.
@@ -70,7 +74,13 @@ _EXCHANGE_CODES = {
     "TOR": "TSX", "VAN": "TSXV", "CCC": "CRYPTO",
 }
 
+FUND_TTL = 12 * 3600        # ETF fund data (funds_data), per symbol
+FUND_FAIL_TTL = 30 * 60     # empty / failed fund data is retried sooner
+FUND_TIMEOUT_S = 8.0        # the page never waits longer for fund data (fails soft to null)
+ABOUT_MAX_CHARS = 3000      # about.description cap (cut on a word boundary)
+
 _page_cache = TTLCache(max_size=500, default_ttl=PAGE_TTL)
+_fund_cache = TTLCache(max_size=500, default_ttl=FUND_TTL)
 _resolve_cache = TTLCache(max_size=1000, default_ttl=24 * 3600)   # input -> resolved symbol
 _missing_cache = TTLCache(max_size=1000, default_ttl=MISSING_TTL)
 _locks: dict[str, asyncio.Lock] = {}
@@ -103,6 +113,7 @@ def _today_et() -> date:
 
 def clear_cache() -> None:
     _page_cache.clear()
+    _fund_cache.clear()
     _resolve_cache.clear()
     _missing_cache.clear()
     _locks.clear()
@@ -133,6 +144,45 @@ def _fetch_market(symbol: str) -> dict:
     except Exception as e:
         logger.debug(f"stock_page: info({symbol}) failed: {e}")
     return out
+
+
+def _fetch_fund(symbol: str) -> dict:
+    """ETF funds_data for the `fund` block (blocking, never raises; tests
+    replace it). Cached per symbol FUND_TTL (FUND_FAIL_TTL when empty); a
+    hold-mode check's cached data (long_term_check._data_cache) is reused.
+    The cache is filled here, so a fetch that outlives FUND_TIMEOUT_S
+    still serves the next page build."""
+    cached = _fund_cache.get(symbol)
+    if cached is not None:
+        return cached
+    from app.services import long_term_check as ltc
+
+    prof = ltc._data_cache.get(symbol) or {}
+    fd = prof.get("fund") or ltc.fetch_funds_data(symbol)
+    ok = bool(fd.get("holdings") or fd.get("overview") or fd.get("sector_weights")
+              or fd.get("expense_ratio_raw") is not None)
+    _fund_cache.set(symbol, fd, ttl=FUND_TTL if ok else FUND_FAIL_TTL)
+    return fd
+
+
+async def _fund(symbol: str, asset_type: str, info: dict) -> dict | None:
+    """`fund` block (ETFs only, else None): long_term_check.build_fund_info
+    over the page's info + funds_data. Fails soft to None."""
+    if asset_type != "ETF":
+        return None
+    try:
+        fd = await asyncio.wait_for(asyncio.to_thread(_fetch_fund, symbol), FUND_TIMEOUT_S)
+    except Exception as e:   # includes the timeout
+        logger.debug(f"stock_page: fund data({symbol}) unavailable: {e!r}")
+        fd = {}
+    try:
+        from app.services.long_term_check import build_fund_info
+        fund = build_fund_info(info or {}, fd or {})
+    except Exception as e:
+        logger.warning(f"stock_page: fund info({symbol}) failed: {e}")
+        return None
+    useful = ("expense_ratio", "aum", "family", "category", "top_holdings", "sector_weights", "asset_classes")
+    return fund if any(fund.get(k) for k in useful) else None
 
 
 # ============================================================
@@ -193,6 +243,32 @@ def build_quote(history, info: dict | None) -> dict:
     change_pct = round((price / prev - 1) * 100, 2) if price and prev else None
     return {"price": _r(price, 4), "change_pct": change_pct, "high_52w": _r(hi, 4), "low_52w": _r(lo, 4),
             "market_cap": _num(info.get("marketCap")), "as_of": as_of}
+
+
+def build_about(info: dict | None) -> dict | None:
+    """{"description", "country", "city", "state", "website", "employees"}
+    from Yahoo info (each nullable); None when Yahoo has none of them. Pure.
+    description = longBusinessSummary, whitespace collapsed, capped at
+    ABOUT_MAX_CHARS on a word boundary (ending with "…")."""
+    info = info or {}
+
+    def text(key: str) -> str | None:
+        v = " ".join(str(info.get(key) or "").split())
+        return v or None
+
+    desc = text("longBusinessSummary")
+    if desc and len(desc) > ABOUT_MAX_CHARS:
+        desc = desc[:ABOUT_MAX_CHARS].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    emp = _num(info.get("fullTimeEmployees"))
+    out = {
+        "description": desc,
+        "country": text("country"),
+        "city": text("city"),
+        "state": text("state"),
+        "website": text("website"),
+        "employees": int(emp) if emp is not None and emp > 0 else None,
+    }
+    return out if any(v is not None for v in out.values()) else None
 
 
 def _last_bar(history) -> dict:
@@ -423,8 +499,10 @@ async def _build(symbol: str, raw: dict) -> tuple[dict, bool]:
     got = await asyncio.gather(
         dividends.get_dividend_profile(symbol, info=info or None, price=quote["price"]),
         _earnings(symbol, asset_type, exchange, info),
+        _fund(symbol, asset_type, info),
         return_exceptions=True,
     )
+    fund = got[2] if isinstance(got[2], dict) else None
     profile = got[0] if isinstance(got[0], dict) else dividends.empty_profile(symbol, "unavailable")
     earnings = got[1] if isinstance(got[1], dict) else None
     try:
@@ -453,6 +531,8 @@ async def _build(symbol: str, raw: dict) -> tuple[dict, bool]:
         "events": build_events(earnings, profile),
         "statistics": build_statistics(history, info, quote, profile),
         "checks": build_checks(tech, asset_type, earnings, div["item"], currency),
+        "fund": fund,
+        "about": build_about(info),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
     complete = bool(info) and bool(tech) and not isinstance(got[0], BaseException) \
@@ -540,11 +620,15 @@ def build_position(symbols: set[str], scope: dict) -> dict | None:
     avg_cost = _wavg([(r["shares"], r.get("avg_cost")) for r in mine])
     ccy = mine[0]["currency"]
     price = next((r["price"] for r in mine if r.get("price") is not None), None)
-    prev = next((r["prev_close"] for r in mine if r.get("prev_close") is not None), None)
+    # today's move only from a live quote (a last-close fallback's prev_close is yesterday's)
+    prev = next((r["prev_close"] for r in mine if r.get("prev_close") is not None
+                 and r.get("price_source") == "quote"), None)
     value = shares * price if price is not None else None
     value_home = total("value_home")
-    cost = shares * avg_cost if avg_cost is not None else None
-    open_abs = value - cost if value is not None and cost is not None else None
+    # cost / open P/L over the lots that have an avg_cost (like /portfolio/summary)
+    costed = sum(r["shares"] for r in mine if r.get("avg_cost") is not None)
+    cost = costed * avg_cost if avg_cost is not None else None
+    open_abs = costed * price - cost if price is not None and cost is not None else None
     today_abs = shares * (price - prev) if price is not None and prev is not None else None
 
     txs = [t for t in scope.get("transactions") or [] if str(t.get("symbol") or "").upper() in symbols]
@@ -607,6 +691,43 @@ def slots(user: dict) -> dict | None:
         return None
 
 
+def _stored_quote(symbol: str) -> dict | None:
+    """The shared `quotes` row (the price /holdings, /portfolio/summary and
+    `position` use). Table only, never a live fetch. Never raises; tests
+    replace it."""
+    from app.services import quotes as quotes_service
+    try:
+        return quotes_service.get_stored_quotes([symbol]).get(symbol.upper())
+    except Exception:
+        return None
+
+
+def _ts(v) -> datetime | None:
+    try:
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def overlay_live_quote(quote: dict | None, live: dict | None) -> dict:
+    """The cached page quote with price / change_pct / as_of taken from the
+    shared quotes row when that row is at least as recent (so the header
+    matches `position` and the rest of the app). Pure."""
+    q = dict(quote or {})
+    price = _num((live or {}).get("price"))
+    if price is None or price <= 0:
+        return q
+    t_live, t_page = _ts(live.get("as_of")), _ts(q.get("as_of"))
+    if t_page is not None and (t_live is None or t_live < t_page):
+        return q
+    prev = _num(live.get("prev_close"))
+    q["price"] = _r(price, 4)
+    q["change_pct"] = round((price / prev - 1) * 100, 2) if prev else None
+    q["as_of"] = live.get("as_of") or q.get("as_of")
+    return q
+
+
 async def get_stock_page(raw_symbol: str, user: dict) -> dict:
     """Shared body + this user's part (never cached): followed, position, slots."""
     body = await get_shared_page(raw_symbol)
@@ -621,8 +742,9 @@ async def get_stock_page(raw_symbol: str, user: dict) -> dict:
     from app.core.access import can
     from app.services import quotes as quotes_service
     level = user.get("access_level") or "free"
+    base_quote = overlay_live_quote(body.get("quote"), await asyncio.to_thread(_stored_quote, body["symbol"]))
     view = None
     if can(level, "feature.extended_hours"):
-        view = await asyncio.to_thread(quotes_service.extended_for_symbol, body["symbol"], body.get("quote"))
-    quote = {**(body.get("quote") or {}), **quotes_service.extended_payload(level, body["symbol"], view)}
+        view = await asyncio.to_thread(quotes_service.extended_for_symbol, body["symbol"], base_quote)
+    quote = {**base_quote, **quotes_service.extended_payload(level, body["symbol"], view)}
     return {**body, "quote": quote, "followed": fol, "position": pos, "slots": slot}

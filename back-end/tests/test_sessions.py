@@ -90,6 +90,7 @@ def db(monkeypatch):
     monkeypatch.setattr(sessions, "_db", lambda: mem)
     monkeypatch.setattr(sessions, "_level", lambda uid: "free")
     sessions._active_cache._store.clear()
+    sessions._grace_used._store.clear()
     return mem
 
 
@@ -148,6 +149,7 @@ def test_reused_refresh_token_revokes_the_session(db):
     out = sessions.create(USER, "ios", None, "ip", "ua")
     first = out["refresh_token"]
     second = sessions.rotate(first, "ip", "ua")["refresh_token"]
+    _age_used(db, first, seconds=settings.session_refresh_grace_seconds + 5)   # past the retry window
     with pytest.raises(sessions.SessionError) as e:
         sessions.rotate(first, "ip", "ua")                        # stolen copy presented
     assert e.value.code == "reuse_detected"
@@ -156,6 +158,67 @@ def test_reused_refresh_token_revokes_the_session(db):
         sessions.rotate(second, "ip", "ua")                       # the legit one is dead too
     assert e.value.code == "session_revoked"
     assert sessions.is_active(out["session_id"]) is False
+
+
+def _age_used(db, token, seconds):
+    h = sessions.hash_token(token)
+    row = next(r for r in db.tables["auth_refresh_tokens"] if r["token_hash"] == h)
+    row["used_at"] = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+
+
+def test_retry_within_grace_returns_the_same_pair_once(db):
+    out = sessions.create(USER, "ios", None, "ip", "ua")
+    first = out["refresh_token"]
+    r1 = sessions.rotate(first, "ip", "ua")                       # response lost on the way
+    r2 = sessions.rotate(first, "ip", "ua")                       # the app retries with the old token
+    assert r2["refresh_token"] == r1["refresh_token"] and r2.get("retry") is True
+    assert str(r2["session"]["id"]) == out["session_id"]
+    assert len(db.tables["auth_refresh_tokens"]) == 2             # nothing new issued
+    assert sessions.is_active(out["session_id"]) is True
+    with pytest.raises(sessions.SessionError) as e:               # only once per rotation
+        sessions.rotate(first, "ip", "ua")
+    assert e.value.code == "reuse_detected"
+
+
+def test_retry_after_grace_window_is_reuse(db):
+    out = sessions.create(USER, "ios", None, "ip", "ua")
+    first = out["refresh_token"]
+    sessions.rotate(first, "ip", "ua")
+    _age_used(db, first, seconds=settings.session_refresh_grace_seconds + 1)
+    with pytest.raises(sessions.SessionError) as e:
+        sessions.rotate(first, "ip", "ua")
+    assert e.value.code == "reuse_detected"
+    assert db.tables["auth_sessions"][0]["revoked_reason"] == "reuse_detected"
+
+
+def test_older_than_predecessor_is_reuse_even_inside_window(db):
+    out = sessions.create(USER, "ios", None, "ip", "ua")
+    first = out["refresh_token"]
+    second = sessions.rotate(first, "ip", "ua")["refresh_token"]
+    sessions.rotate(second, "ip", "ua")                           # current = third
+    with pytest.raises(sessions.SessionError) as e:
+        sessions.rotate(first, "ip", "ua")                        # 2 rotations back, a few ms ago
+    assert e.value.code == "reuse_detected"
+    assert sessions.is_active(out["session_id"]) is False
+
+
+def test_retry_after_successor_was_used_is_reuse(db):
+    first = sessions.create(USER, "ios", None, "ip", "ua")["refresh_token"]
+    second = sessions.rotate(first, "ip", "ua")["refresh_token"]
+    sessions.rotate(second, "ip", "ua")
+    with pytest.raises(sessions.SessionError) as e:
+        sessions.rotate(first, "ip", "ua")
+    assert e.value.code == "reuse_detected"
+
+
+def test_grace_off_and_successor_is_derived(db, monkeypatch):
+    monkeypatch.setattr(settings, "session_refresh_grace_seconds", 0)
+    first = sessions.create(USER, "ios", None, "ip", "ua")["refresh_token"]
+    second = sessions.rotate(first, "ip", "ua")["refresh_token"]
+    assert second == sessions.successor_token(first) and len(second) == len(first)
+    with pytest.raises(sessions.SessionError) as e:
+        sessions.rotate(first, "ip", "ua")
+    assert e.value.code == "reuse_detected"
 
 
 def test_unknown_and_expired_tokens(db):
@@ -219,13 +282,16 @@ def _signed_in(client_kind="ios"):
     return out, {"Authorization": f"Bearer {token}"}
 
 
-def test_refresh_endpoint_rotates_and_reports_reuse(api):
+def test_refresh_endpoint_rotates_and_reports_reuse(api, db):
     out, _ = _signed_in()
     r = api.post("/api/v1/auth/token/refresh", json={"refresh_token": out["refresh_token"]})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["refresh_token"] and body["refresh_token"] != out["refresh_token"]
     assert body["expires_in"] == 15 * 60 and body["session_id"] == out["session_id"]
+    retry = api.post("/api/v1/auth/token/refresh", json={"refresh_token": out["refresh_token"]})
+    assert retry.status_code == 200 and retry.json()["refresh_token"] == body["refresh_token"]   # lost response
+    assert retry.json()["session_id"] == out["session_id"] and retry.json()["access_token"]
     again = api.post("/api/v1/auth/token/refresh", json={"refresh_token": out["refresh_token"]})
     assert again.status_code == 401 and again.json()["detail"]["code"] == "reuse_detected"
 

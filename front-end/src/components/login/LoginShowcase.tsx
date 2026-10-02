@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { CalendarDays, Wallet, Bell, ShieldCheck } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
+import { AppVersion } from '@/components/ui/AppVersion'
 
 /** Left side of the login page on desktop: what Signa is, with a small
  *  illustrative preview of the app (sample figures, labelled as such). */
@@ -87,6 +88,7 @@ export function LoginShowcase() {
           <Link href="/pricing" className="font-medium hover:underline" style={{ color: c.primary }}>{t.pricing.seePlans}</Link>
           <span className="flex items-center gap-1.5"><ShieldCheck size={14} aria-hidden="true" />{tl.notAdvice}</span>
         </div>
+        <AppVersion />
       </div>
     </aside>
   )

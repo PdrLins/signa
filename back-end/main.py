@@ -28,6 +28,7 @@ from app.api.v1 import portfolio_home as portfolio_home_api
 from app.api.v1 import referrals as referrals_api
 from app.api.v1 import register as register_api
 from app.core.config import settings
+from app.core.version import APP_VERSION
 from app.core.exceptions import register_exception_handlers
 from app.middleware.audit import AuditMiddleware
 from app.middleware.auth import AuthMiddleware
@@ -107,7 +108,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Signa API",
     description="AI Investment Signal Engine",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
     # Disable docs in production
     docs_url="/docs" if settings.debug else None,
@@ -197,4 +198,4 @@ async def telegram_webhook(request: Request):
 
 @app.get("/")
 async def root():
-    return {"app": "Signa", "version": "1.0.0", "docs": "/docs"}
+    return {"app": "Signa", "version": APP_VERSION, "docs": "/docs"}

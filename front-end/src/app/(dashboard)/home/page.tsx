@@ -3,7 +3,7 @@
 import { Suspense, memo, useMemo } from 'react'
 import Link from 'next/link'
 import { useCardLink } from '@/hooks/useCardLink'
-import { AlertTriangle, ChevronRight, Info } from 'lucide-react'
+import { AlertTriangle, Bell, CalendarCheck, ChevronRight, Info } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18nStore } from '@/store/i18nStore'
 import { useAccess } from '@/hooks/useAccess'
@@ -18,7 +18,7 @@ import { HomeValueCard } from '@/components/tracker/PortfolioValueCard'
 import { EventRow } from '@/components/tracker/EventRow'
 import { EmptyHoldings, HideAmountsButton, QueryError, ScopeSelect, SkeletonCards } from '@/components/tracker/ui'
 import { warningText } from '@/components/tracker/text'
-import type { DividendSummary } from '@/types/tracker'
+import type { DividendSummary, EventItem } from '@/types/tracker'
 
 export default function HomePage() {
   return (
@@ -43,7 +43,9 @@ function HomeInner() {
 
   return (
     <div className="space-y-4 pb-4 min-w-0">
-      <HomeHeader title={t.home.title} greeting={greeting} actions={<HideAmountsButton />} />
+      <HomeHeader title={t.home.title} greeting={greeting}
+        actions={<>{can('area.coming_up') && <ComingUpBell scopeQuery={query} />}<HideAmountsButton /></>} />
+      {can('area.coming_up') && <DividendsTodayPill scopeQuery={query} />}
       <ScopeSelect scope={scope} onChange={setScope} />
 
       {summary.isLoading && <SkeletonCards heights={[150, 140, 120]} />}
@@ -251,7 +253,7 @@ function ComingUpCard({ scopeQuery, currency }: { scopeQuery: string; currency: 
   const q = useUpcomingEvents(scope, 30)
   const items = useMemo(() => (q.data?.items ?? []).filter((e) => !e.recent).slice(0, 4), [q.data])
   return (
-    <Card id="home-next" title={t.home.comingUp} right={<MoreLink href={`/dividends${scopeQuery ? `${scopeQuery}&` : '?'}tab=upcoming`} label={t.home.seeAll} aria={t.home.seeAllComingUp} />}>
+    <Card id="home-next" title={t.home.comingUp} right={<MoreLink href={`/coming-up${scopeQuery}`} label={t.home.seeAll} aria={t.home.seeAllComingUp} />}>
       {q.isLoading && <div className="h-24 rounded-xl animate-pulse" style={{ backgroundColor: theme.colors.surfaceAlt }} />}
       {!!q.error && !q.data && <QueryError error={q.error} onRetry={() => q.refetch()} />}
       {q.data && (items.length === 0 ? (
@@ -264,5 +266,73 @@ function ComingUpCard({ scopeQuery, currency }: { scopeQuery: string; currency: 
         </ul>
       ))}
     </Card>
+  )
+}
+
+
+/** Today's events for stocks the user OWNS, and price alerts that fired today. */
+function useToday() {
+  const { scope } = useScope()
+  const q = useUpcomingEvents(scope, 30)   // same query (and cache) as the Coming up card
+  return useMemo(() => {
+    const d = q.data
+    if (!d) return { owned: [] as EventItem[], alerts: [] as EventItem[], currency: 'CAD' }
+    const today = d.today
+    return {
+      owned: d.items.filter((e) => e.owned && e.date === today && !e.recent),
+      alerts: d.items.filter((e) => e.type === 'price_alert' && e.date === today),
+      currency: d.home_currency,
+    }
+  }, [q.data])
+}
+
+/** Bell in the Home header → Coming up; red dot when something of the
+ *  user's happens today or one of their alerts just fired. */
+function ComingUpBell({ scopeQuery }: { scopeQuery: string }) {
+  const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
+  const { owned, alerts } = useToday()
+  const dot = owned.length > 0 || alerts.length > 0
+  const label = dot ? t.home.bellNew : t.home.bell
+  return (
+    <Link href={`/coming-up${scopeQuery}`} aria-label={label} title={label}
+      className="relative min-h-[44px] min-w-[44px] rounded-full inline-flex items-center justify-center focus-visible:outline focus-visible:outline-2"
+      style={{ backgroundColor: theme.colors.surfaceAlt, color: theme.colors.text, outlineColor: theme.colors.primary }}>
+      <Bell size={18} aria-hidden="true" />
+      {dot && <span aria-hidden="true" className="absolute top-2.5 right-2.5 w-2.5 h-2.5 rounded-full"
+        style={{ backgroundColor: theme.colors.down, boxShadow: `0 0 0 2px ${theme.colors.surfaceAlt}` }} />}
+    </Link>
+  )
+}
+
+/** "AAPL.TO pays you C$42.18 today" — only on days with a dividend event
+ *  for a stock the user owns. Opens Coming up. */
+function DividendsTodayPill({ scopeQuery }: { scopeQuery: string }) {
+  const theme = useTheme()
+  const t = useI18nStore((s) => s.t)
+  const th = t.home.today
+  const { owned, currency } = useToday()
+  const { fmt } = useMoney(currency)
+  const pays = owned.filter((e) => e.type === 'dividend_payment')
+  const exs = owned.filter((e) => e.type === 'ex_dividend')
+  let text: string | null = null
+  if (pays.length === 1) {
+    const e = pays[0]
+    text = e.cash_home != null ? fill(th.paysOne, { symbol: e.symbol ?? '', amount: fmt(e.cash_home) }) : fill(th.paysOneNoCash, { symbol: e.symbol ?? '' })
+  } else if (pays.length > 1) {
+    const total = pays.reduce((a, e) => a + (e.cash_home ?? 0), 0)
+    text = fill(th.paysMany, { n: pays.length, amount: fmt(total) })
+  } else if (exs.length === 1) {
+    text = fill(th.exOne, { symbol: exs[0].symbol ?? '' })
+  } else if (exs.length > 1) {
+    text = fill(th.exMany, { n: exs.length })
+  }
+  if (!text) return null
+  return (
+    <Link href={`/coming-up${scopeQuery}`}
+      className="inline-flex items-center gap-2 rounded-full px-3.5 min-h-[40px] text-[13.5px] font-medium hover:brightness-110 focus-visible:outline focus-visible:outline-2"
+      style={{ backgroundColor: theme.colors.up + '1f', color: theme.colors.up, outlineColor: theme.colors.primary }}>
+      <CalendarCheck size={16} aria-hidden="true" />{text}<ChevronRight size={15} aria-hidden="true" />
+    </Link>
   )
 }

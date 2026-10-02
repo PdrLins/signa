@@ -14,6 +14,7 @@ import {
   Briefcase,
   ChartLine,
   Star,
+  CalendarClock,
   Settings,
   Menu,
   Brain,
@@ -65,6 +66,7 @@ export function BottomNav() {
     ].filter((i) => can(i.feature))
     const more: NavItem[] = [
       { label: t.nav.profile, href: '/profile', icon: UserRound, feature: 'area.profile' },
+      { label: t.nav.comingUp, href: '/coming-up', icon: CalendarClock, feature: 'area.coming_up' },
       { label: t.nav.howItWorks, href: '/how-it-works', icon: HelpCircle, feature: 'area.how_it_works' },
     ].filter((i) => can(i.feature))
     const brain: NavItem[] = [

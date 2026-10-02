@@ -44,7 +44,17 @@ const AlertRow = memo(function AlertRow({ a, onDelete, deleting, canEdit }: {
             aria-label={d === null ? undefined : fill(ta.distanceAria, { pct: signedPct(d, 1) })}>
             {d === null ? DASH : fill(ta.distance, { pct: signedPct(d, 1) })}
           </p>
-        ) : a.triggered_at ? (
+        ) : null}
+        {a.active && d !== null && (
+          <div className="mt-1.5 h-1 rounded-full max-w-[220px]" aria-hidden="true" style={{ backgroundColor: theme.colors.surfaceAlt }}>
+            {/* full width = 30% away; red when the target is below the price */}
+            <div className="h-full rounded-full" style={{
+              width: `${Math.max(3, Math.min(100, (Math.abs(d) / 30) * 100))}%`,
+              backgroundColor: d < 0 ? theme.colors.down : theme.colors.up,
+            }} />
+          </div>
+        )}
+        {a.active ? null : a.triggered_at ? (
           <p className="text-[12.5px] tabular-nums" style={{ color: theme.colors.warning }}>
             {fill(ta.triggered, { date: shortDate(a.triggered_at, locale), price: nativePrice(a.last_price, a.symbol, a.currency) })}
           </p>

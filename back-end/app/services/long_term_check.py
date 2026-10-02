@@ -796,6 +796,53 @@ def _fetch_history(symbol: str) -> pd.Series:
     return s
 
 
+def fetch_funds_data(symbol: str, ticker=None) -> dict:
+    """Ticker.funds_data parsed for build_fund_info (blocking, never raises):
+    {"overview", "expense_ratio_raw", "turnover", "total_net_assets",
+     "holdings", "sector_weights", "asset_classes", "pe", "pb"}. Shared by the
+    hold-mode check (_fetch_profile) and the stock page's `fund` block."""
+    if ticker is None:
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+    t = ticker
+    fd: dict = {}
+    try:
+        f = t.funds_data
+        for attr, key in (("fund_overview", "overview"),):
+            try:
+                fd[key] = getattr(f, attr) or {}
+            except Exception:
+                fd[key] = {}
+        try:
+            ops = f.fund_operations
+            fd["expense_ratio_raw"] = _df_cell(ops, "Annual Report Expense Ratio")
+            fd["turnover"] = _df_cell(ops, "Annual Holdings Turnover")
+            fd["total_net_assets"] = _df_cell(ops, "Total Net Assets")
+        except Exception:
+            pass
+        try:
+            fd["holdings"] = parse_holdings(f.top_holdings)
+        except Exception:
+            fd["holdings"] = []
+        try:
+            fd["sector_weights"] = _frac_dict(f.sector_weightings)
+        except Exception:
+            pass
+        try:
+            fd["asset_classes"] = _frac_dict(f.asset_classes)
+        except Exception:
+            pass
+        try:
+            eq = f.equity_holdings
+            fd["pe"] = _df_cell(eq, "Price/Earnings")
+            fd["pb"] = _df_cell(eq, "Price/Book")
+        except Exception:
+            pass
+    except Exception as e:
+        logger.debug(f"long_term: funds_data({symbol}) failed: {e}")
+    return fd
+
+
 def _fetch_profile(symbol: str) -> dict:
     """info + (ETF) funds_data + (stock) income statement, cached ~24h."""
     cached = _data_cache.get(symbol)
@@ -812,42 +859,7 @@ def _fetch_profile(symbol: str) -> dict:
     out: dict = {"info": info, "fund": {}, "income": []}
     at = asset_type_for(symbol, info)
     if at == "ETF":
-        fd: dict = {}
-        try:
-            f = t.funds_data
-            for attr, key in (("fund_overview", "overview"),):
-                try:
-                    fd[key] = getattr(f, attr) or {}
-                except Exception:
-                    fd[key] = {}
-            try:
-                ops = f.fund_operations
-                fd["expense_ratio_raw"] = _df_cell(ops, "Annual Report Expense Ratio")
-                fd["turnover"] = _df_cell(ops, "Annual Holdings Turnover")
-                fd["total_net_assets"] = _df_cell(ops, "Total Net Assets")
-            except Exception:
-                pass
-            try:
-                fd["holdings"] = parse_holdings(f.top_holdings)
-            except Exception:
-                fd["holdings"] = []
-            try:
-                fd["sector_weights"] = _frac_dict(f.sector_weightings)
-            except Exception:
-                pass
-            try:
-                fd["asset_classes"] = _frac_dict(f.asset_classes)
-            except Exception:
-                pass
-            try:
-                eq = f.equity_holdings
-                fd["pe"] = _df_cell(eq, "Price/Earnings")
-                fd["pb"] = _df_cell(eq, "Price/Book")
-            except Exception:
-                pass
-        except Exception as e:
-            logger.debug(f"long_term: funds_data({symbol}) failed: {e}")
-        out["fund"] = fd
+        out["fund"] = fetch_funds_data(symbol, t)
     elif at == "STOCK":
         try:
             out["income"] = income_trend(t.income_stmt)

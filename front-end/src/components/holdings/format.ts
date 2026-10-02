@@ -85,7 +85,7 @@ export function holdingChips(h: Holding, th: T['holdings'], maxWeight: number): 
   }
   if (h.position?.overweight) {
     chips.push({ key: 'ow', label: th.chips.overweight, tone: 'down',
-      title: fill(th.chips.overweightHelp, { w: pct(h.position.weight_pct, 1), max: pct(maxWeight, 0) }) })
+      title: fill(th.chips.overweightHelp, { w: pct(h.position.symbol_weight_pct ?? h.position.weight_pct, 1), max: pct(maxWeight, 0) }) })
   }
   if (h.flags?.leveraged) chips.push({ key: 'lev', label: th.chips.leveraged, tone: 'warning' })
   if (h.flags?.covered_call) chips.push({ key: 'cc', label: th.chips.coveredCall, tone: 'neutral' })

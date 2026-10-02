@@ -111,6 +111,10 @@ async def refresh_with_session(request: Request, body: RefreshRequest):
     "session_revoked" | "session_expired" | "reuse_detected", "message"}}:
     sign in again. reuse_detected means an old refresh token was presented:
     the session is ended everywhere. 503 migration_required before 017.
+    Lost response: re-presenting the token just rotated, within
+    settings.session_refresh_grace_seconds (30 s) and before the new one is
+    used, returns 200 with the SAME new refresh_token (and a fresh access
+    token) once per rotation; later or older tokens -> reuse_detected.
     """
     import asyncio
 

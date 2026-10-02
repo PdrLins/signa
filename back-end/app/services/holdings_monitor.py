@@ -120,6 +120,7 @@ def compute_price_status(closes: pd.Series | None) -> dict:
         "day_change_pct": _r((price / prev - 1) * 100),
         "change_1m_pct": _r((price / base_1m - 1) * 100) if base_1m else None,
         "ytd_pct": _r((price / ytd_base - 1) * 100) if ytd_base else None,
+        "ytd_base": _r(ytd_base, 4),   # last close of the previous year (GET /holdings ytd_pct_live)
         "sma50": _r(sma50, 4),
         "sma200": _r(sma200, 4),
         "pct_vs_sma200": _r((price / sma200 - 1) * 100) if sma200 else None,
