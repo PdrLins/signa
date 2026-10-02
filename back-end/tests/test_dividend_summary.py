@@ -418,7 +418,10 @@ def test_api_income_quality(monkeypatch):
     monkeypatch.setattr(dividends, "get_dividend_profile", prof)
     monkeypatch.setattr("app.services.price_cache.fetch_daily_closes",
                         lambda syms, period="1y": {s: _closes(10, 12) for s in syms})
-    c = make_client(monkeypatch, api.income_router, level="free")
+    free = make_client(monkeypatch, api.income_router, level="free")
+    r = free.get("/api/v1/portfolio/income-quality/qqcl.to")   # premium since migration 022
+    assert r.status_code == 403 and r.json()["detail"]["code"] == "upgrade_required"
+    c = make_client(monkeypatch, api.income_router, level="premium")
     body = c.get("/api/v1/portfolio/income-quality/qqcl.to").json()
     assert body["symbol"] == "QQCL.TO" and body["underlying"] == "QQQ" and body["comparison"]["currency_mismatch"]
     assert c.get("/api/v1/portfolio/income-quality/$$$").json()["detail"]["code"] == "invalid_symbol"

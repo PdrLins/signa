@@ -231,7 +231,8 @@ def test_history_1d_interval_by_level(monkeypatch, db):
     assert body["session"]["open"] < body["session"]["close"]
     perf.clear_cache()
     body = _client(monkeypatch, "free").get("/api/v1/portfolio/history?range=1d").json()
-    assert body["interval"] == "15m" and seen[-1][1] == "15m" and seen[-1][2] is False
+    # 5-minute bars for everyone since migration 022; pre/after-hours stay Premium
+    assert body["interval"] == "5m" and seen[-1][1] == "5m" and seen[-1][2] is False
     # cached per symbol: a second call does not download again
     _client(monkeypatch, "free").get("/api/v1/portfolio/history?range=1D")
     assert len(seen) == 2

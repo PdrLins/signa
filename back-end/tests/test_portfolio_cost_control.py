@@ -164,7 +164,7 @@ def test_quote_download_counts_provider_calls(monkeypatch):
 
 def test_refresh_settings_defaults():
     assert settings.quotes_refresh_seconds_free == 900 and settings.quotes_refresh_seconds_premium == 60
-    assert access.FEATURE_CATALOG["feature.intraday_chart"][0] == "premium"
+    assert access.FEATURE_CATALOG["feature.intraday_chart"][0] == "free"   # migration 022
     assert access.FEATURE_CATALOG["feature.full_history"][0] == "premium"
 
 

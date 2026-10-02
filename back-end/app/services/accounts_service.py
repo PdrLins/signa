@@ -7,7 +7,7 @@ Accounts are created and named by the user ("Wealthsimple", "Questrade",
   CA: TFSA, RRSP, FHSA, RESP, NON_REGISTERED     US: ROTH_IRA, TRADITIONAL_IRA, 401K, TAXABLE
   both: OTHER
 
-Setting a type needs action.accounts.type (premium) -> else 403
+Setting a type needs action.accounts.type (free since migration 022) -> else 403
 upgrade_required, and the user's country must be CA or US -> else 422
 account_type_unavailable; the type must belong to that country -> else 422
 invalid_account_type. Clearing it (null) is always allowed.

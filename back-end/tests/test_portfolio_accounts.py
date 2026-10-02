@@ -120,7 +120,7 @@ def test_accounts_are_user_scoped(monkeypatch, db):
 # ---------------------------------------------------------------- account type gating
 
 @pytest.mark.parametrize("level,country,atype,status,code", [
-    ("free", "CA", "TFSA", 403, "upgrade_required"),
+    ("free", "CA", "TFSA", 201, None),            # account types are free since migration 022
     ("premium", "BR", "TFSA", 422, "account_type_unavailable"),
     ("premium", None, "OTHER", 422, "account_type_unavailable"),
     ("premium", "US", "TFSA", 422, "invalid_account_type"),
@@ -142,11 +142,12 @@ def test_account_type_rules(monkeypatch, db, level, country, atype, status, code
         assert r.json()["account_type"] == (atype.upper() if atype else None)
 
 
-def test_account_type_patch_gated_and_clearable(monkeypatch, db):
+def test_account_type_patch_and_clearable(monkeypatch, db):
     db.settings[U1] = {"user_id": U1, "country": "CA"}
     aid = db.add_account(U1, "WS", account_type="TFSA")
     c = _client(monkeypatch, "free")
-    assert c.patch(f"/api/v1/accounts/{aid}", json={"account_type": "RRSP"}).status_code == 403
+    r = c.patch(f"/api/v1/accounts/{aid}", json={"account_type": "RRSP"})
+    assert r.status_code == 200 and r.json()["account_type"] == "RRSP"
     r = c.patch(f"/api/v1/accounts/{aid}", json={"account_type": None})
     assert r.status_code == 200 and r.json()["account_type"] is None
 

@@ -25,17 +25,20 @@ def test_new_feature_keys_and_levels():
     for k in ("area.home", "area.insights", "area.coming_up", "area.profile", "action.accounts.edit",
               "action.transactions.edit", "action.import.csv"):
         assert cat[k][0] == "free", k
-    assert cat["action.accounts.type"][0] == "premium"
+    assert cat["action.accounts.type"][0] == "free"      # free since migration 022
     assert cat["feature.tax_view"][0] == "premium"
     assert cat["area.brain"][0] == "owner"   # brain keys untouched
 
 
 def test_migration_keys_match_catalog():
+    """The level each migration leaves in access_features (later migrations win,
+    e.g. 022 re-levels keys first inserted by 013/014) equals the code default."""
     import pathlib
     import re
-    sql = (pathlib.Path(__file__).parents[1] / "app/db/migrations/013_portfolio_foundation.sql").read_text()
-    rows = dict(re.findall(r"\('([a-z_.]+)', '(free|premium|owner)'", sql))
-    assert rows and all(access.FEATURE_CATALOG[k][0] == lvl for k, lvl in rows.items())
+    rows = {}
+    for f in sorted((pathlib.Path(__file__).parents[1] / "app/db/migrations").glob("0*.sql")):
+        rows.update(re.findall(r"\('([a-z_.]+)', '(free|premium|owner)'", f.read_text()))
+    assert rows and all(access.FEATURE_CATALOG[k][0] == lvl for k, lvl in rows.items() if k in access.FEATURE_CATALOG)
 
 
 # ---------------------------------------------------------------- migration missing

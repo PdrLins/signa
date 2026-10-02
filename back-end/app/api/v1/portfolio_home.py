@@ -37,7 +37,7 @@ GET /api/v1/portfolio/history?range=1D|1W|1M|3M|YTD|1Y|5Y|ALL&account_id=&person
   "as_of": "...", "delayed_minutes": 15
 }
   compare is opt-in (no default), one of GET /profile/options compare indexes.
-  1D: 5-minute bars with feature.intraday_chart (premium), else 15-minute.
+  1D: 5-minute bars with feature.intraday_chart (free since migration 022), else 15-minute.
   ALL needs feature.full_history (premium) -> else 403 upgrade_required.
 
 GET /api/v1/portfolio/performance?range=&account_id=&person_id=&compare=    area.insights

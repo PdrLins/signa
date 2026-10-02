@@ -172,7 +172,7 @@ def test_allocation_scope_filters(monkeypatch, db):
 
 
 def test_targets_roundtrip_and_errors(monkeypatch, db):
-    c = make_client(monkeypatch, api.router, level="free")
+    c = make_client(monkeypatch, api.router, level="premium")
     assert c.get("/api/v1/portfolio/allocation/targets").json()["targets"] is None
     r = c.put("/api/v1/portfolio/allocation/targets", json={"targets": {"broad_etfs": 70, "stocks": 20}})
     assert r.status_code == 422 and r.json()["detail"]["code"] == "targets_sum" and r.json()["detail"]["sum"] == 90
@@ -209,3 +209,17 @@ def test_migration_missing_is_503(monkeypatch, db):
     db.missing = True
     r = c.get("/api/v1/portfolio/allocation")
     assert r.status_code == 503 and r.json()["detail"]["code"] == "migration_required"
+
+
+def test_allocation_plan_is_premium(monkeypatch, db):
+    """Targets + deposit plan need feature.allocation_plan (premium, migration 022);
+    the mix itself stays free."""
+    c = make_client(monkeypatch, api.router, level="free")
+    for method, path in [("get", "/api/v1/portfolio/allocation/targets"),
+                         ("put", "/api/v1/portfolio/allocation/targets"),
+                         ("get", "/api/v1/portfolio/allocation/plan?amount=500")]:
+        kw = {"json": {"targets": {"stocks": 100}}} if method == "put" else {}
+        r = getattr(c, method)(path, **kw)
+        assert r.status_code == 403, path
+        assert r.json()["detail"]["code"] == "upgrade_required", path
+    assert c.get("/api/v1/portfolio/allocation").status_code == 200

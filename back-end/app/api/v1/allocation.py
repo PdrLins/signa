@@ -121,12 +121,12 @@ async def allocation(account_id: Optional[UUID] = Query(None), person_id: Option
     return await run_db(get_allocation, user, _s(account_id), _s(person_id))
 
 
-@router.get("/targets", dependencies=[Depends(require_feature("area.insights"))])
+@router.get("/targets", dependencies=[Depends(require_feature("area.insights")), Depends(require_feature("feature.allocation_plan"))])
 async def read_targets(user: dict = Depends(get_current_user)):
     return await run_db(get_targets, user["user_id"])
 
 
-@router.put("/targets", dependencies=[Depends(require_feature("area.insights"))])
+@router.put("/targets", dependencies=[Depends(require_feature("area.insights")), Depends(require_feature("feature.allocation_plan"))])
 async def write_targets(body: dict = Body(...), user: dict = Depends(get_current_user)):
     if "targets" not in body:
         raise api_error("invalid_targets", "Body must be {\"targets\": {class: pct} | null}.",
@@ -134,7 +134,7 @@ async def write_targets(body: dict = Body(...), user: dict = Depends(get_current
     return await run_db(put_targets, user["user_id"], body["targets"])
 
 
-@router.get("/plan", dependencies=[Depends(require_feature("area.insights"))])
+@router.get("/plan", dependencies=[Depends(require_feature("area.insights")), Depends(require_feature("feature.allocation_plan"))])
 async def plan(amount: Optional[str] = Query(None), account_id: Optional[UUID] = Query(None),
                person_id: Optional[UUID] = Query(None), user: dict = Depends(get_current_user)):
     return await run_db(get_plan, user, amount, _s(account_id), _s(person_id))

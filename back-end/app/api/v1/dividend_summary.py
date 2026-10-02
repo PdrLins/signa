@@ -87,6 +87,6 @@ async def summary(
                                               str(person_id) if person_id else None)
 
 
-@income_router.get("/income-quality/{symbol}", dependencies=[Depends(require_feature("area.insights"))])
+@income_router.get("/income-quality/{symbol}", dependencies=[Depends(require_feature("area.insights")), Depends(require_feature("feature.income_quality"))])
 async def quality(symbol: str):
     return await income_quality.get_income_quality(symbol)
