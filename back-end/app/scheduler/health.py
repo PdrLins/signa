@@ -32,6 +32,7 @@ DAILY = {
     "holding_status_refresh": (17, 45, True, True),
     "income_forecast_snapshots": (18, 0, True, True),
     "check_status_snapshots": (18, 15, True, True),
+    "auto_dividends": (19, 30, False, False),
 }
 MONTHLY = {"monthly_recap_push": (1, 9, 5)}   # day, hour, minute
 WEEKLY = {"weekly_digest": (6, 10, 0)}        # weekday (Sunday = 6), hour, minute

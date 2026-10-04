@@ -78,7 +78,7 @@ def _bucket() -> dict:
 
 
 def compute_snapshot_rows(holdings: list[dict], accounts: list[dict], quotes: dict[str, dict],
-                          home_currency: str, usdcad: float | None) -> list[dict]:
+                          home_currency: str, usdcad: float | None, fixed: list[dict] | None = None) -> list[dict]:
     """One user's rows (without user_id / snapshot_date). Pure."""
     home = (home_currency or "CAD").upper()
     total = _bucket()
@@ -109,6 +109,11 @@ def compute_snapshot_rows(holdings: list[dict], accounts: list[dict], quotes: di
             if cost:
                 b["cost_basis"] += convert(shares * cost, ccy, home, usdcad) or 0.0
 
+    for f in fixed or []:   # fixed income (migration 032): value and amount invested, home currency
+        for b in targets(f.get("account_id")):
+            b["market_value"] += f.get("value_home") or 0.0
+            b["cost_basis"] += f.get("invested_home") or 0.0
+
     for a in accounts:
         cash = _f(a.get("cash_balance")) or 0.0
         if not cash:
@@ -127,6 +132,30 @@ def compute_snapshot_rows(holdings: list[dict], accounts: list[dict], quotes: di
                 "currency": home, "unconverted": b["unconverted"] or None}
 
     return [row(None, total)] + [row(aid, b) for aid, b in per.items()]
+
+
+def _fixed_values(currencies: dict[str, str], usdcad: float | None, d: date) -> dict[str, list[dict]]:
+    """user_id -> [{account_id, value_home, invested_home}] of fixed income. {} before 032."""
+    from app.services import fixed_income
+    from app.services.portfolio_context import to_home
+    try:
+        from app.db.queries import _select_all_pages
+        from app.db.supabase import get_client
+        rows = _select_all_pages(lambda: get_client().table("fixed_income").select(
+            "id, user_id, " + fixed_income.COLUMNS.replace("id, ", "", 1)).order("id"))
+    except Exception:
+        return {}
+    rates = fixed_income.load_rates(rows)
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        home = currencies.get(str(r["user_id"]), "CAD")
+        v = fixed_income.value(r, d, rates)
+        ccy = r.get("currency") or "BRL"
+        out.setdefault(str(r["user_id"]), []).append({
+            "account_id": r.get("account_id"),
+            "value_home": to_home(v["value"], ccy, home, usdcad) or 0.0,
+            "invested_home": to_home(fixed_income._f(r.get("principal")), ccy, home, usdcad) or 0.0})
+    return out
 
 
 def run_snapshots(on_date: date | None = None) -> dict:
@@ -163,8 +192,11 @@ def run_snapshots(on_date: date | None = None) -> dict:
         return {"status": "failed", "reason": "home_currencies_unavailable", "date": d.isoformat()}
     quotes = get_quotes({str(h.get("symbol") or "").upper() for h in holdings if h.get("symbol")})
     usdcad = get_usdcad_rate()
+    fixed_by_user = _fixed_values(currencies, usdcad, d)
+    users = sorted(set(users) | set(fixed_by_user))
     rows_by_user = {uid: compute_snapshot_rows(by_user_h.get(uid, []), by_user_a.get(uid, []), quotes,
-                                               currencies.get(uid, "CAD"), usdcad) for uid in users}
+                                               currencies.get(uid, "CAD"), usdcad, fixed_by_user.get(uid))
+                    for uid in users}
     written, failed = queries.replace_portfolio_snapshots_batch(d.isoformat(), rows_by_user)
     logger.info(f"Portfolio snapshots {d}: {len(users)} users, {written} rows, {failed} failed")
     return {"status": "ok", "date": d.isoformat(), "users": len(users), "rows": written, "failed": failed}

@@ -120,6 +120,11 @@ def load_scope(user: dict, account_id: str | None = None, person_id: str | None 
                                          for p in user_cache.get(uid, "people", lambda: queries.get_people(uid))):
         raise api_error("person_not_found", "Person not found.", status.HTTP_404_NOT_FOUND, field="person_id")
     holdings = user_cache.get(uid, "holdings", lambda: queries.get_holdings(uid))
+    try:   # fixed income (migration 032); [] before it
+        from app.services import fixed_income
+        fixed = user_cache.get(uid, "fixed_income", lambda: fixed_income.rows_for(uid))
+    except Exception:
+        fixed = []
     txs = user_cache.get(uid, "transactions", lambda: queries.get_all_transactions(uid)) if with_transactions else []
     scope = scope_filter(accounts, holdings, txs, account_id, person_id)
     country = settings_row.get("country")
@@ -152,6 +157,9 @@ def load_scope(user: dict, account_id: str | None = None, person_id: str | None 
         "transactions": scope["transactions"],
         "quotes": quotes_map,
         "quotes_ext": ext_map,
+        # fixed income in this scope (an account filter keeps only its assets)
+        "fixed_income": fixed if scope["account_ids"] is None
+        else [f for f in fixed if str(f.get("account_id")) in {str(a) for a in scope["account_ids"]}],
         "usdcad": usdcad,
     }
 

@@ -344,3 +344,17 @@ async def weekly_digest():
     except Exception as e:
         fail("weekly_digest", e)
         logger.error(f"Weekly digest failed: {e}")
+
+
+@tracked("auto_dividends")
+async def auto_dividends():
+    """19:30 ET daily: record dividends holdings paid (app/services/auto_dividends.py)."""
+    try:
+        from app.services.auto_dividends import run
+        result = await run()
+        logger.info(f"Auto dividends: {result}")
+        if result.get("status") == "failed":
+            fail("auto_dividends", str(result))
+    except Exception as e:
+        fail("auto_dividends", e)
+        logger.error(f"Auto dividends failed: {e}")

@@ -1,10 +1,10 @@
 # Signa Database
 
-35 tables on Supabase (PostgreSQL). A new project is created by running
+37 tables on Supabase (PostgreSQL). A new project is created by running
 `schema.sql` once in the SQL Editor (idempotent). Every table has Row Level
 Security on with no policies: only the back-end's service_role key can read
 or write. Database changes: add `migrations/0NN_name.sql` (next free number),
-run it, and fold it into `schema.sql`. `migrations/010`–`031` are history and
+run it, and fold it into `schema.sql`. `migrations/010`–`032` are history and
 already included in `schema.sql`.
 
 Access goes through `queries.py` and the services (supabase-py / PostgREST).
@@ -48,6 +48,8 @@ Access goes through `queries.py` and the services (supabase-py / PostgREST).
 | **check_status_daily** | Daily Signa check status per followed symbol. |
 | **data_usage_daily** | Usage counters (provider calls, refreshed symbols). |
 | **symbol_profiles** | What a symbol is (sector, industry, country, size, dividend yield) for suggestions. |
+| **fixed_income** | Tesouro Direto, CDB, LCI/LCA … entered by hand, valued daily from CDI / Selic / IPCA / a fixed rate. |
+| **auto_dividend_dismissed** | Automatic dividends the user deleted (never re-created). |
 | **reserved_usernames** | Usernames of deleted accounts, held 90 days. |
 | **job_runs** | Last start / success / error of each scheduled job (owner report, alerts, catch-up). |
 | **signup_sources** | Where each user came from: campaign tags, "how did you hear", Apple Search Ads ids. |

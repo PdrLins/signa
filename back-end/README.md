@@ -61,6 +61,7 @@ back-end/
 | Push notifications (iOS; free basics, Premium all) | 8:31 daily, 18:31 weekdays / every 5 min while a followed exchange trades |
 | Monthly recap push | 1st of the month, 9:05 |
 | Weekly digest push ("your week") | Sunday 10:00 |
+| Automatic dividends (estimated "received" records) | 19:30 |
 | Usage counters flush | every 5 min |
 | Suggestions data (followed-together counts, symbol profiles) | 3:00 |
 | Apple Search Ads attribution (sign-up campaign ids) | every 10 min |
@@ -77,7 +78,7 @@ Premium sales: `PREMIUM_ON_SALE` (default false: the apps hide upgrade buttons u
 ## Database
 
 `app/db/schema.sql` creates the whole database on an empty Supabase project
-(35 tables, Row Level Security on, service_role access only). Changes: add the
+(37 tables, Row Level Security on, service_role access only). Changes: add the
 next numbered file in `app/db/migrations/`, run it, then fold it into
 `schema.sql`. See `app/db/README.md`.
 

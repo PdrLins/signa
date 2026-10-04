@@ -32,6 +32,7 @@ from app.api.v1 import growth as growth_api
 from app.api.v1 import public as public_api
 from app.api.v1 import account as account_api
 from app.api.v1 import password as password_api
+from app.api.v1 import fixed_income as fixed_income_api
 from app.api.v1 import portfolio_home as portfolio_home_api
 from app.api.v1 import referrals as referrals_api
 from app.api.v1 import register as register_api
@@ -190,6 +191,7 @@ app.include_router(growth_api.router, prefix=api_prefix)
 app.include_router(public_api.router, prefix=api_prefix)
 app.include_router(account_api.router, prefix=api_prefix)
 app.include_router(password_api.router, prefix=api_prefix)
+app.include_router(fixed_income_api.router, prefix=api_prefix)
 
 
 @app.post("/api/v1/telegram/webhook")

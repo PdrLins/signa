@@ -148,3 +148,15 @@ def _fresh_breaker_and_no_pending(monkeypatch):
     monkeypatch.setattr(queries, "pending_deletion_ids", lambda: set())
     from app.services import account
     monkeypatch.setattr(account, "username_reserved", lambda name, now=None: False)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_fixed_income(monkeypatch):
+    """Fixed income (migration 032): no Banco Central downloads and no database
+    reads unless a test provides them."""
+    from app.market import br_rates
+    from app.services import fixed_income, portfolio_snapshots
+    br_rates.clear_cache()
+    monkeypatch.setattr(br_rates, "_download", lambda code, since, until: {})
+    monkeypatch.setattr(fixed_income, "rows_for", lambda uid: [])
+    monkeypatch.setattr(portfolio_snapshots, "_fixed_values", lambda currencies, usdcad, d: {})

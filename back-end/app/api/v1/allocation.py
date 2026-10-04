@@ -74,7 +74,9 @@ def _allocation(user: dict, account_id: str | None, person_id: str | None) -> tu
     for a in ctx["accounts"]:
         c = pc.to_home(pc._f(a.get("cash_balance")) or 0.0, a.get("currency") or home, home, ctx["usdcad"])
         cash += c or 0.0
-    body = alloc.build_allocation(merged, cash)
+    from app.services import fixed_income
+    fixed = fixed_income.scope_value(ctx.get("fixed_income") or [], home, ctx["usdcad"])
+    body = alloc.build_allocation(merged, cash, fixed["items"])
     meta = pc.price_meta(positions)
     return ctx, body, meta
 

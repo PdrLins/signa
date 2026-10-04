@@ -207,6 +207,30 @@ def _close_series_from_download(data, sym: str, multi: bool):
         return None
 
 
+_PERIOD_DAYS = {"1y": 366, "2y": 731, "5y": 5 * 366, "max": 15 * 366}
+
+
+def cdi_index_series(period: str = "1y"):
+    """CDI as a growth curve (100 at the start, compounding each business day),
+    like a fund's closes, so CDI works as a benchmark. None when unavailable."""
+    from datetime import date, timedelta
+
+    import pandas as pd
+
+    from app.market import br_rates
+    since = date.today() - timedelta(days=_PERIOD_DAYS.get(period, 366))
+    rates = br_rates.series("CDI", since)
+    if not rates:
+        return None
+    level, points = 100.0, {}
+    for d in sorted(rates):
+        points[pd.Timestamp(d)] = level          # the index at the start of day d
+        level *= 1 + rates[d] / 100
+    s = pd.Series(points, dtype=float)
+    s.name = "CDI"
+    return s
+
+
 def fetch_daily_closes(symbols: list[str], period: str = "1y") -> dict:
     """Daily closes per symbol → {symbol: pandas.Series indexed by date}.
 
@@ -216,6 +240,11 @@ def fetch_daily_closes(symbols: list[str], period: str = "1y") -> dict:
     """
     out: dict = {}
     missing: list[str] = []
+    if "CDI" in symbols:   # not a Yahoo symbol: a growth curve from Banco Central's daily CDI
+        symbols = [s for s in symbols if s != "CDI"]
+        cdi = cdi_index_series(period)
+        if cdi is not None:
+            out["CDI"] = cdi
     for sym in dict.fromkeys(s for s in symbols if s):
         entry = _history_cache.get(f"hist:{period}:{sym}")
         if entry is None:

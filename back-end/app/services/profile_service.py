@@ -72,6 +72,7 @@ COMPARE_INDEXES: dict[str, str] = {
     "SPY": "SPDR S&P 500 ETF",
     "VT": "Vanguard Total World Stock ETF",
     "^BVSP": "Ibovespa",
+    "CDI": "CDI (Brazilian interbank rate)",   # built from Banco Central's daily rate (price_cache)
     "BOVA11.SA": "iShares Ibovespa (BOVA11)",
     "IVVB11.SA": "iShares S&P 500 em reais (IVVB11)",
     "^FTSE": "FTSE 100",
@@ -87,6 +88,7 @@ DEFAULTS: dict[str, Any] = {
     "dividend_tax_view": "before",
     "compare_index": None,
     "holdings_native_currency": False,
+    "auto_dividends": True,   # migration 032: record dividends automatically (app/services/auto_dividends.py)
 }
 
 
@@ -125,6 +127,7 @@ def build_profile(user: dict, row: dict | None, email: str | None, slots: dict |
         "tax_view_available": tax_view_allowed(level, s["country"]),
         "compare_index": s["compare_index"],
         "holdings_native_currency": bool(s["holdings_native_currency"]),
+        "auto_dividends": bool(s["auto_dividends"]),
         "access_level": level,
         "slots": slots,
     }
@@ -188,6 +191,12 @@ def validate_update(user: dict, current: dict | None, patch: dict) -> dict:
             raise _422("invalid_value", "holdings_native_currency must be true or false.",
                        "holdings_native_currency")
         clean["holdings_native_currency"] = v
+
+    if "auto_dividends" in patch:
+        v = patch["auto_dividends"]
+        if not isinstance(v, bool):
+            raise _422("invalid_value", "auto_dividends must be true or false.", "auto_dividends")
+        clean["auto_dividends"] = v
 
     if "dividend_tax_view" in patch:
         v = patch["dividend_tax_view"]

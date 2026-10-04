@@ -14,6 +14,7 @@ from app.scheduler.jobs import (
     suggestions_nightly,
     apple_search_ads_attribution,
     weekly_digest,
+    auto_dividends,
     portfolio_snapshots,
     monthly_recap_push,
     push_notifications,
@@ -163,6 +164,10 @@ def init_scheduler() -> AsyncIOScheduler:
     # Suggestions (migration 028): co-follow counts + symbol profiles, nightly.
     scheduler.add_job(suggestions_nightly, CronTrigger(hour=3, minute=0, timezone=settings.timezone),
                       id="suggestions_nightly", name="Suggestions data (3:00 AM ET)", replace_existing=True)
+
+    # Dividends paid by holdings, recorded as estimated transactions (migration 032).
+    scheduler.add_job(auto_dividends, CronTrigger(hour=19, minute=30, timezone=settings.timezone),
+                      id="auto_dividends", name="Automatic dividends (7:30 PM ET)", replace_existing=True)
 
     # Growth (migration 029): Apple Search Ads tokens -> campaign ids.
     scheduler.add_job(apple_search_ads_attribution, CronTrigger(minute="*/10", timezone=settings.timezone),

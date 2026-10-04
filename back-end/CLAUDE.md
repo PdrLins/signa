@@ -56,6 +56,8 @@ Push notifications (APNs, migration 025, `services/push.py`; devices under `/not
 - **Referrals** pay only for real returning friends (`referrals.earned`: 7+ days old, back 3+ days after sign-up); "followed together" counts only such accounts (min 10, rounded).
 - **Forgot password:** `POST /auth/password/forgot {identifier}` (username or email; same answer always; code to the verified email, else the Telegram two-step chat; 3 an hour) and `/auth/password/reset` (every device signed out). Users add an email under `/account/email` (+ `/confirm`). Email stays on the console sender until an email provider is set.
 - **Weekly digest:** Sunday 10:00 ET push (`app/services/weekly_digest.py`), every user with the app, `notification_prefs.weekly_digest`, deduped per ISO week, caught up the same day.
+- **Automatic dividends** (migration 032, `app/services/auto_dividends.py`): 19:30 ET, each paid dividend of a holding becomes a `dividend` transaction with `source: "auto"` (`estimated: true`); real records win (±15 days); edited → `manual`; deleted → remembered in `auto_dividend_dismissed`; `user_settings.auto_dividends` switch; no back-fill before the holding existed.
+- **Fixed income** (migration 032, `app/services/fixed_income.py`, `/fixed-income`): Tesouro / CDB / LCI ... valued daily from Banco Central series (`app/market/br_rates.py`: CDI 12, Selic 11, IPCA 433), estimated IR by the regressive table; included in `/portfolio/summary` total (`fixed_income` block), allocation (`fixed_income` class) and snapshots. `CDI` is a benchmark (`price_cache.cdi_index_series`).
 - `PREMIUM_ON_SALE=false` (default) → `/auth/me` `premium_on_sale: false`, apps hide upgrade buttons.
 
 ## Access levels

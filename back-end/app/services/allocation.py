@@ -45,7 +45,8 @@ from fastapi import status
 from app.core.api_errors import api_error
 from app.services.holdings_service import CASH_LIKE_FUNDS, COVERED_CALL_FUNDS, base_symbol
 
-CLASSES: tuple[str, ...] = ("stocks", "broad_etfs", "option_income_etfs", "cash_like", "crypto", "other")
+CLASSES: tuple[str, ...] = ("stocks", "broad_etfs", "option_income_etfs", "cash_like", "crypto", "other",
+                             "fixed_income")   # fixed_income: Tesouro, CDB, LCI ... (migration 032)
 
 CASH_LIKE_EXTRA = {"BIL", "SGOV", "SHV", "USFR", "TFLO", "BILS", "CLIP", "TBIL", "GBIL", "CMR", "PSU.U",
                    "ZMMK", "CBIL", "CASH", "PSA", "HISA", "CSAV", "MNY", "UBIL", "ZST", "HSAV", "NSAV"}
@@ -125,7 +126,7 @@ def classify(symbol: str, name: str | None = None, asset_type: str | None = None
 # Allocation
 # ============================================================
 
-def build_allocation(positions: list[dict], cash_home: float = 0.0) -> dict:
+def build_allocation(positions: list[dict], cash_home: float = 0.0, fixed_items: list[dict] | None = None) -> dict:
     """positions: portfolio_context.merge_positions_by_symbol rows (home currency).
 
     Returns {"total_home", "invested_home", "cash_home", "mix": [...], "tiles": [...],
@@ -133,7 +134,9 @@ def build_allocation(positions: list[dict], cash_home: float = 0.0) -> dict:
     cash_home = max(0.0, _f(cash_home) or 0.0)
     priced = [p for p in positions or [] if _f(p.get("value_home")) is not None and p["value_home"] > 0]
     unpriced = sorted({p["symbol"] for p in positions or [] if p not in priced})
-    invested = sum(p["value_home"] for p in priced)
+    fixed_items = [f for f in fixed_items or [] if (_f(f.get("value_home")) or 0) > 0]
+    fixed_total = sum(f["value_home"] for f in fixed_items)
+    invested = sum(p["value_home"] for p in priced) + fixed_total
     total = invested + cash_home
 
     def pct(v: float) -> float | None:
@@ -156,6 +159,10 @@ def build_allocation(positions: list[dict], cash_home: float = 0.0) -> dict:
         members = [{"symbol": p["symbol"], "value_home": _r(p["value_home"]), "pct": pct(p["value_home"])}
                    for p in by_class[cls]]
         value = sum(p["value_home"] for p in by_class[cls])
+        if cls == "fixed_income":
+            members = [{"symbol": None, "kind": "fixed_income", "id": f.get("id"), "name": f.get("name"),
+                        "value_home": _r(f["value_home"]), "pct": pct(f["value_home"])} for f in fixed_items]
+            value = fixed_total
         if cls == "cash_like" and cash_home > 0:
             members.append({"symbol": None, "kind": "account_cash", "value_home": _r(cash_home),
                             "pct": pct(cash_home)})

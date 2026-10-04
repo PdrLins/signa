@@ -39,7 +39,7 @@ def invalidate(uid: str | None) -> None:
         _gen[uid] = _gen.get(uid, 0) + 1
         if len(_gen) > 20000:   # bounded; a dropped counter only means a re-read
             _gen.clear()
-    for part in ("settings", "accounts", "people", "holdings", "transactions"):
+    for part in ("settings", "accounts", "people", "holdings", "transactions", "fixed_income"):
         _cache.delete(f"{uid}:{part}")
 
 

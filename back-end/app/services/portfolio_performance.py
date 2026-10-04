@@ -233,6 +233,8 @@ def summary_body(scope: dict) -> dict:
                    for p in positions if not p["converted"]] + cash_unconv + led_unconv
     estimated = bool(meta["estimated_prices"] or unpriced or unconverted or missing_cost)
     ext = extended_change(positions, scope.get("quotes") or {}, scope.get("quotes_ext") or {}, home, usdcad, mv)
+    from app.services import fixed_income as fixed_mod
+    fixed = fixed_mod.scope_value(scope.get("fixed_income") or [], home, usdcad)
     from app.core.access import can
     from app.services import quotes as quotes_service
     phase = quotes_service.market_phase()
@@ -242,7 +244,10 @@ def summary_body(scope: dict) -> dict:
         "currency": home,
         "market_value": pc.r2(mv),
         "cash": pc.r2(cash),
-        "total": pc.r2(mv + cash),
+        "total": pc.r2(mv + cash + fixed["value"]),
+        # fixed income entered by hand (migration 032), included in total
+        "fixed_income": {"value": fixed["value"], "invested": fixed["invested"], "gain": fixed["gain"],
+                         "count": fixed["count"], "estimated": fixed["estimated"]},
         "day_change": {"abs": pc.r2(day_abs) if day_base else None,
                        "pct": pc.r2(day_abs / day_base * 100) if day_base else None},
         "total_gain": {

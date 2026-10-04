@@ -260,6 +260,7 @@ def public_tx(t: dict, accounts: dict[str, dict] | None = None) -> dict:
         out[k] = _num(out.get(k))
     acct = (accounts or {}).get(str(t.get("account_id"))) if t.get("account_id") else None
     out["account_name"] = (acct or {}).get("name")
+    out["estimated"] = t.get("source") == "auto"   # recorded by Signa (migration 032), not by the user
     return out
 
 
@@ -319,6 +320,8 @@ def update_transaction(user_id: str, tx_id: str, patch: dict) -> dict:
     clean, errors = validate_transaction(merged, accounts=accounts, home_currency=home)
     if errors:
         _raise_invalid(errors)
+    if cur.get("source") == "auto":   # the user checked it: now it's their record, no longer an estimate
+        clean = {**clean, "source": "manual"}
     row = queries.update_transaction(tx_id, user_id, clean)
     if not row:
         raise api_error("not_found", "Transaction not found.", status.HTTP_404_NOT_FOUND)
@@ -326,6 +329,9 @@ def update_transaction(user_id: str, tx_id: str, patch: dict) -> dict:
 
 
 def delete_transaction(user_id: str, tx_id: str) -> dict:
+    cur = queries.get_transaction(tx_id, user_id)
+    if cur and cur.get("auto_ref"):   # an automatic dividend the user removed: never re-create it
+        queries.add_dismissed_auto_ref(user_id, cur["auto_ref"])
     if not queries.delete_transaction(tx_id, user_id):
         raise api_error("not_found", "Transaction not found.", status.HTTP_404_NOT_FOUND)
     return {"deleted": True, "id": tx_id}

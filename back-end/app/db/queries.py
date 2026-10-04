@@ -537,6 +537,23 @@ def update_user_settings(user_id: str, data: dict) -> dict:
 _PAGE = 1000  # PostgREST default max rows per request
 
 
+_missing_optional: set[str] = set()   # column groups a pending migration hasn't added yet
+
+
+def _with_optional(group: str, base: str, extra: str, run):
+    """run(columns) with `extra` columns (a newer migration), falling back to
+    `base` while that migration isn't applied. Remembered until restart."""
+    if group in _missing_optional:
+        return run(base)
+    try:
+        return run(base + extra)
+    except Exception as e:
+        if not _missing_schema(e):
+            raise
+        _missing_optional.add(group)
+        return run(base)
+
+
 def _select_all_pages(build_query, page_size: int = _PAGE, max_rows: int = 5_000_000) -> list[dict]:
     """Page through a select with .range() until a short page comes back.
     Whole-table reads (jobs) can be large: the cap is a safety net, logged."""
@@ -567,7 +584,8 @@ def get_profile_settings(user_id: str) -> dict | None:
     """The profile columns of user_settings (None when the user has no row).
     Raises when migration 013 is missing (unknown columns)."""
     client = get_client()
-    result = client.table("user_settings").select(PROFILE_COLUMNS).eq("user_id", user_id).limit(1).execute()
+    result = _with_optional("profile_032", PROFILE_COLUMNS, ", auto_dividends", lambda cols: client.table(
+        "user_settings").select(cols).eq("user_id", user_id).limit(1).execute())
     return result.data[0] if result.data else None
 
 
@@ -688,19 +706,21 @@ TRANSACTION_COLUMNS = (
 def list_transactions(user_id: str, filters: dict, limit: int, offset: int) -> tuple[list[dict], int]:
     """Newest first. filters: account_id, symbol, type, from, to (ISO dates)."""
     client = get_client()
-    q = client.table("transactions").select(TRANSACTION_COLUMNS, count="exact").eq("user_id", user_id)
-    if filters.get("account_id"):
-        q = q.eq("account_id", filters["account_id"])
-    if filters.get("symbol"):
-        q = q.eq("symbol", filters["symbol"])
-    if filters.get("type"):
-        q = q.eq("type", filters["type"])
-    if filters.get("from"):
-        q = q.gte("trade_date", filters["from"])
-    if filters.get("to"):
-        q = q.lte("trade_date", filters["to"])
-    result = (q.order("trade_date", desc=True).order("created_at", desc=True)
-              .range(offset, offset + limit - 1).execute())
+    def run(cols):
+        q = client.table("transactions").select(cols, count="exact").eq("user_id", user_id)
+        if filters.get("account_id"):
+            q = q.eq("account_id", filters["account_id"])
+        if filters.get("symbol"):
+            q = q.eq("symbol", filters["symbol"])
+        if filters.get("type"):
+            q = q.eq("type", filters["type"])
+        if filters.get("from"):
+            q = q.gte("trade_date", filters["from"])
+        if filters.get("to"):
+            q = q.lte("trade_date", filters["to"])
+        return (q.order("trade_date", desc=True).order("created_at", desc=True)
+                .range(offset, offset + limit - 1).execute())
+    result = _with_optional("tx_032", TRANSACTION_COLUMNS, ", auto_ref", run)
     rows = result.data or []
     total = result.count if isinstance(getattr(result, "count", None), int) else offset + len(rows)
     return rows, total
@@ -709,14 +729,15 @@ def list_transactions(user_id: str, filters: dict, limit: int, offset: int) -> t
 def get_all_transactions(user_id: str) -> list[dict]:
     """Every transaction of a user, oldest first (position derivation)."""
     client = get_client()
-    return _select_all_pages(lambda: (client.table("transactions").select(TRANSACTION_COLUMNS)
-                                      .eq("user_id", user_id).order("trade_date").order("created_at")))
+    return _with_optional("tx_032", TRANSACTION_COLUMNS, ", auto_ref", lambda cols: _select_all_pages(
+        lambda: (client.table("transactions").select(cols).eq("user_id", user_id)
+                 .order("trade_date").order("created_at").order("id"))))
 
 
 def get_transaction(tx_id: str, user_id: str) -> dict | None:
     client = get_client()
-    rows = (client.table("transactions").select(TRANSACTION_COLUMNS).eq("id", tx_id)
-            .eq("user_id", user_id).limit(1).execute().data or [])
+    rows = _with_optional("tx_032", TRANSACTION_COLUMNS, ", auto_ref", lambda cols: client.table(
+        "transactions").select(cols).eq("id", tx_id).eq("user_id", user_id).limit(1).execute().data or [])
     return rows[0] if rows else None
 
 
@@ -1396,3 +1417,29 @@ def get_activity_days(user_ids: list[str], start_day: str, end_day: str) -> list
                                      .in_("user_id", p).gte("day", start_day).lte("day", end_day)
                                      .order("user_id").order("day")))
     return out
+
+
+
+# ============================================================
+# Automatic dividends (migration 032)
+# ============================================================
+
+def auto_dividends_off_users() -> set[str]:
+    """Users who turned automatic dividends off."""
+    client = get_client()
+    rows = _select_all_pages(lambda: client.table("user_settings").select("user_id")
+                             .eq("auto_dividends", False).order("user_id"))
+    return {str(r["user_id"]) for r in rows}
+
+
+def get_dismissed_auto_refs(user_id: str) -> set[str]:
+    client = get_client()
+    rows = _select_all_pages(lambda: client.table("auto_dividend_dismissed").select("auto_ref")
+                             .eq("user_id", user_id).order("auto_ref"))
+    return {r["auto_ref"] for r in rows}
+
+
+def add_dismissed_auto_ref(user_id: str, auto_ref: str) -> None:
+    get_client().table("auto_dividend_dismissed").upsert(
+        {"user_id": user_id, "auto_ref": auto_ref}, on_conflict="user_id,auto_ref",
+        ignore_duplicates=True, returning=ReturnMethod.minimal).execute()
