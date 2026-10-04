@@ -50,28 +50,39 @@ async def dividend_calendar(
     include_watchlist: bool = Query(False),
     user: dict = Depends(get_current_user),
 ):
-    uid = user["user_id"]
-    try:
-        holdings = await asyncio.to_thread(queries.get_holdings, uid)
-    except Exception as e:
-        logger.warning(f"dividends: holdings unavailable: {e}")
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={
-            "code": "holdings_unavailable", "message": "Holdings storage is unavailable."})
-    # the same symbol can be held in several accounts (migration 013): one position per symbol
+    from app.core import user_cache
+    from app.services import profile_service
     from app.services.holdings_service import merge_by_symbol
-    holdings = merge_by_symbol(holdings)
-    watchlist = None
-    if include_watchlist:
+
+    uid = user["user_id"]
+
+    async def holdings_rows():
         try:
-            watchlist = await asyncio.to_thread(queries.get_watchlist, uid)
+            return await asyncio.to_thread(user_cache.get, uid, "holdings", lambda: queries.get_holdings(uid))
+        except Exception as e:
+            logger.warning(f"dividends: holdings unavailable: {e}")
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={
+                "code": "holdings_unavailable", "message": "Holdings storage is unavailable."})
+
+    async def watchlist_rows():
+        if not include_watchlist:
+            return None
+        try:
+            return await asyncio.to_thread(queries.get_watchlist, uid)
         except Exception as e:
             logger.warning(f"dividends: watchlist unavailable: {e}")
-            watchlist = []
-    home = "CAD"
-    try:
-        from app.services import profile_service
-        row = await asyncio.to_thread(queries.get_profile_settings, uid)
-        home = str(profile_service.merged_settings(row).get("home_currency") or "CAD").upper()
-    except Exception as e:
-        logger.debug(f"dividends: home currency unavailable ({e})")
-    return await dc.get_calendar(holdings, watchlist, months, await _usdcad(), home=home)
+            return []
+
+    async def home_currency():
+        try:
+            row = await asyncio.to_thread(user_cache.get, uid, "settings", lambda: queries.get_profile_settings(uid))
+            return str(profile_service.merged_settings(row).get("home_currency") or "CAD").upper()
+        except Exception as e:
+            logger.debug(f"dividends: home currency unavailable ({e})")
+            return "CAD"
+
+    holdings, watchlist, home, usdcad = await asyncio.gather(
+        holdings_rows(), watchlist_rows(), home_currency(), _usdcad())
+    # the same symbol can be held in several accounts (migration 013): one position per symbol
+    holdings = merge_by_symbol(holdings)
+    return await dc.get_calendar(holdings, watchlist, months, usdcad, home=home)

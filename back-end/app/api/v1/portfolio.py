@@ -1,4 +1,5 @@
-"""Portfolio API routes — protected."""
+"""Portfolio API routes — protected. Plain `def` handlers: FastAPI runs them
+in the thread pool, so their DB calls never block the event loop."""
 
 from uuid import UUID
 
@@ -13,14 +14,14 @@ router = APIRouter(prefix="/portfolio", tags=["Portfolio"])
 
 
 @router.get("", dependencies=[Depends(require_feature("area.holdings"))])
-async def get_portfolio(user: dict = Depends(get_current_user)):
+def get_portfolio(user: dict = Depends(get_current_user)):
     """Get all portfolio positions."""
     items = queries.get_portfolio(user["user_id"])
     return {"items": items, "count": len(items)}
 
 
 @router.post("", dependencies=[Depends(require_feature("area.holdings"))], status_code=status.HTTP_201_CREATED)
-async def add_portfolio_item(
+def add_portfolio_item(
     body: PortfolioAddRequest,
     user: dict = Depends(get_current_user),
 ):
@@ -38,7 +39,7 @@ async def add_portfolio_item(
 
 
 @router.put("/{item_id}", dependencies=[Depends(require_feature("area.holdings"))])
-async def update_portfolio_item(
+def update_portfolio_item(
     item_id: UUID,
     body: PortfolioUpdateRequest,
     user: dict = Depends(get_current_user),
@@ -56,7 +57,7 @@ async def update_portfolio_item(
 
 
 @router.delete("/{item_id}", dependencies=[Depends(require_feature("area.holdings"))])
-async def delete_portfolio_item(
+def delete_portfolio_item(
     item_id: UUID,
     user: dict = Depends(get_current_user),
 ):

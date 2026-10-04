@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import time
 from datetime import date, datetime, timedelta, timezone
 from html import escape
 from typing import Any
@@ -130,22 +131,29 @@ def short_date(d: date, lang: str) -> str:
 def user_language(user_id: str) -> str:
     from app.db import queries
     from app.services import profile_service
+    from app.core import user_cache
     try:
-        lang = profile_service.merged_settings(queries.get_profile_settings(user_id)).get("language")
+        lang = profile_service.merged_settings(
+            user_cache.get(user_id, "settings", lambda: queries.get_profile_settings(user_id))).get("language")
     except Exception:
         lang = None
     return lang if lang in ("en", "pt") else (settings.language if settings.language in ("en", "pt") else "en")
 
 
+BOT_LOOKUP_RETRY_S = 300
+_bot_lookup_retry_at = 0.0
+
+
 async def bot_username() -> str | None:
-    """settings.telegram_bot_username, else read once via getMe."""
-    global _bot_username
+    """settings.telegram_bot_username, else read once via getMe (a failure is
+    retried after BOT_LOOKUP_RETRY_S)."""
+    global _bot_username, _bot_lookup_retry_at
     if settings.telegram_bot_username:
         return settings.telegram_bot_username.lstrip("@")
     if _bot_username:
         return _bot_username
-    if not settings.telegram_bot_token:
-        return None
+    if not settings.telegram_bot_token or time.time() < _bot_lookup_retry_at:
+        return None   # a failed getMe isn't retried on every call (the app polls)
     try:
         from app.notifications.telegram_bot import _get_http_client, _telegram_url
         resp = await _get_http_client().get(_telegram_url("getMe"))
@@ -154,6 +162,8 @@ async def bot_username() -> str | None:
         logger.warning(f"telegram: getMe failed: {type(e).__name__}")
         name = None
     _bot_username = name or None
+    if not _bot_username:
+        _bot_lookup_retry_at = time.time() + BOT_LOOKUP_RETRY_S
     return _bot_username
 
 
@@ -431,6 +441,28 @@ async def _lines_for(user: dict, mode: str, today: date, now: datetime) -> tuple
     return lang, lines
 
 
+MESSAGE_MAX_CHARS = 4000   # Telegram's limit is 4,096
+DELIVERY_CONCURRENCY = 8   # users prepared at once per run (DB reads + Yahoo, bounded)
+
+
+def live_candidates(today: date, now: datetime) -> set[str] | None:
+    """Users who could get a "live" line this run: holders of a stock that
+    moved past the lowest big-move threshold today, or users whose price
+    alert fired in the last 24 h. Everyone else is skipped without reading
+    their settings or portfolio. None (process everyone) if this fails."""
+    from app.db import queries
+    from app.services.notification_prefs import THRESHOLD_MIN
+
+    try:
+        movers = [r["symbol"] for r in queries.get_mover_quotes(THRESHOLD_MIN)
+                  if r.get("symbol") and _et_date(r.get("as_of")) == today]
+        out = queries.get_holder_ids(movers) if movers else set()
+        return out | queries.get_recent_alert_user_ids((now - timedelta(hours=24)).isoformat())
+    except Exception as e:
+        logger.debug(f"notifications: live candidates unavailable ({type(e).__name__}), checking everyone")
+        return None
+
+
 async def deliver_user(link: dict, mode: str, today: date, now: datetime) -> int:
     """Send one user's new lines for this run; returns how many were sent."""
     import asyncio
@@ -438,7 +470,7 @@ async def deliver_user(link: dict, mode: str, today: date, now: datetime) -> int
     from app.db import queries
 
     uid = str(link["user_id"])
-    level = access.get_user_access(uid)["level"]
+    level = (await asyncio.to_thread(access.get_user_access, uid))["level"]
     if not access.can(level, FEATURE):
         return 0
     user = {"user_id": uid, "access_level": level}
@@ -451,7 +483,18 @@ async def deliver_user(link: dict, mode: str, today: date, now: datetime) -> int
     fresh = [ln for ln in unique if ln[1] not in done]
     if not fresh:
         return 0
-    if not await send(str(link["chat_id"]), compose(lang, [t for _, _, t in fresh])):
+    # Telegram rejects messages over 4,096 characters: send what fits, the
+    # rest goes out on the next run (only sent lines are recorded).
+    while len(fresh) > 1 and len(compose(lang, [t for _, _, t in fresh])) > MESSAGE_MAX_CHARS:
+        fresh = fresh[:max(1, len(fresh) * 2 // 3)]
+    chat = str(link["chat_id"])
+    if not await send(chat, compose(lang, [t for _, _, t in fresh])):
+        from app.notifications.telegram_bot import blocked_chats
+        if chat in blocked_chats:   # the user blocked the bot: stop trying every run
+            blocked_chats.discard(chat)
+            await asyncio.to_thread(queries.delete_telegram_link, uid)
+            logger.info(f"telegram: {uid} blocked the bot, notification chat unlinked")
+            return 0
         logger.warning(f"telegram: delivery to {uid} failed — will retry next run")
         return 0
     await asyncio.to_thread(queries.insert_deliveries, uid, [(kind, key) for kind, key, _ in fresh])
@@ -478,13 +521,21 @@ async def run_delivery(mode: str, today: date | None = None, now: datetime | Non
             return {"status": "migration_required"}
         logger.warning(f"telegram: could not load linked chats: {type(e).__name__}")
         return {"status": "failed"}
-    users = sent = errors = 0
-    for link in links:
-        try:
-            n = await deliver_user(link, mode, today, now)
-            users += 1 if n else 0
-            sent += n
-        except Exception as e:
-            errors += 1
-            logger.warning(f"telegram: delivery for {link.get('user_id')} failed: {type(e).__name__}: {e}")
+    if mode == "live":
+        wanted = await asyncio.to_thread(live_candidates, today, now)
+        if wanted is not None:
+            links = [ln for ln in links if str(ln.get("user_id")) in wanted]
+    sem = asyncio.Semaphore(DELIVERY_CONCURRENCY)
+
+    async def one(link: dict) -> int | None:
+        async with sem:
+            try:
+                return await deliver_user(link, mode, today, now)
+            except Exception as e:
+                logger.warning(f"telegram: delivery for {link.get('user_id')} failed: {type(e).__name__}: {e}")
+                return None
+    results = await asyncio.gather(*(one(ln) for ln in links))
+    users = sum(1 for n in results if n)
+    sent = sum(n for n in results if n)
+    errors = sum(1 for n in results if n is None)
     return {"status": "ok", "mode": mode, "linked": len(links), "users": users, "lines": sent, "errors": errors}

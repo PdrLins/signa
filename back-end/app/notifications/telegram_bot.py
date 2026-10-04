@@ -39,6 +39,9 @@ _queue: asyncio.Queue | None = None
 _worker_task: asyncio.Task | None = None
 
 
+_loop: asyncio.AbstractEventLoop | None = None   # the worker's loop (enqueue from threads)
+
+
 def _get_queue() -> asyncio.Queue:
     """Get or create the module-level queue (must be called inside an event loop)."""
     global _queue
@@ -78,6 +81,8 @@ def start_telegram_worker() -> None:
     global _worker_task
     if _worker_task is not None and not _worker_task.done():
         return  # already running
+    global _loop
+    _loop = asyncio.get_running_loop()
     _worker_task = asyncio.ensure_future(_telegram_worker())
 
 
@@ -110,16 +115,35 @@ def enqueue(chat_id: str, text: str, parse_mode: str = "HTML", urgent: bool = Fa
     worker is stuck), the message is dropped with a warning. This prevents
     a broken Telegram connection from backpressuring the scan pipeline.
     """
+    item = (chat_id, text, parse_mode, urgent)
     try:
-        q = _get_queue()
-        q.put_nowait((chat_id, text, parse_mode, urgent))
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if _loop is not None and running is not _loop:
+            # asyncio.Queue isn't thread-safe: from a worker thread, hand it to the loop
+            _loop.call_soon_threadsafe(_put, item)
+            return
+        _get_queue().put_nowait(item)
     except asyncio.QueueFull:
         logger.warning(f"Telegram queue full — dropped message: {text[:80]}...")
     except Exception as e:
         logger.warning(f"Telegram enqueue failed: {e}")
 
 
+def _put(item: tuple) -> None:
+    try:
+        _get_queue().put_nowait(item)
+    except asyncio.QueueFull:
+        logger.warning(f"Telegram queue full — dropped message: {item[1][:80]}...")
+
+
 # ── Direct send (still used by health ping and as the worker's backend) ──
+
+# Chats that answered 403 (bot blocked / chat gone): delivery unlinks them.
+blocked_chats: set[str] = set()
+
 
 async def send_message(chat_id: str, text: str, parse_mode: str = "HTML", urgent: bool = False) -> bool:
     """Send a message via Telegram Bot API (direct, awaits HTTP response).
@@ -142,6 +166,8 @@ async def send_message(chat_id: str, text: str, parse_mode: str = "HTML", urgent
             # Never log the exception/URL: httpx errors embed the request URL,
             # which contains the bot token (api.telegram.org/bot<TOKEN>/...).
             logger.error(f"Telegram send failed: HTTP {resp.status_code}")
+            if resp.status_code == 403:
+                blocked_chats.add(str(chat_id))   # the user blocked the bot
             return False
         return True
     except Exception as e:

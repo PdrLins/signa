@@ -17,6 +17,15 @@ pytest tests/test_stock_page.py::test_name -v    # single test
 
 Config in `app/core/config.py` (Pydantic Settings from `.env`, unknown keys ignored). Required: `JWT_SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`. Auth is always enabled. Validation at import time. One process only: APScheduler runs in-process, two instances would run every job twice.
 
+## Speed rules (every screen should answer without waiting)
+
+- **Never block the event loop:** DB calls, yfinance, bcrypt and heavy math go through `run_db` / `asyncio.to_thread` (jobs: `executors.in_job_pool`); independent awaits use `asyncio.gather`. Fire-and-forget tasks use `executors.spawn` (keeps a reference).
+- **Per-user rows:** settings / accounts / people / holdings / transactions through `app/core/user_cache.py` (30 s, cleared by any POST/PUT/PATCH/DELETE of that user in AuthMiddleware). Writes made outside a request show within 30 s.
+- **Shared market data:** cached per symbol for everyone, with one fetch per symbol at a time (`quotes.get_quotes`, `price_cache.fetch_daily_closes`, intraday bars, dividend profiles, charts, symbol search; `cache.SingleFlight`). Failures are cached briefly (30 s - 10 min), never as "not found" for long; a Yahoo error is not a missing symbol.
+- **Pence listings:** every Yahoo price/dividend goes through `market/currency.price_factor` / `normalize_info` (London, Johannesburg, Tel Aviv quote in sub-units).
+- **No silent caps:** list reads use `queries._select_all_pages`; jobs write in batches (snapshots, holding status per symbol, bulk upserts), never one call per row.
+- **Indexes:** a new filter/order on a big table needs an index in a migration (027 added the hot ones).
+
 ## Worldwide (markets: Brazil, Canada, US first; any country works)
 
 - **Currency per listing:** `app/market/currency.py` (suffix → currency/exchange: .SA BRL/B3, .L GBP/LSE (pence ÷100), .DE EUR/XETRA ...; no suffix = USD). Quotes store that currency.

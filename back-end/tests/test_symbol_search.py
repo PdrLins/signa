@@ -167,7 +167,7 @@ def test_yahoo_cached_per_normalized_query(env):
     assert fake.calls == ["tesla"]
 
 
-def test_yahoo_failure_not_cached(env, monkeypatch):
+def test_yahoo_failure_cached_briefly(env, monkeypatch):
     calls = []
 
     def boom(q):
@@ -177,6 +177,9 @@ def test_yahoo_failure_not_cached(env, monkeypatch):
     monkeypatch.setattr(ss, "_yahoo_raw", boom)
     res = run("apple")
     assert res[0]["symbol"] == "AAPL"  # local still answers
+    run("apple")
+    assert len(calls) == 1             # not retried on every keystroke...
+    ss._yahoo_cache.delete("apple")    # ...only after YAHOO_FAIL_TTL_S
     run("apple")
     assert len(calls) == 2
 
@@ -285,7 +288,7 @@ def test_preferred_shares_rank_after_common(env):
 
 def test_known_names_seed_local_candidates(monkeypatch):
     from app.db import queries
-    monkeypatch.setattr(queries, "get_all_holdings", lambda: [{"symbol": "XEQT.TO", "name": "iShares Core Equity", "asset_type": "ETF"}])
+    monkeypatch.setattr(queries, "get_all_holding_names", lambda: [{"symbol": "XEQT.TO", "name": "iShares Core Equity", "asset_type": "ETF"}])
     monkeypatch.setattr(queries, "get_all_watchlist_symbols", lambda: {"hood"})
     cands = {c["symbol"]: c for c in ss._load_local()}
     assert cands["TSLA"]["name"] == "Tesla"

@@ -3,6 +3,7 @@ daily closes and exchange/currency lookups."""
 
 from __future__ import annotations
 
+import threading
 from typing import Optional
 
 from loguru import logger
@@ -11,7 +12,10 @@ from app.core.executors import download_threads
 
 from app.core.cache import TTLCache
 
-_fx_cache = TTLCache(max_size=8, default_ttl=3600)  # 1h — FX drift intraday is small
+_fx_cache = TTLCache(max_size=256, default_ttl=3600)  # 1h — FX drift intraday is small; every currency
+# Last rate Yahoo gave per currency: served when a refresh fails, so totals never
+# drop holdings because of one failed FX download.
+_last_good: dict[str, float] = {}
 
 CAD_SUFFIXES = (".TO", ".V", ".NE", ".CN")
 
@@ -77,9 +81,12 @@ def usd_rates(codes) -> dict[str, float]:
     if missing:
         got = _download_fx(missing)
         for c in missing:
-            _fx_cache.set(f"USD{c}", got.get(c, 0.0), ttl=FX_TTL if c in got else FX_MISS_TTL)
             if c in got:
-                out[c] = got[c]
+                _last_good[c] = got[c]
+            rate = got.get(c) or _last_good.get(c, 0.0)
+            _fx_cache.set(f"USD{c}", rate, ttl=FX_TTL if c in got else FX_MISS_TTL)
+            if rate:
+                out[c] = rate
     return out
 
 
@@ -126,8 +133,14 @@ def get_usdcad_rate(force_refresh: bool = False) -> Optional[float]:
                     logger.warning(f"USDCAD quote {value} outside sanity band — ignored")
     except Exception as e:
         logger.warning(f"USDCAD fetch failed: {e}")
-    # Cache failures briefly (5 min) so we don't hammer Yahoo every call.
-    _fx_cache.set("USDCAD", rate or 0.0, ttl=3600 if rate else 300)
+    # A failure serves the last good rate (retried in 5 min), so CAD totals
+    # never silently drop USD holdings.
+    fetched = rate is not None
+    if fetched:
+        _last_good["CAD"] = rate
+    else:
+        rate = _last_good.get("CAD")
+    _fx_cache.set("USDCAD", rate or 0.0, ttl=3600 if fetched else 300)
     return rate
 
 
@@ -147,7 +160,9 @@ def fx_to_usd(symbol: str | None) -> Optional[float]:
 # days barely move intraday). A failed/empty symbol is cached as None for
 # 30 min so one bad ticker doesn't trigger a Yahoo call on every scan.
 
-_history_cache = TTLCache(max_size=1000, default_ttl=6 * 3600)
+_history_cache = TTLCache(max_size=20000, default_ttl=6 * 3600)   # every followed symbol × period
+_hist_lock = threading.Lock()
+_hist_inflight: dict[str, threading.Event] = {}
 _HISTORY_MISS_TTL = 1800
 
 
@@ -167,6 +182,10 @@ def _close_series_from_download(data, sym: str, multi: bool):
         s = s[s > 0]
         if s.empty:
             return None
+        from app.market.currency import price_factor
+        k = price_factor(sym)   # pence/cents listings (LSE, JSE, TASE), like the quotes table
+        if k != 1.0:
+            s = s * k
         import pandas as pd
 
         idx = pd.DatetimeIndex(s.index)
@@ -198,6 +217,37 @@ def fetch_daily_closes(symbols: list[str], period: str = "1y") -> dict:
             out[sym] = entry
     if not missing:
         return out
+    # One download per symbol at a time: a symbol another request is already
+    # downloading is waited for (then read from the cache), not fetched again.
+    mine, theirs = [], []
+    with _hist_lock:
+        for sym in missing:
+            key = f"hist:{period}:{sym}"
+            ev = _hist_inflight.get(key)
+            if ev is None:
+                _hist_inflight[key] = threading.Event()
+                mine.append(sym)
+            else:
+                theirs.append((sym, ev))
+    try:
+        out.update(_download_closes(mine, period) if mine else {})
+    finally:
+        with _hist_lock:
+            for sym in mine:
+                ev = _hist_inflight.pop(f"hist:{period}:{sym}", None)
+                if ev is not None:
+                    ev.set()
+    for sym, ev in theirs:
+        ev.wait(timeout=30)
+        entry = _history_cache.get(f"hist:{period}:{sym}")
+        if entry is not None and entry is not False:
+            out[sym] = entry
+    return out
+
+
+def _download_closes(missing: list[str], period: str) -> dict:
+    """One batched yf.download; caches each symbol (or its miss). Never raises."""
+    out: dict = {}
     try:
         import pandas as pd
         import yfinance as yf

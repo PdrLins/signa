@@ -281,6 +281,8 @@ def get_quotes(symbols: Iterable[str]) -> dict[str, dict]:
 def clear_quote_caches() -> None:
     _quote_miss.clear()
     _stored.clear()
+    _ext_stored.clear()
+    _ext_cache.clear()
 
 
 def in_market_session(now: datetime | None = None) -> bool:
@@ -541,6 +543,7 @@ def store_extended(found: dict[str, dict], regular: dict[str, dict]) -> int:
         row = {**ext, "ext_change_pct": round((ext["ext_price"] / base - 1) * 100, 4) if base else None}
         try:
             queries.update_quote_extended(sym, row)
+            _ext_stored.delete(sym)
             n += 1
         except Exception as e:
             logger.debug(f"quotes: extended price not stored for {sym} (migration 021?): {e}")
@@ -574,11 +577,26 @@ def get_extended(symbols) -> dict[str, dict]:
     syms = _clean(symbols)
     if not syms:
         return {}
+    out = {}
+    need = []
+    for sym in syms:
+        hit = _ext_stored.get(sym)
+        if hit is None:
+            need.append(sym)
+        elif hit:
+            out[sym] = dict(hit)
+    if not need:
+        return out
     try:
-        return {str(r["symbol"]).upper(): r for r in queries.get_quote_extended_rows(syms)}
+        rows = {str(r["symbol"]).upper(): r for r in queries.get_quote_extended_rows(need)}
     except Exception as e:
         logger.debug(f"quotes: extended columns unavailable (migration 021?): {e}")
-        return {}
+        return out
+    for sym in need:   # shared like stored quotes; {} = no extended price
+        _ext_stored.set(sym, rows.get(sym) or {})
+        if rows.get(sym):
+            out[sym] = dict(rows[sym])
+    return out
 
 
 def refresh_offhours(now: datetime | None = None) -> dict:
@@ -586,7 +604,6 @@ def refresh_offhours(now: datetime | None = None) -> dict:
     hours (see the section comment). Does nothing during the regular session
     (refresh_followed_quotes covers everything then)."""
     from app.core.config import settings
-    from app.db import queries
     from app.services import price_alerts, usage_metrics
 
     now = (now or datetime.now(timezone.utc))
@@ -595,8 +612,7 @@ def refresh_offhours(now: datetime | None = None) -> dict:
     if in_market_session(now):
         return {"status": "session"}
     try:
-        follows = queries.get_follow_rows() + price_alerts.alert_follow_rows()
-        levels = follower_levels(follows, queries.get_users_activity(), now, settings.quotes_active_user_days)
+        levels = _followed_levels(now)   # cached FOLLOW_TTL_S, shared with the session job
     except Exception as e:
         logger.warning(f"quotes: followed symbols unavailable: {e}")
         return {"status": "unavailable"}
@@ -630,27 +646,24 @@ def refresh_offhours(now: datetime | None = None) -> dict:
     return out
 
 
-_ext_cache: dict[str, tuple[float, dict]] = {}
 EXT_CACHE_S = 120
+_ext_cache = TTLCache(max_size=5000, default_ttl=EXT_CACHE_S)   # live after-hours fetches (stock page)
+_ext_stored = TTLCache(max_size=20000, default_ttl=STORED_TTL_S)
 
 
 def extended_for_symbol(symbol: str, quote: dict | None, now: datetime | None = None) -> dict | None:
     """Stock page: the stored after-hours price, else (US stock, pre/post
     phase) a one-symbol download cached EXT_CACHE_S for everyone viewing it.
     Never raises."""
-    import time as _time
-
     sym = symbol.upper()
     now = now or datetime.now(timezone.utc)
     v = extended_view(quote, get_extended([sym]).get(sym), now)
     if v is not None or not is_us_equity(sym) or market_phase(now) not in ("pre", "post"):
         return v
-    hit = _ext_cache.get(sym)
-    if hit and _time.time() - hit[0] < EXT_CACHE_S:
-        found = hit[1]
-    else:
+    found = _ext_cache.get(sym)
+    if found is None:
         found = fetch_extended([sym]).get(sym) or {}
-        _ext_cache[sym] = (_time.time(), found)
+        _ext_cache.set(sym, found)
     if not found:
         return None
     base = _f((quote or {}).get("price"))

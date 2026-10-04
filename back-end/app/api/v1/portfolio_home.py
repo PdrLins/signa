@@ -76,6 +76,7 @@ Errors ({"detail": {"code", "message", ...}}):
 
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
 from uuid import UUID
 
@@ -108,7 +109,7 @@ async def summary(
     user: dict = Depends(get_current_user),
 ):
     scope = await run_db(portfolio_context.load_scope, user, _s(account_id), _s(person_id))
-    return perf.summary_body(scope)
+    return await asyncio.to_thread(perf.summary_body, scope)
 
 
 @router.get("/history", dependencies=[Depends(require_feature("area.home"))])

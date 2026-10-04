@@ -50,6 +50,9 @@ def _fresh_follow_cache():
     quotes.clear_quote_caches()
     from app.core import user_cache
     user_cache.clear()
+    from app.api.v1 import tickers, watchlist
+    tickers.clear_cache()
+    watchlist._search_cache.clear()
     yield
     quotes.clear_follow_cache()
     quotes.clear_quote_caches()

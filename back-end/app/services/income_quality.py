@@ -46,7 +46,8 @@ from app.services.holdings_service import CASH_LIKE_FUNDS, COVERED_CALL_FUNDS, b
 
 CACHE_TTL = 12 * 3600
 ROC_YIELD = 0.12
-_cache = TTLCache(max_size=500, default_ttl=CACHE_TTL)
+_cache = TTLCache(max_size=5000, default_ttl=CACHE_TTL)
+DEGRADED_TTL = 600
 
 # Option-income fund -> what it writes options on (hand-maintained).
 UNDERLYING: dict[str, str] = {
@@ -186,12 +187,14 @@ async def get_income_quality(raw_symbol: str) -> dict:
     cached = _cache.get(sym)
     if cached is not None:
         return cached
-    profile = await dividends.get_dividend_profile(sym)
     und = UNDERLYING.get(sym)
-    closes = await asyncio.to_thread(fetch_daily_closes, [s for s in (sym, und) if s], "5y")
+    profile, closes = await asyncio.gather(
+        dividends.get_dividend_profile(sym),
+        asyncio.to_thread(fetch_daily_closes, [s for s in (sym, und) if s], "5y"))
     if closes.get(sym) is None and profile.get("reason") in ("unavailable", "no_dividend") \
             and not profile.get("last_payments") and not profile.get("history"):
         raise api_error("not_found", f"No market data for {sym}.", 404)
     body = build_quality(sym, profile, closes, dividends.today_et())
-    _cache.set(sym, body)
+    degraded = closes.get(sym) is None or profile.get("reason") == "unavailable"
+    _cache.set(sym, body, ttl=DEGRADED_TTL if degraded else None)   # partial data: retried soon
     return body

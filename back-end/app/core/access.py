@@ -25,6 +25,8 @@ database applies within a minute without logging out.
 
 from __future__ import annotations
 
+import threading
+import time
 from contextvars import ContextVar
 from typing import Callable, Optional
 
@@ -101,7 +103,6 @@ def upgrade_hint(feature: str) -> dict:
 
 
 _level_cache = TTLCache(max_size=10000, default_ttl=60)
-_features_cache = TTLCache(max_size=1, default_ttl=60)
 
 # Access level of the user behind the current request; None outside a
 # request (scheduler jobs, scripts). Set by AuthMiddleware; copied into
@@ -123,11 +124,14 @@ def _is_missing_column(err: Exception, column: str) -> bool:
                                or "pgrst204" in text)
 
 
-def get_feature_levels() -> dict[str, str]:
-    """Feature key -> min level: catalog defaults overridden by DB rows."""
-    cached = _features_cache.get("features")
-    if cached is not None:
-        return cached
+FEATURES_TTL_S = 60
+_features_last: tuple[dict[str, str], float] | None = None   # (levels, loaded at)
+_features_refreshing = threading.Event()
+
+
+def _load_feature_levels() -> dict[str, str]:
+    """Blocking: catalog defaults overridden by DB rows."""
+    global _features_last
     levels = {k: v[0] for k, v in FEATURE_CATALOG.items()}
     try:
         from app.db.supabase import get_client
@@ -138,8 +142,37 @@ def get_feature_levels() -> dict[str, str]:
                 levels[key] = lvl
     except Exception as e:  # table missing (before 011) or DB down: defaults
         logger.debug(f"access_features unavailable, using defaults: {e}")
-    _features_cache.set("features", levels)
+        if _features_last is not None:
+            levels = _features_last[0]   # keep the last good levels through an outage
+    _features_last = (levels, time.time())
     return levels
+
+
+def _refresh_in_background() -> None:
+    if _features_refreshing.is_set():
+        return
+    _features_refreshing.set()
+
+    def run():
+        try:
+            _load_feature_levels()
+        finally:
+            _features_refreshing.clear()
+    threading.Thread(target=run, name="access-features", daemon=True).start()
+
+
+def get_feature_levels() -> dict[str, str]:
+    """Feature key -> min level: catalog defaults overridden by DB rows.
+
+    Read on every protected request, so it never waits on the database after
+    the first load: older than FEATURES_TTL_S, the last levels are served while
+    one background thread reloads them."""
+    last = _features_last
+    if last is None:
+        return _load_feature_levels()
+    if time.time() - last[1] > FEATURES_TTL_S:
+        _refresh_in_background()
+    return last[0]
 
 
 def get_user_access(user_id: str) -> dict:
@@ -175,8 +208,9 @@ def get_user_access(user_id: str) -> dict:
 
 
 def clear_access_cache() -> None:
+    global _features_last
     _level_cache.clear()
-    _features_cache.clear()
+    _features_last = None
 
 
 def allowed_features(level: str) -> list[str]:

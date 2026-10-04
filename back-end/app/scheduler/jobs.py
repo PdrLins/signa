@@ -9,6 +9,8 @@ from app.core.executors import in_job_pool
 # Days kept by the nightly cleanup. Delivery keys carry their event date, so
 # a deleted key can't be sent again; check diffs only look a few days back.
 RETENTION_DAYS = {"notification_deliveries": 45, "check_status_daily": 60, "audit_logs": 180}
+# Also removed nightly: used refresh tokens after 2 days, sessions ended 30 days
+# ago, Telegram link codes a day after expiry, rejected push devices after 30 days.
 
 
 def _cleanup_db(now=None) -> dict:
@@ -33,12 +35,26 @@ def _cleanup_db(now=None) -> dict:
            "otps": delete(table("otp_codes").not_.is_("used_at", "null"))
            + delete(table("otp_codes").lt("expires_at", iso))}
     cut = {t: now - timedelta(days=d) for t, d in RETENTION_DAYS.items()}
-    for name, col, value in (
-            ("notification_deliveries", "sent_at", cut["notification_deliveries"].isoformat()),
-            ("check_status_daily", "check_date", cut["check_status_daily"].date().isoformat()),
-            ("audit_logs", "created_at", cut["audit_logs"].isoformat())):
+    day, month = (now - timedelta(days=1)).isoformat(), (now - timedelta(days=30)).isoformat()
+    steps = [
+        ("notification_deliveries", lambda: table("notification_deliveries").lt(
+            "sent_at", cut["notification_deliveries"].isoformat())),
+        ("check_status_daily", lambda: table("check_status_daily").lt(
+            "check_date", cut["check_status_daily"].date().isoformat())),
+        ("audit_logs", lambda: table("audit_logs").lt("created_at", cut["audit_logs"].isoformat())),
+        # sign-in rows: used refresh tokens (rotation keeps the newest), sessions
+        # ended 30+ days ago (their tokens go with them), old Telegram link codes,
+        # devices Apple rejected a month ago
+        ("auth_refresh_tokens", lambda: table("auth_refresh_tokens").lt("used_at", (now - timedelta(days=2)).isoformat())),
+        ("auth_sessions", lambda: table("auth_sessions").lt("absolute_expires_at", month)),
+        ("auth_sessions_revoked", lambda: db.table("auth_sessions").delete(
+            count=CountMethod.exact, returning=ReturnMethod.minimal).lt("revoked_at", month)),
+        ("telegram_link_codes", lambda: table("telegram_link_codes").lt("expires_at", day)),
+        ("push_devices", lambda: table("push_devices").lt("disabled_at", month)),
+    ]
+    for name, build in steps:
         try:
-            out[name] = delete(table(name).lt(col, value))
+            out[name] = delete(build())
         except Exception as e:   # one missing table must not stop the rest
             logger.warning(f"DB cleanup of {name} failed: {type(e).__name__}")
     return out
@@ -78,8 +94,6 @@ async def quotes_refresh(force: bool = False):
     """Every 60s in the 09:30-16:00 ET session (force=True after the close):
     refresh the shared `quotes` table for every followed symbol (one batched
     yfinance call; nothing per user). See app/services/quotes.py."""
-    import asyncio
-
     from app.core.config import settings
 
     if not settings.quotes_refresh_enabled:
@@ -102,8 +116,6 @@ async def quotes_offhours():
     """Every minute, any day: crypto 24/7 and US pre/after-hours prices for
     Premium followers, outside the regular session (app/services/quotes.py
     refresh_offhours). Skips itself during the session."""
-    import asyncio
-
     from app.core.config import settings
 
     if not (settings.quotes_refresh_enabled and settings.quotes_offhours_enabled):
@@ -120,8 +132,6 @@ async def quotes_offhours():
 async def portfolio_snapshots():
     """16:30 ET weekdays — per-user / per-account value, cash and cost basis
     in the user's home currency (app/services/portfolio_snapshots.py)."""
-    import asyncio
-
     from app.core.config import settings
 
     if not settings.portfolio_snapshots_enabled:
@@ -138,8 +148,6 @@ async def income_forecast_snapshots():
     """18:00 ET weekdays — per-user forward dividend income forecast
     (migration 014), the history "why your income changed" diffs against
     (app/services/income_forecast.py). No AI."""
-    import asyncio
-
     from app.core.config import settings
 
     if not settings.portfolio_insights_jobs_enabled:
@@ -234,7 +242,6 @@ async def telegram_notifications_live():
 
 async def usage_flush():
     """Every 5 minutes — write the buffered data-usage counters (migration 014)."""
-    import asyncio
 
     try:
         from app.services.usage_metrics import flush

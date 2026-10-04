@@ -39,7 +39,7 @@ async def _currents(user: dict, kinds: set[str]) -> tuple[str, dict[str, tuple[f
     home = scope["home_currency"]
     out: dict[str, tuple[float | None, bool]] = {}
     if "portfolio_value" in kinds:
-        s = perf.summary_body(scope)
+        s = await asyncio.to_thread(perf.summary_body, scope)
         out["portfolio_value"] = (s.get("total"), bool(s.get("estimated")))
     if "monthly_income" in kinds:
         from app.services import dividend_calendar
@@ -47,7 +47,7 @@ async def _currents(user: dict, kinds: set[str]) -> tuple[str, dict[str, tuple[f
         held = sorted({str(h.get("symbol") or "").upper() for h in scope["holdings"] if h.get("symbol")})
         try:
             profiles = await asyncio.wait_for(dividend_calendar.fetch_profiles(held), INCOME_TIMEOUT_S)
-            fc = compute_forecast(scope["holdings"], profiles, home, scope.get("usdcad"))
+            fc = await asyncio.to_thread(compute_forecast, scope["holdings"], profiles, home, scope.get("usdcad"))
             out["monthly_income"] = (fc["total_home"] / 12, bool(fc.get("unconverted")))
         except Exception as e:
             logger.debug(f"goals: income unavailable ({e!r})")

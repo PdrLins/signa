@@ -1,7 +1,7 @@
 """Authentication service — login, OTP, token management."""
 
 import math
-import time
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
@@ -71,7 +71,27 @@ async def login(
     client: str = "web",
     device_name: str | None = None,
 ) -> dict:
-    """Step 1: Validate credentials and send OTP via Telegram."""
+    """Step 1: Validate credentials and send OTP via Telegram.
+
+    The password hash check (bcrypt, ~250 ms of CPU) and the DB calls run in a
+    worker thread, so a sign-in never freezes other users' requests. Only the
+    Telegram enqueue (an asyncio queue) runs here."""
+    result, otp = await asyncio.to_thread(_login_sync, username, password, ip_address, user_agent,
+                                          client, device_name)
+    if otp:
+        await send_otp_message(*otp)
+    return result
+
+
+def _login_sync(
+    username: str,
+    password: str,
+    ip_address: str,
+    user_agent: str,
+    client: str = "web",
+    device_name: str | None = None,
+) -> tuple[dict, tuple[str, str] | None]:
+    """(response, (chat_id, code) to send or None). Blocking."""
     from app.db.supabase import get_client
     db = get_client()
 
@@ -128,7 +148,7 @@ async def login(
             from app.services import email_sender
             token, code = identity.issue_code(user["id"], "login", user["email"])
             email_sender.send_code(user["email"], "signup", code, identity._language(user["id"]))
-            return {"message": "We sent a code to your email", "session_token": token, "code_via": "email"}
+            return {"message": "We sent a code to your email", "session_token": token, "code_via": "email"}, None
         raise AuthenticationError(INVALID_CREDENTIALS)
 
     # ── Successful credentials — clear attempts in DB ──
@@ -149,7 +169,7 @@ async def login(
         # Password-only sign-in: two-step sign-in is off for this account
         # (migration 020), or LOGIN_OTP_ENABLED=false.
         token = _issue_access_token(user, ip_address, user_agent, client, device_name)
-        return {"message": "Logged in", "session_token": None, "code_via": None, **token}
+        return {"message": "Logged in", "session_token": None, "code_via": None, **token}, None
 
     # Generate OTP and session token
     otp_code = generate_otp()
@@ -163,8 +183,6 @@ async def login(
         code_hash=hash_otp(otp_code, salt=session_token),
         expires_at=expires_at,
     )
-
-    await send_otp_message(user["telegram_chat_id"], otp_code)
 
     queries.insert_audit_log(
         event_type=AuditEvent.OTP_SENT,
@@ -181,7 +199,7 @@ async def login(
         "session_token": session_token,
         "last_login": user.get("last_login"),
         "code_via": "telegram",
-    }
+    }, (user["telegram_chat_id"], otp_code)
 
 
 async def verify_otp_code(
@@ -192,7 +210,19 @@ async def verify_otp_code(
     client: str = "web",
     device_name: str | None = None,
 ) -> dict:
-    """Step 2: Verify OTP and issue JWT."""
+    """Step 2: Verify OTP and issue JWT (blocking work in a worker thread)."""
+    return await asyncio.to_thread(_verify_otp_sync, session_token, otp_code, ip_address, user_agent,
+                                   client, device_name)
+
+
+def _verify_otp_sync(
+    session_token: str,
+    otp_code: str,
+    ip_address: str,
+    user_agent: str,
+    client: str = "web",
+    device_name: str | None = None,
+) -> dict:
     otp_record = queries.get_otp_by_session_token(session_token)
 
     if otp_record is None:
@@ -374,9 +404,15 @@ def refresh_token(payload: dict, ip_address: str, user_agent: str) -> dict:
     expires_at = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else now
     try:
         queries.blacklist_token(jti, user_id, expires_at)
-    except Exception:
-        logger.warning("Refresh rejected: token JTI already revoked or blacklist write failed")
-        raise TokenRefreshError("Token has been revoked")
+    except Exception as e:
+        text = str(e).lower()
+        if "23505" in text or "duplicate" in text:   # a concurrent refresh already used this token
+            logger.warning("Refresh rejected: token JTI already revoked")
+            raise TokenRefreshError("Token has been revoked")
+        # a DB blip must not sign the user out: they retry the refresh
+        logger.warning(f"Refresh failed: blacklist write failed ({type(e).__name__})")
+        from app.core.api_errors import api_error
+        raise api_error("service_unavailable", "Please try again in a moment.", 503)
 
     minutes = sessions.access_minutes(payload.get("cli") or "web")
     new_token = create_access_token(user_id=user_id, username=username, auth_time=int(float(auth_time)),

@@ -160,14 +160,8 @@ def run_snapshots(on_date: date | None = None) -> dict:
         currencies = {}
     quotes = get_quotes({str(h.get("symbol") or "").upper() for h in holdings if h.get("symbol")})
     usdcad = get_usdcad_rate()
-    written = failed = 0
-    for uid in users:
-        rows = compute_snapshot_rows(by_user_h.get(uid, []), by_user_a.get(uid, []), quotes,
-                                     currencies.get(uid, "CAD"), usdcad)
-        try:
-            written += queries.replace_portfolio_snapshots(uid, d.isoformat(), rows)
-        except Exception as e:
-            failed += 1
-            logger.warning(f"snapshots: user {uid} failed: {e}")
+    rows_by_user = {uid: compute_snapshot_rows(by_user_h.get(uid, []), by_user_a.get(uid, []), quotes,
+                                               currencies.get(uid, "CAD"), usdcad) for uid in users}
+    written, failed = queries.replace_portfolio_snapshots_batch(d.isoformat(), rows_by_user)
     logger.info(f"Portfolio snapshots {d}: {len(users)} users, {written} rows, {failed} failed")
     return {"status": "ok", "date": d.isoformat(), "users": len(users), "rows": written, "failed": failed}

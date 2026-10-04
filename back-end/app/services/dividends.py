@@ -147,7 +147,7 @@ GROWER_MIN_YEARS_NO_CUT = 5.0
 YIELD_TRAP_RATIO = 1.5
 YIELD_TRAP_MIN_YIELD = 0.04
 
-_cache = TTLCache(max_size=500, default_ttl=12 * 3600)
+_cache = TTLCache(max_size=20000, default_ttl=12 * 3600)   # every followed symbol (nightly jobs fill it)
 _CACHE_TTL = 12 * 3600
 _FAIL_TTL = 600
 
@@ -661,6 +661,11 @@ def _fetch_raw(symbol: str, info: dict | None = None) -> dict:
     # Funds have no earnings calendar: Yahoo answers 404 "No fundamentals
     # data found" (printed by yfinance) and it slowed every page that builds
     # dividend profiles. Their dates come from the dividend history + info.
+    # pence/cents listings: amounts and prices in the main currency (GBp -> GBP)
+    from app.market.currency import normalize_info
+    out["info"], k = normalize_info(symbol, out["info"])
+    if k != 1.0 and out["dividends"] is not None:
+        out["dividends"] = out["dividends"] * k
     if skip_calendar(out["info"]):
         return out
     try:
@@ -676,15 +681,11 @@ def skip_calendar(info: dict | None) -> bool:
     return str((info or {}).get("quoteType") or "").upper() in ("ETF", "MUTUALFUND", "MONEYMARKET")
 
 
-async def get_dividend_profile(symbol: str, info: dict | None = None, price: float | None = None) -> dict:
-    """Dividend profile for one symbol (cached ~12h). Never raises."""
-    if is_crypto(symbol, info):
-        return empty_profile(symbol, "crypto")
-    cached = _cache.get(symbol)
-    if cached is not None:
-        return cached
+def _load_profile(symbol: str, info: dict | None, price: float | None) -> dict:
+    """Blocking: fetch, build and cache. Cached here, in the thread, so a fetch
+    that outlives the caller's timeout still serves the next request."""
     try:
-        raw = await asyncio.to_thread(_fetch_raw, symbol, info)
+        raw = _fetch_raw(symbol, info)
         prof = build_profile(symbol, raw.get("info"), raw.get("dividends"), raw.get("calendar"),
                              today_et(), price)
         ok = bool(raw.get("info")) or raw.get("dividends") is not None
@@ -693,6 +694,26 @@ async def get_dividend_profile(symbol: str, info: dict | None = None, price: flo
         prof, ok = empty_profile(symbol, "unavailable"), False
     _cache.set(symbol, prof, ttl=_CACHE_TTL if ok else _FAIL_TTL)
     return prof
+
+
+_inflight: dict[str, asyncio.Future] = {}
+
+
+async def get_dividend_profile(symbol: str, info: dict | None = None, price: float | None = None) -> dict:
+    """Dividend profile for one symbol (cached ~12h, shared by every user).
+    Concurrent requests for the same symbol share one Yahoo fetch. Never raises."""
+    if is_crypto(symbol, info):
+        return empty_profile(symbol, "crypto")
+    cached = _cache.get(symbol)
+    if cached is not None:
+        return cached
+    fut = _inflight.get(symbol)
+    if fut is None:
+        fut = asyncio.ensure_future(asyncio.to_thread(_load_profile, symbol, info, price))
+        _inflight[symbol] = fut
+        fut.add_done_callback(lambda _f, s=symbol: _inflight.pop(s, None))
+    # shield: a caller's timeout doesn't cancel the fetch other callers wait on
+    return await asyncio.shield(fut)
 
 
 # ============================================================

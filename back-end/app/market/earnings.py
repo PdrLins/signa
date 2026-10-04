@@ -24,7 +24,8 @@ from loguru import logger
 
 from app.core.cache import TTLCache
 
-_earnings_cache = TTLCache(max_size=2000, default_ttl=12 * 3600)
+_earnings_cache = TTLCache(max_size=20000, default_ttl=12 * 3600)
+FAIL_TTL_S = 600
 
 _ET = ZoneInfo("America/New_York")
 
@@ -145,23 +146,31 @@ async def get_earnings_context(ticker: str) -> dict:
         t = yf.Ticker(ticker)
         cal = None
         edf = None
+        ok = False
         try:
             cal = t.calendar
+            ok = True
         except Exception as e:
             logger.debug(f"Earnings calendar unavailable for {ticker}: {e}")
-        try:
-            edf = t.get_earnings_dates(limit=12)
-        except Exception as e:
-            logger.debug(f"Earnings dates unavailable for {ticker}: {e}")
-        return build_earnings_context(cal, edf)
+        # Signa only needs the next date. The report-date list is a slow HTML
+        # scrape: asked only when the calendar has no future date.
+        if _next_from_calendar(cal, datetime.now(_ET).date()) is None:
+            try:
+                edf = t.get_earnings_dates(limit=12)
+                ok = True
+            except Exception as e:
+                logger.debug(f"Earnings dates unavailable for {ticker}: {e}")
+        result = build_earnings_context(cal, edf)
+        # cached here (in the thread) so a caller's timeout doesn't lose it;
+        # a Yahoo failure is retried in FAIL_TTL_S, not 12 hours
+        _earnings_cache.set(ticker, result, ttl=None if ok else FAIL_TTL_S)
+        return result
 
     try:
-        result = await asyncio.to_thread(_fetch)
+        return await asyncio.to_thread(_fetch)
     except Exception as e:
         logger.debug(f"Earnings context failed for {ticker}: {e}")
         return _empty()
-    _earnings_cache.set(ticker, result)
-    return result
 
 
 def next_earnings_date_from_info(info: dict) -> str | None:
@@ -173,7 +182,7 @@ def next_earnings_date_from_info(info: dict) -> str | None:
     `earningsTimestampStart` / `earningsTimestamp` / `earningsTimestampEnd`
     (epoch seconds). Pick the earliest one that is today or later.
     """
-    today = date.today()
+    today = datetime.now(_ET).date()
     candidates = []
     for key in ("earningsTimestampStart", "earningsTimestamp", "earningsTimestampEnd"):
         ts = info.get(key)
@@ -200,11 +209,14 @@ def _asset_type(h: dict) -> str:
 
 
 def _exchange_code(symbol: str) -> str:
+    """Calendar label for trading-day counts: B3, LSE, Tokyo ... use their own holidays."""
     if symbol.endswith("-USD"):
         return "CRYPTO"
     if symbol.endswith((".TO", ".V")):
         return "TSX"
-    return "NYSE"
+    from app.market.sessions import label_for_symbol
+    label = label_for_symbol(symbol)
+    return "NYSE" if label == "US" else label
 
 
 async def earnings_info(h: dict, today: date | None = None) -> dict | None:

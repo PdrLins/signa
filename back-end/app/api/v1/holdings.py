@@ -43,6 +43,7 @@ from app.services import slots
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.core.utils import validate_ticker
+from app.core import user_cache
 from app.db import queries
 from app.services import holding_status
 from app.services import holdings_service as hs
@@ -135,7 +136,7 @@ async def _db(fn, *args):
 async def _accounts(user_id: str) -> list[dict] | None:
     """The user's accounts; None before migration 013 (no accounts table)."""
     try:
-        return await asyncio.to_thread(queries.get_accounts, user_id)
+        return await asyncio.to_thread(user_cache.get, user_id, "accounts", lambda: queries.get_accounts(user_id))
     except Exception as e:
         logger.debug(f"holdings: accounts unavailable ({e})")
         return None
@@ -163,7 +164,8 @@ def _with_account(item: dict, accounts: list[dict] | None) -> dict:
 async def _home_currency(user_id: str) -> str:
     try:
         from app.services import profile_service
-        row = await asyncio.to_thread(queries.get_profile_settings, user_id)
+        row = await asyncio.to_thread(user_cache.get, user_id, "settings",
+                                      lambda: queries.get_profile_settings(user_id))
         return str(profile_service.merged_settings(row).get("home_currency") or "CAD").upper()
     except Exception as e:
         logger.debug(f"holdings: home currency unavailable ({e})")
@@ -229,8 +231,11 @@ async def list_holdings(
     position.weight_pct = this row (one account's lot); position.symbol_weight_pct
     = the symbol across all accounts in the filter; position.overweight uses
     symbol_weight_pct. totals.as_of = the oldest price time among priced rows."""
-    rows = await _db(queries.get_holdings, user["user_id"])
-    accounts = await _accounts(user["user_id"])
+    uid = user["user_id"]
+    # Independent reads at once; the rows come from the per-user cache Home also uses.
+    rows, accounts, usdcad, home = await asyncio.gather(
+        _db(user_cache.get, uid, "holdings", lambda: queries.get_holdings(uid)),
+        _accounts(uid), _usdcad(), _home_currency(uid))
     if (account_id or person_id) and accounts is None:
         raise migration_required()
     if account_id:
@@ -238,10 +243,8 @@ async def list_holdings(
     if person_id:
         mine = {str(a["id"]) for a in accounts or [] if str(a.get("person_id")) == str(person_id)}
         rows = [h for h in rows if str(h.get("account_id")) in mine]
-    usdcad = await _usdcad()
     quotes = await _live_quotes(rows)
-    home = await _home_currency(user["user_id"])
-    per, totals = hs.portfolio_math(rows, usdcad, quotes=quotes, home=home)
+    per, totals = await asyncio.to_thread(hs.portfolio_math, rows, usdcad, quotes=quotes, home=home)
     items = [_with_account(hs.public_holding(h, per.get(str(h.get("id"))), hs.holding_quote(h, quotes),
                                              with_quote=True), accounts) for h in rows]
     return {

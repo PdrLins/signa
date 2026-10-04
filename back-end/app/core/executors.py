@@ -43,3 +43,15 @@ def download_threads(n: int) -> int | bool:
     """yf.download(threads=...): parallel requests for several symbols (yfinance
     makes one HTTP request per symbol); False for a single symbol."""
     return min(YAHOO_DOWNLOAD_THREADS, n) if n > 1 else False
+
+
+_background: set = set()
+
+
+def spawn(coro) -> "asyncio.Task":
+    """create_task that keeps a reference until the task ends (a bare
+    create_task can be garbage-collected mid-run, losing e.g. a push)."""
+    task = asyncio.get_running_loop().create_task(coro)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+    return task

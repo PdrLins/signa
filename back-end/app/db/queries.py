@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 
 from loguru import logger
 
+from postgrest.types import ReturnMethod
+
 from app.db.supabase import get_client
 
 
@@ -306,10 +308,17 @@ def get_holdings(user_id: str) -> list[dict]:
     ))
 
 
+def get_all_holding_names() -> list[dict]:
+    """symbol, name, exchange, asset_type of every holding (symbol search), 4 columns only."""
+    client = get_client()
+    return _select_all_pages(lambda: client.table("holdings").select("id, symbol, name, exchange, asset_type")
+                             .order("id"))
+
+
 def get_all_holdings() -> list[dict]:
     """Every user's holdings (scheduler monitor)."""
     client = get_client()
-    return _select_holdings(lambda cols: client.table("holdings").select(cols).order("created_at").order("id"))
+    return _select_holdings(lambda cols: client.table("holdings").select(cols).order("id"))   # pk: cheap paging
 
 
 def upsert_holdings(user_id: str, rows: list[dict]) -> list[dict]:
@@ -340,18 +349,37 @@ def upsert_holdings(user_id: str, rows: list[dict]) -> list[dict]:
     index = {(str(x.get("account_id") or ""), x["symbol"]): x["id"] for x in existing}
     out: list[dict] = []
     inserts: list[dict] = []
+    updates: list[dict] = []
     now_iso = datetime.now(timezone.utc).isoformat()
     for r in rows:
         hid = index.get((str(r.get("account_id") or ""), r["symbol"]))
         if hid:
-            res = (client.table("holdings").update({**r, "updated_at": now_iso})
-                   .eq("id", hid).eq("user_id", user_id).execute())
-            out.extend(res.data or [])
+            updates.append({**r, "id": hid, "user_id": user_id, "updated_at": now_iso})
         else:
             inserts.append({**r, "user_id": user_id})
+    # Existing rows: one bulk upsert on the primary key (only the sent columns
+    # change), not one PATCH per holding.
+    for i in range(0, len(updates), 500):
+        out.extend(client.table("holdings").upsert(updates[i:i + 500], on_conflict="id").execute().data or [])
     if inserts:
         out.extend(client.table("holdings").insert(inserts).execute().data or [])
     return out
+
+
+def move_holdings(user_id: str, holding_ids: list[str], account_id: str | None) -> None:
+    """Move holdings to another account (or none) in chunks of 200 ids."""
+    client = get_client()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for i in range(0, len(holding_ids), 200):
+        (client.table("holdings").update({"account_id": account_id, "updated_at": now_iso},
+                                         returning=ReturnMethod.minimal)
+         .eq("user_id", user_id).in_("id", holding_ids[i:i + 200]).execute())
+
+
+def set_symbol_status(symbol: str, data: dict, user_id: str | None = None) -> None:
+    """Same holding_status on every holding of `symbol` (one user's, or everyone's)."""
+    q = get_client().table("holdings").update(data, returning=ReturnMethod.minimal).eq("symbol", symbol)
+    (q.eq("user_id", user_id) if user_id else q).execute()
 
 
 def update_holding(holding_id: str, user_id: str, data: dict) -> dict | None:
@@ -387,15 +415,9 @@ def delete_holding(holding_id: str, user_id: str) -> bool:
 def get_watchlist(user_id: str) -> list[dict]:
     """Get all watchlist items for a user."""
     client = get_client()
-    result = (
-        client.table("watchlist")
-        .select("*")
-        .eq("user_id", user_id)
-        .order("added_at", desc=True)
-        .limit(200)
-        .execute()
-    )
-    return result.data or []
+    # every row (Premium is unlimited), newest first; id breaks ties for stable paging
+    return _select_all_pages(lambda: client.table("watchlist").select("*").eq("user_id", user_id)
+                             .order("added_at", desc=True).order("id"))
 
 
 def get_all_watchlist_symbols() -> set[str]:
@@ -492,7 +514,8 @@ def get_user_settings(user_id: str) -> dict:
         return result.data[0]
     # Create default settings
     default = {"user_id": user_id, "theme": "midnight", "language": "en"}
-    client.table("user_settings").insert(default).execute()
+    # two first loads at once: the second insert is ignored (was a 500)
+    client.table("user_settings").upsert(default, on_conflict="user_id", ignore_duplicates=True).execute()
     return default
 
 
@@ -514,16 +537,18 @@ def update_user_settings(user_id: str, data: dict) -> dict:
 _PAGE = 1000  # PostgREST default max rows per request
 
 
-def _select_all_pages(build_query, page_size: int = _PAGE, max_rows: int = 50_000) -> list[dict]:
-    """Page through a select with .range() until a short page comes back."""
+def _select_all_pages(build_query, page_size: int = _PAGE, max_rows: int = 5_000_000) -> list[dict]:
+    """Page through a select with .range() until a short page comes back.
+    Whole-table reads (jobs) can be large: the cap is a safety net, logged."""
     rows: list[dict] = []
     start = 0
     while start < max_rows:
         page = (build_query().range(start, start + page_size - 1).execute()).data or []
         rows.extend(page)
         if len(page) < page_size:
-            break
+            return rows
         start += page_size
+    logger.warning(f"queries: read stopped at {max_rows} rows")
     return rows
 
 
@@ -556,7 +581,7 @@ def get_user_email(user_id: str) -> str | None:
     """users.email when that column exists (it doesn't in schema.sql yet)."""
     client = get_client()
     try:
-        rows = client.table("users").select("*").eq("id", user_id).limit(1).execute().data or []
+        rows = client.table("users").select("email").eq("id", user_id).limit(1).execute().data or []
     except Exception:
         return None
     email = (rows[0] if rows else {}).get("email")
@@ -614,13 +639,13 @@ ACCOUNT_COLUMNS = "id, user_id, person_id, name, account_type, currency, cash_ba
 
 def get_accounts(user_id: str) -> list[dict]:
     client = get_client()
-    return (client.table("accounts").select(ACCOUNT_COLUMNS).eq("user_id", user_id)
-            .order("created_at").limit(500).execute().data or [])
+    return _select_all_pages(lambda: client.table("accounts").select(ACCOUNT_COLUMNS).eq("user_id", user_id)
+                             .order("created_at").order("id"))
 
 
 def get_all_accounts() -> list[dict]:
     client = get_client()
-    return _select_all_pages(lambda: client.table("accounts").select(ACCOUNT_COLUMNS).order("created_at"))
+    return _select_all_pages(lambda: client.table("accounts").select(ACCOUNT_COLUMNS).order("id"))   # pk: cheap paging
 
 
 def insert_accounts(user_id: str, rows: list[dict]) -> list[dict]:
@@ -825,6 +850,27 @@ def replace_portfolio_snapshots(user_id: str, snapshot_date: str, rows: list[dic
     return len(client.table("portfolio_snapshots").insert(payload).execute().data or [])
 
 
+def replace_portfolio_snapshots_batch(snapshot_date: str, rows_by_user: dict[str, list[dict]],
+                                     chunk: int = 200) -> tuple[int, int]:
+    """replace_portfolio_snapshots for many users: one delete + one insert per
+    `chunk` users instead of two calls per user. Returns (rows written, users failed)."""
+    client = get_client()
+    users = sorted(rows_by_user)
+    written = failed = 0
+    for i in range(0, len(users), chunk):
+        part = users[i:i + chunk]
+        payload = [{**r, "user_id": uid, "snapshot_date": snapshot_date} for uid in part for r in rows_by_user[uid]]
+        try:
+            client.table("portfolio_snapshots").delete().in_("user_id", part).eq("snapshot_date", snapshot_date).execute()
+            for j in range(0, len(payload), 500):
+                client.table("portfolio_snapshots").insert(payload[j:j + 500], returning=ReturnMethod.minimal).execute()
+            written += len(payload)
+        except Exception as e:
+            failed += len(part)
+            logger.warning(f"snapshots: {len(part)} users failed: {type(e).__name__}: {e}")
+    return written, failed
+
+
 # ---- notification prefs ----
 
 def get_notification_prefs(user_id: str) -> dict | None:
@@ -871,6 +917,24 @@ def get_income_snapshots(user_id: str, since: str | None = None) -> list[dict]:
     if since:
         q = q.gte("snapshot_date", since)
     return q.order("snapshot_date").limit(400).execute().data or []
+
+
+def get_income_snapshot_bounds(user_id: str, cutoff: str, before: str) -> list[dict]:
+    """The oldest snapshot before `before` and the newest on or before `cutoff`
+    (what "why your income changed" compares), oldest first."""
+    client = get_client()
+    cols = "snapshot_date, total_home, currency, usdcad, per_symbol"
+
+    def q():
+        return client.table("income_forecast_snapshots").select(cols).eq("user_id", user_id).lt("snapshot_date", before)
+    rows = (q().order("snapshot_date").limit(1).execute().data or []) + \
+        (q().lte("snapshot_date", cutoff).order("snapshot_date", desc=True).limit(1).execute().data or [])
+    seen, out = set(), []
+    for r in sorted(rows, key=lambda r: str(r["snapshot_date"])):
+        if r["snapshot_date"] not in seen:
+            seen.add(r["snapshot_date"])
+            out.append(r)
+    return out
 
 
 def upsert_income_snapshot(user_id: str, snapshot_date: str, row: dict) -> int:
@@ -975,10 +1039,11 @@ PRICE_ALERT_COLUMNS = ("id, user_id, symbol, direction, target_price, currency, 
 
 def list_price_alerts(user_id: str, symbol: str | None = None) -> list[dict]:
     client = get_client()
-    q = client.table("price_alerts").select(PRICE_ALERT_COLUMNS).eq("user_id", user_id)
-    if symbol:
-        q = q.eq("symbol", symbol)
-    return q.order("created_at", desc=True).limit(1000).execute().data or []
+
+    def build():
+        q = client.table("price_alerts").select(PRICE_ALERT_COLUMNS).eq("user_id", user_id)
+        return (q.eq("symbol", symbol) if symbol else q).order("created_at", desc=True).order("id")
+    return _select_all_pages(build)
 
 
 def get_price_alert(alert_id: str, user_id: str) -> dict | None:
@@ -1040,6 +1105,32 @@ def get_triggered_price_alerts(user_id: str, since_iso: str) -> list[dict]:
     client = get_client()
     return (client.table("price_alerts").select(PRICE_ALERT_COLUMNS).eq("user_id", user_id)
             .gte("triggered_at", since_iso).order("triggered_at", desc=True).limit(500).execute().data or [])
+
+
+def get_mover_quotes(min_abs_pct: float) -> list[dict]:
+    """Quotes that moved at least min_abs_pct either way (live notifications)."""
+    client = get_client()
+    return _select_all_pages(lambda: client.table("quotes").select("symbol, change_pct, as_of")
+                             .or_(f"change_pct.gte.{min_abs_pct},change_pct.lte.{-min_abs_pct}").order("symbol"))
+
+
+def get_holder_ids(symbols: list[str]) -> set[str]:
+    """Users holding any of `symbols`."""
+    client = get_client()
+    out: set[str] = set()
+    for i in range(0, len(symbols), 200):
+        rows = _select_all_pages(lambda part=symbols[i:i + 200]: client.table("holdings").select("user_id, id")
+                                 .in_("symbol", part).order("id"))
+        out |= {str(r["user_id"]) for r in rows if r.get("user_id")}
+    return out
+
+
+def get_recent_alert_user_ids(since_iso: str) -> set[str]:
+    """Users with a price alert triggered since `since_iso`."""
+    client = get_client()
+    rows = _select_all_pages(lambda: client.table("price_alerts").select("user_id, id")
+                             .gte("triggered_at", since_iso).order("id"))
+    return {str(r["user_id"]) for r in rows if r.get("user_id")}
 
 
 def get_active_alert_follow_rows() -> list[dict]:

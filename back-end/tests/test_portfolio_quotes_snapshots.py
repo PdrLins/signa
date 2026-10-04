@@ -160,10 +160,11 @@ def test_run_snapshots_is_idempotent(monkeypatch):
                                                             "XEQT.TO": {"price": 35, "currency": "CAD"}})
     monkeypatch.setattr("app.services.price_cache.get_usdcad_rate", lambda *a, **k: 1.4)
 
-    def replace(uid, d, rows):
-        store[(uid, d)] = rows
-        return len(rows)
-    monkeypatch.setattr(queries, "replace_portfolio_snapshots", replace)
+    def replace(d, rows_by_user):
+        for uid, rows in rows_by_user.items():
+            store[(uid, d)] = rows
+        return sum(len(r) for r in rows_by_user.values()), 0
+    monkeypatch.setattr(queries, "replace_portfolio_snapshots_batch", replace)
     day = date(2026, 9, 30)
     r1 = snaps.run_snapshots(day)
     first = dict(store)

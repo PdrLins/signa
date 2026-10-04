@@ -46,6 +46,11 @@ class _Q:
         self.op, self.payload = "update", payload
         return self
 
+    def upsert(self, payload, on_conflict=None, ignore_duplicates=False):
+        assert on_conflict == "token_hash" and ignore_duplicates
+        self.op, self.payload = "upsert", payload
+        return self
+
     def eq(self, k, v):
         self.filters.append(lambda r, k=k, v=v: str(r.get(k)) == str(v))
         return self
@@ -74,6 +79,8 @@ class _Q:
             for r in match:
                 r.update(self.payload)
             return _Result([dict(r) for r in match])
+        if self.op == "upsert" and any(r.get("token_hash") == self.payload["token_hash"] for r in rows):
+            return _Result([])   # duplicate ignored
         now = datetime.now(timezone.utc).isoformat()
         row = {"created_at": now, **self.payload}
         if self.name == "auth_sessions":
@@ -328,3 +335,23 @@ def test_sign_in_issues_session_bound_tokens(db, monkeypatch):
     web = auth_service._issue_access_token({**USER}, "ip", "Firefox/130", "web", None)
     assert web["refresh_token"] is None and decode_token(web["access_token"])["cli"] == "web"
     assert web["expires_in"] == settings.jwt_access_token_expire_minutes * 60
+
+
+def test_failure_after_marking_used_does_not_sign_the_user_out(db, monkeypatch):
+    """The DB fails after the old token was spent: the app's retry must still
+    work (the successor was stored first), not be treated as a stolen token."""
+    out = sessions.create(USER, "ios", None, "ip", "ua")
+    first = out["refresh_token"]
+    real_execute = _Q.execute
+    state = {"failed": False}
+
+    def flaky(self):
+        if self.name == "auth_sessions" and self.op == "update" and not state["failed"]:
+            state["failed"] = True
+            raise RuntimeError("timeout")
+        return real_execute(self)
+    monkeypatch.setattr(_Q, "execute", flaky)
+    with pytest.raises(RuntimeError):
+        sessions.rotate(first, "ip", "ua")
+    r = sessions.rotate(first, "ip", "ua")          # the app retries
+    assert r["refresh_token"] and sessions.is_active(out["session_id"]) is True

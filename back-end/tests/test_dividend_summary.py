@@ -363,7 +363,7 @@ def test_api_summary_without_014(monkeypatch, db):
 
     def missing(*a, **k):
         raise RuntimeError('relation "public.income_forecast_snapshots" does not exist (42P01)')
-    monkeypatch.setattr(queries, "get_income_snapshots", missing)
+    monkeypatch.setattr(queries, "get_income_snapshot_bounds", missing)
     body = make_client(monkeypatch, api.router).get("/api/v1/dividends/summary").json()
     assert body["income_change"]["reason"] == "migration_required" and body["income_change"]["available_from"] is None
 

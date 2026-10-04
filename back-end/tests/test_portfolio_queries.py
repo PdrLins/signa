@@ -110,7 +110,8 @@ def test_upsert_after_013_matches_account_and_symbol(monkeypatch):
         {"symbol": "NVDA", "account_id": "b", "shares": 3},     # same stock, other account -> insert
     ])
     ops = [c[0] for c in fake.calls]
-    assert ops == ["select", "update", "insert"] and len(out) == 2
+    assert ops == ["select", "upsert", "insert"] and len(out) == 2   # one bulk upsert for existing lots
+    assert fake.calls[1][3][0]["id"] == "h1" and fake.calls[1][3][0]["shares"] == 2
     assert fake.calls[2][3] == [{"symbol": "NVDA", "account_id": "b", "shares": 3, "user_id": "u"}]
 
 

@@ -82,3 +82,28 @@ def price_factor(symbol: str | None, yahoo_currency: str | None = None) -> float
 def exchange_for_suffix(symbol: str | None) -> str | None:
     suf = _suffix(symbol or "")
     return SUFFIXES[suf][1] if suf else None
+
+
+# Yahoo `info` fields given in the listing's quote unit (pence on London ...).
+INFO_PRICE_KEYS = (
+    "regularMarketPrice", "currentPrice", "previousClose", "regularMarketPreviousClose", "open",
+    "regularMarketOpen", "dayHigh", "dayLow", "regularMarketDayHigh", "regularMarketDayLow",
+    "fiftyTwoWeekLow", "fiftyTwoWeekHigh", "fiftyDayAverage", "twoHundredDayAverage", "bid", "ask",
+    "dividendRate", "trailingAnnualDividendRate", "lastDividendValue", "navPrice",
+    "targetMeanPrice", "targetHighPrice", "targetLowPrice",
+)
+
+
+def normalize_info(symbol: str | None, info: dict | None) -> tuple[dict, float]:
+    """(info in the main currency, factor applied). London's pence prices and
+    dividends become pounds and "GBp" becomes "GBP", like the quotes table. Pure."""
+    info = dict(info or {})
+    k = price_factor(symbol, info.get("currency"))
+    if info.get("currency"):
+        info["currency"] = normalize_currency(info["currency"])[0]
+    if k != 1.0:
+        for key in INFO_PRICE_KEYS:
+            v = info.get(key)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                info[key] = v * k
+    return info, k

@@ -297,17 +297,20 @@ def delete_account(user_id: str, account_id: str, move_to: str | None = None, fo
                         "or remove them from any account (force=true).",
                         status.HTTP_409_CONFLICT, holdings=len(inside))
     target = move_to  # None = "no account"
-    moved = merged = 0
+    merged = 0
+    in_target = {x.get("symbol"): x for x in holdings if str(x.get("account_id") or "") == str(target or "")}
+    plain: list[str] = []
     for h in inside:
-        twin = next((x for x in holdings if x.get("symbol") == h.get("symbol")
-                     and str(x.get("account_id") or "") == str(target or "") and x.get("id") != h.get("id")), None)
-        if twin:
+        twin = in_target.get(h.get("symbol"))
+        if twin and twin.get("id") != h.get("id"):
             queries.update_holding(str(twin["id"]), user_id, merge_holding(twin, h))
             queries.delete_holding(str(h["id"]), user_id)
             merged += 1
         else:
-            queries.update_holding(str(h["id"]), user_id, {"account_id": target})
-            moved += 1
+            plain.append(str(h["id"]))
+    # The rest move in one call (a 300-holding account was 300 calls, near the DB timeout)
+    queries.move_holdings(user_id, plain, target)
+    moved = len(plain)
     queries.move_account_transactions(user_id, account_id, target)
     if not queries.delete_account(account_id, user_id):
         raise api_error("not_found", "Account not found.", status.HTTP_404_NOT_FOUND)

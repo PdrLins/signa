@@ -31,3 +31,43 @@ def test_missing_symbol_fetched_once_then_skipped(monkeypatch):
     assert quotes.get_quotes(["NOPE.XX"]) == {}
     assert quotes.get_quotes(["NOPE.XX"]) == {}
     assert fetched == [["NOPE.XX"]]
+
+
+def test_intraday_bars_downloaded_once_for_concurrent_users(monkeypatch):
+    import threading
+    import time
+    from datetime import datetime, timezone
+
+    from app.services import portfolio_performance as perf
+
+    perf.clear_cache()
+    calls = []
+    bar = [(datetime(2026, 10, 2, 14, 0, tzinfo=timezone.utc), 10.0)]
+
+    def slow(symbols, interval, prepost=False):
+        calls.append(list(symbols))
+        time.sleep(0.2)
+        return {s: bar for s in symbols}
+    monkeypatch.setattr(perf, "_download_intraday", slow)
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(perf.get_intraday_bars(["VOD.L"], "5m")))
+               for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert calls == [["VOD.L"]]
+    assert all(r == {"VOD.L": bar} for r in results)
+    perf.clear_cache()
+
+
+def test_daily_closes_scaled_from_pence():
+    import pandas as pd
+
+    from app.services.price_cache import _close_series_from_download
+
+    idx = pd.date_range("2026-09-28", periods=2, freq="D")
+    s = _close_series_from_download(pd.DataFrame({"Close": [7200.0, 7300.0]}, index=idx), "VOD.L", False)
+    assert list(s) == [72.0, 73.0]
+    s = _close_series_from_download(pd.DataFrame({"Close": [10.0, 11.0]}, index=idx), "AAPL", False)
+    assert list(s) == [10.0, 11.0]

@@ -28,13 +28,13 @@ def test_refresh_writes_one_download_for_all_users(monkeypatch):
     downloads, saved = [], {}
     monkeypatch.setattr(queries, "get_all_holdings", lambda: rows)
     monkeypatch.setattr(hst, "fetch_closes", lambda syms: downloads.append(syms) or {"MSFT": _closes()})
-    monkeypatch.setattr(queries, "update_holding", lambda hid, uid, data: saved.setdefault(hid, (uid, data)))
+    monkeypatch.setattr(queries, "set_symbol_status", lambda sym, data, uid=None: saved.setdefault(sym, (uid, data)))
     out = asyncio.run(hst.refresh())
     assert downloads == [["MSFT", "NOPE"]]
     assert out == {"status": "ok", "holdings": 3, "symbols": 2, "updated": 2}
-    assert set(saved) == {"h1", "h2"} and saved["h2"][0] == "u2"
-    assert "holding_status" in saved["h1"][1] and "status_updated_at" in saved["h1"][1]
-    assert "alert_state" not in saved["h1"][1]
+    assert set(saved) == {"MSFT"} and saved["MSFT"][0] is None   # one write for both users' MSFT
+    assert "holding_status" in saved["MSFT"][1] and "status_updated_at" in saved["MSFT"][1]
+    assert "alert_state" not in saved["MSFT"][1]
 
 
 def test_daily_run_waits_for_a_user_refresh(monkeypatch):

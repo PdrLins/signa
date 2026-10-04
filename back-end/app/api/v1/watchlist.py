@@ -11,14 +11,18 @@ from app.core.dependencies import get_current_user
 from app.models.watchlist import WatchlistAddRequest
 from app.services import following, watchlist_service
 from app.core.api_errors import run_db
+from app.core.cache import TTLCache
 
 router = APIRouter(prefix="/watchlist", tags=["Watchlist"])
+
+SEARCH_TTL_S = 30 * 60
+_search_cache = TTLCache(max_size=5000, default_ttl=SEARCH_TTL_S)
 
 
 @router.get("", dependencies=[Depends(require_feature("area.watchlist"))])
 async def get_watchlist(user: dict = Depends(get_current_user)):
     """Get the current watchlist."""
-    items = watchlist_service.get_watchlist(user["user_id"])
+    items = await run_db(watchlist_service.get_watchlist, user["user_id"])
     return {"items": items, "count": len(items)}
 
 
@@ -76,12 +80,16 @@ async def search_tickers(q: str = Query(..., min_length=1, max_length=10), user:
                 continue
         return results
 
+    cached = _search_cache.get(query)
+    if cached is not None:   # shared by every user: Yahoo .info is slow (1-3 s per candidate)
+        return {"results": cached}
     try:
         results = await asyncio.to_thread(_search)
-        return {"results": results}
     except Exception as e:
         logger.debug(f"Ticker search failed for {query}: {e}")
         return {"results": []}
+    _search_cache.set(query, results, ttl=SEARCH_TTL_S if results else 120)
+    return {"results": results}
 
 
 @router.post("/{ticker}", dependencies=[Depends(require_feature("action.watchlist.edit"))], status_code=status.HTTP_201_CREATED)
@@ -96,8 +104,12 @@ async def add_to_watchlist(
     symbol = ticker.upper()
     await slots.check_new_symbols_async(user, [symbol])
 
-    # Validate ticker exists
+    # Validate ticker exists: a stored or freshly fetched quote (shared, cached),
+    # else Yahoo's info (slow) as the last word.
     def _validate():
+        from app.services.quotes import get_quotes
+        if get_quotes([symbol]).get(symbol):
+            return True
         t = yf.Ticker(symbol)
         info = t.info
         return bool(info.get("regularMarketPrice") or info.get("longName"))
@@ -114,7 +126,7 @@ async def add_to_watchlist(
         )
 
     notes = body.notes if body else None
-    item = watchlist_service.add_to_watchlist(user["user_id"], symbol, notes)
+    item = await run_db(watchlist_service.add_to_watchlist, user["user_id"], symbol, notes)
     # an invited user's first follow rewards their referrer (migration 019)
     from app.services import referrals
     await referrals.after_follow(user["user_id"])
@@ -127,7 +139,7 @@ async def remove_from_watchlist(
     user: dict = Depends(get_current_user),
 ):
     """Remove a ticker from the watchlist."""
-    removed = watchlist_service.remove_from_watchlist(user["user_id"], ticker.upper())
+    removed = await run_db(watchlist_service.remove_from_watchlist, user["user_id"], ticker.upper())
     if not removed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticker not found in watchlist")
     return {"message": f"{ticker.upper()} removed from watchlist"}

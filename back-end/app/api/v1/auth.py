@@ -1,5 +1,6 @@
 """Authentication routes — login, OTP verification, logout, refresh."""
 
+import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -57,7 +58,8 @@ async def logout(request: Request, user: dict = Depends(get_current_user)):
     auth_header = request.headers.get("Authorization", "")
     token = auth_header.split(" ", 1)[1] if " " in auth_header else ""
 
-    auth_service.logout(
+    await asyncio.to_thread(
+        auth_service.logout,
         token=token,
         user_id=user["user_id"],
         ip_address=get_client_ip(request),
@@ -87,7 +89,8 @@ async def refresh_token(request: Request):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token too old for refresh")
 
     try:
-        result = auth_service.refresh_token(
+        result = await asyncio.to_thread(
+            auth_service.refresh_token,
             payload=payload,
             ip_address=get_client_ip(request),
             user_agent=request.headers.get("User-Agent", ""),
@@ -155,9 +158,10 @@ async def revoke_session(session_id: UUID, request: Request, user: dict = Depend
         raise api_error("session_not_found", "That device is not signed in.", status.HTTP_404_NOT_FOUND)
     from app.db.queries import insert_audit_log
     from app.models.audit import AuditEvent
-    insert_audit_log(event_type=AuditEvent.SESSION_REVOKED, success=True, user_id=user["user_id"],
-                     ip_address=get_client_ip(request), user_agent=request.headers.get("User-Agent", ""),
-                     metadata={"session_id": str(session_id), "reason": "user"})
+    await asyncio.to_thread(insert_audit_log, event_type=AuditEvent.SESSION_REVOKED, success=True,
+                            user_id=user["user_id"], ip_address=get_client_ip(request),
+                            user_agent=request.headers.get("User-Agent", ""),
+                            metadata={"session_id": str(session_id), "reason": "user"})
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -167,9 +171,10 @@ async def revoke_other_sessions(request: Request, user: dict = Depends(get_curre
     n = await _sessions_call(sessions.revoke_others, user["user_id"], user.get("sid"))
     from app.db.queries import insert_audit_log
     from app.models.audit import AuditEvent
-    insert_audit_log(event_type=AuditEvent.SESSION_REVOKED, success=True, user_id=user["user_id"],
-                     ip_address=get_client_ip(request), user_agent=request.headers.get("User-Agent", ""),
-                     metadata={"reason": "others", "count": n})
+    await asyncio.to_thread(insert_audit_log, event_type=AuditEvent.SESSION_REVOKED, success=True,
+                            user_id=user["user_id"], ip_address=get_client_ip(request),
+                            user_agent=request.headers.get("User-Agent", ""),
+                            metadata={"reason": "others", "count": n})
     return {"revoked": n}
 
 
@@ -179,17 +184,18 @@ async def me(user: dict = Depends(get_current_user)):
     client (web, iOS): the level, every allowed area/action key, the full
     catalog (key -> min level, so a client can show "premium" badges on
     locked items) and followed-stock slots."""
-    import asyncio
-
     from app.services import referrals, slots
 
     level = user.get("access_level") or "free"
     levels = get_feature_levels()
+    account_id, slot_info = await asyncio.gather(
+        asyncio.to_thread(referrals.account_id_for, user["user_id"]),
+        asyncio.to_thread(slots.slot_summary, user))
     return {
         "user_id": user["user_id"],
         "username": user.get("username"),
         # visible account ID = invite code (migration 019; null before it)
-        "account_id": await asyncio.to_thread(referrals.account_id_for, user["user_id"]),
+        "account_id": account_id,
         "access_level": level,
         # Dev tools ("View as"): the real level and whether the switch may be
         # shown (owner + DEV_TOOLS_ENABLED). Clients ignore these otherwise.
@@ -201,5 +207,5 @@ async def me(user: dict = Depends(get_current_user)):
             {"key": k, "min_level": levels[k], "description": FEATURE_CATALOG.get(k, ("", ""))[1]}
             for k in sorted(levels)
         ],
-        "slots": await asyncio.to_thread(slots.slot_summary, user),
+        "slots": slot_info,
     }

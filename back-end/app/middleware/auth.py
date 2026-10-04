@@ -76,7 +76,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         jti, sid, uid = payload.get("jti"), payload.get("sid"), payload.get("sub")
         # Blacklist, session and access level: cached; misses hit the DB in ONE
         # worker thread so the event loop never waits on Supabase.
-        revoked, active, access = await asyncio.to_thread(_auth_state, jti, sid, uid)
+        # Warm caches answer inline (most requests); a miss goes to a thread.
+        state = _auth_state_cached(jti, sid, uid)
+        revoked, active, access = state if state is not None else await asyncio.to_thread(_auth_state, jti, sid, uid)
         if revoked:
             _log_unauthorized(request, path, "revoked_token", uid)
             return _unauthorized_response("Token has been revoked")
@@ -120,6 +122,27 @@ BLACKLIST_FAIL_OPEN_S = 5
 _blacklist_errors = TTLCache(max_size=10000, default_ttl=BLACKLIST_FAIL_OPEN_S)
 INVALID_AUDIT_EVERY_S = 60
 _invalid_audited = TTLCache(max_size=10000, default_ttl=INVALID_AUDIT_EVERY_S)
+
+
+def _auth_state_cached(jti: str | None, sid: str | None, uid: str | None) -> tuple[bool, bool, dict] | None:
+    """_auth_state from memory only (no thread hop, no DB), or None on any miss."""
+    from app.core.access import _level_cache
+    from app.core.cache import blacklist_cache
+
+    revoked = False
+    if jti and not _blacklist_errors.get(jti):
+        revoked = blacklist_cache.get(f"bl:{jti}")
+        if revoked is None:
+            return None
+    active = True
+    if sid:
+        active = sessions._active_cache.get(sid)
+        if active is None:
+            return None
+    access = _level_cache.get(uid) if uid else None
+    if access is None:
+        return None
+    return bool(revoked), bool(active), access
 
 
 def _auth_state(jti: str | None, sid: str | None, uid: str | None) -> tuple[bool, bool, dict]:

@@ -44,12 +44,12 @@ class FakePortfolioDB:
             "get_profile_settings", "upsert_profile_settings", "get_user_email",
             "get_people", "insert_person", "update_person", "delete_person",
             "get_accounts", "insert_accounts", "update_account", "delete_account", "move_account_transactions",
-            "get_holdings", "upsert_holdings", "update_holding", "delete_holding",
+            "get_holdings", "upsert_holdings", "update_holding", "delete_holding", "move_holdings",
             "list_transactions", "get_transaction", "insert_transactions", "update_transaction",
             "delete_transaction", "delete_transaction_batch",
             "get_notification_prefs", "upsert_notification_prefs",
             # Phase 2 (migration 014)
-            "get_all_transactions", "get_portfolio_snapshot_rows", "get_income_snapshots",
+            "get_all_transactions", "get_portfolio_snapshot_rows", "get_income_snapshots", "get_income_snapshot_bounds",
             "upsert_income_snapshot", "get_check_status_rows", "upsert_check_status_rows",
             "get_allocation_targets", "set_allocation_targets",
             # price alerts (migration 015)
@@ -186,6 +186,10 @@ class FakePortfolioDB:
         h.update(data)
         return dict(h)
 
+    def move_holdings(self, uid, ids, account_id):
+        for hid in ids:
+            self.update_holding(hid, uid, {"account_id": account_id})
+
     def delete_holding(self, hid, uid):
         h = self.holdings.get(hid)
         if not h or h["user_id"] != uid:
@@ -254,6 +258,12 @@ class FakePortfolioDB:
     def get_income_snapshots(self, uid, since=None):
         rows = [dict(r) for (u, d), r in self.income_snaps.items() if u == uid and (since is None or d >= since)]
         return sorted(rows, key=lambda r: r["snapshot_date"])
+
+    def get_income_snapshot_bounds(self, uid, cutoff, before):
+        rows = [r for r in self.get_income_snapshots(uid) if r["snapshot_date"] < before]
+        old = [r for r in rows if r["snapshot_date"] <= cutoff]
+        picked = ([rows[0]] if rows else []) + ([old[-1]] if old else [])
+        return sorted({r["snapshot_date"]: r for r in picked}.values(), key=lambda r: r["snapshot_date"])
 
     def upsert_income_snapshot(self, uid, snapshot_date, row):
         self.income_snaps[(uid, snapshot_date)] = {**row, "snapshot_date": snapshot_date}

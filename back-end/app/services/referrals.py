@@ -215,7 +215,7 @@ async def notify_referrer(referrer_id: str) -> bool:
     from app.services import telegram_notify
 
     try:
-        level = access.get_user_access(referrer_id)["level"]
+        level = (await asyncio.to_thread(access.get_user_access, referrer_id))["level"]
         if not access.can(level, telegram_notify.FEATURE):
             return False
         chat = await asyncio.to_thread(telegram_notify.linked_chat, referrer_id)

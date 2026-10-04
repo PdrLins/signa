@@ -393,8 +393,8 @@ def holding_currency(h: dict) -> str:
     c = str(h.get("currency") or "").upper()
     if c:
         return c
-    sym = str(h.get("symbol") or "")
-    return "CAD" if sym.endswith((".TO", ".V", ".NE", ".CN")) else "USD"
+    from app.market.currency import currency_for
+    return currency_for(str(h.get("symbol") or ""))   # PETR4.SA -> BRL, VOD.L -> GBP, AAPL -> USD
 
 
 def holding_price(h: dict) -> float | None:

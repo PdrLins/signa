@@ -36,10 +36,13 @@ def _num(v) -> float | None:
 
 
 def _bar_date(ts, exchange: str | None):
-    """Calendar date of a daily bar in the exchange's reference zone."""
+    """Calendar date of a daily bar. Yahoo stamps a stock's daily bar at
+    midnight in its exchange's own zone (Tokyo, São Paulo, New York ...), so
+    its own date is the session date; converting to New York would move Asian
+    bars to the day before. Crypto bars are UTC days."""
     ts = pd.Timestamp(ts)
-    if ts.tzinfo is not None:
-        ts = ts.tz_convert("UTC" if exchange == "CRYPTO" else "America/New_York")
+    if ts.tzinfo is not None and exchange == "CRYPTO":
+        ts = ts.tz_convert("UTC")
     return ts.date()
 
 

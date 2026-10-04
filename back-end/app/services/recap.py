@@ -195,17 +195,23 @@ async def run_monthly_push(today: date | None = None) -> dict:
         logger.warning(f"recap: devices unavailable ({type(e).__name__})")
         return {"status": "failed"}
     users = sorted({str(d["user_id"]) for d in devices})
-    sent = 0
-    for uid in users:
-        try:
-            user = {"user_id": uid, "access_level": get_user_access(uid)["level"]}
-            scope = await asyncio.to_thread(portfolio_context.load_scope, user, None, None, True)
-            if not scope["holdings"]:
-                continue
-            r = await asyncio.to_thread(build, scope, first, last, today, await next_month_events(scope))
-            lang = await asyncio.to_thread(user_language, uid)
-            sent += 1 if await push.notify_user(uid, "Signa", push_text(r, money, lang),
-                                                {"kind": "monthly_recap", "month": r["month"]}) else 0
-        except Exception as e:
-            logger.warning(f"recap: {uid} failed: {type(e).__name__}: {e}")
+    from app.core.executors import in_job_pool
+    from app.services.telegram_notify import DELIVERY_CONCURRENCY
+    sem = asyncio.Semaphore(DELIVERY_CONCURRENCY)
+
+    async def one(uid: str) -> int:
+        async with sem:
+            try:
+                user = {"user_id": uid, "access_level": (await in_job_pool(get_user_access, uid))["level"]}
+                scope = await in_job_pool(portfolio_context.load_scope, user, None, None, True)
+                if not scope["holdings"]:
+                    return 0
+                r = await in_job_pool(build, scope, first, last, today, await next_month_events(scope))
+                lang = await in_job_pool(user_language, uid)
+                return 1 if await push.notify_user(uid, "Signa", push_text(r, money, lang),
+                                                   {"kind": "monthly_recap", "month": r["month"]}) else 0
+            except Exception as e:
+                logger.warning(f"recap: {uid} failed: {type(e).__name__}: {e}")
+                return 0
+    sent = sum(await asyncio.gather(*(one(u) for u in users)))
     return {"status": "ok", "users": len(users), "sent": sent, "month": first.strftime("%Y-%m")}

@@ -414,9 +414,11 @@ def build_summary(scope: dict, profiles: dict[str, dict | None], today: date, pe
     # --- yield / yield on cost
     mv = sum(p["value_home"] for p in positions if p.get("value_home"))
     inc_cost = cost = 0.0
+    pos_by = {}
+    for q in positions:   # first match wins, like the scan it replaces (O(n) not O(n²))
+        pos_by.setdefault((q["symbol"], q.get("account_id")), q)
     for idx, h in enumerate(holdings):
-        p = next((q for q in positions if q["symbol"] == str(h["symbol"]).upper()
-                  and q.get("account_id") == h.get("account_id")), None)
+        p = pos_by.get((str(h["symbol"]).upper(), h.get("account_id")))
         if p and p.get("cost_home"):
             cost += p["cost_home"]
             inc_cost += fwd_by_holding.get(idx, 0.0)
@@ -505,18 +507,23 @@ async def get_summary(user: dict, period: str | None, account_id: str | None, pe
 
     usage_metrics.record("requests.dividends_summary")
     today = dividends.today_et()
-    parse_period(period, today)
+    kind, year = parse_period(period, today)
     scope = await run_db(load_scope, user, account_id, person_id)
     syms = {str(h.get("symbol") or "").upper() for h in scope["holdings"] if h.get("symbol")}
-    syms |= {str(t.get("symbol") or "").upper() for t in scope["transactions"]
-             if t.get("type") == "dividend" and t.get("symbol")}
-    profiles = await dividend_calendar.fetch_profiles(sorted(syms), fetch)
-    snaps, missing = None, False
-    if scope["account_ids"] is None:
-        try:
-            snaps = await asyncio.to_thread(queries.get_income_snapshots, user["user_id"],
-                                            (today - timedelta(days=400)).isoformat())
+    if kind == "year":   # a past year also lists what was received from stocks since sold
+        syms |= {str(t.get("symbol") or "").upper() for t in scope["transactions"]
+                 if t.get("type") == "dividend" and t.get("symbol")
+                 and str(t.get("trade_date") or "")[:4] == str(year)}
+
+    async def snapshots():
+        if scope["account_ids"] is not None:
+            return None, False
+        try:   # only the two rows income_change reads, not 400 days of per-symbol JSON
+            cutoff = today - timedelta(days=CHANGE_DAYS)
+            return await asyncio.to_thread(queries.get_income_snapshot_bounds, user["user_id"],
+                                           cutoff.isoformat(), today.isoformat()), False
         except Exception as e:
-            missing = is_missing_schema(e)
-            snaps = None
+            return None, is_missing_schema(e)
+    profiles, (snaps, missing) = await asyncio.gather(
+        dividend_calendar.fetch_profiles(sorted(syms), fetch), snapshots())
     return build_summary(scope, profiles, today, period or "next12m", snaps, missing)

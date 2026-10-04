@@ -69,7 +69,7 @@ from loguru import logger
 from app.core.executors import download_threads
 
 from app.core.api_errors import api_error
-from app.core.cache import TTLCache
+from app.core.cache import SingleFlight, TTLCache
 from app.services import portfolio_context as pc
 from app.services.price_cache import native_currency
 
@@ -82,7 +82,8 @@ INTRADAY_MISS_TTL = 120
 ALL_FALLBACK_YEARS = 5
 TOP_DRIVERS = 5
 
-_intraday_cache = TTLCache(max_size=3000, default_ttl=INTRADAY_TTL)
+_intraday_cache = TTLCache(max_size=20000, default_ttl=INTRADAY_TTL)
+_intraday_flight = SingleFlight()
 
 
 def _f(v: Any) -> float | None:
@@ -151,6 +152,8 @@ def closes_period(start: date, today: date) -> str:
     days = (today - start).days
     if days <= 360:
         return "1y"
+    if days <= 2 * 366:   # 1Y (365/366 days) needs the close before its start: 2y, not 5y
+        return "2y"
     if days <= 5 * 366:
         return "5y"
     return "max"
@@ -327,6 +330,8 @@ def parse_intraday(data, symbols: list[str]) -> dict[str, list[tuple[datetime, f
             col = col.dropna()
         except Exception:
             continue
+        from app.market.currency import price_factor
+        k = price_factor(sym)   # pence/cents listings, like the quotes table
         pts = []
         for ts, v in col.items():
             x = _f(v)
@@ -334,7 +339,7 @@ def parse_intraday(data, symbols: list[str]) -> dict[str, list[tuple[datetime, f
                 continue
             t = pd.Timestamp(ts)
             t = t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC")
-            pts.append((t.to_pydatetime(), x))
+            pts.append((t.to_pydatetime(), x * k))
         if pts:
             out[sym] = pts
     return out
@@ -366,23 +371,37 @@ def get_intraday_bars(symbols: list[str], interval: str, prepost: bool = False) 
             out[s] = hit
     if not missing:
         return out
-    usage_metrics.record("provider_calls.intraday")
+    # At the open every user's 1D chart asks for the same symbols: one download each.
+    mine_keys, their_keys = _intraday_flight.claim([f"{tag}:{s}" for s in missing])
+    mine = [k[len(tag) + 1:] for k in mine_keys]
     try:
-        got = (_download_intraday(missing, interval, True) if prepost else _download_intraday(missing, interval)) or {}
-    except Exception as e:
-        logger.warning(f"intraday bars failed for {len(missing)} symbols: {e}")
-        got = {}
-    for s in missing:
-        if got.get(s):
-            _intraday_cache.set(f"{tag}:{s}", got[s])
-            out[s] = got[s]
-        else:
-            _intraday_cache.set(f"{tag}:{s}", False, ttl=INTRADAY_MISS_TTL)
+        if mine:
+            usage_metrics.record("provider_calls.intraday")
+            try:
+                got = (_download_intraday(mine, interval, True) if prepost else _download_intraday(mine, interval)) or {}
+            except Exception as e:
+                logger.warning(f"intraday bars failed for {len(mine)} symbols: {e}")
+                got = {}
+            for s in mine:
+                if got.get(s):
+                    _intraday_cache.set(f"{tag}:{s}", got[s])
+                    out[s] = got[s]
+                else:
+                    _intraday_cache.set(f"{tag}:{s}", False, ttl=INTRADAY_MISS_TTL)
+    finally:
+        _intraday_flight.release(mine_keys)
+    if their_keys:
+        _intraday_flight.wait(their_keys)
+        for k in their_keys:
+            hit = _intraday_cache.get(k)
+            if hit:
+                out[k[len(tag) + 1:]] = hit
     return out
 
 
 def clear_cache() -> None:
     _intraday_cache.clear()
+    _daily_cache.clear()
 
 
 # ============================================================
@@ -395,25 +414,26 @@ def _fx(ccy: str, home: str, usdcad: float | None) -> float | None:
 
 def intraday_series(positions: list[dict], bars: dict[str, list], home: str, usdcad: float | None,
                     cash: float) -> list[tuple[datetime, float]]:
-    """value(t) = cash + sum shares x (last bar <= t, else prev_close, else first bar). Pure."""
-    held = [p for p in positions if p.get("shares") and p.get("price") and _fx(p["currency"], home, usdcad)]
-    stamps = sorted({t for p in held for t, _ in bars.get(p["symbol"], [])})
-    out = []
-    for t in stamps:
-        total = cash
-        for p in held:
-            b = bars.get(p["symbol"]) or []
-            px = None
-            for bt, bv in b:
-                if bt <= t:
-                    px = bv
-                else:
-                    break
-            if px is None:
-                px = p.get("prev_close") or (b[0][1] if b else p["price"])
-            total += p["shares"] * px * _fx(p["currency"], home, usdcad)
-        out.append((t, total))
-    return out
+    """value(t) = cash + sum shares x (last bar <= t, else prev_close, else first bar). Pure.
+    One pass per position over its bars (they and the stamps are sorted)."""
+    held = []
+    for p in positions:
+        fx = _fx(p["currency"], home, usdcad) if p.get("shares") and p.get("price") else None
+        if fx:
+            held.append((p, fx))
+    stamps = sorted({t for p, _ in held for t, _ in bars.get(p["symbol"], [])})
+    totals = [cash] * len(stamps)
+    for p, fx in held:
+        b = bars.get(p["symbol"]) or []
+        px = p.get("prev_close") or (b[0][1] if b else p["price"])   # before its first bar
+        k = p["shares"] * fx
+        i = 0
+        for j, t in enumerate(stamps):
+            while i < len(b) and b[i][0] <= t:
+                px = b[i][1]
+                i += 1
+            totals[j] += k * px
+    return list(zip(stamps, totals))
 
 
 def estimate_series(positions: list[dict], closes: dict, base: date, today: date, home: str,
@@ -425,8 +445,9 @@ def estimate_series(positions: list[dict], closes: dict, base: date, today: date
 
     held = [p for p in positions if p.get("shares") and p.get("price") and _fx(p["currency"], home, usdcad)]
     with_hist = [p for p in held if closes.get(p["symbol"]) is not None and len(closes[p["symbol"]])]
+    hist_ids = {id(p) for p in with_hist}
     const = cash + sum(p["shares"] * p["price"] * _fx(p["currency"], home, usdcad)
-                       for p in held if p not in with_hist)
+                       for p in held if id(p) not in hist_ids)
     if not with_hist:
         return [], False
     df = pd.concat({p["symbol"]: closes[p["symbol"]] for p in with_hist}, axis=1).sort_index().ffill()
@@ -438,11 +459,13 @@ def estimate_series(positions: list[dict], closes: dict, base: date, today: date
     df = df[df.index >= start_ts]
     complete = df.dropna()
     truncated = len(complete) < len(df) or (len(before) == 0)
-    points = []
-    for ts, row in complete.iterrows():
-        v = const + sum(p["shares"] * float(row[p["symbol"]]) * _fx(p["currency"], home, usdcad)
-                        for p in with_hist)
-        points.append((ts.date(), v))
+    # value = const + closes · (shares × fx), one vector operation for every day
+    weights: dict[str, float] = {}
+    for p in with_hist:
+        weights[p["symbol"]] = weights.get(p["symbol"], 0.0) + p["shares"] * _fx(p["currency"], home, usdcad)
+    w = pd.Series(weights)
+    values = complete[list(w.index)].astype(float).mul(w).sum(axis=1) + const
+    points = [(ts.date(), float(v)) for ts, v in values.items()]
     return points, truncated
 
 
@@ -665,8 +688,32 @@ def _snapshot_rows(scope: dict, since: str | None) -> list[dict]:
     return queries.get_portfolio_snapshot_rows(scope["user_id"], since, ids)
 
 
+DAILY_TTL_S = 30   # history + performance open together: the second reuses the first's series
+_daily_cache = TTLCache(max_size=5000, default_ttl=DAILY_TTL_S)
+
+
 def _daily(scope: dict, live: dict, rng: str, today: date, extra_symbols: list[str] = ()) -> dict:
-    """Daily series for 1W..ALL + the closes used (for drivers / benchmark)."""
+    """Daily series for 1W..ALL + the closes used (for drivers / benchmark).
+    Cached DAILY_TTL_S per user, scope and range; a write by the user (new
+    generation in app/core/user_cache.py) starts a new entry."""
+    from app.core import user_cache
+
+    uid = scope.get("user_id")
+    key = None
+    if uid:
+        acc = scope.get("account_ids")
+        key = "|".join([str(uid), ",".join(sorted(map(str, acc))) if acc is not None else "*", rng,
+                        ",".join(sorted(extra_symbols)), str(user_cache.generation(uid)), today.isoformat()])
+        hit = _daily_cache.get(key)
+        if hit is not None:
+            return hit
+    out = _daily_build(scope, live, rng, today, extra_symbols)
+    if key:
+        _daily_cache.set(key, out)
+    return out
+
+
+def _daily_build(scope: dict, live: dict, rng: str, today: date, extra_symbols: list[str] = ()) -> dict:
     from app.services import price_cache
 
     home, usdcad = scope["home_currency"], scope["usdcad"]
@@ -759,6 +806,27 @@ def _start_price(series, base: date):
     return pts[0][1] if pts else None
 
 
+def in_range_trades_value(txs: list[dict], start: date, end: date, closes: dict, base: date,
+                          home: str, usdcad: float | None) -> float:
+    """Value at the range's start price of the shares bought (minus sold) inside
+    (start, end], in the home currency. Pure. A symbol without a start close
+    uses the trade's own price."""
+    total = 0.0
+    for t in txs or []:
+        typ = str(t.get("type") or "")
+        d = _d(t.get("trade_date"))
+        sym = str(t.get("symbol") or "").upper()
+        if typ not in ("buy", "sell") or not sym or d is None or not (start < d <= end):
+            continue
+        qty = abs(_f(t.get("quantity")) or 0.0)
+        px = _start_price(closes.get(sym), base) or _f(t.get("price"))
+        fx = _fx(_tx_currency(t, home), home, usdcad)
+        if not qty or not px or not fx:
+            continue
+        total += (qty if typ == "buy" else -qty) * px * fx
+    return total
+
+
 def performance_body(scope: dict, rng: str, compare: str | None, today: date | None = None) -> dict:
     from app.services import price_cache
 
@@ -774,11 +842,18 @@ def performance_body(scope: dict, rng: str, compare: str | None, today: date | N
         start = today - timedelta(days=1)
         v0 = live["prev_total"]
         start_prices = {p["symbol"]: p.get("prev_close") for p in live["merged"]}
-        closes = price_cache.fetch_daily_closes([compare], period="1y") if compare else {}
+        closes = {}
         bench_ret = None
-        if compare and closes.get(compare) is not None and len(closes[compare]) >= 2:
-            s = closes[compare].dropna()
-            bench_ret = float(s.iloc[-1]) / float(s.iloc[-2]) - 1
+        if compare:   # today's move from the shared quote (live), like the portfolio's
+            from app.services.quotes import get_quotes
+            q = get_quotes([compare]).get(compare) or {}
+            if q.get("change_pct") is not None:
+                bench_ret = float(q["change_pct"]) / 100
+            else:
+                closes = price_cache.fetch_daily_closes([compare], period="1y")
+                if closes.get(compare) is not None and len(closes[compare]) >= 2:
+                    s = closes[compare].dropna()
+                    bench_ret = float(s.iloc[-1]) / float(s.iloc[-2]) - 1
     else:
         daily = _daily(scope, live, rng, today, [compare] if compare else [])
         start = daily["base"] if not daily["points"] else min(daily["base"], daily["points"][0][0])
@@ -793,6 +868,11 @@ def performance_body(scope: dict, rng: str, compare: str | None, today: date | N
                 bench_ret = bp[-1][1] / bp[0][1] - 1
 
     fl = external_flows(txs, start, today, home, usdcad) if txs else None
+    if txs and rng not in ("1D", "ALL") and estimated_reason in ("no_snapshots", "partial_snapshots") \
+            and v0 is not None:
+        # The estimated start value uses TODAY's shares; the buys/sells inside the
+        # range are also counted as flows. Take them out of the start value.
+        v0 = v0 - in_range_trades_value(txs, start, today, closes, daily["base"], home, usdcad)
     if txs:
         method = "transactions"
         if rng == "ALL":
@@ -800,6 +880,8 @@ def performance_body(scope: dict, rng: str, compare: str | None, today: date | N
             first_tx = min(d for d in (_d(t.get("trade_date")) for t in txs) if d)
             start = first_tx - timedelta(days=1)
             fl = external_flows(txs, start, today, home, usdcad)
+            if fl["basis"] == "trades":
+                v1 = v1 - live["cash"]   # cash isn't a flow on this basis: it isn't a gain either
         extra = fl["dividends"] if fl["basis"] == "trades" else 0.0
         md = modified_dietz(v0 or 0.0, v1, fl["flows"], start, today, extra)
         ret, gain, net = md["return_pct"], md["gain"], md["net_flows"]

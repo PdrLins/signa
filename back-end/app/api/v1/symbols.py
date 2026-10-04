@@ -30,7 +30,10 @@ async def search_symbols(
             import asyncio
 
             from app.db import queries
-            country = ((await asyncio.to_thread(queries.get_profile_settings, user["user_id"])) or {}).get("country")
+            from app.core import user_cache
+            uid = user["user_id"]
+            country = ((await asyncio.to_thread(user_cache.get, uid, "settings",
+                                                lambda: queries.get_profile_settings(uid))) or {}).get("country")
         except Exception:
             country = None
     results = await symbol_search.search(query, limit, country) if query else []

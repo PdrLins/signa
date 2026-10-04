@@ -58,7 +58,7 @@ async def widget_summary(user: dict = Depends(get_current_user)):
     from app.services import dividend_calendar, dividends
 
     scope = await run_db(portfolio_context.load_scope, user, None, None, False)
-    body = perf.summary_body(scope)
+    body = await asyncio.to_thread(perf.summary_body, scope)
     today = dividends.today_et().isoformat()
     upcoming: list[dict] = []
     complete = True

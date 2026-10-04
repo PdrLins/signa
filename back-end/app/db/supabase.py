@@ -11,6 +11,7 @@ from supabase import Client, ClientOptions, create_client
 from app.core.config import settings
 
 _client: Client | None = None
+_http: httpx.Client | None = None
 _lock = threading.Lock()
 _last_created: float = 0
 _MAX_AGE = 1800  # Recreate client every 30 min; with_retry handles stale connections
@@ -73,26 +74,35 @@ def get_client() -> Client:
     Recreates the client if the connection is older than 30 minutes.
     The @with_retry decorator handles stale connection errors.
     """
-    global _client, _last_created
+    global _client, _last_created, _http
     now = time.time()
 
-    if _client is not None and (now - _last_created) < _MAX_AGE:
-        return _client
+    c = _client   # one read: reset_client() may set it to None meanwhile
+    if c is not None and (now - _last_created) < _MAX_AGE:
+        return c
 
     with _lock:
         # Double-check after acquiring lock
-        if _client is not None and (now - _last_created) < _MAX_AGE:
-            return _client
+        c = _client
+        if c is not None and (now - _last_created) < _MAX_AGE:
+            return c
 
         was_first = _last_created == 0
-        _client = create_client(settings.supabase_url, settings.supabase_key,
-                                options=ClientOptions(httpx_client=_http_client()))
-        _last_created = now
+        old_http = _http
+        _http = _http_client()
+        c = create_client(settings.supabase_url, settings.supabase_key,
+                          options=ClientOptions(httpx_client=_http))
+        _client, _last_created = c, now
+        if old_http is not None:
+            # requests still running on the old client finish first
+            t = threading.Timer(60, old_http.close)
+            t.daemon = True
+            t.start()
         if was_first:
             logger.info("Supabase client initialized")
         else:
             logger.debug("Supabase client reconnected (stale connection)")
-        return _client
+        return c
 
 
 def reset_client():

@@ -376,3 +376,34 @@ def test_history_5y_needs_full_history_3m_is_free(monkeypatch, db):
     assert r.status_code == 403 and r.json()["detail"]["feature"] == "feature.full_history"
     assert _client(monkeypatch, "free").get("/api/v1/portfolio/history?range=3M").status_code == 200
     assert _client(monkeypatch, "premium").get("/api/v1/portfolio/history?range=5Y").status_code == 200
+
+
+def test_performance_buy_inside_range_is_not_a_loss(monkeypatch, db):
+    """New user: 100 shares bought 2 weeks ago, price flat. The estimated start
+    value must not count those shares (they're a flow), so the return is ~0, not -50%."""
+    a = db.add_account(U1, "Main", currency="CAD", cash_balance=0)
+    db.add_holding(U1, "XEQT.TO", a, shares=100, avg_cost=30)
+    db.quotes["XEQT.TO"] = {"symbol": "XEQT.TO", "price": 30.0, "prev_close": 30.0, "currency": "CAD",
+                            "as_of": "2026-09-30T14:00:00+00:00"}
+    db.closes["XEQT.TO"] = _closes([30.0] * 60)
+    d = (TODAY - timedelta(days=14)).isoformat()
+    db.insert_transactions(U1, [{"account_id": a, "symbol": "XEQT.TO", "type": "buy", "trade_date": d,
+                                 "quantity": 100, "price": 30, "amount": 3000, "currency": "CAD", "fee": 0}])
+    body = _client(monkeypatch).get("/api/v1/portfolio/performance?range=1M").json()
+    assert body["method"] == "transactions"
+    assert body["start_value"] == pytest.approx(0.0, abs=0.01)
+    assert body["return_pct"] == pytest.approx(0.0, abs=0.01)
+
+
+def test_performance_all_trades_basis_cash_is_not_gain(monkeypatch, db):
+    a = db.add_account(U1, "Main", currency="CAD", cash_balance=500)
+    db.add_holding(U1, "XEQT.TO", a, shares=100, avg_cost=30)
+    db.quotes["XEQT.TO"] = {"symbol": "XEQT.TO", "price": 30.0, "prev_close": 30.0, "currency": "CAD",
+                            "as_of": "2026-09-30T14:00:00+00:00"}
+    db.closes["XEQT.TO"] = _closes([30.0] * 60)
+    d = (TODAY - timedelta(days=30)).isoformat()
+    db.insert_transactions(U1, [{"account_id": a, "symbol": "XEQT.TO", "type": "buy", "trade_date": d,
+                                 "quantity": 100, "price": 30, "amount": 3000, "currency": "CAD", "fee": 0}])
+    body = _client(monkeypatch).get("/api/v1/portfolio/performance?range=ALL").json()
+    assert body["flows_basis"] == "trades"
+    assert body["return_pct"] == pytest.approx(0.0, abs=0.01)

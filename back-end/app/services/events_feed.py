@@ -341,7 +341,11 @@ async def _analyst(sym: str, today: date) -> list[dict]:
         return hit
     from app.services import usage_metrics
     usage_metrics.record("provider_calls.analyst")
-    rows = await asyncio.to_thread(fetch_upgrades, sym)
+    try:
+        rows = await asyncio.to_thread(fetch_upgrades, sym)
+    except Exception:
+        _analyst_cache.set(key, [], ttl=3600)   # not asked again on every open for an hour
+        raise
     _analyst_cache.set(key, rows)
     return rows
 
@@ -397,16 +401,18 @@ async def build_upcoming(scope: dict, watchlist: list[dict] | None, days: int, t
         async with sem:
             return await asyncio.wait_for(coro, FETCH_TIMEOUT_S)
 
-    # dividends
-    try:
-        profiles = await fetch_profiles(list(every))
-        failed = [s for s in every if profiles.get(s) is None]
-        for sym, pos in every.items():
-            items += dividend_items(profiles.get(sym), pos, sym in held, today, end, home, usdcad)
-        sources["dividends"] = "ok" if not failed else ("failed" if len(failed) == len(every) else "partial")
-    except Exception as e:
-        logger.warning(f"events: dividends failed: {e!r}")
-        sources["dividends"] = "failed"
+    # The four sources run at the same time (each fails on its own, see `sources`).
+    async def dividends_src() -> tuple[list[dict], str]:
+        try:
+            profiles = await fetch_profiles(list(every))
+            failed = [s for s in every if profiles.get(s) is None]
+            out = []
+            for sym, pos in every.items():
+                out += dividend_items(profiles.get(sym), pos, sym in held, today, end, home, usdcad)
+            return out, "ok" if not failed else ("failed" if len(failed) == len(every) else "partial")
+        except Exception as e:
+            logger.warning(f"events: dividends failed: {e!r}")
+            return [], "failed"
 
     # earnings (+ average move, only for reports inside the window)
     async def one_earnings(sym: str, pos: dict):
@@ -420,31 +426,39 @@ async def build_upcoming(scope: dict, watchlist: list[dict] | None, days: int, t
             move = None
         return earnings_item(sym, e, move, pos, sym in held, today, end, home, usdcad)
 
-    res = await asyncio.gather(*(one_earnings(s, p) for s, p in every.items()), return_exceptions=True)
-    errs = sum(1 for r in res if isinstance(r, BaseException))
-    items += [r for r in res if isinstance(r, dict)]
-    sources["earnings"] = "ok" if not errs else ("failed" if errs == len(res) else "partial")
+    async def earnings_src() -> tuple[list[dict], str]:
+        res = await asyncio.gather(*(one_earnings(s, p) for s, p in every.items()), return_exceptions=True)
+        errs = sum(1 for r in res if isinstance(r, BaseException))
+        return [r for r in res if isinstance(r, dict)], "ok" if not errs else ("failed" if errs == len(res) else "partial")
 
-    # analyst (held only)
-    res = await asyncio.gather(*(guarded(_analyst(s, today)) for s in held), return_exceptions=True)
-    errs = 0
-    for sym, rows in zip(held, res):
-        if isinstance(rows, BaseException):
-            errs += 1
-            continue
-        items += analyst_items(sym, rows, held[sym], today)
-    sources["analyst"] = "ok" if not errs else ("failed" if errs == len(res) else "partial")
+    # analyst (held stocks only: funds and crypto have no analyst ratings)
+    async def analyst_src() -> tuple[list[dict], str]:
+        from app.market.earnings import _asset_type
+        stocks = [s for s in held if _asset_type({"symbol": s, "asset_type": held[s].get("asset_type")}) == "STOCK"]
+        res = await asyncio.gather(*(guarded(_analyst(s, today)) for s in stocks), return_exceptions=True)
+        errs, out = 0, []
+        for sym, rows in zip(stocks, res):
+            if isinstance(rows, BaseException):
+                errs += 1
+                continue
+            out += analyst_items(sym, rows, held[sym], today)
+        return out, "ok" if not errs else ("failed" if errs == len(res) else "partial")
 
     # check_changed
-    from app.services.check_status import latest_changes
-    try:
-        since = (today - timedelta(days=RECENT_DAYS + 7)).isoformat()
-        rows = await asyncio.to_thread(queries.get_check_status_rows, sorted(every), since) if every else []
-        items += check_items(latest_changes(rows), every, set(held), today)
-        sources["check_changed"] = "ok"
-    except Exception as e:
-        sources["check_changed"] = "unavailable" if is_missing_schema(e) else "failed"
-        logger.debug(f"events: check statuses unavailable: {e}")
+    async def checks_src() -> tuple[list[dict], str]:
+        from app.services.check_status import latest_changes
+        try:
+            since = (today - timedelta(days=RECENT_DAYS + 7)).isoformat()
+            rows = await asyncio.to_thread(queries.get_check_status_rows, sorted(every), since) if every else []
+            return check_items(latest_changes(rows), every, set(held), today), "ok"
+        except Exception as e:
+            logger.debug(f"events: check statuses unavailable: {e}")
+            return [], "unavailable" if is_missing_schema(e) else "failed"
+
+    results = await asyncio.gather(dividends_src(), earnings_src(), analyst_src(), checks_src())
+    for name, (got, status_) in zip(("dividends", "earnings", "analyst", "check_changed"), results):
+        items += got
+        sources[name] = status_
 
     items += economy_items(today, end)
     sources["economy"] = "ok"

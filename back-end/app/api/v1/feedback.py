@@ -102,7 +102,8 @@ async def update_report(report_id: UUID, body: ReportUpdate):
     if not saved:
         raise api_error("report_not_found", "No report with that id.", 404)
     if "status" in data and saved.get("user_id"):
+        from app.core.executors import spawn
         from app.services import push
-        asyncio.create_task(push.notify_user(
+        spawn(push.notify_user(
             str(saved["user_id"]), "Signa", svc.status_message(saved), {"kind": "report", "report_id": str(report_id)}))
     return saved

@@ -79,3 +79,39 @@ brain_lockout_cache = TTLCache(max_size=500, default_ttl=900)
 
 # Login attempt tracking (lockout after 3 failures, 10 min TTL)
 login_attempt_cache = TTLCache(max_size=1000, default_ttl=600)
+
+
+class SingleFlight:
+    """One fetch per key across threads: claim() splits keys into the ones this
+    caller fetches and the ones another caller is already fetching (wait()
+    for those, then read the cache); release() wakes the waiters."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._inflight: dict[str, threading.Event] = {}
+
+    def claim(self, keys) -> tuple[list, list]:
+        mine, theirs = [], []
+        with self._lock:
+            for k in keys:
+                ev = self._inflight.get(k)
+                if ev is None:
+                    self._inflight[k] = threading.Event()
+                    mine.append(k)
+                else:
+                    theirs.append(k)
+        return mine, theirs
+
+    def wait(self, keys, timeout: float = 30) -> None:
+        with self._lock:
+            events = [self._inflight.get(k) for k in keys]
+        for ev in events:
+            if ev is not None:
+                ev.wait(timeout=timeout)
+
+    def release(self, keys) -> None:
+        with self._lock:
+            for k in keys:
+                ev = self._inflight.pop(k, None)
+                if ev is not None:
+                    ev.set()

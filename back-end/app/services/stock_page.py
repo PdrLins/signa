@@ -78,10 +78,10 @@ FUND_FAIL_TTL = 30 * 60     # empty / failed fund data is retried sooner
 FUND_TIMEOUT_S = 8.0        # the page never waits longer for fund data (fails soft to null)
 ABOUT_MAX_CHARS = 3000      # about.description cap (cut on a word boundary)
 
-_page_cache = TTLCache(max_size=500, default_ttl=PAGE_TTL)
-_fund_cache = TTLCache(max_size=500, default_ttl=FUND_TTL)
-_resolve_cache = TTLCache(max_size=1000, default_ttl=24 * 3600)   # input -> resolved symbol
-_missing_cache = TTLCache(max_size=1000, default_ttl=MISSING_TTL)
+_page_cache = TTLCache(max_size=3000, default_ttl=PAGE_TTL)   # worldwide: many symbols
+_fund_cache = TTLCache(max_size=2000, default_ttl=FUND_TTL)
+_resolve_cache = TTLCache(max_size=5000, default_ttl=24 * 3600)   # input -> resolved symbol
+_missing_cache = TTLCache(max_size=5000, default_ttl=MISSING_TTL)
 _locks: dict[str, asyncio.Lock] = {}
 
 
@@ -123,7 +123,7 @@ def clear_cache() -> None:
 # ============================================================
 
 def _fetch_market(symbol: str) -> dict:
-    """{"history": daily OHLCV DataFrame (1y) or None, "info": dict}.
+    """{"history": daily OHLCV DataFrame (1y) or None, "info": dict, "error"?: True}.
 
     `info` is only fetched when there is price history (an unknown
     candidate costs one call, not two). Never raises."""
@@ -136,12 +136,22 @@ def _fetch_market(symbol: str) -> dict:
         out["history"] = df if df is not None and not df.empty else None
     except Exception as e:
         logger.debug(f"stock_page: history({symbol}) failed: {e}")
+        out["error"] = True   # Yahoo failed (timeout, 429): not proof the symbol doesn't exist
     if out["history"] is None:
         return out
     try:
         out["info"] = t.info or {}
     except Exception as e:
         logger.debug(f"stock_page: info({symbol}) failed: {e}")
+    # pence/cents listings (London, Johannesburg, Tel Aviv): main currency, like quotes
+    from app.market.currency import normalize_info
+    out["info"], k = normalize_info(symbol, out["info"])
+    if k != 1.0:
+        h = out["history"].copy()
+        for col in ("Open", "High", "Low", "Close"):
+            if col in h.columns:
+                h[col] = h[col] * k
+        out["history"] = h
     return out
 
 
@@ -475,6 +485,7 @@ async def _resolve(sym: str) -> tuple[str, dict]:
 
     known = _resolve_cache.get(sym)
     cands = [known] if known else candidate_symbols(sym)
+    failed = False
     for cand in cands:
         if _missing_cache.get(cand):
             continue
@@ -482,7 +493,12 @@ async def _resolve(sym: str) -> tuple[str, dict]:
         if raw.get("history") is not None:
             _resolve_cache.set(sym, cand)
             return cand, raw
-        _missing_cache.set(cand, True)
+        if raw.get("error"):
+            failed = True     # unknown, not missing: nothing remembered
+        else:
+            _missing_cache.set(cand, True)
+    if failed:
+        raise StockPageError("data_unavailable", "Price data is unavailable right now. Please try again.", 503)
     raise StockPageError("not_found", f"No recent price data for {sym}.", 404)
 
 
@@ -562,8 +578,9 @@ async def get_shared_page(raw_symbol: str) -> dict:
         symbol, raw = await _resolve(sym)
         body, complete = await _build(symbol, raw)
         _page_cache.set(symbol, body, ttl=PAGE_TTL if complete else PARTIAL_TTL)
-        if len(_locks) > 1000:
-            _locks.clear()
+        if len(_locks) > 1000:   # prune only locks nobody holds or waits on
+            for k in [k for k, v in _locks.items() if not v.locked()]:
+                _locks.pop(k, None)
         return body
 
 
@@ -572,21 +589,24 @@ async def get_shared_page(raw_symbol: str) -> dict:
 # ============================================================
 
 def followed(user_id: str, symbols: set[str]) -> dict:
-    """{"in_holdings", "in_watchlist"} for this user. DB errors -> False."""
+    """{"in_holdings", "in_watchlist"} for this user. DB errors -> False.
+    Holdings come from the per-user cache (the screen the user came from read them)."""
+    from app.core import user_cache
+    from app.db import queries
     from app.db.supabase import get_client
 
     out = {"in_holdings": False, "in_watchlist": False}
     try:
-        db = get_client()
-    except Exception:
-        return out
-    for table, key in (("holdings", "in_holdings"), ("watchlist", "in_watchlist")):
-        try:
-            rows = (db.table(table).select("symbol").eq("user_id", user_id)
-                    .in_("symbol", sorted(symbols)).limit(1).execute().data or [])
-            out[key] = bool(rows)
-        except Exception as e:
-            logger.debug(f"stock_page: followed({table}) failed: {e}")
+        rows = user_cache.get(user_id, "holdings", lambda: queries.get_holdings(user_id))
+        out["in_holdings"] = any(str(r.get("symbol") or "").upper() in symbols for r in rows)
+    except Exception as e:
+        logger.debug(f"stock_page: followed(holdings) failed: {e}")
+    try:
+        rows = (get_client().table("watchlist").select("symbol").eq("user_id", user_id)
+                .in_("symbol", sorted(symbols)).limit(1).execute().data or [])
+        out["in_watchlist"] = bool(rows)
+    except Exception as e:
+        logger.debug(f"stock_page: followed(watchlist) failed: {e}")
     return out
 
 
@@ -739,27 +759,30 @@ async def get_stock_page(raw_symbol: str, user: dict) -> dict:
     body = await get_shared_page(raw_symbol)
     sym = normalize(raw_symbol)
     symbols = {body["symbol"], sym}
-    fol, pos, slot = await asyncio.gather(
+    from app.core.access import can
+    from app.services import quotes as quotes_service
+    from app.services import similar_funds
+    level = user.get("access_level") or "free"
+    # similar funds (ETFs with curated peers): Premium gets the rows, Free a lock flag
+    has_similar = body.get("asset_type") == "etf" and similar_funds.has_peers(body["symbol"])
+    want_similar = has_similar and can(level, "feature.similar_funds")
+
+    async def none():
+        return None
+    # everything independent at once
+    fol, pos, slot, stored, similar = await asyncio.gather(
         asyncio.to_thread(followed, user["user_id"], symbols),
         asyncio.to_thread(position, user, symbols),
         asyncio.to_thread(slots, user),
+        asyncio.to_thread(_stored_quote, body["symbol"]),
+        asyncio.to_thread(similar_funds.get_similar, body["symbol"], body.get("name")) if want_similar else none(),
     )
+    similar_locked = has_similar and not want_similar
     # pre-market / after-hours price (Premium, migration 021); per user, never cached in the body
-    from app.core.access import can
-    from app.services import quotes as quotes_service
-    level = user.get("access_level") or "free"
-    base_quote = overlay_live_quote(body.get("quote"), await asyncio.to_thread(_stored_quote, body["symbol"]))
+    base_quote = overlay_live_quote(body.get("quote"), stored)
     view = None
     if can(level, "feature.extended_hours"):
         view = await asyncio.to_thread(quotes_service.extended_for_symbol, body["symbol"], base_quote)
     quote = {**base_quote, **quotes_service.extended_payload(level, body["symbol"], view)}
-    # similar funds (ETFs with curated peers): Premium gets the rows, Free a lock flag
-    from app.services import similar_funds
-    similar, similar_locked = None, False
-    if body.get("asset_type") == "etf" and similar_funds.has_peers(body["symbol"]):
-        if can(level, "feature.similar_funds"):
-            similar = await asyncio.to_thread(similar_funds.get_similar, body["symbol"], body.get("name"))
-        else:
-            similar_locked = True
     return {**body, "quote": quote, "followed": fol, "position": pos, "slots": slot,
             "similar": similar, "similar_locked": similar_locked}

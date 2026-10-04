@@ -39,10 +39,9 @@ def asset_type_for(symbol: str, info: dict) -> str:
 
 
 def currency_of(symbol: str, info: dict | None = None) -> str:
-    c = str((info or {}).get("currency") or "").upper()
-    if c:
-        return c
-    return "CAD" if symbol.endswith((".TO", ".V")) else "USD"
+    from app.market.currency import currency_for, normalize_currency
+    c = normalize_currency((info or {}).get("currency"))[0]   # "GBp" -> "GBP"
+    return c or currency_for(symbol)
 
 
 def expense_ratio_fraction(info: dict, ops_value=None) -> tuple[float | None, str | None]:

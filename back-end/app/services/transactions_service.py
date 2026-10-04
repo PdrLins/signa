@@ -264,7 +264,8 @@ def public_tx(t: dict, accounts: dict[str, dict] | None = None) -> dict:
 
 
 def _accounts_map(user_id: str) -> dict[str, dict]:
-    return {str(a["id"]): a for a in queries.get_accounts(user_id)}
+    from app.core import user_cache
+    return {str(a["id"]): a for a in user_cache.get(user_id, "accounts", lambda: queries.get_accounts(user_id))}
 
 
 # ============================================================

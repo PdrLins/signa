@@ -87,9 +87,13 @@ async def upcoming(
     user: dict = Depends(get_current_user),
 ):
     days = events_feed.validate_days(days)
-    scope = await run_db(portfolio_context.load_scope, user, str(account_id) if account_id else None,
-                         str(person_id) if person_id else None, False, True)
-    whole = scope["account_ids"] is None
-    watchlist = await run_db(_watchlist, user["user_id"]) if whole else []
-    alerts = await asyncio.to_thread(_triggered_alerts, user["user_id"]) if whole else None
+    whole = account_id is None and person_id is None   # the whole portfolio: watchlist + alerts too
+
+    async def nothing(value):
+        return value
+    scope, watchlist, alerts = await asyncio.gather(
+        run_db(portfolio_context.load_scope, user, str(account_id) if account_id else None,
+               str(person_id) if person_id else None, False, True),
+        run_db(_watchlist, user["user_id"]) if whole else nothing([]),
+        asyncio.to_thread(_triggered_alerts, user["user_id"]) if whole else nothing(None))
     return await events_feed.build_upcoming(scope, watchlist, days, price_alerts=alerts)

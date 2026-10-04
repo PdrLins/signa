@@ -2,7 +2,7 @@
 
 A slot is one symbol in the user's holdings or watchlist (a symbol in both
 counts once). The limit comes from app.core.access.slot_limit (the one
-place it is computed): free 10 + 5 per rewarded referral (max +25,
+place it is computed): free 15 + 5 per rewarded referral (max +25,
 migration 019), premium and owner unlimited. limit_for() feeds it the
 rewarded count for both /auth/me "slots" and every 403 slot_limit.
 """
@@ -15,15 +15,18 @@ from typing import Iterable, Optional
 from fastapi import HTTPException, status
 
 from app.core.access import slot_limit, upgrade_hint
-from app.db.supabase import get_client
 
 
 def followed_symbols(user_id: str) -> set[str]:
-    db = get_client()
+    """Every distinct symbol in the user's holdings (per-user cache) and watchlist (all rows)."""
+    from app.core import user_cache
+    from app.db import queries
+
     symbols: set[str] = set()
-    for table in ("holdings", "watchlist"):
+    for load in (lambda: user_cache.get(user_id, "holdings", lambda: queries.get_holdings(user_id)),
+                 lambda: queries.get_watchlist(user_id)):
         try:
-            rows = db.table(table).select("symbol").eq("user_id", user_id).execute().data or []
+            rows = load() or []
         except Exception:
             rows = []  # table missing (holdings before 010): counts as empty
         symbols.update(str(r["symbol"]).upper() for r in rows if r.get("symbol"))

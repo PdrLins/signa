@@ -245,6 +245,14 @@ def rotate(refresh_token: str, ip: str, user_agent: str) -> dict:
     if (exp and now >= exp) or (absolute and now >= absolute):
         raise SessionError("session_expired", "Your sign-in expired. Please sign in again.")
 
+    # The successor is stored BEFORE the token is marked used: if this request
+    # fails in between, the app's retry finds the successor (grace retry)
+    # instead of looking like a reused token and being signed out. It is
+    # derived from the token, so concurrent winners store the same row.
+    new_token = successor_token(refresh_token)
+    db.table("auth_refresh_tokens").upsert({"token_hash": hash_token(new_token), "session_id": sid},
+                                           on_conflict="token_hash", ignore_duplicates=True).execute()
+
     # Mark used only if still unused: of two concurrent refreshes with the
     # same token exactly one wins; the other is treated as reuse.
     won = db.table("auth_refresh_tokens").update({"used_at": now.isoformat()}) \
@@ -263,8 +271,6 @@ def rotate(refresh_token: str, ip: str, user_agent: str) -> dict:
         revoke(sid, None, "reuse_detected")
         raise SessionError("reuse_detected", "This sign-in was used from another place and has been ended. Please sign in again.")
 
-    new_token = successor_token(refresh_token)
-    db.table("auth_refresh_tokens").insert({"token_hash": hash_token(new_token), "session_id": sid}).execute()
     level = _level(str(session["user_id"]))
     new_exp = slide(absolute or now, level, now)
     db.table("auth_sessions").update({

@@ -1,4 +1,8 @@
-"""Price history for charts (GET /tickers/{ticker}/chart). Free."""
+"""Price history for charts (GET /tickers/{ticker}/chart). Free.
+
+The chart is shared by everyone viewing the same symbol and period: cached
+CHART_TTL_S seconds (short for intraday, long for daily/weekly), and one
+Yahoo request even when many users open it at the same time."""
 
 import asyncio
 from typing import Literal
@@ -6,6 +10,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from loguru import logger
 
+from app.core.cache import TTLCache
 from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/tickers", tags=["Tickers"])
@@ -20,6 +25,22 @@ _PERIOD_CONFIG = {
     "1y": {"period": "1y", "interval": "1d"},      # Daily for 1 year
     "5y": {"period": "5y", "interval": "1wk"},     # Weekly for 5 years
 }
+
+CHART_TTL_S = {"1d": 60, "5d": 5 * 60, "1mo": 15 * 60, "3mo": 3600, "6mo": 3600, "1y": 3600, "5y": 6 * 3600}
+EMPTY_TTL_S = 10 * 60
+ERROR_TTL_S = 30           # a failed Yahoo call (timeout, 429)      # "no data" is remembered too, so a bad symbol isn't re-asked every view
+_charts = TTLCache(max_size=5000, default_ttl=3600)
+_locks: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+def _px(v: float) -> float:
+    """Cheap prices (crypto, penny stocks, yen pairs) keep 4 decimals."""
+    return round(v, 4) if abs(v) < 10 else round(v, 2)
+
+
+def clear_cache() -> None:
+    _charts.clear()
+    _locks.clear()
 
 
 def chart_points(df) -> list[dict]:
@@ -41,8 +62,8 @@ def chart_points(df) -> list[dict]:
             vol = int(vol) if math.isfinite(vol) else 0
         except (TypeError, ValueError, KeyError):
             vol = 0
-        out.append({"date": idx.isoformat(), "open": round(o, 2), "high": round(h, 2),
-                    "low": round(lo, 2), "close": round(c, 2), "volume": vol})
+        out.append({"date": idx.isoformat(), "open": _px(o), "high": _px(h),
+                    "low": _px(lo), "close": _px(c), "volume": vol})
     return out
 
 
@@ -65,7 +86,27 @@ async def get_ticker_chart(
     - 5y: weekly candles
     """
     ticker = ticker.upper()
+    key = (ticker, period)
+    body = _charts.get(f"{ticker}|{period}")
+    if body is None:
+        lock = _locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            body = _charts.get(f"{ticker}|{period}")
+            if body is None:
+                body = await _load_chart(ticker, period)
+        if not lock.locked():
+            _locks.pop(key, None)   # bounded: the next miss makes a new lock
+    if body.get("error"):
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch price data")
+    if body.get("empty"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No price data for {ticker}")
+    return body
+
+
+async def _load_chart(ticker: str, period: str) -> dict:
+    """Yahoo -> chart body, cached for everyone ({"error"} for ERROR_TTL_S on a failed fetch)."""
     config = _PERIOD_CONFIG[period]
+    cache_key = f"{ticker}|{period}"
 
     def _fetch():
         import yfinance as yf
@@ -77,40 +118,42 @@ async def get_ticker_chart(
         df = await asyncio.to_thread(_fetch)
     except Exception as e:
         logger.error(f"Chart data fetch failed for {ticker}: {e}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch price data")
-
-    if df.empty:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No price data for {ticker}")
+        # remembered briefly: the users waiting on this chart don't each retry Yahoo
+        _charts.set(cache_key, {"error": True}, ttl=ERROR_TTL_S)
+        return {"error": True}
 
     # Flatten MultiIndex if present
     import pandas as pd
-    if isinstance(df.columns, pd.MultiIndex):
+    if not df.empty and isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
-    data_points = chart_points(df)
+    data_points = chart_points(df) if not df.empty else []
     if not data_points:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No price data for {ticker}")
+        _charts.set(cache_key, {"empty": True}, ttl=EMPTY_TTL_S)
+        return {"empty": True}
 
     # Summary stats
-    current = data_points[-1]["close"] if data_points else 0
-    first = data_points[0]["close"] if data_points else 0
-    high = max(p["high"] for p in data_points) if data_points else 0
-    low = min(p["low"] for p in data_points) if data_points else 0
+    current = data_points[-1]["close"]
+    first = data_points[0]["close"]
+    high = max(p["high"] for p in data_points)
+    low = min(p["low"] for p in data_points)
     change = current - first
     change_pct = (change / first * 100) if first else 0
 
-    return {
+    body = {
         "ticker": ticker,
         "period": period,
         "interval": config["interval"],
         "data_points": data_points,
         "count": len(data_points),
         "summary": {
-            "current_price": round(current, 2),
-            "period_high": round(high, 2),
-            "period_low": round(low, 2),
-            "change": round(change, 2),
+            "current_price": _px(current),
+            "period_high": _px(high),
+            "period_low": _px(low),
+            "change": _px(change),
             "change_pct": round(change_pct, 2),
         },
         "signal_markers": [],   # kept for older clients; always empty
     }
+    _charts.set(cache_key, body, ttl=CHART_TTL_S[period])
+    return body

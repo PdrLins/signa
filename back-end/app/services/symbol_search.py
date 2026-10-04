@@ -29,6 +29,7 @@ Response rows: {symbol, name, exchange, exchange_label, type, source}.
 from __future__ import annotations
 
 import asyncio
+import threading
 import re
 from difflib import SequenceMatcher
 
@@ -43,9 +44,10 @@ YAHOO_TIMEOUT_S = 6.0
 LOCAL_TTL_S = 6 * 3600
 YAHOO_TTL_S = 3600
 YAHOO_EMPTY_TTL_S = 600
+YAHOO_FAIL_TTL_S = 60
 
-_local_cache = TTLCache(max_size=2, default_ttl=LOCAL_TTL_S)
-_yahoo_cache = TTLCache(max_size=500, default_ttl=YAHOO_TTL_S)
+_local_cache = TTLCache(max_size=4, default_ttl=LOCAL_TTL_S)
+_yahoo_cache = TTLCache(max_size=5000, default_ttl=YAHOO_TTL_S)
 
 # Yahoo exchange code -> display label. Unknown codes are kept with the
 # suffix's label (app/market/currency.py) or the code itself.
@@ -223,7 +225,7 @@ def _load_local() -> list[dict]:
     from app.market.universe import get_all_tickers, get_exchange
     for sym in get_all_tickers():   # Signa's known symbols (static list)
         add(sym, None, get_exchange(sym))
-    for loader, label in ((queries.get_all_holdings, "holdings"),):
+    for loader, label in ((queries.get_all_holding_names, "holdings"),):
         try:
             for r in loader() or []:
                 add(r.get("symbol"), r.get("name"), r.get("exchange"), r.get("asset_type"))
@@ -246,11 +248,36 @@ def _load_local() -> list[dict]:
     return out
 
 
+_local_lock = threading.Lock()
+_local_refreshing = threading.Event()
+
+
 def local_candidates() -> list[dict]:
+    """Loaded once (one load even when many keystrokes arrive together); after
+    LOCAL_TTL_S the old list keeps serving while one thread reloads it."""
     cached = _local_cache.get("all")
-    if cached is None:
-        cached = _load_local()
-        _local_cache.set("all", cached)
+    if cached is not None:
+        return cached
+    last = _local_cache.get("last")
+    if last is not None:
+        if not _local_refreshing.is_set():
+            _local_refreshing.set()
+
+            def reload():
+                try:
+                    fresh = _load_local()
+                    _local_cache.set("all", fresh)
+                    _local_cache.set("last", fresh, ttl=10 * LOCAL_TTL_S)
+                finally:
+                    _local_refreshing.clear()
+            threading.Thread(target=reload, name="symbol-search-local", daemon=True).start()
+        return last
+    with _local_lock:
+        cached = _local_cache.get("all")
+        if cached is None:
+            cached = _load_local()
+            _local_cache.set("all", cached)
+            _local_cache.set("last", cached, ttl=10 * LOCAL_TTL_S)
     return cached
 
 
@@ -322,19 +349,40 @@ def _yahoo_raw(q: str) -> list[dict]:
     return list(yf.Search(q, max_results=10, news_count=0).quotes or [])
 
 
+_yahoo_inflight: dict[str, asyncio.Future] = {}
+
+
+def _yahoo_cached(q: str) -> list[dict]:
+    """Blocking: Yahoo search, cached in the thread (a slow answer still serves
+    the next keystroke); a failure is remembered YAHOO_FAIL_TTL_S."""
+    key = q.lower()
+    try:
+        quotes = _yahoo_raw(q)
+    except Exception as e:
+        logger.debug(f"symbol_search: yahoo search '{q}' failed: {type(e).__name__}: {e}")
+        _yahoo_cache.set(key, [], ttl=YAHOO_FAIL_TTL_S)
+        return []
+    _yahoo_cache.set(key, quotes, ttl=YAHOO_TTL_S if quotes else YAHOO_EMPTY_TTL_S)
+    return quotes
+
+
 async def yahoo_search(q: str) -> list[dict]:
-    """Raw Yahoo quotes for a query (cached 1h; failures and timeouts are not cached)."""
+    """Raw Yahoo quotes for a query (cached 1h; empty 10 min; failures 1 min).
+    The same query typed by several users at once is one Yahoo call."""
     key = q.lower()
     cached = _yahoo_cache.get(key)
     if cached is not None:
         return cached
+    fut = _yahoo_inflight.get(key)
+    if fut is None:
+        fut = asyncio.ensure_future(asyncio.to_thread(_yahoo_cached, q))
+        _yahoo_inflight[key] = fut
+        fut.add_done_callback(lambda _f, k=key: _yahoo_inflight.pop(k, None))
     try:
-        quotes = await asyncio.wait_for(asyncio.to_thread(_yahoo_raw, q), timeout=YAHOO_TIMEOUT_S)
+        return await asyncio.wait_for(asyncio.shield(fut), timeout=YAHOO_TIMEOUT_S)
     except Exception as e:
-        logger.debug(f"symbol_search: yahoo search '{q}' failed: {type(e).__name__}: {e}")
+        logger.debug(f"symbol_search: yahoo search '{q}' timed out: {type(e).__name__}")
         return []
-    _yahoo_cache.set(key, quotes, ttl=YAHOO_TTL_S if quotes else YAHOO_EMPTY_TTL_S)
-    return quotes
 
 
 def filter_yahoo(quotes: list[dict]) -> list[dict]:
@@ -451,14 +499,16 @@ async def search(q: str | None, limit: int = 8, country: str | None = None) -> l
     limit = max(1, min(int(limit or 8), MAX_LIMIT))
     if not query:
         return []
-    try:
-        cands = await asyncio.to_thread(local_candidates)
-    except Exception as e:
-        logger.debug(f"symbol_search: local candidates failed: {e}")
-        cands = []
-    local, corrections = score_local(query, cands)
+    def scored():
+        try:
+            cands = local_candidates()
+        except Exception as e:
+            logger.debug(f"symbol_search: local candidates failed: {e}")
+            cands = []
+        return score_local(query, cands)   # fuzzy matching is CPU work: off the event loop
 
-    yahoo = filter_yahoo(await yahoo_search(query))
+    (local, corrections), raw = await asyncio.gather(asyncio.to_thread(scored), yahoo_search(query))
+    yahoo = filter_yahoo(raw)
     if not yahoo_relevant(query, yahoo):
         fixed = corrected_query(query, corrections)
         if fixed:

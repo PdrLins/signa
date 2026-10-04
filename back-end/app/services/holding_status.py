@@ -84,12 +84,20 @@ def compute_price_status(closes: pd.Series | None) -> dict:
     }
 
 
+CLOSES_BATCH = 200
+
+
 def fetch_closes(symbols: list[str]) -> dict[str, pd.Series]:
     """Fresh daily closes for every symbol (one batched yf.download).
     Blocking — call via asyncio.to_thread. Missing symbols are absent."""
     syms = list(dict.fromkeys(s for s in symbols if s))
     if not syms:
         return {}
+    if len(syms) > CLOSES_BATCH:   # one failed giant download must not lose every symbol
+        out: dict[str, pd.Series] = {}
+        for i in range(0, len(syms), CLOSES_BATCH):
+            out.update(fetch_closes(syms[i:i + CLOSES_BATCH]))
+        return out
     from app.services.price_cache import _close_series_from_download
 
     out: dict[str, pd.Series] = {}
@@ -126,20 +134,25 @@ async def refresh(user_id: str | None = None) -> dict:
         if not rows:
             return {"status": "ok", "holdings": 0, "updated": 0}
         symbols = sorted({str(r.get("symbol") or "").upper() for r in rows if r.get("symbol")})
-        closes = await asyncio.to_thread(fetch_closes, symbols)
+        from app.core.executors import in_job_pool
+        closes = await in_job_pool(fetch_closes, symbols)
         now_iso = datetime.now(timezone.utc).isoformat()
-        updated = 0
+        per_symbol: dict[str, int] = {}
         for r in rows:
             sym = str(r.get("symbol") or "").upper()
+            per_symbol[sym] = per_symbol.get(sym, 0) + 1
+        updated = 0
+        # The status depends only on the symbol: one write per symbol, not per holding.
+        for sym, n in per_symbol.items():
             st = compute_price_status(closes.get(sym))
             if st.get("error"):
                 continue
             try:
-                await asyncio.to_thread(queries.update_holding, str(r["id"]), str(r["user_id"]),
-                                        {"holding_status": st, "status_updated_at": now_iso})
-                updated += 1
+                await in_job_pool(queries.set_symbol_status, sym,
+                                  {"holding_status": st, "status_updated_at": now_iso}, user_id)
+                updated += n
             except Exception as e:
-                logger.warning(f"holding status: save {r.get('id')} failed: {e}")
+                logger.warning(f"holding status: save {sym} failed: {e}")
         return {"status": "ok", "holdings": len(rows), "symbols": len(symbols), "updated": updated}
 
 
@@ -151,5 +164,6 @@ def kick(user_id: str) -> bool:
     """Start a background refresh for one user (False when one is running)."""
     if is_running():
         return False
-    asyncio.create_task(refresh(user_id))
+    from app.core.executors import spawn
+    spawn(refresh(user_id))
     return True

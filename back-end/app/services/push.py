@@ -191,7 +191,7 @@ async def deliver_user(user_id: str, devices: list[dict], mode: str, today: date
     from app.db import queries
     from app.services import telegram_notify
 
-    level = access.get_user_access(user_id)["level"]
+    level = (await asyncio.to_thread(access.get_user_access, user_id))["level"]
     _lang, lines = await telegram_notify._lines_for({"user_id": user_id, "access_level": level}, mode, today, now)
     lines = allowed_lines(lines, level)
     if not lines:
@@ -229,16 +229,26 @@ async def run_delivery(mode: str, today: date | None = None, now: datetime | Non
             return {"status": "migration_required"}
         logger.warning(f"push: could not load devices: {type(e).__name__}")
         return {"status": "failed"}
+    if mode == "live":
+        from app.services.telegram_notify import live_candidates
+        wanted = await asyncio.to_thread(live_candidates, today, now)
+        if wanted is not None:
+            devices = [d for d in devices if str(d.get("user_id")) in wanted]
     by_user: dict[str, list[dict]] = {}
     for d in devices:
         by_user.setdefault(str(d["user_id"]), []).append(d)
-    users = lines = errors = 0
-    for uid, devs in by_user.items():
-        try:
-            n = await deliver_user(uid, devs, mode, today, now)
-            users += 1 if n else 0
-            lines += n
-        except Exception as e:
-            errors += 1
-            logger.warning(f"push: delivery for {uid} failed: {type(e).__name__}: {e}")
+    from app.services.telegram_notify import DELIVERY_CONCURRENCY
+    sem = asyncio.Semaphore(DELIVERY_CONCURRENCY)
+
+    async def one(uid: str, devs: list[dict]) -> int | None:
+        async with sem:
+            try:
+                return await deliver_user(uid, devs, mode, today, now)
+            except Exception as e:
+                logger.warning(f"push: delivery for {uid} failed: {type(e).__name__}: {e}")
+                return None
+    results = await asyncio.gather(*(one(u, d) for u, d in by_user.items()))
+    users = sum(1 for n in results if n)
+    lines = sum(n for n in results if n)
+    errors = sum(1 for n in results if n is None)
     return {"status": "ok", "mode": mode, "devices": len(devices), "users": users, "lines": lines, "errors": errors}

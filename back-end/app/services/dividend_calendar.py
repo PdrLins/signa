@@ -195,7 +195,7 @@ def _pay_offset(profile: dict) -> int | None:
     """The symbol's usual ex -> pay gap in days, from its schedule."""
     for u in profile.get("upcoming") or []:
         ex, pay = _d(u.get("ex_date")), _d(u.get("pay_date"))
-        if ex and pay and 0 <= (pay - ex).days <= dividends.MAX_PAY_OFFSET_DAYS:
+        if ex and pay and 0 <= (pay - ex).days <= dividends.max_pay_offset(profile.get("symbol")):   # B3 pays months later
             return (pay - ex).days
     return None
 
