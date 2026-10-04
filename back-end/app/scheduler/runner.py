@@ -11,6 +11,7 @@ from app.scheduler.jobs import (
     cleanup_expired_tokens,
     holding_status_refresh,
     income_forecast_snapshots,
+    suggestions_nightly,
     portfolio_snapshots,
     monthly_recap_push,
     push_notifications,
@@ -154,6 +155,10 @@ def init_scheduler() -> AsyncIOScheduler:
         scheduler.add_job(monthly_recap_push, CronTrigger(day=1, hour=9, minute=5, timezone=settings.timezone),
                           id="monthly_recap_push", name="Monthly recap push (1st, 9:05 AM ET)",
                           replace_existing=True)
+
+    # Suggestions (migration 028): co-follow counts + symbol profiles, nightly.
+    scheduler.add_job(suggestions_nightly, CronTrigger(hour=3, minute=0, timezone=settings.timezone),
+                      id="suggestions_nightly", name="Suggestions data (3:00 AM ET)", replace_existing=True)
 
     # Data-usage counters (cost control, migration 014): flush every 5 minutes.
     scheduler.add_job(

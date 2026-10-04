@@ -31,6 +31,7 @@ Status: in development, not deployed yet. Hosting is still to be decided.
 | Goals (portfolio value, monthly dividend income) | 1 | Unlimited |
 | Monthly recap | ✓ | ✓ |
 | Report a problem / report wrong data | ✓ | ✓ |
+| Stock suggestions (similar stocks, "also followed"; no AI) | 3 per list | All, plus gaps in your portfolio |
 
 Country-specific tools (Canadian adjusted cost base, Brazilian income tax, US cost basis) are planned for
 Premium.

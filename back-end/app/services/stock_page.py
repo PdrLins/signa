@@ -577,6 +577,10 @@ async def get_shared_page(raw_symbol: str) -> dict:
             return cached
         symbol, raw = await _resolve(sym)
         body, complete = await _build(symbol, raw)
+        if raw.get("info"):   # what this symbol is, for suggestions (migration 028); in the background
+            from app.core.executors import spawn
+            from app.services import suggestions
+            spawn(asyncio.to_thread(suggestions.record_from_info, symbol, raw["info"]))
         _page_cache.set(symbol, body, ttl=PAGE_TTL if complete else PARTIAL_TTL)
         if len(_locks) > 1000:   # prune only locks nobody holds or waits on
             for k in [k for k, v in _locks.items() if not v.locked()]:

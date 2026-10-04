@@ -73,6 +73,8 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "feature.similar_funds": ("premium", "Similar funds compared (fee, yield, return)"),
     "feature.all_widgets": ("premium", "Every home-screen and lock-screen widget (free: 1)"),
     "feature.unlimited_goals": ("premium", "Unlimited goals (free: 1)"),
+    "feature.suggestions_all": ("premium", "Every suggestion (free: 3 similar stocks and 3 also-followed)"),
+    "feature.portfolio_gaps": ("premium", "Gaps in your portfolio, with ideas to look at"),
     "feature.push_all": ("premium", "Every push notification type (free: price alerts, dividends, earnings, report updates)"),
     # --- System capabilities ---
     "system.unlimited_slots": ("premium", "No limit on followed stocks"),

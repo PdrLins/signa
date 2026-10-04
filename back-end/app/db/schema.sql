@@ -8,8 +8,8 @@
 --
 -- How: Supabase dashboard -> SQL Editor -> New query -> paste -> Run.
 -- Idempotent (IF NOT EXISTS / ON CONFLICT): safe to run twice. Tested on
--- Postgres: one run creates 29 tables with RLS on; a second run changes nothing.
--- Changes after 027: add a numbered file in migrations/ (028, 029, ...),
+-- Postgres: one run creates 31 tables with RLS on; a second run changes nothing.
+-- Changes after 028: add a numbered file in migrations/ (029, 030, ...),
 -- run it on the database, and fold it into this file.
 --
 -- Afterwards: put the new project's URL and service_role key in the
@@ -1450,6 +1450,54 @@ CREATE INDEX IF NOT EXISTS idx_push_devices_disabled ON push_devices (disabled_a
     WHERE disabled_at IS NOT NULL;
 
 -- ############################################################
+-- 028_suggestions.sql
+-- ############################################################
+
+-- ============================================================================
+-- 028_suggestions.sql — stock suggestions without AI
+-- ============================================================================
+-- symbol_profiles   what a symbol is (sector, industry, country, size,
+--                   dividend yield), shared by everyone. Written when a stock
+--                   page is built and refreshed nightly for followed symbols.
+-- symbol_cofollows  "people who follow X also follow Y": anonymous counts of
+--                   users following both, computed nightly. Only pairs shared
+--                   by at least 5 users are stored; no user ids.
+-- Read by app/services/suggestions.py. Idempotent.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS symbol_profiles (
+    symbol          VARCHAR(24) PRIMARY KEY,
+    name            TEXT,
+    quote_type      VARCHAR(16),            -- EQUITY | ETF | MUTUALFUND | CRYPTOCURRENCY ...
+    sector          VARCHAR(64),
+    industry        VARCHAR(96),
+    category        VARCHAR(96),            -- funds: Yahoo category ("Canada Equity" ...)
+    country         VARCHAR(64),
+    exchange        VARCHAR(24),            -- Signa label (B3, TSX, LSE, US ...)
+    currency        VARCHAR(3),
+    market_cap      NUMERIC,                -- listing currency
+    dividend_yield  NUMERIC,                -- FRACTION (0.035 = 3.5%)
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_symbol_profiles_industry ON symbol_profiles (industry);
+CREATE INDEX IF NOT EXISTS idx_symbol_profiles_updated ON symbol_profiles (updated_at);
+ALTER TABLE public.symbol_profiles ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS symbol_cofollows (
+    symbol      VARCHAR(24) NOT NULL,
+    other       VARCHAR(24) NOT NULL,
+    users       INTEGER NOT NULL CHECK (users > 0),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (symbol, other)
+);
+ALTER TABLE public.symbol_cofollows ENABLE ROW LEVEL SECURITY;
+
+INSERT INTO access_features (key, min_level, description) VALUES
+  ('feature.suggestions_all', 'premium', 'Every suggestion (free: 3 similar stocks and 3 also-followed)'),
+  ('feature.portfolio_gaps', 'premium', 'Gaps in your portfolio, with ideas to look at')
+ON CONFLICT (key) DO NOTHING;
+
+-- ############################################################
 -- Signa only: drop the brain's feature keys (inserted by 011, they now
 -- live in Signa Advisor; the code ignores unknown keys anyway)
 -- ############################################################
@@ -1493,7 +1541,7 @@ END $$;
 -- ############################################################
 -- Checks (run after; each should return what the comment says)
 -- ############################################################
--- 29 tables, all with RLS on:
+-- 31 tables, all with RLS on:
 --   SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname = 'public' ORDER BY 1;
 -- No brain keys left:
 --   SELECT key, min_level FROM access_features ORDER BY 1;

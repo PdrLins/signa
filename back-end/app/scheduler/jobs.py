@@ -250,3 +250,12 @@ async def usage_flush():
             logger.debug(f"Usage flush: {result}")
     except Exception as e:
         logger.error(f"Usage flush failed: {e}")
+
+
+async def suggestions_nightly():
+    """03:00 ET: co-follow counts and symbol profiles for suggestions (migration 028)."""
+    try:
+        from app.services.suggestions import run_nightly
+        logger.info(f"Suggestions: {await in_job_pool(run_nightly)}")
+    except Exception as e:
+        logger.error(f"Suggestions nightly failed: {e}")

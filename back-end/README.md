@@ -2,7 +2,7 @@
 
 Portfolio tracker API for the Signa iOS and web apps: holdings, accounts,
 people, transactions, live prices, dividends, allocation, events, price
-alerts, goals, monthly recaps, widgets, push and Telegram notifications, and
+alerts, goals, monthly recaps, stock suggestions, widgets, push and Telegram notifications, and
 problem reports, on Free and Premium plans. Works in any country and currency
 (Brazil, Canada and the US first). No AI: the brain (AI signals) is Signa
 Advisor, a separate repository.
@@ -61,6 +61,7 @@ back-end/
 | Push notifications (iOS; free basics, Premium all) | 8:31 daily, 18:31 weekdays / every 5 min while a followed exchange trades |
 | Monthly recap push | 1st of the month, 9:05 |
 | Usage counters flush | every 5 min |
+| Suggestions data (followed-together counts, symbol profiles) | 3:00 |
 | Cleanup: expired tokens and codes, notification keys (45 days), check snapshots (60), audit log (180) | 2:00 |
 
 ## Environment Variables
@@ -72,7 +73,7 @@ iOS push (`APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_PRIVATE_KEY`, `APNS_BUNDLE_ID`).
 ## Database
 
 `app/db/schema.sql` creates the whole database on an empty Supabase project
-(29 tables, Row Level Security on, service_role access only). Changes: add the
+(31 tables, Row Level Security on, service_role access only). Changes: add the
 next numbered file in `app/db/migrations/`, run it, then fold it into
 `schema.sql`. See `app/db/README.md`.
 

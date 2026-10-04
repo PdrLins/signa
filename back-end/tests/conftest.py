@@ -115,3 +115,13 @@ def _no_referrals_db(monkeypatch):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_access: use real access-level resolution (no owner default)")
+
+
+@pytest.fixture(autouse=True)
+def _no_profile_writes(monkeypatch):
+    """A built stock page stores the symbol's profile for suggestions
+    (migration 028): never write it to a real database in tests."""
+    from app.db import queries
+    from app.services import suggestions
+    monkeypatch.setattr(queries, "upsert_symbol_profiles", lambda rows: None)
+    suggestions.clear_cache()

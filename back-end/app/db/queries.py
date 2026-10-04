@@ -1217,3 +1217,45 @@ def insert_deliveries(user_id: str, items: list[tuple[str, str]]) -> None:
     rows = [{"user_id": user_id, "kind": k, "dedupe_key": key} for k, key in items]
     get_client().table("notification_deliveries").upsert(
         rows, on_conflict="user_id,dedupe_key", ignore_duplicates=True).execute()
+
+
+# ============================================================
+# Suggestions (migration 028): symbol profiles + co-follow counts
+# ============================================================
+
+SYMBOL_PROFILE_COLUMNS = ("symbol, name, quote_type, sector, industry, category, country, exchange, "
+                          "currency, market_cap, dividend_yield, updated_at")
+
+
+def upsert_symbol_profiles(rows: list[dict]) -> None:
+    client = get_client()
+    for i in range(0, len(rows), 500):
+        client.table("symbol_profiles").upsert(rows[i:i + 500], on_conflict="symbol",
+                                               returning=ReturnMethod.minimal).execute()
+
+
+def get_symbol_profiles() -> list[dict]:
+    """Every profile (the suggestion pool; cached by the caller)."""
+    client = get_client()
+    return _select_all_pages(lambda: client.table("symbol_profiles").select(SYMBOL_PROFILE_COLUMNS).order("symbol"))
+
+
+def get_cofollows(symbols: list[str]) -> list[dict]:
+    """[{symbol, other, users}] for `symbols`."""
+    client = get_client()
+    out: list[dict] = []
+    for i in range(0, len(symbols), 200):
+        part = symbols[i:i + 200]
+        out.extend(_select_all_pages(lambda p=part: client.table("symbol_cofollows").select("symbol, other, users")
+                                     .in_("symbol", p).order("symbol").order("other")))
+    return out
+
+
+def replace_cofollows(rows: list[dict], run_started: str) -> int:
+    """Write this run's pairs, then drop pairs the run didn't write (fell below the minimum)."""
+    client = get_client()
+    for i in range(0, len(rows), 500):
+        client.table("symbol_cofollows").upsert(rows[i:i + 500], on_conflict="symbol,other",
+                                                returning=ReturnMethod.minimal).execute()
+    client.table("symbol_cofollows").delete(returning=ReturnMethod.minimal).lt("updated_at", run_started).execute()
+    return len(rows)
