@@ -179,7 +179,8 @@ def test_empty_input_is_valid():
     assert all(m["events"] == [] and m["total"]["total_cad"] is None for m in out["months"])
     s = out["summary"]
     assert s["next_payment"] is None and s["next_ex_date"] is None and s["forward_yield_pct"] is None
-    assert s["income_window"] == {"by_currency": {}, "total_cad": None, "fx_missing": False}
+    assert s["income_window"] == {"by_currency": {}, "total_cad": None, "fx_missing": False,
+                                  "total_home": None, "home_fx_missing": False}
     assert out["include_watchlist"] is False
 
 

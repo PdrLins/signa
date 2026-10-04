@@ -62,7 +62,10 @@ Response (GET /api/v1/dividends/calendar):
   "unknown":    [{"symbol", "name", "owned"}],
   "missing_shares": [{"symbol", "name"}]       # owned payers/unknown without shares
 }
-Money = {"by_currency": {"USD": 12.3, "CAD": 45.6}, "total_cad": 62.7 | null, "fx_missing": false}
+Money = {"by_currency": {"USD": 12.3, "CAD": 45.6}, "total_cad": 62.7 | null, "fx_missing": false,
+         "total_home": 62.7 | null, "home_fx_missing": false}        # *_home: the user's home currency
+(Also: top-level "home_currency"; events "expected_cash_home"; positions "annual_income_home";
+ summary "market_value_home", "forward_yield_pct_home". The *_cad fields stay for older clients.)
 Event = {
   "symbol", "name", "date",                    # date = pay_date or ex_date (ISO)
   "ex_date", "pay_date" | null, "pay_date_estimated": bool,
@@ -91,7 +94,7 @@ from typing import Awaitable, Callable, Iterable
 from loguru import logger
 
 from app.services import dividends
-from app.services.holdings_service import holding_currency, holding_price, to_cad
+from app.services.holdings_service import convert, holding_currency, holding_price, to_cad
 
 MAX_MONTHS = 12
 CONCURRENCY = 4
@@ -148,12 +151,15 @@ def month_keys(start: date, end: date) -> list[str]:
 
 
 class _Money:
-    def __init__(self, usdcad: float | None):
+    def __init__(self, usdcad: float | None, home: str = "CAD"):
         self.usdcad = usdcad
+        self.home = home
         self.by_ccy: dict[str, float] = {}
         self.cad = 0.0
+        self.home_total = 0.0
         self.any = False
         self.fx_missing = False
+        self.home_missing = False
 
     def add(self, amount: float | None, currency: str) -> None:
         if amount is None:
@@ -165,12 +171,19 @@ class _Money:
             self.fx_missing = True
         else:
             self.cad += c
+        h = convert(amount, currency, self.home, self.usdcad)
+        if h is None:
+            self.home_missing = True
+        else:
+            self.home_total += h
 
     def out(self) -> dict:
         return {
             "by_currency": {k: _r(v) for k, v in sorted(self.by_ccy.items())},
             "total_cad": _r(self.cad) if self.any else None,
             "fx_missing": self.fx_missing,
+            "total_home": _r(self.home_total) if self.any else None,
+            "home_fx_missing": self.home_missing,
         }
 
 
@@ -236,7 +249,7 @@ def _position(item: dict, owned: bool) -> dict:
 
 
 def build_calendar(holdings: list[dict], watchlist: Iterable[dict] | None, profiles: dict[str, dict | None],
-                   today: date, months: int = 12, usdcad: float | None = None) -> dict:
+                   today: date, months: int = 12, usdcad: float | None = None, home: str = "CAD") -> dict:
     """The whole calendar response from holdings + profiles. Pure.
 
     `profiles` maps symbol -> dividend profile, or None when it failed."""
@@ -259,14 +272,17 @@ def build_calendar(holdings: list[dict], watchlist: Iterable[dict] | None, profi
             positions.append(p)
 
     events: list[dict] = []
-    income_window, income_12m, annual = _Money(usdcad), _Money(usdcad), _Money(usdcad)
-    month_money = {k: _Money(usdcad) for k in month_keys(start, end)}
+    home = (home or "CAD").upper()
+    income_window, income_12m, annual = _Money(usdcad, home), _Money(usdcad, home), _Money(usdcad, home)
+    month_money = {k: _Money(usdcad, home) for k in month_keys(start, end)}
     month_events: dict[str, list[dict]] = {k: [] for k in month_money}
     non_payers, unknown, missing_shares, pos_out = [], [], [], []
     payers = non_pay = unk = 0
     mv_cad = 0.0
     mv_any = False
     annual_cad_for_yield = 0.0
+    mv_home = annual_home_for_yield = 0.0
+    mv_home_any = False
 
     for pos in positions:
         sym, owned, shares = pos["symbol"], pos["owned"], pos["shares"]
@@ -283,6 +299,7 @@ def build_calendar(holdings: list[dict], watchlist: Iterable[dict] | None, profi
         annual_rate = _num((prof or {}).get("annual_rate")) if status == "payer" else None
         annual_income = shares * annual_rate if owned and shares and annual_rate else None
         annual_income_cad = to_cad(annual_income, ccy, usdcad)
+        annual_income_home = convert(annual_income, ccy, home, usdcad)
         y = _num((prof or {}).get("yield")) if status == "payer" else None
 
         if owned:
@@ -303,6 +320,12 @@ def build_calendar(holdings: list[dict], watchlist: Iterable[dict] | None, profi
                     mv_any = True
                     if annual_income_cad:
                         annual_cad_for_yield += annual_income_cad
+                vh = convert(shares * price, pos["currency"], home, usdcad)
+                if vh is not None:
+                    mv_home += vh
+                    mv_home_any = True
+                    if annual_income_home:
+                        annual_home_for_yield += annual_income_home
         if status == "non_payer":
             non_payers.append({"symbol": sym, "name": pos["name"], "reason": reason, "owned": owned})
         elif status == "unknown":
@@ -313,6 +336,7 @@ def build_calendar(holdings: list[dict], watchlist: Iterable[dict] | None, profi
             "frequency": (prof or {}).get("frequency") if status == "payer" else None,
             "annual_rate": _r(annual_rate, 6), "yield_pct": _r(y * 100) if y is not None else None,
             "annual_income": _r(annual_income), "annual_income_cad": _r(annual_income_cad),
+            "annual_income_home": _r(annual_income_home),
             "next_ex_date": (prof or {}).get("next_ex_date") if status == "payer" else None,
             "next_pay_date": (prof or {}).get("next_pay_date") if status == "payer" else None,
         })
@@ -326,11 +350,13 @@ def build_calendar(holdings: list[dict], watchlist: Iterable[dict] | None, profi
             amt = raw["amount_per_share"]
             cash = shares * amt if owned and shares and amt is not None else None
             cash_cad = to_cad(cash, ccy, usdcad)
+            cash_home = convert(cash, ccy, home, usdcad)
             ev = {
                 "symbol": sym, "name": pos["name"], "date": key.isoformat(), **raw,
                 "currency": ccy, "frequency": prof.get("frequency"),
                 "shares": shares if owned else None,
                 "expected_cash": _r(cash), "expected_cash_cad": _r(cash_cad),
+                "expected_cash_home": _r(cash_home),
                 "account": pos["account"], "owned": owned,
             }
             if owned:
@@ -360,6 +386,7 @@ def build_calendar(holdings: list[dict], watchlist: Iterable[dict] | None, profi
         "as_of": today.isoformat(),
         "window": {"start": start.isoformat(), "end": end.isoformat(), "months": months},
         "usdcad": usdcad,
+        "home_currency": home,
         "include_watchlist": wl_on,
         "summary": {
             "income_window": income_window.out(),
@@ -372,6 +399,9 @@ def build_calendar(holdings: list[dict], watchlist: Iterable[dict] | None, profi
             "missing_shares": len(missing_shares),
             "forward_yield_pct": _r(annual_cad_for_yield / mv_cad * 100) if mv_any and mv_cad > 0 else None,
             "market_value_cad": _r(mv_cad) if mv_any else None,
+            "market_value_home": _r(mv_home) if mv_home_any else None,
+            "forward_yield_pct_home": (_r(annual_home_for_yield / mv_home * 100)
+                                       if mv_home_any and mv_home > 0 else None),
         },
         "months": [{"month": k, "total": month_money[k].out(), "events": month_events[k]} for k in month_money],
         "events": events,
@@ -410,10 +440,10 @@ async def fetch_profiles(symbols: Iterable[str], fetch: ProfileFn | None = None,
 
 async def get_calendar(holdings: list[dict], watchlist: list[dict] | None = None, months: int = 12,
                        usdcad: float | None = None, today: date | None = None,
-                       fetch: ProfileFn | None = None) -> dict:
+                       fetch: ProfileFn | None = None, home: str = "CAD") -> dict:
     """Fetch the shared dividend profiles and build the calendar."""
     wl = list(watchlist or [])[:MAX_WATCHLIST] if watchlist is not None else None
     symbols = [str(h.get("symbol") or "").upper() for h in holdings or []]
     symbols += [str(w.get("symbol") or "").upper() for w in wl or []]
     profiles = await fetch_profiles(symbols, fetch)
-    return build_calendar(holdings, wl, profiles, today or dividends.today_et(), months, usdcad)
+    return build_calendar(holdings, wl, profiles, today or dividends.today_et(), months, usdcad, home)

@@ -53,22 +53,26 @@ _HEADER_ALIASES = {
     "account": ("account", "account type", "acct"),
 }
 
-_NUM_RE = re.compile(r"^(?:C\$|US\$|\$)?\d+(?:\.\d+)?$", re.IGNORECASE)
+_DEC_COMMA = re.compile(r"(?<=\d),(?=\d)")   # a comma between digits: decimal or thousands, not a separator
+_KEEP = "\u00a7"                              # placeholder while splitting the line
 
 
-def _clean_num(tok: str) -> float | None:
-    t = tok.strip().upper().replace("C$", "").replace("US$", "").replace("$", "").replace("_", "")
-    if not t or not re.fullmatch(r"\d+(?:\.\d+)?", t):
+def _clean_num(tok: str, decimal_comma: bool = False) -> float | None:
+    """Positive amount from "17.99", "35,50", "1.234,56", "R$ 35,50", "C$12" ... else None."""
+    from app.services.transactions_service import parse_number
+
+    t = tok.strip().replace(_KEEP, ",")
+    if not t or not re.search(r"\d", t) or re.search(r"[A-Za-z]", re.sub(r"(?i)US\$|C\$|CA\$|R\$", "", t)):
         return None
     try:
-        v = float(t)
+        v = parse_number(t, decimal_comma)
     except ValueError:
         return None
-    return v if math.isfinite(v) and v > 0 else None
+    return v if v is not None and math.isfinite(v) and v > 0 else None
 
 
 def _is_num(tok: str) -> bool:
-    return bool(_NUM_RE.match(tok.strip()))
+    return _clean_num(tok) is not None
 
 
 def normalize_account(raw: str | None) -> str | None:
@@ -108,7 +112,8 @@ def _row(line: int, raw: str, sym: str, shares=None, avg_cost=None, account=None
 def _parse_free_line(line_no: int, raw: str) -> list[dict]:
     """Free-form line: tickers, each optionally followed by shares and an
     average cost ("NVDA 17.99", "RY.TO 4.1 @ 145.20", "XEQT, COST, NVDA")."""
-    text = raw.replace("@", " @ ")
+    text = _DEC_COMMA.sub(_KEEP, raw.replace("@", " @ "))
+    text = re.sub(r"(?i)(R\$|US\$|C\$|CA\$)\s+(?=\d)", r"\1", text)   # "R$ 35,50" -> one token
     tokens = [t for t in re.split(r"[,\t;|]+|\s+", text) if t.strip()]
     rows: list[dict] = []
     cur: dict | None = None
@@ -174,8 +179,9 @@ def parse_holdings_text(text: str) -> list[dict]:
             sym = _norm_symbol(get("symbol"))
             if not sym:
                 continue
-            shares = _clean_num(get("shares").replace(",", "")) if get("shares") else None
-            cost = _clean_num(get("avg_cost").replace(",", "")) if get("avg_cost") else None
+            dc = delim == ";"   # "; " CSVs (pt-BR Excel) use decimal commas
+            shares = _clean_num(get("shares"), dc) if get("shares") else None
+            cost = _clean_num(get("avg_cost"), dc) if get("avg_cost") else None
             rows.append(_row(idx, stripped, sym, shares, cost, normalize_account(get("account"))))
         else:
             rows.extend(_parse_free_line(idx, stripped))
@@ -269,8 +275,9 @@ def _guess_asset_type(symbol: str) -> str:
     return get_asset_class(symbol)
 
 
-async def resolve_input(sym: str) -> dict:
-    """All listings for one typed symbol, TSX first (Canadian owner).
+async def resolve_input(sym: str, country: str | None = None) -> dict:
+    """All listings for one typed symbol, the user's local market first
+    (`country`; Canada when unknown — TSX first; B3-style tickers -> .SA).
 
     Returns {"status": ok|ambiguous|not_found, "selected", "alternatives",
     "note"}. The bare symbol and SYMBOL.TO are both looked up; when both
@@ -281,7 +288,7 @@ async def resolve_input(sym: str) -> dict:
     """
     from app.market.symbols import candidate_symbols
 
-    cands = candidate_symbols(sym, prefer_tsx=True)
+    cands = candidate_symbols(sym, prefer_tsx=True, country=country)
     if len(cands) == 1:
         found = await asyncio.to_thread(_lookup_listing, cands[0])
         return {"status": "ok" if found else "not_found", "selected": found,
@@ -312,9 +319,9 @@ async def resolve_input(sym: str) -> dict:
         # likely means the US share — still flagged so the owner confirms.
         found = [us] + [f for f in found if f is not us]
         return {"status": "ambiguous", "selected": us, "alternatives": found, "note": "cdr"}
-    tsx_first = found[0]["symbol"].endswith(".TO")
-    return {"status": "ambiguous", "selected": found[0], "alternatives": found,
-            "note": "prefer_tsx" if tsx_first else "prefer_known"}
+    first = found[0]["symbol"]
+    note = "prefer_tsx" if first.endswith(".TO") else "prefer_local" if "." in first else "prefer_known"
+    return {"status": "ambiguous", "selected": found[0], "alternatives": found, "note": note}
 
 
 _NAME_NOISE = re.compile(
@@ -335,7 +342,8 @@ def is_cdr_of(tsx: dict, us: dict) -> bool:
     return bool(tn and un and (tn == un or tn.startswith(un) or un.startswith(tn)))
 
 
-async def resolve_rows(rows: list[dict], existing_symbols: set[str] | None = None) -> list[dict]:
+async def resolve_rows(rows: list[dict], existing_symbols: set[str] | None = None,
+                       country: str | None = None) -> list[dict]:
     """Resolve parsed rows concurrently (bounded)."""
     sem = asyncio.Semaphore(RESOLVE_CONCURRENCY)
     existing = existing_symbols or set()
@@ -346,7 +354,7 @@ async def resolve_rows(rows: list[dict], existing_symbols: set[str] | None = Non
                     "existing": False}
         async with sem:
             try:
-                res = await resolve_input(r["input"])
+                res = await resolve_input(r["input"], country)
             except Exception as e:
                 logger.warning(f"holdings: resolve {r['input']} failed: {e}")
                 res = {"status": "not_found", "selected": None, "alternatives": [], "note": None}
@@ -370,16 +378,15 @@ def _num(v) -> float | None:
     return f if math.isfinite(f) else None
 
 
+def convert(amount: float | None, currency: str | None, to: str, usdcad: float | None) -> float | None:
+    from app.services.portfolio_snapshots import convert as _convert
+    return _convert(amount, currency, to, usdcad)
+
+
 def to_cad(amount: float | None, currency: str | None, usdcad: float | None) -> float | None:
-    """Native amount -> CAD. USD needs the CAD=X rate (CAD per 1 USD)."""
-    if amount is None:
-        return None
-    ccy = (currency or "").upper()
-    if ccy == "CAD":
-        return amount
-    if ccy == "USD":
-        return amount * usdcad if usdcad else None
-    return None
+    """Native amount -> CAD (any currency; USD uses the given CAD=X rate)."""
+    from app.services.portfolio_snapshots import convert
+    return convert(amount, currency, "CAD", usdcad)
 
 
 def holding_currency(h: dict) -> str:
@@ -445,13 +452,14 @@ def holding_quote(h: dict, quotes: dict[str, dict] | None) -> dict | None:
 
 def portfolio_math(holdings: list[dict], usdcad: float | None,
                    max_weight_pct: float | None = None,
-                   quotes: dict[str, dict] | None = None) -> tuple[dict[str, dict], dict]:
+                   quotes: dict[str, dict] | None = None, home: str = "CAD") -> tuple[dict[str, dict], dict]:
     """Per-holding position figures + portfolio totals.
 
     Only holdings with shares AND a price have a value; weights are shares
     of the total value of those holdings (labelled as such in the UI). A
     gain needs avg_cost too. Everything is in the holding's own currency
-    plus a CAD figure (USD x CAD=X); totals are CAD only.
+    plus the user's home currency (`home`: value_home, totals.value_home ...;
+    weights use it). The *_cad figures are kept for older clients.
 
     `quotes` ({SYMBOL: quote row}, quotes.get_quotes): when given, a holding
     is priced with its live quote (falling back to holding_status.price) —
@@ -469,6 +477,8 @@ def portfolio_math(holdings: list[dict], usdcad: float | None,
     total_cad = 0.0
     cost_cad = 0.0
     gain_cad = 0.0
+    total_home = cost_home = gain_home = 0.0
+    home = (home or "CAD").upper()
     fx_missing = False
     with_shares = 0
     as_ofs: list[str] = []
@@ -488,13 +498,20 @@ def portfolio_math(holdings: list[dict], usdcad: float | None,
                 as_ofs.append(str(hq["as_of"]))
         value = shares * price if shares and price else None
         value_cad = to_cad(value, ccy, usdcad)
+        value_home = convert(value, ccy, home, usdcad)
         book = shares * cost if shares and cost else None
         gain = value - book if value is not None and book is not None else None
         gain_pct = (value / book - 1) * 100 if value is not None and book else None
         if shares:
             with_shares += 1
-        if value is not None and value_cad is None:
+        if value is not None and value_home is None:
             fx_missing = True
+        if value_home is not None:
+            total_home += value_home
+            book_home = convert(book, ccy, home, usdcad)
+            if book_home is not None and gain is not None:
+                cost_home += book_home
+                gain_home += value_home - book_home
         if value_cad is not None:
             total_cad += value_cad
             book_cad = to_cad(book, ccy, usdcad)
@@ -502,24 +519,30 @@ def portfolio_math(holdings: list[dict], usdcad: float | None,
                 cost_cad += book_cad
                 gain_cad += value_cad - book_cad
         per[hid] = {
-            "currency": ccy, "value": _r(value), "value_cad": _r(value_cad), "book_value": _r(book),
+            "currency": ccy, "value": _r(value), "value_cad": _r(value_cad), "value_home": _r(value_home),
+            "book_value": _r(book),
             "unrealized": _r(gain), "unrealized_pct": _r(gain_pct), "weight_pct": None,
             "symbol_weight_pct": None, "overweight": False, "_symbol": str(h.get("symbol") or "").upper(),
         }
-    sym_cad: dict[str, float] = {}
+    sym_home: dict[str, float] = {}
     for hid, p in per.items():
-        if p["value_cad"] is not None:
-            sym_cad[p["_symbol"]] = sym_cad.get(p["_symbol"], 0.0) + p["value_cad"]
+        if p["value_home"] is not None:
+            sym_home[p["_symbol"]] = sym_home.get(p["_symbol"], 0.0) + p["value_home"]
     for hid, p in per.items():
         sym = p.pop("_symbol")
-        if p["value_cad"] is not None and total_cad > 0:
-            w = p["value_cad"] / total_cad * 100
-            sw = sym_cad[sym] / total_cad * 100
+        if p["value_home"] is not None and total_home > 0:
+            w = p["value_home"] / total_home * 100
+            sw = sym_home[sym] / total_home * 100
             p["weight_pct"] = round(w, 2)
             p["symbol_weight_pct"] = round(sw, 2)
             p["overweight"] = sw > max_w
     totals = {
-        "currency": "CAD",
+        "currency": "CAD",                     # of the *_cad fields (older clients)
+        "home_currency": home,
+        "value_home": _r(total_home) if total_home > 0 else None,
+        "book_value_home": _r(cost_home) if cost_home > 0 else None,
+        "unrealized_home": _r(gain_home) if cost_home > 0 else None,
+        "unrealized_pct_home": _r((gain_home / cost_home) * 100) if cost_home > 0 else None,
         "value_cad": _r(total_cad) if total_cad > 0 else None,
         "book_value_cad": _r(cost_cad) if cost_cad > 0 else None,
         "unrealized_cad": _r(gain_cad) if cost_cad > 0 else None,

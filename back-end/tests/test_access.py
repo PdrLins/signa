@@ -78,13 +78,13 @@ def test_db_rows_for_unknown_keys_are_ignored(monkeypatch):
 
 
 def test_slot_limits():
-    assert access.slot_limit("free") == 10
-    assert access.slot_limit("free", 10) == 10   # users.slot_bonus is ignored
-    assert access.slot_limit("free", 999) == 10
+    assert access.slot_limit("free") == 15
+    assert access.slot_limit("free", 10) == 15   # users.slot_bonus is ignored
+    assert access.slot_limit("free", 999) == 15
     # migration 019: +5 per rewarded referral, at most +25
-    assert access.slot_limit("free", rewarded_referrals=1) == 15
-    assert access.slot_limit("free", rewarded_referrals=5) == 35
-    assert access.slot_limit("free", rewarded_referrals=9) == 35
+    assert access.slot_limit("free", rewarded_referrals=1) == 20
+    assert access.slot_limit("free", rewarded_referrals=5) == 40
+    assert access.slot_limit("free", rewarded_referrals=9) == 40
     assert access.slot_limit("premium", rewarded_referrals=3) is None
     assert access.slot_limit("premium") is None
     assert access.slot_limit("owner") is None
@@ -169,20 +169,20 @@ def test_me_reports_level_features_and_slots(monkeypatch):
     assert "area.holdings" in body["features"] and "area.admin" not in body["features"]
     assert {"key": "area.admin", "min_level": "owner"}.items() <= next(
         c for c in body["catalog"] if c["key"] == "area.admin").items()
-    assert body["slots"] == {"used": 2, "limit": 10, "remaining": 8}
+    assert body["slots"] == {"used": 2, "limit": 15, "remaining": 13}
 
 
 def test_slot_limit_blocks_only_new_symbols(monkeypatch):
     from fastapi import HTTPException
 
     from app.services import slots
-    monkeypatch.setattr(slots, "followed_symbols", lambda _uid: {f"S{i}" for i in range(10)})
+    monkeypatch.setattr(slots, "followed_symbols", lambda _uid: {f"S{i}" for i in range(15)})
     free = {"user_id": "u", "access_level": "free", "slot_bonus": 5}
     slots.check_new_symbols(free, ["S1", "s2"])  # already followed: fine
     with pytest.raises(HTTPException) as e:
         slots.check_new_symbols(free, ["NEW"])
     assert e.value.status_code == 403 and e.value.detail["code"] == "slot_limit"
-    assert e.value.detail["limit"] == 10 and e.value.detail["used"] == 10
+    assert e.value.detail["limit"] == 15 and e.value.detail["used"] == 15
     assert e.value.detail["upgrade"] == {"feature": "system.unlimited_slots", "plan": "premium"}
     slots.check_new_symbols({**free, "access_level": "premium"}, ["NEW"])
     slots.check_new_symbols({**free, "access_level": "owner"}, ["NEW"])

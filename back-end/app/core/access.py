@@ -69,19 +69,22 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "feature.allocation_plan": ("premium", "Target allocation and deposit plan"),
     "feature.income_quality": ("premium", "Income quality of option-income / covered-call ETFs"),
     "feature.similar_funds": ("premium", "Similar funds compared (fee, yield, return)"),
+    "feature.all_widgets": ("premium", "Every home-screen and lock-screen widget (free: 1)"),
+    "feature.unlimited_goals": ("premium", "Unlimited goals (free: 1)"),
+    "feature.push_all": ("premium", "Every push notification type (free: price alerts, dividends, earnings, report updates)"),
     # --- System capabilities ---
     "system.unlimited_slots": ("premium", "No limit on followed stocks"),
 }
 
 # Slots = stocks a user follows (holdings + watchlist). None = unlimited.
 # Business rule: followed symbols are what users pay for. Free follows
-# FREE_SLOT_LIMIT (10) + REFERRAL_SLOTS_PER_FRIEND (5) per rewarded referral,
+# FREE_SLOT_LIMIT (15) + REFERRAL_SLOTS_PER_FRIEND (5) per rewarded referral,
 # at most +REFERRAL_SLOTS_MAX (25) — migration 019, app/services/referrals.py.
 # Premium and owner are unlimited (system.unlimited_slots, migration 015).
 # `users.slot_bonus` is kept in the DB but ignored: the bonus is counted from
 # the referrals table. slot_limit() is the ONLY place the limit is computed
 # (slots.limit_for feeds it the rewarded count for /auth/me and every 403).
-FREE_SLOT_LIMIT = 10
+FREE_SLOT_LIMIT = 15
 REFERRAL_SLOTS_PER_FRIEND = 5
 REFERRAL_SLOTS_MAX = 25
 SLOT_BASE: dict[str, Optional[int]] = {"free": FREE_SLOT_LIMIT, "premium": None, "owner": None}

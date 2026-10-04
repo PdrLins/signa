@@ -231,9 +231,9 @@ def test_same_stock_in_two_accounts(monkeypatch, db):
 
 def test_second_account_does_not_use_a_slot(monkeypatch, db):
     a, b = db.add_account(U1, "A"), db.add_account(U1, "B")
-    for i in range(10):
+    for i in range(15):
         db.add_holding(U1, f"S{i}", account_id=a)
-    c = _client(monkeypatch, "free")   # 10 slots, all used
+    c = _client(monkeypatch, "free")   # 15 slots, all used
     assert c.post("/api/v1/holdings", json={"items": [{"symbol": "S1", "account_id": b}]}).status_code == 201
     r = c.post("/api/v1/holdings", json={"items": [{"symbol": "NEW", "account_id": b}]})
     assert r.status_code == 403 and r.json()["detail"]["code"] == "slot_limit"

@@ -1,7 +1,7 @@
 """Account IDs, invite-only sign-up and referral rewards (migration 019):
 app/services/referrals.py, app/services/registration.py,
 POST /auth/register, GET /auth/referral/{code}, GET /referrals, the slot
-limit (10 + min(5 x rewarded, 25)) and the reward on the first follow."""
+limit (15 + min(5 x rewarded, 25)) and the reward on the first follow."""
 
 import asyncio
 
@@ -217,7 +217,7 @@ def test_summary_before_migration(monkeypatch, rdb):
 def test_bonus_is_capped_at_25(monkeypatch, rdb):
     _friends(rdb, rewarded=7, pending=0)
     assert _referrals_client(monkeypatch).get("/api/v1/referrals").json()["bonus_slots"] == 25
-    assert slots.limit_for({"user_id": rf.REFERRER_ID, "access_level": "free"}) == 35
+    assert slots.limit_for({"user_id": rf.REFERRER_ID, "access_level": "free"}) == 40
 
 
 # ---------------------------------------------------------------- slots
@@ -232,20 +232,20 @@ def test_me_slots_and_403_use_the_referral_limit(monkeypatch, rdb):
     for i in range(12):
         db.add_holding(U1, f"S{i}")
     me = make_client(monkeypatch, auth.router, level="free").get("/api/v1/auth/me").json()
-    assert me["slots"] == {"used": 12, "limit": 20, "remaining": 8}
+    assert me["slots"] == {"used": 12, "limit": 25, "remaining": 13}
     assert me["account_id"] == "MEMEMEME"
-    for i in range(12, 20):
+    for i in range(12, 25):
         db.add_holding(U1, f"S{i}")
     user = {"user_id": U1, "access_level": "free"}
     slots.check_new_symbols(user, ["S1"])
     with pytest.raises(HTTPException) as e:
         slots.check_new_symbols(user, ["NEW"])
-    assert e.value.detail["code"] == "slot_limit" and e.value.detail["limit"] == 20
+    assert e.value.detail["code"] == "slot_limit" and e.value.detail["limit"] == 25
 
 
 def test_no_referral_table_keeps_flat_10(monkeypatch):
     # conftest default: database without 019
-    assert slots.limit_for({"user_id": U1, "access_level": "free"}) == 10
+    assert slots.limit_for({"user_id": U1, "access_level": "free"}) == 15
     assert referrals.account_id_for(U1) is None
     assert referrals.reward_first_follow(U1) is None
 
@@ -291,7 +291,7 @@ def test_reward_on_first_holding(monkeypatch, invited):
     assert c.post("/api/v1/holdings", json={"items": [{"symbol": "NVDA"}]}).status_code == 201
     assert _ref(invited)["status"] == "rewarded" and _ref(invited)["rewarded_at"]
     assert referrals.rewarded_count(rf.REFERRER_ID) == 1       # ...and invalidated on reward
-    assert slots.limit_for({"user_id": rf.REFERRER_ID, "access_level": "free"}) == 15
+    assert slots.limit_for({"user_id": rf.REFERRER_ID, "access_level": "free"}) == 20
     first = _ref(invited)["rewarded_at"]
     assert c.post("/api/v1/holdings", json={"items": [{"symbol": "MSFT"}]}).status_code == 201
     assert _ref(invited)["rewarded_at"] == first                 # once
@@ -373,3 +373,11 @@ def test_notify_referrer_needs_telegram_feature_and_chat(monkeypatch):
 def test_english_message():
     from app.notifications.messages import msg_for
     assert msg_for("en", "user_tg_referral_rewarded", per_friend=5).startswith("🎉 <b>Your friend joined Signa</b>")
+
+
+def test_signup_settings_from_locale():
+    from app.services.profile_service import signup_settings as s
+    assert s(None, None, None, "pt-BR") == {"country": "BR", "home_currency": "BRL", "language": "pt"}
+    assert s("US", None, "en", "pt-BR") == {"country": "US", "home_currency": "USD", "language": "en"}
+    assert s(None, "EUR", None, "de_DE") == {"country": "DE", "home_currency": "EUR", "language": "en"}
+    assert s("XX", "ZZZ", "fr", None) == {}

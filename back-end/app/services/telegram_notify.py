@@ -85,12 +85,24 @@ def _d(v: Any) -> date | None:
         return None
 
 
-def money(v: float | None, ccy: str | None) -> str:
+CURRENCY_SYMBOLS = {"CAD": "C$", "USD": "US$", "BRL": "R$", "EUR": "€", "GBP": "£", "JPY": "¥", "CHF": "CHF ",
+                    "AUD": "A$", "NZD": "NZ$", "MXN": "MX$", "HKD": "HK$", "SGD": "S$", "INR": "₹", "KRW": "₩"}
+
+
+def money(v: float | None, ccy: str | None, lang: str = "en") -> str:
+    """"C$1,234.56" (en) / "R$ 1.234,56" (pt): the currency's symbol, the
+    language's separators. Unknown codes are written in front ("SEK 12.00")."""
     if v is None:
         return ""
     ccy = (ccy or "").upper()
-    prefix = {"CAD": "C$", "USD": "US$"}.get(ccy, f"{ccy} " if ccy else "$")
-    return f"{prefix}{v:,.2f}"
+    prefix = CURRENCY_SYMBOLS.get(ccy, f"{ccy} " if ccy else "$")
+    digits = 0 if ccy in ("JPY", "KRW") else 2
+    num = f"{v:,.{digits}f}"
+    if lang == "pt":
+        num = num.replace(",", "\u0000").replace(".", ",").replace("\u0000", ".")
+        if not prefix.endswith(" "):
+            prefix += " "
+    return f"{prefix}{num}"
 
 
 def pct(v: float, digits: int = 1) -> str:
@@ -260,11 +272,11 @@ def _when(d: date, today: date, lang: str) -> str:
     return msg_for(lang, "user_tg_on_date", date=short_date(d, lang))
 
 
-def _amount(it: dict, home: str) -> str:
+def _amount(it: dict, home: str, lang: str = "en") -> str:
     if it.get("cash_home") is not None:
-        return f" · {money(_f(it['cash_home']), home)}"
+        return f" · {money(_f(it['cash_home']), home, lang)}"
     if it.get("cash") is not None:
-        return f" · {money(_f(it['cash']), it.get('currency'))}"
+        return f" · {money(_f(it['cash']), it.get('currency'), lang)}"
     return ""
 
 
@@ -281,11 +293,11 @@ def event_lines(items: list[dict], prefs: dict, today: date, lang: str, home: st
         if t == "ex_dividend" and on("exdiv_reminder") and it.get("owned") and it.get("shares") \
                 and today < d <= today + timedelta(days=2):
             out.append(("exdiv_reminder", f"exdiv:{sym}:{d}",
-                        msg_for(lang, "user_tg_exdiv", symbol=s, when=_when(d, today, lang), amount=_amount(it, home))))
+                        msg_for(lang, "user_tg_exdiv", symbol=s, when=_when(d, today, lang), amount=_amount(it, home, lang))))
         elif t == "dividend_payment" and on("dividend_paid") and it.get("owned") and it.get("shares") \
                 and d == today and not it.get("estimated"):
             out.append(("dividend_paid", f"paid:{sym}:{d}",
-                        msg_for(lang, "user_tg_paid", symbol=s, amount=_amount(it, home))))
+                        msg_for(lang, "user_tg_paid", symbol=s, amount=_amount(it, home, lang))))
         elif t == "earnings" and on("earnings") and it.get("owned"):
             td = it.get("trading_days")
             td = int(td) if isinstance(td, (int, float)) else (d - today).days
@@ -339,7 +351,7 @@ def dividend_change_lines(profiles: dict[str, dict | None], held: set[str], pref
         ccy = prof.get("currency")
         out.append(("dividend_change", f"divchange:{sym}:{nd}",
                     msg_for(lang, "user_tg_raise" if change > 0 else "user_tg_cut", symbol=escape(sym),
-                            pct=pct(change), old=money(b, ccy), new=money(a, ccy))))
+                            pct=pct(change), old=money(b, ccy, lang), new=money(a, ccy, lang))))
     return out
 
 
@@ -377,7 +389,7 @@ def alert_lines(rows: list[dict], lang: str, now: datetime) -> list[tuple[str, s
         key = "user_tg_alert_above" if r.get("direction") == "above" else "user_tg_alert_below"
         out.append(("price_alert", f"alert:{r.get('id')}",
                     msg_for(lang, key, symbol=escape(str(r.get("symbol") or "")),
-                            target=money(_f(r.get("target_price")), ccy), price=money(_f(r.get("last_price")), ccy))))
+                            target=money(_f(r.get("target_price")), ccy, lang), price=money(_f(r.get("last_price")), ccy, lang))))
     return out
 
 

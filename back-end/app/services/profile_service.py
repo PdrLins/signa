@@ -40,11 +40,21 @@ SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR
 UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW
 """.split())
 
-# Home currencies a user can pick (ISO 4217). Only USD/CAD convert today.
+# Home currencies a user can pick (ISO 4217). All convert (Yahoo FX, cached:
+# price_cache.usd_rates).
 CURRENCIES: frozenset[str] = frozenset(
-    "CAD USD EUR GBP BRL AUD NZD JPY CHF SEK NOK DKK MXN INR HKD SGD CNY KRW ZAR PLN ILS".split()
+    "CAD USD EUR GBP BRL AUD NZD JPY CHF SEK NOK DKK MXN INR HKD SGD CNY KRW ZAR PLN ILS ARS CLP COP".split()
 )
-CONVERTIBLE_CURRENCIES: frozenset[str] = frozenset({"CAD", "USD"})
+CONVERTIBLE_CURRENCIES: frozenset[str] = CURRENCIES
+
+# Default home currency for a country (sign-up from the phone's region).
+COUNTRY_CURRENCY: dict[str, str] = {
+    "CA": "CAD", "US": "USD", "BR": "BRL", "MX": "MXN", "AR": "ARS", "CL": "CLP", "CO": "COP",
+    "GB": "GBP", "IE": "EUR", "DE": "EUR", "FR": "EUR", "IT": "EUR", "ES": "EUR", "PT": "EUR", "NL": "EUR",
+    "BE": "EUR", "AT": "EUR", "FI": "EUR", "GR": "EUR", "LU": "EUR", "CH": "CHF", "SE": "SEK", "NO": "NOK",
+    "DK": "DKK", "PL": "PLN", "JP": "JPY", "CN": "CNY", "HK": "HKD", "SG": "SGD", "KR": "KRW", "IN": "INR",
+    "AU": "AUD", "NZ": "NZD", "ZA": "ZAR", "IL": "ILS",
+}
 
 LANGUAGES: tuple[str, ...] = ("en", "pt")
 TAX_VIEWS: tuple[str, ...] = ("before", "after")
@@ -61,6 +71,12 @@ COMPARE_INDEXES: dict[str, str] = {
     "^IXIC": "Nasdaq Composite",
     "SPY": "SPDR S&P 500 ETF",
     "VT": "Vanguard Total World Stock ETF",
+    "^BVSP": "Ibovespa",
+    "BOVA11.SA": "iShares Ibovespa (BOVA11)",
+    "IVVB11.SA": "iShares S&P 500 em reais (IVVB11)",
+    "^FTSE": "FTSE 100",
+    "^STOXX50E": "Euro Stoxx 50",
+    "^N225": "Nikkei 225",
 }
 
 DEFAULTS: dict[str, Any] = {
@@ -212,3 +228,26 @@ def get_country_and_currency(user_id: str) -> tuple[str | None, str]:
     """(country, home_currency) for rules elsewhere (accounts, imports)."""
     s = merged_settings(queries.get_profile_settings(user_id))
     return s["country"], s["home_currency"]
+
+
+def signup_settings(country: str | None, home_currency: str | None, language: str | None,
+                    locale: str | None) -> dict:
+    """First settings of a new account from what the app sends (or the phone's
+    locale, e.g. "pt-BR"): country, home currency (the country's when not
+    given), language (pt for Portuguese locales). Invalid values are dropped. Pure."""
+    loc = str(locale or "").replace("_", "-")
+    parts = loc.split("-")
+    lang_guess = "pt" if parts[0].lower() == "pt" else "en" if parts[0] else None
+    region = parts[-1].upper() if len(parts) > 1 and len(parts[-1]) == 2 else None
+    c = str(country or region or "").strip().upper() or None
+    c = c if c in COUNTRIES else None
+    ccy = str(home_currency or "").strip().upper() or COUNTRY_CURRENCY.get(c or "", "")
+    out: dict[str, Any] = {}
+    if c:
+        out["country"] = c
+    if ccy in CURRENCIES:
+        out["home_currency"] = ccy
+    lang = language if language in LANGUAGES else lang_guess
+    if lang in LANGUAGES:
+        out["language"] = lang
+    return out

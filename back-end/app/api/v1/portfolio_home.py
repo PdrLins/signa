@@ -55,6 +55,19 @@ GET /api/v1/portfolio/performance?range=&account_id=&person_id=&compare=    area
 }
 Driver = {"symbol", "weight_pct", "return_pct", "contribution_pts", "vs_benchmark_pts"?}
 
+GET /api/v1/portfolio/recap?month=YYYY-MM          area.home   (default: last month)
+{
+  "month": "2026-09", "currency": "CAD",
+  "start_value": 12000.0 | null, "end_value": 12400.0 | null,
+  "change": {"abs": 400.0 | null, "pct": 3.33 | null},      # value moved (includes deposits)
+  "dividends_received": 45.0 | null, "dividend_payments": 3,  # null when no transactions are recorded
+  "best": [{"symbol", "return_pct"}], "worst": [{"symbol", "return_pct"}],   # up to 3 each
+  "next_month": {"month": "2026-10", "expected": 52.3 | null, "payments": 4},
+  "estimated": bool                                           # some values estimated from closes
+}
+  A push with the recap goes out on the 1st of each month (09:05 ET) to users with the app.
+  422 invalid_month (bad format or a future month).
+
 Errors ({"detail": {"code", "message", ...}}):
   403 upgrade_required (feature: area.home | area.insights | feature.full_history) ·
   404 account_not_found | person_not_found · 422 invalid_scope | invalid_range | invalid_compare ·
@@ -126,3 +139,14 @@ async def performance(
     bench = perf.validate_compare(compare)
     scope = await run_db(portfolio_context.load_scope, user, _s(account_id), _s(person_id))
     return await run_db(perf.performance_body, scope, rng, bench)
+
+
+@router.get("/recap", dependencies=[Depends(require_feature("area.home"))])
+async def recap(month: Optional[str] = Query(None), user: dict = Depends(get_current_user)):
+    from app.services import recap as recap_svc
+
+    today = perf.today_et()
+    first, last = recap_svc.month_bounds(month, today)
+    scope = await run_db(portfolio_context.load_scope, user, None, None, True)
+    events = await recap_svc.next_month_events(scope)
+    return await run_db(recap_svc.build, scope, first, last, today, events)

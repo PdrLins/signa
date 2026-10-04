@@ -3,7 +3,9 @@
 
   POST /api/v1/auth/register            AUTH tier, every attempt counts
        {"username", "password", "referral_code",
-        "client": "web" | "ios" (default "web"), "device_name": str | null}
+        "client": "web" | "ios" (default "web"), "device_name": str | null,
+        "country"?: "BR", "home_currency"?: "BRL", "language"?: "pt", "locale"?: "pt-BR"}
+       (first profile settings; the currency defaults to the country's)
        201 — the same payload as a password-only POST /auth/login:
          {"message": "Account created", "session_token": null, "code_via": null,
           "access_token", "token_type": "bearer", "expires_in", "last_login": null,
@@ -25,7 +27,7 @@ from pydantic import Field
 from app.core.api_errors import run_db_for
 from app.core.utils import get_client_ip
 from app.models.auth import DeviceInfo, LoginResponse
-from app.services import referrals, registration
+from app.services import profile_service, referrals, registration
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -35,6 +37,11 @@ class RegisterRequest(DeviceInfo):
     username: str = Field(..., max_length=100)
     password: str = Field(..., max_length=256)
     referral_code: Optional[str] = Field(None, max_length=32)
+    # First settings (optional; the phone's region / language). Invalid values are ignored.
+    country: Optional[str] = Field(None, max_length=8)        # ISO alpha-2, e.g. "BR"
+    home_currency: Optional[str] = Field(None, max_length=8)  # ISO 4217; default: the country's
+    language: Optional[str] = Field(None, max_length=8)       # "en" | "pt"
+    locale: Optional[str] = Field(None, max_length=20)        # e.g. "pt-BR" (fills what's missing)
 
 
 @router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
@@ -45,6 +52,7 @@ async def register(request: Request, body: RegisterRequest):
         body.username, body.password, body.referral_code or "",
         get_client_ip(request), request.headers.get("User-Agent", ""),
         body.client, body.device_name,
+        profile_service.signup_settings(body.country, body.home_currency, body.language, body.locale),
     )
     return LoginResponse(**result)
 

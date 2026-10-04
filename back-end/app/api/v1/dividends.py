@@ -67,4 +67,11 @@ async def dividend_calendar(
         except Exception as e:
             logger.warning(f"dividends: watchlist unavailable: {e}")
             watchlist = []
-    return await dc.get_calendar(holdings, watchlist, months, await _usdcad())
+    home = "CAD"
+    try:
+        from app.services import profile_service
+        row = await asyncio.to_thread(queries.get_profile_settings, uid)
+        home = str(profile_service.merged_settings(row).get("home_currency") or "CAD").upper()
+    except Exception as e:
+        logger.debug(f"dividends: home currency unavailable ({e})")
+    return await dc.get_calendar(holdings, watchlist, months, await _usdcad(), home=home)

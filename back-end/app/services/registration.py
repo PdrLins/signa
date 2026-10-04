@@ -113,7 +113,7 @@ def _audit(event: str, success: bool, ip: str, ua: str, user_id: str | None = No
 
 
 def register(username: str, password: str, referral_code: str, ip_address: str, user_agent: str,
-             client: str = "web", device_name: str | None = None) -> dict:
+             client: str = "web", device_name: str | None = None, settings: dict | None = None) -> dict:
     """Create the account and sign it in. Blocking (bcrypt + DB): run via
     run_db_for(referrals.MIGRATION, ...) so a missing schema answers 503."""
     from app.services import auth_service
@@ -132,6 +132,11 @@ def register(username: str, password: str, referral_code: str, ip_address: str, 
         _audit(AuditEvent.REGISTER_FAILED, False, ip_address, user_agent, reason=e.code)
         raise api_error(e.code, e.message, e.http)
 
+    if settings:
+        try:   # country / currency / language from the phone; never fail the sign-up for this
+            queries.upsert_profile_settings(str(user["id"]), settings)
+        except Exception as e:
+            logger.warning(f"register: first settings not saved for {user['id']}: {type(e).__name__}")
     _audit(AuditEvent.USER_REGISTERED, True, ip_address, user_agent, user_id=str(user["id"]),
            referrer_id=referrer["id"], client=client)
     logger.info(f"register: new account {name} invited by {referrer['id']}")

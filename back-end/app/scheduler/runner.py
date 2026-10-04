@@ -12,6 +12,9 @@ from app.scheduler.jobs import (
     holding_status_refresh,
     income_forecast_snapshots,
     portfolio_snapshots,
+    monthly_recap_push,
+    push_notifications,
+    push_notifications_live,
     quotes_offhours,
     quotes_refresh,
     quotes_refresh_after_close,
@@ -57,9 +60,9 @@ def init_scheduler() -> AsyncIOScheduler:
     if settings.quotes_refresh_enabled:
         scheduler.add_job(
             quotes_refresh,
-            CronTrigger(minute="*", hour="9-15", day_of_week="mon-fri", timezone=settings.timezone),
+            CronTrigger(minute="*", timezone=settings.timezone),
             id="quotes_refresh",
-            name="Quotes refresh (every 60s, 9:30-4:00 PM ET)",
+            name="Quotes refresh (every 60s, each exchange during its own session)",
             replace_existing=True,
             misfire_grace_time=30,
             coalesce=True,
@@ -134,6 +137,23 @@ def init_scheduler() -> AsyncIOScheduler:
             replace_existing=True,
             max_instances=1,
         )
+
+    # iOS push (migration 025): same times as Telegram, offset 1 minute.
+    if settings.push_notifications_enabled:
+        scheduler.add_job(push_notifications, CronTrigger(hour=8, minute=31, timezone=settings.timezone),
+                          id="push_notifications_morning", name="Push digest (8:31 AM ET daily)",
+                          replace_existing=True)
+        scheduler.add_job(push_notifications,
+                          CronTrigger(hour=18, minute=31, day_of_week="mon-fri", timezone=settings.timezone),
+                          id="push_notifications_evening", name="Push digest (6:31 PM ET weekdays)",
+                          replace_existing=True)
+        scheduler.add_job(push_notifications_live,
+                          CronTrigger(minute="1-59/5", hour="9-16", day_of_week="mon-fri", timezone=settings.timezone),
+                          id="push_notifications_live", name="Push price alerts + big moves (every 5 min)",
+                          replace_existing=True, max_instances=1)
+        scheduler.add_job(monthly_recap_push, CronTrigger(day=1, hour=9, minute=5, timezone=settings.timezone),
+                          id="monthly_recap_push", name="Monthly recap push (1st, 9:05 AM ET)",
+                          replace_existing=True)
 
     # Data-usage counters (cost control, migration 014): flush every 5 minutes.
     scheduler.add_job(

@@ -127,6 +127,12 @@ GROWTH_DATE_TOLERANCE_DAYS = 120
 LAST_PAYMENTS = 8
 SCHEDULE_DAYS = 365
 MAX_PAY_OFFSET_DAYS = 75
+# Brazilian companies often pay dividends / JCP months after the "data com".
+MAX_PAY_OFFSET_DAYS_BR = 365
+
+
+def max_pay_offset(symbol: str | None) -> int:
+    return MAX_PAY_OFFSET_DAYS_BR if str(symbol or "").upper().endswith(".SA") else MAX_PAY_OFFSET_DAYS
 FLAT_TOLERANCE = 0.15                     # last p payments within 15% -> flat payer
 
 # ── trade-mode rules ──
@@ -560,16 +566,17 @@ def build_profile(symbol: str, info: dict | None, raw_dividends: Any, calendar: 
     pay_cands = [d for d in (_to_date(calendar.get("Dividend Date")), _to_date(info.get("dividendDate"))) if d]
     future_ex = next((d for d in ex_cands if d >= today), None)
     pay_offset = None
+    max_off = max_pay_offset(symbol)
     for ex in ex_cands:
         for pay in pay_cands:
-            if 0 <= (pay - ex).days <= MAX_PAY_OFFSET_DAYS:
+            if 0 <= (pay - ex).days <= max_off:
                 pay_offset = (pay - ex).days
                 break
         if pay_offset is not None:
             break
     confirmed_pay = None
     if future_ex is not None:
-        confirmed_pay = min((d for d in pay_cands if 0 <= (d - future_ex).days <= MAX_PAY_OFFSET_DAYS), default=None)
+        confirmed_pay = min((d for d in pay_cands if 0 <= (d - future_ex).days <= max_off), default=None)
 
     amounts = projected_amounts(regular, freq)
     interval = gap if freq in PER_YEAR else None

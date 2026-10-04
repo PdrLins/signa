@@ -49,7 +49,7 @@ def slot_summary(user: dict) -> dict:
 def check_new_symbols(user: dict, symbols: Iterable[str]) -> None:
     """403 if following `symbols` would exceed the limit. Symbols the user
     already follows don't need a slot. Body:
-    {"detail": {"code": "slot_limit", "limit": 10, "used": 10, "requested": 1,
+    {"detail": {"code": "slot_limit", "limit": 15, "used": 15, "requested": 1,
                 "message": str,
                 "upgrade": {"feature": "system.unlimited_slots", "plan": "premium"}}}"""
     limit = limit_for(user)

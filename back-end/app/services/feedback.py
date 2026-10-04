@@ -18,10 +18,12 @@ from typing import Any
 from loguru import logger
 
 from app.core.api_errors import api_error
+from app.core.utils import validate_ticker
 from app.db.supabase import get_client
 
 MIGRATION = "023_feedback_reports.sql"
-KINDS = ("bug", "idea", "other")
+DATA_MIGRATION = "024_feedback_data_kind.sql"   # kind "data" + symbol
+KINDS = ("bug", "idea", "data", "other")
 PLATFORMS = ("ios", "web")
 STATUSES = ("open", "in_progress", "fixed", "wont_fix", "duplicate")
 CLOSED = ("fixed", "wont_fix", "duplicate")
@@ -30,8 +32,8 @@ NOTE_MAX = 2000
 DIAGNOSTICS_MAX_BYTES = 16_000
 SHORT_FIELDS = {"screen": 80, "app_version": 32, "build": 32, "os_version": 32,
                 "device_model": 64, "locale": 16}
-PUBLIC_COLUMNS = "id, kind, message, platform, screen, app_version, build, status, created_at, resolved_at"
-OWNER_COLUMNS = ("id, user_id, kind, message, platform, screen, app_version, build, os_version, "
+PUBLIC_COLUMNS = "id, kind, message, platform, screen, symbol, app_version, build, status, created_at, resolved_at"
+OWNER_COLUMNS = ("id, user_id, kind, message, platform, screen, symbol, app_version, build, os_version, "
                  "device_model, locale, diagnostics, status, owner_note, created_at, updated_at, resolved_at")
 
 
@@ -69,6 +71,13 @@ def clean_report(body: dict) -> dict:
         if len(json.dumps(diagnostics, default=str)) > DIAGNOSTICS_MAX_BYTES:
             raise _invalid("invalid_diagnostics", f"diagnostics must be under {DIAGNOSTICS_MAX_BYTES} bytes.")
     row = {"kind": kind, "message": message, "platform": platform, "diagnostics": diagnostics}
+    symbol = body.get("symbol")
+    if symbol is not None:
+        if not isinstance(symbol, str) or not validate_ticker(symbol.strip()):
+            raise _invalid("invalid_symbol", "symbol must be a ticker like AAPL or XEQT.TO.")
+        row["symbol"] = symbol.strip().upper()
+    if kind == "data" and not row.get("symbol"):
+        raise _invalid("invalid_symbol", "A data report needs the symbol it is about.")
     for name in SHORT_FIELDS:
         row[name] = _short(name, body.get(name))
     return row
@@ -94,13 +103,24 @@ def clean_update(body: dict) -> dict:
 
 def owner_message(report: dict, username: str | None) -> str:
     """Telegram text for the owner. Pure."""
-    where = " · ".join(x for x in (report.get("platform"), report.get("app_version"),
+    where = " · ".join(x for x in (report.get("symbol"), report.get("platform"), report.get("app_version"),
                                    report.get("screen")) if x)
     text = report.get("message") or ""
     if len(text) > 500:
         text = text[:500] + "…"
     return (f"🐞 <b>New {escape(report.get('kind') or 'bug')} report</b> from "
             f"{escape(username or 'a user')}\n<i>{escape(where)}</i>\n\n{escape(text)}")
+
+
+STATUS_TEXT = {"open": "is open again", "in_progress": "is being looked at", "fixed": "was fixed",
+               "wont_fix": "was closed (won't fix)", "duplicate": "was closed (duplicate)"}
+
+
+def status_message(report: dict) -> str:
+    """Push text for a status change. Pure."""
+    first = (report.get("message") or "").strip().splitlines()[0][:60] if report.get("message") else ""
+    what = f'Your report "{first}"' if first else "Your report"
+    return f"{what} {STATUS_TEXT.get(report.get('status'), 'was updated')}."
 
 
 # ---------------------------------------------------------------- storage (blocking)

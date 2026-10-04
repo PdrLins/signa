@@ -46,6 +46,8 @@ from zoneinfo import ZoneInfo
 from loguru import logger
 
 from app.core.market_calendar import is_market_open
+from app.market import sessions
+from app.market.currency import price_factor
 from app.services.price_cache import native_currency
 
 QUOTE_BATCH = 500
@@ -130,10 +132,13 @@ def parse_download(data, symbols: list[str], now_iso: str | None = None) -> dict
         close = _series(data, "Close", sym, multi)
         if close is None:
             continue
+        k = price_factor(sym)   # pence/cents listings (LSE, JSE, TASE) -> main currency
         price = _f(close.iloc[-1])
         if price is None or price <= 0:
             continue
+        price *= k
         prev = _f(close.iloc[-2]) if len(close) >= 2 else None
+        prev = prev * k if prev else prev
         hi, lo = _series(data, "High", sym, multi), _series(data, "Low", sym, multi)
         try:
             as_of, as_of_source = resolve_as_of(close.index[-1], sym, datetime.fromisoformat(now_iso))
@@ -145,8 +150,8 @@ def parse_download(data, symbols: list[str], now_iso: str | None = None) -> dict
             "prev_close": round(prev, 6) if prev else None,
             "change_pct": round((price / prev - 1) * 100, 4) if prev else None,
             "currency": native_currency(sym),
-            "day_high": round(_f(hi.iloc[-1]), 6) if hi is not None and _f(hi.iloc[-1]) else None,
-            "day_low": round(_f(lo.iloc[-1]), 6) if lo is not None and _f(lo.iloc[-1]) else None,
+            "day_high": round(_f(hi.iloc[-1]) * k, 6) if hi is not None and _f(hi.iloc[-1]) else None,
+            "day_low": round(_f(lo.iloc[-1]) * k, 6) if lo is not None and _f(lo.iloc[-1]) else None,
             "as_of": as_of,
             "as_of_source": as_of_source,
             "updated_at": now_iso,
@@ -278,25 +283,53 @@ def due_symbols(levels: dict[str, str], last_refresh: dict[str, float], now_ts: 
     return out
 
 
+FOLLOW_TTL_S = 300
+_follow_cache: dict = {}
+
+
+def _followed_levels(now: datetime) -> dict[str, str]:
+    """follower_levels over holdings + watchlists + active price alerts, cached
+    FOLLOW_TTL_S (the job runs every minute; a new follow is priced on first
+    view via get_quotes anyway). clear_follow_cache() after bulk changes."""
+    from app.core.config import settings
+    from app.db import queries
+    from app.services import price_alerts
+
+    hit = _follow_cache.get("levels")
+    if hit and now.timestamp() - hit[0] < FOLLOW_TTL_S:
+        return dict(hit[1])
+    follows = queries.get_follow_rows() + price_alerts.alert_follow_rows()
+    levels = follower_levels(follows, queries.get_users_activity(), now, settings.quotes_active_user_days)
+    _follow_cache["levels"] = (now.timestamp(), levels)
+    return dict(levels)
+
+
+def clear_follow_cache() -> None:
+    _follow_cache.clear()
+
+
 def refresh_followed_quotes(force: bool = False, now: datetime | None = None) -> dict:
     """Scheduler entry (see the module docstring). Skips outside the session unless force."""
     from app.core.config import settings
-    from app.db import queries
     from app.services import usage_metrics
 
     now = (now or datetime.now(timezone.utc))
     now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
-    if not force and not in_market_session(now):
-        return {"status": "closed"}
     from app.services import price_alerts
     try:
-        # active price alerts need fresh quotes too (at their owner's tier)
-        follows = queries.get_follow_rows() + price_alerts.alert_follow_rows()
-        levels = follower_levels(follows, queries.get_users_activity(), now,
-                                 settings.quotes_active_user_days)
+        levels = _followed_levels(now)
     except Exception as e:
         logger.warning(f"quotes: followed symbols unavailable: {e}")
         return {"status": "unavailable"}
+    if not force:
+        # Each symbol while ITS exchange trades (and 10 min after its close, for
+        # the closing price): B3, LSE, Tokyo ... not only New York/Toronto hours.
+        # Crypto: here during the US session, else in refresh_offhours.
+        us_open = in_market_session(now)
+        levels = {s: t for s, t in levels.items()
+                  if (us_open if is_crypto(s) else sessions.is_trading(s, now))}
+        if not levels:
+            return {"status": "closed"}
     if not levels:
         return {"status": "ok", "followed": 0, "symbols": 0, "quotes": 0}
     now_ts = now.timestamp()

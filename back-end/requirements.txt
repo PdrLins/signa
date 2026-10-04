@@ -25,3 +25,4 @@ httpx>=0.28.0
 
 # Logging
 loguru>=0.7.0
+exchange_calendars>=4.5       # holidays / sessions per exchange (app/market/sessions.py)

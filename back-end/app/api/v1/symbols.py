@@ -1,4 +1,5 @@
-"""Symbol search — ticker or company name, typo tolerant. Protected.
+"""Symbol search — ticker or company name, typo tolerant, any exchange. Protected.
+Dual listings show the user's country first (profile country; Canada when unset).
 
   GET /api/v1/symbols/search?q=tesla&limit=8
     -> {"query": "tesla", "results": [{symbol, name, exchange, exchange_label, type, source}]}
@@ -23,5 +24,14 @@ async def search_symbols(
 ):
     """Suggestions for the Check-a-stock search box."""
     query = symbol_search.normalize_query(q)
-    results = await symbol_search.search(query, limit) if query else []
+    country = None
+    if query:
+        try:
+            import asyncio
+
+            from app.db import queries
+            country = ((await asyncio.to_thread(queries.get_profile_settings, user["user_id"])) or {}).get("country")
+        except Exception:
+            country = None
+    results = await symbol_search.search(query, limit, country) if query else []
     return {"query": query, "results": results}

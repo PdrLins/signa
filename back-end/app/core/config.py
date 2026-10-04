@@ -168,6 +168,15 @@ class Settings(BaseSettings):
     # alerts and big moves every 5 min during the session.
     telegram_notifications_enabled: bool = True
 
+    # --- iOS push notifications (migration 025, app/services/push.py) ---
+    # APNs token auth: Apple Developer -> Keys -> a key with "Apple Push
+    # Notifications service" (.p8). Empty = pushes are only logged (dev).
+    push_notifications_enabled: bool = True
+    apns_team_id: str = ""
+    apns_key_id: str = ""
+    apns_private_key: str = ""       # the .p8 contents (PEM); "\n" escapes allowed
+    apns_bundle_id: str = ""         # the iOS app's bundle id (APNs topic)
+
     # --- Language ---
     language: str = "en"  # "en" or "pt"
 

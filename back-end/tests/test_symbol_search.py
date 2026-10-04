@@ -111,7 +111,7 @@ def test_crypto_alias(env):
 
 # ── filtering / dedupe / labels ──
 
-def test_filters_futures_funds_foreign_and_non_usd_crypto(env):
+def test_filters_futures_and_funds_keeps_foreign(env):
     env({"gold": [
         {"symbol": "GC=F", "shortname": "Gold", "exchange": "CMX", "quoteType": "FUTURE"},
         {"symbol": "GLD", "shortname": "SPDR Gold", "exchange": "PCX", "quoteType": "ETF"},
@@ -122,9 +122,13 @@ def test_filters_futures_funds_foreign_and_non_usd_crypto(env):
         {"symbol": "PAXG-USD", "shortname": "PAX Gold USD", "exchange": "CCC", "quoteType": "CRYPTOCURRENCY"},
     ]})
     res = run("gold")
-    assert [r["symbol"] for r in res] == ["GLD", "PAXG-USD"]
+    syms = [r["symbol"] for r in res]
+    assert "GC=F" not in syms and "FGLDX" not in syms               # futures and mutual funds dropped
+    assert syms[:2] == ["GLD", "GLDX.F"] and syms[-1] == "GOLD.MU"  # foreign kept; German regional copies last
+    assert set(syms) >= {"PAXG-USD", "PAXG-EUR"}
     assert res[0]["exchange_label"] == "NYSE Arca" and res[0]["type"] == "etf"
-    assert res[1]["exchange_label"] == "Crypto" and res[1]["type"] == "crypto"
+    assert next(r for r in res if r["symbol"] == "GLDX.F")["exchange_label"] == "Frankfurt"
+    assert next(r for r in res if r["symbol"] == "PAXG-USD")["exchange_label"] == "Crypto"
 
 
 def test_dedupe_local_and_yahoo(env):
@@ -288,3 +292,15 @@ def test_known_names_seed_local_candidates(monkeypatch):
     assert cands["XEQT.TO"]["name"] == "iShares Core Equity"  # DB name wins
     assert cands["XEQT.TO"]["type_hint"] == "ETF"
     assert "HOOD" in cands and "BTC-USD" in cands
+
+
+def test_b3_listings_found_and_users_country_first(env):
+    env({"petrobras": [
+        {"symbol": "PBR", "shortname": "Petrobras", "longname": "Petróleo Brasileiro S.A. - Petrobras", "exchange": "NYQ", "quoteType": "EQUITY"},
+        {"symbol": "PETR4.SA", "shortname": "PETROBRAS PN", "longname": "Petróleo Brasileiro S.A. - Petrobras", "exchange": "SAO", "quoteType": "EQUITY"},
+    ]})
+    import asyncio
+    br = asyncio.run(ss.search("petrobras", 8, "BR"))
+    assert [r["symbol"] for r in br][:2] == ["PETR4.SA", "PBR"] and br[0]["exchange_label"] == "B3"
+    us = asyncio.run(ss.search("petrobras", 8, "US"))
+    assert [r["symbol"] for r in us][:2] == ["PBR", "PETR4.SA"]

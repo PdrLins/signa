@@ -39,17 +39,38 @@ def _f(v) -> float | None:
     return x if math.isfinite(x) else None
 
 
+from app.services.price_cache import fx_convert  # noqa: E402
+
+
+def _to_usd(amount: float, ccy: str, usdcad: float | None) -> float | None:
+    if ccy == "USD":
+        return amount
+    if ccy == "CAD":   # always the scope's rate: one request stays consistent
+        return amount / usdcad if usdcad else None
+    return fx_convert(amount, ccy, "USD")
+
+
+def _from_usd(amount: float, ccy: str, usdcad: float | None) -> float | None:
+    if ccy == "USD":
+        return amount
+    if ccy == "CAD":
+        return amount * usdcad if usdcad else None
+    return fx_convert(amount, "USD", ccy)
+
+
 def convert(amount: float | None, from_ccy: str | None, to_ccy: str, usdcad: float | None) -> float | None:
-    """USD/CAD only (usdcad = CAD per 1 USD). None = can't convert."""
+    """Any currency pair, through USD. CAD uses the scope's `usdcad` (CAD per
+    1 USD) so one request stays consistent; other currencies use the cached
+    Yahoo rates (price_cache.usd_rates). None = can't convert."""
     if amount is None:
         return None
     f, t = (from_ccy or "").upper(), (to_ccy or "").upper()
     if f == t:
         return amount
-    if usdcad and {f, t} == {"USD", "CAD"}:
-        return amount * usdcad if f == "USD" else amount / usdcad
-    # TODO: other currencies (EUR, GBP, BRL ...) need an FX source.
-    return None
+    if not f or not t:
+        return None
+    usd = _to_usd(amount, f, usdcad)
+    return _from_usd(usd, t, usdcad) if usd is not None else None
 
 
 def _bucket() -> dict:

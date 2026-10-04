@@ -65,3 +65,23 @@ def test_portfolio_math_missing_fx_excludes_usd_and_flags():
 def test_portfolio_math_without_any_shares():
     per, tot = hs.portfolio_math([_h("a", "XEQT.TO", 30.0)], 1.4)
     assert tot["value_cad"] is None and per["a"]["weight_pct"] is None
+
+
+def test_portfolio_math_in_brl_home_with_b3_and_us(monkeypatch):
+    from app.services import price_cache
+    monkeypatch.setattr(price_cache, "_download_fx", lambda codes: {"BRL": 5.0, "EUR": 0.9})
+    quotes = {"PETR4.SA": {"price": 38.0, "currency": "BRL"}, "AAPL": {"price": 200.0, "currency": "USD"}}
+    rows = [_h("a", "PETR4.SA", None, shares=100, cost=30.0, ccy="BRL"),
+            _h("b", "AAPL", None, shares=10, cost=150.0, ccy="USD")]
+    per, tot = hs.portfolio_math(rows, 1.4, quotes=quotes, home="BRL")
+    assert per["a"]["value_home"] == 3800.0 and per["b"]["value_home"] == 10000.0   # 2000 USD x 5
+    assert tot["home_currency"] == "BRL" and tot["value_home"] == 13800.0 and tot["fx_missing"] is False
+    assert per["b"]["weight_pct"] == round(10000 / 13800 * 100, 2)
+    assert tot["unrealized_home"] == 800.0 + 2500.0
+    assert per["a"]["value_cad"] == round(3800 / 5 * 1.4, 2)        # BRL -> USD -> CAD (scope rate)
+
+
+def test_unpriceable_currency_flags_fx_missing(monkeypatch):
+    quotes = {"SAP.DE": {"price": 200.0, "currency": "EUR"}}
+    per, tot = hs.portfolio_math([_h("a", "SAP.DE", None, shares=1, ccy="EUR")], 1.4, quotes=quotes, home="CAD")
+    assert per["a"]["value_home"] is None and tot["fx_missing"] is True and tot["value_home"] is None

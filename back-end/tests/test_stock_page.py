@@ -357,7 +357,7 @@ def test_api_position_and_slots_from_the_users_db(monkeypatch):
     body = _client(monkeypatch, "free").get("/api/v1/stocks/MSFT").json()
     assert body["position"]["shares"] == 5 and body["position"]["weight_pct"] == 100.0
     assert body["position"]["per_account"][0]["account_name"] == "TFSA"
-    assert body["slots"] == {"used": 1, "limit": 10, "remaining": 9}
+    assert body["slots"] == {"used": 1, "limit": 15, "remaining": 14}
 
 
 # ---------------------------------------------------------------- fund / about / live quote / growth

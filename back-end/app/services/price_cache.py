@@ -15,10 +15,85 @@ CAD_SUFFIXES = (".TO", ".V", ".NE", ".CN")
 
 
 def native_currency(symbol: str | None) -> str:
-    """'CAD' for Canadian listings, else 'USD' (US equities + -USD crypto)."""
-    if symbol and symbol.upper().endswith(CAD_SUFFIXES):
-        return "CAD"
-    return "USD"
+    """Currency the listing trades in, from its suffix (app/market/currency.py):
+    .TO -> CAD, .SA -> BRL, .L -> GBP, no suffix -> USD ..."""
+    from app.market.currency import currency_for
+    return currency_for(symbol)
+
+
+# ── Any-currency FX (Yahoo "{CCY}=X" = units of CCY per 1 USD), cached 1h ──
+
+FX_TTL = 3600
+FX_MISS_TTL = 300
+
+
+def _download_fx(codes: list[str]) -> dict[str, float]:
+    """{CCY: units per 1 USD} for `codes` (one yfinance call). Never raises."""
+    out: dict[str, float] = {}
+    if not codes:
+        return out
+    try:
+        import yfinance as yf
+
+        tickers = [f"{c}=X" for c in codes]
+        data = yf.download(tickers, period="5d", interval="1d", progress=False, threads=False)
+        if data is None or data.empty:
+            return out
+        close = data["Close"]
+        for c, t in zip(codes, tickers):
+            col = close[t] if hasattr(close, "columns") and t in close.columns else (
+                close if not hasattr(close, "columns") else None)
+            if col is None:
+                continue
+            col = col.dropna()
+            if len(col) and float(col.iloc[-1]) > 0:
+                out[c] = float(col.iloc[-1])
+    except Exception as e:
+        logger.warning(f"FX fetch failed for {codes}: {type(e).__name__}")
+    return out
+
+
+def usd_rates(codes) -> dict[str, float]:
+    """{CCY: units of CCY per 1 USD} for every code that can be priced (USD = 1,
+    CAD from get_usdcad_rate). Cached 1h, misses 5 min."""
+    want = {str(c).upper() for c in codes if c}
+    out: dict[str, float] = {}
+    missing = []
+    for c in sorted(want):
+        if c == "USD":
+            out[c] = 1.0
+        elif c == "CAD":
+            r = get_usdcad_rate()
+            if r:
+                out[c] = r
+        else:
+            cached = _fx_cache.get(f"USD{c}")
+            if cached is None:
+                missing.append(c)
+            elif cached:
+                out[c] = cached
+    if missing:
+        got = _download_fx(missing)
+        for c in missing:
+            _fx_cache.set(f"USD{c}", got.get(c, 0.0), ttl=FX_TTL if c in got else FX_MISS_TTL)
+            if c in got:
+                out[c] = got[c]
+    return out
+
+
+def fx_convert(amount: float | None, from_ccy: str | None, to_ccy: str | None) -> float | None:
+    """Any-currency conversion through USD (cached rates). None = can't convert."""
+    if amount is None:
+        return None
+    f, t = (from_ccy or "").upper(), (to_ccy or "").upper()
+    if not f or not t:
+        return None
+    if f == t:
+        return amount
+    rates = usd_rates([f, t])
+    if f not in rates or t not in rates:
+        return None
+    return amount / rates[f] * rates[t]
 
 
 def get_usdcad_rate(force_refresh: bool = False) -> Optional[float]:
@@ -55,14 +130,12 @@ def get_usdcad_rate(force_refresh: bool = False) -> Optional[float]:
 
 
 def fx_to_usd(symbol: str | None) -> Optional[float]:
-    """Multiplier converting a native-currency amount for `symbol` into USD.
-
-    1.0 for USD instruments; 1/USDCAD for CAD listings; None if the CAD
-    rate can't be fetched (caller must not mix currencies).
-    """
-    if native_currency(symbol) == "USD":
+    """Multiplier converting a native-currency amount for `symbol` into USD
+    (None when the rate can't be fetched; callers must not mix currencies)."""
+    ccy = native_currency(symbol)
+    if ccy == "USD":
         return 1.0
-    rate = get_usdcad_rate()
+    rate = usd_rates([ccy]).get(ccy)
     return (1.0 / rate) if rate else None
 
 

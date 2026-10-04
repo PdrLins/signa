@@ -192,3 +192,21 @@ def test_is_cdr_of_names():
     assert hs.is_cdr_of({"name": "NVIDIA CDR (CAD Hedged)"}, {"name": "NVIDIA Corporation"})
     assert not hs.is_cdr_of({"name": "E Split Corp."}, {"name": "EnerSys"})
     assert not hs.is_cdr_of({"name": None}, {"name": None})
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("PETR4 100 35,50", [("PETR4", 100.0, 35.5)]),
+    ("PETR4 100 @ R$ 35,50", [("PETR4", 100.0, 35.5)]),
+    ("AAPL 1,234 @ 150", [("AAPL", 1234.0, 150.0)]),
+    ("symbol;shares;avg_cost\nITUB4;200;31,25", [("ITUB4", 200.0, 31.25)]),
+    ("XEQT, COST", [("XEQT", None, None), ("COST", None, None)]),
+])
+def test_decimal_commas_and_reais(text, expected):
+    assert [(r["input"], r["shares"], r["avg_cost"]) for r in hs.parse_holdings_text(text)] == expected
+
+
+def test_candidates_by_country_and_b3_pattern(monkeypatch):
+    monkeypatch.setattr(sc, "get_all_tickers", lambda: [])
+    assert sc.candidate_symbols("PETR4")[0] == "PETR4.SA"            # B3 ticker anywhere
+    assert sc.candidate_symbols("VOD", country="GB")[:2] == ["VOD.L", "VOD"]
+    assert sc.candidate_symbols("ENS", prefer_tsx=True, country="BR")[:2] == ["ENS.SA", "ENS"]

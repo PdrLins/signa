@@ -2,20 +2,20 @@
 -- Signa — database schema (product only; the brain's tables are in Signa Advisor)
 -- ============================================================
 -- Creates the Signa schema on an EMPTY Supabase project in one run: the
--- product tables + migrations 010-023 (kept in migrations/ as history; they
+-- product tables + migrations 010-026 (kept in migrations/ as history; they
 -- are already included here). The brain's tables (scans, signals, positions,
 -- virtual trades, knowledge, learning, AI usage...) are not part of Signa.
 --
 -- How: Supabase dashboard -> SQL Editor -> New query -> paste -> Run.
 -- Idempotent (IF NOT EXISTS / ON CONFLICT): safe to run twice. Tested on
--- Postgres: one run creates 27 tables with RLS on; a second run changes nothing.
--- Changes after 023: add a numbered file in migrations/ (024, 025, ...),
+-- Postgres: one run creates 29 tables with RLS on; a second run changes nothing.
+-- Changes after 026: add a numbered file in migrations/ (027, 028, ...),
 -- run it on the database, and fold it into this file.
 --
 -- Afterwards: put the new project's URL and service_role key in the
 -- server's SUPABASE_URL / SUPABASE_KEY, then create your user with
 -- create_user.py (or sign up with an invite code).
--- Built 2026-10-03 from the pre-split schema + migrations 010-023.
+-- Built 2026-10-03 from the pre-split schema + migrations 010-026.
 -- ============================================================
 
 -- 1. USERS
@@ -1323,6 +1323,99 @@ CREATE TRIGGER feedback_reports_updated_at BEFORE UPDATE ON feedback_reports
 ALTER TABLE public.feedback_reports ENABLE ROW LEVEL SECURITY;
 
 -- ############################################################
+-- 024_feedback_data_kind.sql
+-- ############################################################
+
+-- ============================================================================
+-- 024_feedback_data_kind.sql — "Report wrong data" (kind 'data')
+-- ============================================================================
+-- A one-tap report on a wrong price / dividend / date from the apps:
+-- POST /api/v1/feedback {"kind": "data", "symbol": "XEQT.TO",
+--   "diagnostics": {"field": "dividend_amount", "shown": "0.21", "expected": "0.19"}}.
+-- Idempotent.
+-- ============================================================================
+
+ALTER TABLE feedback_reports DROP CONSTRAINT IF EXISTS feedback_reports_kind_check;
+ALTER TABLE feedback_reports ADD CONSTRAINT feedback_reports_kind_check
+    CHECK (kind IN ('bug', 'idea', 'data', 'other'));
+ALTER TABLE feedback_reports ADD COLUMN IF NOT EXISTS symbol VARCHAR(24);
+CREATE INDEX IF NOT EXISTS idx_feedback_reports_symbol ON feedback_reports (symbol) WHERE symbol IS NOT NULL;
+
+-- ############################################################
+-- 025_push_devices.sql
+-- ############################################################
+
+-- ============================================================================
+-- 025_push_devices.sql — iOS push notifications (APNs)
+-- ============================================================================
+-- One row per app install that allowed notifications. The iOS app sends its
+-- APNs device token after sign-in (POST /api/v1/notifications/devices) and
+-- removes it on sign-out (DELETE). A token belongs to one user: registering
+-- it from another account moves it. Tokens Apple reports as invalid are
+-- disabled (disabled_at). Delivery reuses notification_prefs and
+-- notification_deliveries (dedupe keys prefixed "push:"). Idempotent.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS push_devices (
+    token         VARCHAR(200) PRIMARY KEY,           -- APNs device token (hex)
+    user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    platform      VARCHAR(8)  NOT NULL DEFAULT 'ios' CHECK (platform IN ('ios')),
+    environment   VARCHAR(12) NOT NULL DEFAULT 'production' CHECK (environment IN ('sandbox', 'production')),
+    app_version   VARCHAR(32),
+    device_name   VARCHAR(80),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    disabled_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_push_devices_user ON push_devices (user_id) WHERE disabled_at IS NULL;
+
+DROP TRIGGER IF EXISTS push_devices_updated_at ON push_devices;
+CREATE TRIGGER push_devices_updated_at BEFORE UPDATE ON push_devices
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+ALTER TABLE public.push_devices ENABLE ROW LEVEL SECURITY;
+
+INSERT INTO access_features (key, min_level, description) VALUES
+  ('feature.push_all', 'premium', 'Every push notification type (free: price alerts, dividends, earnings, report updates)'),
+  ('feature.all_widgets', 'premium', 'Every home-screen and lock-screen widget (free: 1)')
+ON CONFLICT (key) DO NOTHING;
+
+-- ############################################################
+-- 026_goals.sql
+-- ############################################################
+
+-- ============================================================================
+-- 026_goals.sql — investing goals (portfolio value, monthly dividend income)
+-- ============================================================================
+-- Free: 1 goal; Premium (feature.unlimited_goals): unlimited. Progress is
+-- computed on read (GET /api/v1/goals); nothing is stored but the target.
+-- Idempotent.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS goals (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind         VARCHAR(20) NOT NULL CHECK (kind IN ('portfolio_value', 'monthly_income')),
+    target       NUMERIC NOT NULL CHECK (target > 0),
+    currency     VARCHAR(3) NOT NULL,
+    title        VARCHAR(60),
+    target_date  DATE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_goals_user ON goals (user_id, created_at);
+
+DROP TRIGGER IF EXISTS goals_updated_at ON goals;
+CREATE TRIGGER goals_updated_at BEFORE UPDATE ON goals
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+ALTER TABLE public.goals ENABLE ROW LEVEL SECURITY;
+
+INSERT INTO access_features (key, min_level, description) VALUES
+  ('feature.unlimited_goals', 'premium', 'Unlimited goals (free: 1)')
+ON CONFLICT (key) DO NOTHING;
+
+-- ############################################################
 -- Signa only: drop the brain's feature keys (inserted by 011, they now
 -- live in Signa Advisor; the code ignores unknown keys anyway)
 -- ############################################################
@@ -1366,7 +1459,7 @@ END $$;
 -- ############################################################
 -- Checks (run after; each should return what the comment says)
 -- ############################################################
--- 27 tables, all with RLS on:
+-- 29 tables, all with RLS on:
 --   SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname = 'public' ORDER BY 1;
 -- No brain keys left:
 --   SELECT key, min_level FROM access_features ORDER BY 1;

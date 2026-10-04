@@ -163,6 +163,31 @@ async def telegram_notifications(mode: str = "events"):
         logger.error(f"Telegram notifications ({mode}) failed: {e}")
 
 
+async def push_notifications(mode: str = "events"):
+    """iOS push (migration 025, app/services/push.py), same schedule as Telegram:
+    "events" 08:30 ET daily + 18:30 ET weekdays; "live" every 5 min in the session."""
+    try:
+        from app.services.push import run_delivery
+        result = await run_delivery(mode)
+        if result.get("lines"):
+            logger.info(f"Push notifications ({mode}): {result}")
+    except Exception as e:
+        logger.error(f"Push notifications ({mode}) failed: {e}")
+
+
+async def monthly_recap_push():
+    """1st of the month 09:05 ET: last month's recap as a push (app/services/recap.py)."""
+    try:
+        from app.services.recap import run_monthly_push
+        logger.info(f"Monthly recap: {await run_monthly_push()}")
+    except Exception as e:
+        logger.error(f"Monthly recap failed: {e}")
+
+
+async def push_notifications_live():
+    await push_notifications("live")
+
+
 async def telegram_notifications_live():
     await telegram_notifications("live")
 

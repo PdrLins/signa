@@ -152,3 +152,13 @@ def test_owner_message_is_escaped_and_short():
                               "app_version": "0.3.2", "screen": "Holdings"}, "pedro")
     assert "&lt;b&gt;" in text and "ios · 0.3.2 · Holdings" in text and "pedro" in text
     assert text.endswith("…") and len(text) < 4096   # Telegram message limit
+
+
+def test_data_report_needs_a_symbol(monkeypatch, store):
+    c = _client(monkeypatch)
+    r = c.post("/api/v1/feedback", json={"kind": "data", "message": "Dividend looks doubled"})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "invalid_symbol"
+    r = c.post("/api/v1/feedback", json={"kind": "data", "message": "Dividend looks doubled", "symbol": " vxus ",
+                                         "diagnostics": {"field": "dividend_amount", "shown": "1.40", "expected": "0.70"}})
+    assert r.status_code == 201 and r.json()["symbol"] == "VXUS" and r.json()["kind"] == "data"
+    assert c.post("/api/v1/feedback", json={"message": "x", "symbol": "not a ticker!"}).status_code == 422

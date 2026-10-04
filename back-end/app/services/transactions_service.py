@@ -92,10 +92,12 @@ _TYPE_ALIASES = {
     "buy": "buy", "bought": "buy", "purchase": "buy", "compra": "buy",
     "sell": "sell", "sold": "sell", "sale": "sell", "venda": "sell",
     "dividend": "dividend", "dividends": "dividend", "div": "dividend", "distribution": "dividend",
-    "dividendo": "dividend",
+    "dividendo": "dividend", "dividendos": "dividend", "proventos": "dividend", "provento": "dividend",
+    "jcp": "dividend", "juros sobre capital": "dividend", "juros sobre capital próprio": "dividend",
+    "juros sobre capital proprio": "dividend", "rendimento": "dividend", "rendimentos": "dividend",
     "deposit": "deposit", "contribution": "deposit", "deposito": "deposit", "depósito": "deposit",
     "withdrawal": "withdrawal", "withdraw": "withdrawal", "saque": "withdrawal", "retirada": "withdrawal",
-    "split": "split", "stock split": "split", "desdobramento": "split",
+    "split": "split", "stock split": "split", "desdobramento": "split", "grupamento": "split",
     "fee": "fee", "fees": "fee", "commission": "fee", "taxa": "fee",
 }
 _HEADER_ALIASES = {
@@ -329,6 +331,7 @@ def undo_import(user_id: str, batch_id: str) -> dict:
 
 _MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+_MONTHS.update({"fev": 2, "abr": 4, "mai": 5, "ago": 8, "set": 9, "out": 10, "dez": 12})   # Portuguese
 _NUMERIC_DATE = re.compile(r"^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2}|\d{4})$")
 _THOUSANDS = re.compile(r"[1-9]\d{0,2} \d{3}")   # "1 234" after swapping the separator for a space
 _ISO_DATE = re.compile(r"^(\d{4})[/.\-]?(\d{1,2})[/.\-]?(\d{1,2})(?:[T\s].*)?$")

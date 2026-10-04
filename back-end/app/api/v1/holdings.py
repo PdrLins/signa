@@ -160,6 +160,16 @@ def _with_account(item: dict, accounts: list[dict] | None) -> dict:
             "person_id": (acct or {}).get("person_id")}
 
 
+async def _home_currency(user_id: str) -> str:
+    try:
+        from app.services import profile_service
+        row = await asyncio.to_thread(queries.get_profile_settings, user_id)
+        return str(profile_service.merged_settings(row).get("home_currency") or "CAD").upper()
+    except Exception as e:
+        logger.debug(f"holdings: home currency unavailable ({e})")
+        return "CAD"
+
+
 async def _usdcad() -> float | None:
     from app.services.price_cache import get_usdcad_rate
     try:
@@ -194,6 +204,9 @@ async def list_holdings(
 ):
     """Response: {"items": [Holding + "account_id", "account_name", "person_id", "quote"], "count",
     "totals", "monitor_running", "review_running", "review_all", "settings",
+    (totals and position carry the user's home currency: totals.home_currency, value_home,
+    book_value_home, unrealized_home, unrealized_pct_home; position.value_home; weights use
+    home values. The *_cad fields stay for older clients.)
     "filter": {"account_id", "person_id"}}. Totals/weights cover the filtered items.
 
     Prices: each holding is valued at its shared live quote (quotes table,
@@ -227,7 +240,8 @@ async def list_holdings(
         rows = [h for h in rows if str(h.get("account_id")) in mine]
     usdcad = await _usdcad()
     quotes = await _live_quotes(rows)
-    per, totals = hs.portfolio_math(rows, usdcad, quotes=quotes)
+    home = await _home_currency(user["user_id"])
+    per, totals = hs.portfolio_math(rows, usdcad, quotes=quotes, home=home)
     items = [_with_account(hs.public_holding(h, per.get(str(h.get("id"))), hs.holding_quote(h, quotes),
                                              with_quote=True), accounts) for h in rows]
     return {
@@ -257,7 +271,11 @@ async def resolve_holdings(body: ResolveRequest, user: dict = Depends(get_curren
         existing = {h["symbol"] for h in await asyncio.to_thread(queries.get_holdings, user["user_id"])}
     except Exception:
         existing = set()
-    lines = await hs.resolve_rows(rows, existing)
+    try:
+        country = ((await asyncio.to_thread(queries.get_profile_settings, user["user_id"])) or {}).get("country")
+    except Exception:
+        country = None
+    lines = await hs.resolve_rows(rows, existing, country)
     counts = {k: sum(1 for x in lines if x["status"] == k) for k in ("ok", "ambiguous", "not_found", "invalid")}
     return {"lines": lines, "count": len(lines), "counts": counts}
 

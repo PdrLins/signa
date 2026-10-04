@@ -24,6 +24,8 @@ from app.api.v1 import allocation as allocation_api
 from app.api.v1 import dividend_summary as dividend_summary_api
 from app.api.v1 import events as events_api
 from app.api.v1 import feedback as feedback_api
+from app.api.v1 import widgets as widgets_api
+from app.api.v1 import goals as goals_api
 from app.api.v1 import portfolio_home as portfolio_home_api
 from app.api.v1 import referrals as referrals_api
 from app.api.v1 import register as register_api
@@ -154,6 +156,8 @@ app.include_router(two_factor_api.router, prefix=api_prefix)
 app.include_router(register_api.router, prefix=api_prefix)
 app.include_router(referrals_api.router, prefix=api_prefix)
 app.include_router(feedback_api.router, prefix=api_prefix)
+app.include_router(widgets_api.router, prefix=api_prefix)
+app.include_router(goals_api.router, prefix=api_prefix)
 
 
 @app.post("/api/v1/telegram/webhook")

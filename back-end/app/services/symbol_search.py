@@ -17,9 +17,11 @@ Two sources, merged and ranked:
    and the local fuzzy step corrected a word ("telas" -> "tesla"), Yahoo is
    re-queried with the corrected text and those matches rank first.
 
-Yahoo quotes are filtered to stocks / ETFs / crypto (USD pairs) on US and
-Canadian (TSX / TSXV / NEO) exchanges; OTC (PNK) ranks last. Futures,
-options, mutual funds and foreign listings (MUN, F, DE, ...) are dropped.
+Yahoo quotes are filtered to stocks / ETFs / crypto on any exchange (B3,
+LSE, XETRA, Tokyo ...); OTC (PNK) and secondary German venues (MUN, BER,
+DUS ...: copies of XETRA listings) rank last. Futures, options and mutual
+funds are dropped. Dual listings are grouped with the user's own country's
+listing first (search(..., country="BR") puts PETR4.SA before PBR).
 
 Response rows: {symbol, name, exchange, exchange_label, type, source}.
 """
@@ -45,7 +47,8 @@ YAHOO_EMPTY_TTL_S = 600
 _local_cache = TTLCache(max_size=2, default_ttl=LOCAL_TTL_S)
 _yahoo_cache = TTLCache(max_size=500, default_ttl=YAHOO_TTL_S)
 
-# Yahoo exchange code -> display label. Anything not here is dropped.
+# Yahoo exchange code -> display label. Unknown codes are kept with the
+# suffix's label (app/market/currency.py) or the code itself.
 EXCHANGE_LABELS = {
     "NMS": "NASDAQ", "NGM": "NASDAQ", "NCM": "NASDAQ", "NAS": "NASDAQ", "NASDAQ": "NASDAQ",
     "NYQ": "NYSE", "NYS": "NYSE", "NYSE": "NYSE",
@@ -56,10 +59,27 @@ EXCHANGE_LABELS = {
     "VAN": "TSXV", "CVE": "TSXV", "TSXV": "TSXV",
     "NEO": "NEO",
     "CCC": "Crypto", "CCY": "Crypto", "CRYPTO": "Crypto",
+    "SAO": "B3", "BVMF": "B3", "MEX": "BMV", "BUE": "BYMA",
+    "LSE": "LSE", "IOB": "LSE IOB", "GER": "XETRA", "ETR": "XETRA", "FRA": "Frankfurt",
+    "PAR": "Euronext Paris", "AMS": "Euronext Amsterdam", "BRU": "Euronext Brussels", "LIS": "Euronext Lisbon",
+    "MIL": "Borsa Italiana", "MCE": "BME", "EBS": "SIX", "VIE": "Vienna", "HEL": "Helsinki",
+    "STO": "Stockholm", "OSL": "Oslo", "CPH": "Copenhagen", "ISE": "Euronext Dublin", "WSE": "Warsaw",
+    "JPX": "Tokyo", "TYO": "Tokyo", "HKG": "HKEX", "SHH": "Shanghai", "SHZ": "Shenzhen",
+    "KSC": "KOSPI", "KOE": "KOSDAQ", "TAI": "TWSE", "TWO": "TPEx", "SES": "SGX", "NSI": "NSE", "BSE": "BSE",
+    "ASX": "ASX", "NZE": "NZX", "JNB": "JSE", "TLV": "TASE",
+    "MUN": "Munich", "BER": "Berlin", "DUS": "Düsseldorf", "HAM": "Hamburg", "STU": "Stuttgart", "HAN": "Hanover",
+}
+HOME_BOOST = 10.0   # score added to listings on the user's own market
+# Copies of other listings (German regional venues): kept, ranked last.
+_SECONDARY = {"Munich", "Berlin", "Düsseldorf", "Hamburg", "Stuttgart", "Hanover"}
+# Listings shown first for a user of that country when a company is listed twice.
+COUNTRY_LABELS: dict[str, set[str]] = {
+    "CA": {"TSX", "TSXV", "NEO", "CSE"}, "BR": {"B3"}, "US": {"NASDAQ", "NYSE", "NYSE American", "NYSE Arca", "Cboe"},
+    "GB": {"LSE"}, "DE": {"XETRA"}, "FR": {"Euronext Paris"}, "NL": {"Euronext Amsterdam"}, "IT": {"Borsa Italiana"},
+    "ES": {"BME"}, "CH": {"SIX"}, "PT": {"Euronext Lisbon"}, "MX": {"BMV"}, "AU": {"ASX"}, "JP": {"Tokyo"},
 }
 _QUOTE_TYPES = {"EQUITY": "stock", "ETF": "etf", "CRYPTOCURRENCY": "crypto"}
 _SUFFIX_LABELS = ((".TO", "TSX"), (".V", "TSXV"), (".NE", "NEO"), ("-USD", "Crypto"))
-_CAN_LABELS = {"TSX", "TSXV", "NEO"}
 
 # Common crypto names -> Yahoo symbol (the known-symbol list has no names).
 CRYPTO_ALIASES = {
@@ -140,14 +160,23 @@ def base_symbol(symbol: str) -> str:
     for suf, _ in _SUFFIX_LABELS:
         if s.endswith(suf):
             return s[: -len(suf)]
+    if "." in s:
+        from app.market.currency import SUFFIXES
+        head, tail = s.rsplit(".", 1)
+        if "." + tail in SUFFIXES:
+            return head
     return s
 
 
 def label_for(symbol: str, exchange: str | None = None) -> str:
+    from app.market.currency import exchange_for_suffix, is_crypto
+
     s = symbol.upper()
-    for suf, label in _SUFFIX_LABELS:
-        if s.endswith(suf):
-            return label
+    if is_crypto(s):
+        return "Crypto"
+    by_suffix = exchange_for_suffix(s)
+    if by_suffix:
+        return by_suffix
     code = str(exchange or "").upper()
     if code in EXCHANGE_LABELS:
         return EXCHANGE_LABELS[code]
@@ -309,17 +338,21 @@ async def yahoo_search(q: str) -> list[dict]:
 
 
 def filter_yahoo(quotes: list[dict]) -> list[dict]:
-    """Keep US / Canadian stocks + ETFs and USD crypto pairs, in Yahoo's order."""
+    """Keep stocks, ETFs and crypto on any exchange, in Yahoo's order."""
+    from app.market.currency import is_crypto
+
     out = []
     for qt in quotes or []:
         sym = str(qt.get("symbol") or "").upper()
         typ = _QUOTE_TYPES.get(str(qt.get("quoteType") or "").upper())
         code = str(qt.get("exchange") or "").upper()
-        if not sym or not typ or code not in EXCHANGE_LABELS:
+        if not sym or not typ:
             continue
-        label = EXCHANGE_LABELS[code]
+        label = EXCHANGE_LABELS.get(code) or label_for(sym, code)
+        if label == "US" and code not in EXCHANGE_LABELS:
+            label = code or "US"
         if typ == "crypto":
-            if not sym.endswith("-USD"):
+            if not is_crypto(sym):
                 continue
             label = "Crypto"
         elif label == "Crypto":
@@ -357,7 +390,7 @@ def _name_key(name: str | None) -> str:
     return " ".join(_words(name)[:3])
 
 
-def merge(local: list[tuple[float, dict]], yahoo: list[dict], limit: int) -> list[dict]:
+def merge(local: list[tuple[float, dict]], yahoo: list[dict], limit: int, country: str | None = None) -> list[dict]:
     rows: dict[str, dict] = {}
     for score, c in local:
         rows[c["symbol"]] = {
@@ -371,7 +404,7 @@ def merge(local: list[tuple[float, dict]], yahoo: list[dict], limit: int) -> lis
         }
     for i, y in enumerate(yahoo):
         score = 60 - i * 1.5
-        if y["exchange_label"] == "OTC":
+        if y["exchange_label"] == "OTC" or y["exchange_label"] in _SECONDARY:
             score = 5 - i * 0.1
         elif _PREFERRED.search(y["symbol"]):  # preferred shares (RY-PS.TO) after common
             score = 20 - i * 0.1
@@ -385,10 +418,15 @@ def merge(local: list[tuple[float, dict]], yahoo: list[dict], limit: int) -> lis
         else:
             rows[y["symbol"]] = {**y, "source": "yahoo", "_score": score}
 
+    # The user's own market first (PETR4.SA before the PBR ADR for a Brazilian).
+    home = COUNTRY_LABELS.get((country or "CA").upper(), COUNTRY_LABELS["CA"])
+    for r in rows.values():
+        if r["exchange_label"] in home:
+            r["_score"] += HOME_BOOST
     ranked = sorted(rows.values(), key=lambda r: (-r["_score"], r["symbol"]))
 
-    # Dual listings (RY.TO / RY): keep a company's Canadian + US lines together,
-    # Canadian first when both are present.
+    # Dual listings (RY.TO / RY): keep a company's lines together, the user's
+    # country first (Canada when unknown).
     out: list[dict] = []
     used: set[str] = set()
     for r in ranked:
@@ -401,14 +439,14 @@ def merge(local: list[tuple[float, dict]], yahoo: list[dict], limit: int) -> lis
                 if (o["symbol"] not in used and o is not r and o["exchange_label"] != "OTC"
                         and base_symbol(o["symbol"]) == base_symbol(r["symbol"]) and _name_key(o["name"]) == key):
                     group.append(o)
-        group.sort(key=lambda g: 0 if g["exchange_label"] in _CAN_LABELS else 1)
+        group.sort(key=lambda g: 0 if g["exchange_label"] in home else 1)
         for g in group:
             used.add(g["symbol"])
             out.append({k: v for k, v in g.items() if k != "_score"})
     return out[:limit]
 
 
-async def search(q: str | None, limit: int = 8) -> list[dict]:
+async def search(q: str | None, limit: int = 8, country: str | None = None) -> list[dict]:
     query = normalize_query(q)
     limit = max(1, min(int(limit or 8), MAX_LIMIT))
     if not query:
@@ -426,7 +464,7 @@ async def search(q: str | None, limit: int = 8) -> list[dict]:
         if fixed:
             # Corrected matches first, then whatever Yahoo made of the raw text.
             yahoo = filter_yahoo(await yahoo_search(fixed)) + yahoo
-    return merge(local, yahoo, limit)
+    return merge(local, yahoo, limit, country)
 
 
 def _reset_caches() -> None:

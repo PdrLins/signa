@@ -24,6 +24,27 @@ def _no_live_dividends(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_fx(monkeypatch):
+    """Currencies other than USD/CAD convert through Yahoo "{CCY}=X" rates:
+    never fetch them in tests. Tests that need a rate patch _download_fx."""
+    from app.services import price_cache
+    monkeypatch.setattr(price_cache, "_download_fx", lambda codes: {})
+    for k in list(getattr(price_cache._fx_cache, "_store", {}) or {}):
+        if k.startswith("USD") and k != "USDCAD":
+            price_cache._fx_cache.delete(k) if hasattr(price_cache._fx_cache, "delete") else None
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _fresh_follow_cache():
+    """The quotes job caches who follows what for 5 minutes: start each test empty."""
+    from app.services import quotes
+    quotes.clear_follow_cache()
+    yield
+    quotes.clear_follow_cache()
+
+
+@pytest.fixture(autouse=True)
 def _no_live_last_seen(monkeypatch):
     """The auth middleware records users.last_seen_at in a thread: never let
     a test reach Supabase for it."""

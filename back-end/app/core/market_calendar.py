@@ -247,8 +247,10 @@ def is_market_open(exchange: str | None, on_date: date) -> bool:
         return False
     cal_for_exchange = _BY_EXCHANGE.get(exchange)
     if cal_for_exchange is None:
-        # Exchange not modeled — default open. Don't silently block.
-        return True
+        # Other exchanges (B3, LSE, XETRA ...): the exchange_calendars data;
+        # an unknown label stays open (never silently block).
+        from app.market.sessions import MIC, is_session_day
+        return is_session_day(exchange, on_date) if exchange in MIC else True
     holidays_for_year = cal_for_exchange.get(on_date.year)
     if holidays_for_year is None and on_date.year > 2026:
         # Beyond the eager window — compute from the rules.
@@ -324,6 +326,11 @@ def is_daily_bar_complete(exchange: str | None, bar_date: date, now: datetime | 
         now = now.replace(tzinfo=_ET)
     if exchange == "CRYPTO":
         return bar_date < now.astimezone(ZoneInfo("UTC")).date()
+    if exchange and exchange not in _BY_EXCHANGE:
+        from app.market.sessions import MIC, close_of
+        if exchange in MIC:   # its own close, in its own time zone
+            close = close_of(exchange, bar_date)
+            return close is None or now.astimezone(ZoneInfo("UTC")) >= close
     now_et = now.astimezone(_ET)
     if bar_date < now_et.date():
         return True
