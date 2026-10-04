@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     telegram_polling: bool = True
     # Email (migration 018) and public sign-up (SIGNUP_ENABLED=true).
     signup_enabled: bool = False
+    # POST /auth/register: true = an invite code is required (invite-only);
+    # false = open sign-up (the code is optional; a friend's code still counts).
+    # Turn off before running ads: people from an ad have no code.
+    signup_invite_required: bool = True
     email_code_expire_seconds: int = 600
     email_provider: str = "console"   # console (logs, dev) | resend | smtp
     email_from: str = "Signa <no-reply@localhost>"

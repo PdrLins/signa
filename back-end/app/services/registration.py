@@ -67,7 +67,7 @@ def _is_duplicate(err: Exception) -> bool:
     return "duplicate key" in text or "23505" in text or "already exists" in text
 
 
-def create_account(username: str, password: str, referrer_id: str) -> dict:
+def create_account(username: str, password: str, referrer_id: str | None) -> dict:
     """Insert the user row (free, active, no Telegram) + the pending referral.
     Returns the user row. Raises RegistrationError(username_taken)."""
     db = referrals._db()
@@ -95,6 +95,8 @@ def create_account(username: str, password: str, referrer_id: str) -> dict:
         break
     if not user:
         raise RuntimeError("user insert returned no row")
+    if not referrer_id:   # open sign-up without a friend's code
+        return user
     try:
         referrals.add_pending(referrer_id, str(user["id"]))
     except Exception as e:  # the account exists: don't fail the sign-up for this
@@ -113,7 +115,8 @@ def _audit(event: str, success: bool, ip: str, ua: str, user_id: str | None = No
 
 
 def register(username: str, password: str, referral_code: str, ip_address: str, user_agent: str,
-             client: str = "web", device_name: str | None = None, settings: dict | None = None) -> dict:
+             client: str = "web", device_name: str | None = None, settings: dict | None = None,
+             source: dict | None = None) -> dict:
     """Create the account and sign it in. Blocking (bcrypt + DB): run via
     run_db_for(referrals.MIGRATION, ...) so a missing schema answers 503."""
     from app.services import auth_service
@@ -121,13 +124,16 @@ def register(username: str, password: str, referral_code: str, ip_address: str, 
     try:
         name = normalize_username(username)
         check_password(password)
-        referrer = referrals.find_referrer(referral_code)
-        if not referrer:
+        from app.core.config import settings as app_settings
+        code = (referral_code or "").strip()
+        referrer = referrals.find_referrer(code) if code else None
+        # A code that was typed must be valid; no code is fine when sign-up is open.
+        if (code or app_settings.signup_invite_required) and not referrer:
             raise RegistrationError("invalid_referral", "That invite code isn't valid.",
                                     422)
         if _username_exists(name):
             raise RegistrationError("username_taken", "That username is taken.", status.HTTP_409_CONFLICT)
-        user = create_account(name, password, referrer["id"])
+        user = create_account(name, password, referrer["id"] if referrer else None)
     except RegistrationError as e:
         _audit(AuditEvent.REGISTER_FAILED, False, ip_address, user_agent, reason=e.code)
         raise api_error(e.code, e.message, e.http)
@@ -137,8 +143,11 @@ def register(username: str, password: str, referral_code: str, ip_address: str, 
             queries.upsert_profile_settings(str(user["id"]), settings)
         except Exception as e:
             logger.warning(f"register: first settings not saved for {user['id']}: {type(e).__name__}")
+    from app.services import growth
+    growth.record_signup(str(user["id"]), source, client, (settings or {}).get("country"),
+                         invite="friend" if referrer else "none")   # never fails the sign-up
     _audit(AuditEvent.USER_REGISTERED, True, ip_address, user_agent, user_id=str(user["id"]),
-           referrer_id=referrer["id"], client=client)
-    logger.info(f"register: new account {name} invited by {referrer['id']}")
+           referrer_id=referrer["id"] if referrer else None, client=client)
+    logger.info(f"register: new account {name}" + (f" invited by {referrer['id']}" if referrer else ""))
     token = auth_service._issue_access_token(user, ip_address, user_agent, client, device_name)
     return {"message": "Account created", "session_token": None, **token}

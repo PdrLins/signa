@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signa Creator Program</title>
+<style>
+/* Same family as the other Signa plan pages: one column, tables for rules, pills for status. */
+:root{
+  --bg:#f7f7f4;--surface:#ffffff;--alt:#f0efe9;--text:#1c1c1a;--sub:#5d5c56;--hint:#8a8880;
+  --line:#e2e0d8;--accent:#2f6f4f;--accent-soft:#e3efe8;--warn:#a5631b;--warn-soft:#f8ecdc;
+  --bad:#a83a32;--bad-soft:#f6e1de;--info:#2e5c8a;--info-soft:#e1ebf5;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#151614;--surface:#1d1f1c;--alt:#262825;--text:#ecebe6;--sub:#b3b1a9;--hint:#85837c;
+    --line:#33352f;--accent:#6fc196;--accent-soft:#1f3329;--warn:#e0a35c;--warn-soft:#382a19;
+    --bad:#e5847b;--bad-soft:#3a2220;--info:#82b2e0;--info-soft:#1d2b3a;color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#151614;--surface:#1d1f1c;--alt:#262825;--text:#ecebe6;--sub:#b3b1a9;--hint:#85837c;
+  --line:#33352f;--accent:#6fc196;--accent-soft:#1f3329;--warn:#e0a35c;--warn-soft:#382a19;
+  --bad:#e5847b;--bad-soft:#3a2220;--info:#82b2e0;--info-soft:#1d2b3a;color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 var(--sans)}
+main{max-width:920px;margin:0 auto;padding-block:32px 80px;padding-inline:16px}
+h1{font-size:30px;line-height:1.2;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:21px;margin:44px 0 12px;padding-top:8px;border-top:1px solid var(--line);text-wrap:balance}
+h3{font-size:16px;margin:22px 0 8px}
+p{margin:8px 0;max-width:72ch}
+.sub{color:var(--sub)}
+.hint{color:var(--hint);font-size:13px}
+a{color:var(--info)}
+code{font:13px/1.4 var(--mono);background:var(--alt);padding:1px 5px;border-radius:5px;word-break:break-word}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+.pill{display:inline-block;font-size:12.5px;padding:3px 10px;border-radius:999px;background:var(--alt);color:var(--sub);white-space:nowrap}
+.pill.green{background:var(--accent-soft);color:var(--accent)}
+.pill.amber{background:var(--warn-soft);color:var(--warn)}
+.pill.red{background:var(--bad-soft);color:var(--bad)}
+.pill.blue{background:var(--info-soft);color:var(--info)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:12px 0;min-width:0}
+.callout{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:10px;padding:12px 16px;margin:14px 0}
+.callout.warn{border-color:var(--warn);background:var(--warn-soft)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:680px){.grid2{grid-template-columns:1fr}}
+.tbl{width:100%;overflow-x:auto;margin:10px 0;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--hint);background:var(--alt)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+ul,ol{padding-left:22px;margin:8px 0}
+li{margin:4px 0}
+.toc{display:flex;flex-wrap:wrap;gap:6px;margin:18px 0 0}
+.toc a{text-decoration:none;font-size:13px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;color:var(--sub);background:var(--surface)}
+.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.phase{display:grid;grid-template-columns:120px 1fr;gap:14px;padding:14px 0;border-bottom:1px solid var(--line)}
+.phase:last-child{border-bottom:none}
+.phase b{display:block}
+@media (max-width:560px){.phase{grid-template-columns:1fr;gap:2px}}
+.qs{counter-reset:q}
+.q{counter-increment:q;position:relative;padding-left:42px}
+.q::before{content:"Q" counter(q);position:absolute;left:0;top:16px;font-weight:700;color:var(--accent);font-size:14px;width:34px;text-align:center}
+.q .card{margin:8px 0}
+.rec{color:var(--accent);font-weight:600}
+pre.mermaid{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;overflow-x:auto}
+</style>
+</head><body>
+
+<main>
+<h1>Signa Creator Program</h1>
+<p class="sub">Influencers share their code; when someone they brought pays for Premium, they earn a share. This page is the plan for getting the back-end ready: what to build, in what order, and what we need to decide first. Brazil first (finance YouTube and Instagram), then Canada and the US.</p>
+<div class="meta">
+  <span class="pill">Plan v1 · 2026-10-04</span>
+  <span class="pill amber">Not started: needs Premium sales (Apple In-App Purchase) first</span>
+  <span class="pill blue">Commission up to 30% approved</span>
+</div>
+<nav class="toc">
+  <a href="#tldr">Summary</a><a href="#flow">How it works</a><a href="#have">What exists</a><a href="#money">Money rules</a>
+  <a href="#attr">Who gets credit</a><a href="#backend">Back-end design</a><a href="#payouts">Payouts and tax</a>
+  <a href="#fraud">Fraud and refunds</a><a href="#legal">Legal and Apple</a><a href="#phases">Phases</a><a href="#decide">Decisions</a>
+</nav>
+
+<h2 id="tldr">Summary</h2>
+<ul>
+  <li><b>Most of the plumbing exists.</b> Every user already has an 8-character invite code (their account ID), sign-up records who invited whom (<code>users.referred_by</code>, <code>referrals</code> table), and free users already get +5 stocks per friend. A creator is a user with a creator record, a higher-value reward, and a dashboard.</li>
+  <li><b>The missing piece is Premium sales.</b> Commission is a share of what subscribers pay, and Signa doesn't sell Premium yet. Inside the iOS app it must be Apple In-App Purchase, so the back-end needs to receive Apple's purchase, renewal and refund messages first (Phase 0). That needs the paid Apple Developer account.</li>
+  <li><b>Recommended rules:</b> 25% of what Apple pays Signa (30% for top creators), for each subscriber's first 12 months; credit goes to the code used at sign-up; earnings wait 60 days (refund window), then are paid monthly once over a minimum. Pix in Brazil, Wise or PayPal elsewhere.</li>
+  <li><b>What can be built now, before Apple:</b> creator accounts, vanity codes (<code>NATHFINANCAS</code>), attribution and a creator dashboard showing sign-ups and active users (Phase 1). Money tracking switches on when Premium sales exist.</li>
+</ul>
+
+<h2 id="flow">How it works</h2>
+<pre class="mermaid">
+flowchart LR
+  A[Creator posts video<br>with code SIGNANATH] --> B[Viewer installs Signa<br>enters code at sign-up]
+  B --> C[Signa links the new user<br>to the creator]
+  C --> D[User subscribes to Premium<br>Apple In-App Purchase]
+  D --> E[Apple tells Signa:<br>purchase / renewal / refund]
+  E --> F[Commission entry<br>pending 60 days]
+  F --> G[Available]
+  G --> H[Monthly payout<br>Pix / Wise / PayPal]
+  E -. refund .-> X[Entry reversed]
+</pre>
+<div class="grid2">
+  <div class="card"><h3 style="margin-top:0">For the creator</h3>
+    <ul>
+      <li>Gets a code (their invite code, or a vanity code like <code>SIGNANATH</code>) and optionally an Apple offer code for their audience.</li>
+      <li>Sees a dashboard: sign-ups, active users, paying subscribers, earnings pending / available / paid, by month.</li>
+      <li>Gets paid monthly with a statement.</li>
+    </ul></div>
+  <div class="card"><h3 style="margin-top:0">For the person who signs up</h3>
+    <ul>
+      <li>Enters the code at sign-up (sign-up already requires an invite code).</li>
+      <li>Gets a welcome benefit: the existing +5 free stocks, and optionally a discount on the first Premium year through an Apple offer code (decision Q4).</li>
+      <li>Never sees the creator's earnings; nothing changes in the app for them.</li>
+    </ul></div>
+</div>
+
+<h2 id="have">What already exists (migration 019)</h2>
+<div class="tbl"><table>
+<tr><th>Piece</th><th>Today</th><th>Creator program needs</th></tr>
+<tr><td>Codes</td><td>Every user's account ID is their invite code (8 characters, no 0/O/1/I/L).</td><td>Vanity codes for creators (readable on video), several codes per creator (one per campaign).</td></tr>
+<tr><td>Who invited whom</td><td><code>users.referred_by</code> + <code>referrals</code> (pending → rewarded on first follow).</td><td>A creator attribution with a start and end date (12 months of commission).</td></tr>
+<tr><td>Reward</td><td>Free users: +5 stocks per rewarded friend, up to +25.</td><td>Money: a commission ledger per payment, payouts, statements.</td></tr>
+<tr><td>Premium</td><td>Set by hand (<code>users.access_level</code>).</td><td>Bought in the app; level follows the Apple subscription.</td></tr>
+</table></div>
+
+<h2 id="money">Money rules (recommended)</h2>
+<div class="tbl"><table>
+<tr><th>Rule</th><th>Recommendation</th><th>Why</th></tr>
+<tr><td>Rate</td><td><b>25%</b> standard, <b>30%</b> for top creators (set per creator)</td><td>You approved up to 30%. Stock Events pays about 24%.</td></tr>
+<tr><td>Base</td><td>What Apple pays Signa (after Apple's 15% and sales taxes), not the store price</td><td>Paying on the store price would cost more than the money received in countries where tax is inside the price.</td></tr>
+<tr><td>Duration</td><td>Every payment in the subscriber's <b>first 12 months</b> (monthly or yearly plan)</td><td>Rewards bringing paying users, ends cleanly, and simple to explain.</td></tr>
+<tr><td>Hold</td><td>Earnings become available <b>60 days</b> after each payment</td><td>Covers most Apple refunds. A refund inside the hold just cancels the entry.</td></tr>
+<tr><td>Payout</td><td>Monthly, on the 5th, for everything available; minimum R$100 / CA$25 / US$20 (rolls over)</td><td>Keeps transfer fees small.</td></tr>
+<tr><td>Currency</td><td>Earned in the subscriber's currency, paid in the creator's currency at the payout day's rate</td><td>Brazilian creators get reais even when a Canadian subscribes.</td></tr>
+</table></div>
+<h3>Example earnings per yearly subscriber (25%, Apple Small Business 15%)</h3>
+<div class="tbl"><table>
+<tr><th>Market</th><th class="num">Premium yearly</th><th class="num">Signa receives (about)</th><th class="num">Creator earns (about)</th></tr>
+<tr><td>Brazil</td><td class="num">R$179.90</td><td class="num">R$152.92</td><td class="num">R$38.23</td></tr>
+<tr><td>Canada</td><td class="num">CA$59.99</td><td class="num">CA$50.99</td><td class="num">CA$12.75</td></tr>
+<tr><td>United States</td><td class="num">US$44.99</td><td class="num">US$38.24</td><td class="num">US$9.56</td></tr>
+</table></div>
+<p class="hint">Before taxes Apple keeps in some countries; the exact figure comes from Apple's monthly financial report (Phase 5 reconciles it). Prices from the features plan, not final.</p>
+
+<h2 id="attr">Who gets credit</h2>
+<ul>
+  <li><b>Sign-up code (main path).</b> The code typed at sign-up decides. A creator code links the user to the creator for 12 months from their first payment. One creator per user, first code wins, never changed later (no "code switching").</li>
+  <li><b>Apple offer code (optional).</b> A creator can also get an Apple custom offer code (for example 20% off the first year). Apple reports which offer was used on the purchase, so Signa can credit the creator even if the person signed up with another code. Rule: the sign-up code wins when both exist.</li>
+  <li><b>Link to the right user.</b> When the app starts a purchase it sends Apple an <code>appAccountToken</code> set to the Signa user's id; every Apple message about that subscription carries it back, so the payment maps to the user, and the user to the creator.</li>
+  <li><b>No credit:</b> the creator's own subscription, users who sign up with a code after already having an account, payments after month 12, family-shared or refunded payments.</li>
+</ul>
+
+<h2 id="backend">Back-end design</h2>
+<h3>Tables (new migrations)</h3>
+<div class="tbl"><table>
+<tr><th>Table</th><th>Holds</th><th>Phase</th></tr>
+<tr><td><code>subscriptions</code></td><td>One row per Apple subscription: user, product (monthly/yearly), status, expiry, original transaction id, environment (sandbox/production)</td><td>0</td></tr>
+<tr><td><code>store_transactions</code></td><td>Every Apple payment, renewal and refund: transaction id, price, currency, offer used, date, raw signed message</td><td>0</td></tr>
+<tr><td><code>creators</code></td><td>Creator profile: user, display name, status (active / paused / ended), rate, duration, country, payout method, tax form status</td><td>1</td></tr>
+<tr><td><code>creator_codes</code></td><td>Vanity codes and Apple offer codes per creator, campaign label, active flag</td><td>1</td></tr>
+<tr><td><code>creator_attributions</code></td><td>User → creator, source (sign-up code / offer code), code used, start, end</td><td>1</td></tr>
+<tr><td><code>commission_entries</code></td><td>One per payment: creator, subscriber (internal id only), transaction, base amount + currency, rate, commission, status pending → available → paid, or reversed</td><td>2</td></tr>
+<tr><td><code>creator_payouts</code></td><td>Monthly payouts: creator, period, amount, currency, method, status, transfer reference, paid date, statement</td><td>4</td></tr>
+</table></div>
+<h3>Endpoints</h3>
+<div class="tbl"><table>
+<tr><th>Route</th><th>Who</th><th>Does</th></tr>
+<tr><td><code>POST /store/apple/notifications</code></td><td>Apple (server to server)</td><td>Receives App Store Server Notifications v2; verifies Apple's signature; records purchase / renewal / refund / expiry; updates Premium level; writes or reverses commission entries.</td></tr>
+<tr><td><code>POST /store/purchases</code></td><td>iOS app</td><td>Right after a purchase, the app sends the transaction; the server checks it with Apple's App Store Server API so Premium unlocks at once.</td></tr>
+<tr><td><code>GET /creator/me</code></td><td>Creator</td><td>Dashboard: codes, sign-ups, active users, paying subscribers, earnings by month (pending / available / paid), next payout date. Counts only, never names.</td></tr>
+<tr><td><code>GET /creator/payouts</code></td><td>Creator</td><td>Statements per month.</td></tr>
+<tr><td><code>/admin/creators/*</code></td><td>Owner</td><td>Create a creator, set rate, add codes, pause; see payouts due; mark a payout as paid with the transfer reference; export CSV.</td></tr>
+<tr><td><code>POST /auth/register</code> (existing)</td><td>New user</td><td>Also accepts vanity creator codes; records the attribution.</td></tr>
+</table></div>
+<h3>Jobs</h3>
+<ul>
+  <li><b>Daily:</b> move commission entries past their 60-day hold to available; end attributions after 12 months.</li>
+  <li><b>Monthly (1st):</b> build each creator's statement and the payouts list for the owner.</li>
+  <li><b>Monthly (after Apple's report):</b> compare Signa's records with Apple's financial report; flag differences.</li>
+</ul>
+<p class="hint">Access: creators are a role on top of the plan (a Free or Premium user can be a creator), so the creator area checks the <code>creators</code> row, not the access level. The dashboard can live on the web app first (creators work on desktop), then in iOS.</p>
+
+<h2 id="payouts">Payouts and tax</h2>
+<div class="callout warn"><b>Check with an accountant before the first payout.</b> Who pays (your company and its country) decides the tax paperwork. The items below are what to ask about, not tax advice.</div>
+<div class="tbl"><table>
+<tr><th>Creator in</th><th>How to pay</th><th>What to collect / ask</th></tr>
+<tr><td>Brazil</td><td>Pix through Wise (from Canada) or a Brazilian account</td><td>CPF or CNPJ, Pix key, full name. Ask: does the creator need to issue an invoice (MEI nota fiscal) or declare it as foreign income (carnê-leão)?</td></tr>
+<tr><td>Canada</td><td>Interac e-Transfer or Wise</td><td>Name, address, SIN or business number if needed. Ask: is a T4A needed for payments over the yearly limit?</td></tr>
+<tr><td>United States</td><td>Wise or PayPal</td><td>W-9 or W-8BEN depending on who pays. Ask: is a 1099 needed?</td></tr>
+<tr><td>Other</td><td>Wise or PayPal</td><td>Name, country, bank or PayPal email.</td></tr>
+</table></div>
+<p>Phase 4 starts manual: the back-end lists what is due, you pay through Wise, and mark it paid with the transfer reference. Automating Wise's API can come later.</p>
+
+<h2 id="fraud">Fraud and refunds</h2>
+<ul>
+  <li><b>Refunds:</b> Apple's refund message reverses the entry. Inside the hold, nothing was paid. After a payout, the amount is subtracted from the next one.</li>
+  <li><b>Self-referral:</b> no commission on the creator's own subscription or accounts sharing their device or payment details (Apple doesn't share payment details; same device or same email domain patterns get flagged for review).</li>
+  <li><b>Fake sign-ups:</b> attribution alone pays nothing; only real Apple payments do, so fake accounts can't earn.</li>
+  <li><b>Code leaks / coupon sites:</b> codes can be paused; each code has a campaign label to see where users come from.</li>
+  <li><b>Audit trail:</b> every entry keeps the Apple transaction id and the signed message, so any statement line can be traced.</li>
+</ul>
+
+<h2 id="legal">Legal and Apple rules</h2>
+<ul>
+  <li><b>Creator agreement</b> (simple terms): rate, duration, hold, payout, refunds, that Signa can end the program, and conduct rules below.</li>
+  <li><b>Disclosure:</b> creators must label the content as a paid partnership: CONAR guidelines in Brazil, Ad Standards in Canada, FTC rules in the US.</li>
+  <li><b>No investment advice:</b> creators promote the app (tracking, dividends, calendar), never "Signa tells you what to buy" and no promised returns. Signa itself gives no advice, which keeps this simple.</li>
+  <li><b>Apple:</b> Premium inside the app is sold only through In-App Purchase; paying creators outside the app is allowed. Signa can't reward users with money for subscribing. Offer codes follow Apple's limits per quarter.</li>
+</ul>
+
+<h2 id="phases">Phases</h2>
+<div class="card">
+  <div class="phase"><div><span class="pill amber">Phase 0</span></div><div><b>Premium sales (In-App Purchase)</b>Subscriptions in App Store Connect, the Apple notification endpoint, purchase check, Premium level from the subscription, restore purchases. <span class="hint">Needs the Apple Developer account. Back-end ~3–4 days + iOS (StoreKit 2).</span></div></div>
+  <div class="phase"><div><span class="pill green">Phase 1</span></div><div><b>Creators and attribution</b>Creator records, vanity codes, sign-up attribution, owner admin to create creators, creator dashboard with sign-ups and active users. <span class="hint">Can be built now. ~2–3 days.</span></div></div>
+  <div class="phase"><div><span class="pill">Phase 2</span></div><div><b>Commission ledger</b>Entries from Apple payments, refunds reverse them, 60-day hold, 12-month window, currency handling. <span class="hint">After Phase 0. ~2 days.</span></div></div>
+  <div class="phase"><div><span class="pill">Phase 3</span></div><div><b>Dashboard earnings and statements</b>Earnings by month, monthly statement, web page for creators (then iOS). <span class="hint">~2 days back-end + web page.</span></div></div>
+  <div class="phase"><div><span class="pill">Phase 4</span></div><div><b>Payouts (manual first)</b>Payouts due list, mark paid, CSV export, refund clawback from the next payout. <span class="hint">~1–2 days.</span></div></div>
+  <div class="phase"><div><span class="pill">Phase 5</span></div><div><b>Apple offer codes and reconciliation</b>Credit through offer codes; compare with Apple's monthly financial report; Wise API if volume needs it. <span class="hint">~2 days.</span></div></div>
+</div>
+
+<h2 id="decide">Decisions we need</h2>
+<div class="qs">
+  <div class="q"><div class="card"><b>Who receives Apple's money?</b> Your Canadian company (or sole proprietorship), or a Brazilian one later. This decides payouts and tax paperwork. <span class="rec">Ask an accountant once, before Phase 4.</span></div></div>
+  <div class="q"><div class="card"><b>Rate and duration:</b> <span class="rec">25% (30% top), first 12 months, on what Apple pays Signa.</span> Or lifetime of the subscriber, or a flat amount per new subscriber.</div></div>
+  <div class="q"><div class="card"><b>Hold and payout:</b> <span class="rec">60-day hold, monthly on the 5th, minimum R$100 / CA$25 / US$20.</span></div></div>
+  <div class="q"><div class="card"><b>Audience benefit:</b> does the creator's audience get a discount (Apple offer code, e.g. 20% off the first year), or only the free +5 stocks? A discount helps conversion but lowers both Signa's and the creator's share.</div></div>
+  <div class="q"><div class="card"><b>Who can join:</b> <span class="rec">invite only, approved by you</span>, or an open application form.</div></div>
+  <div class="q"><div class="card"><b>Creator dashboard:</b> <span class="rec">web page first</span> (creators work on desktop), or inside the iOS app.</div></div>
+  <div class="q"><div class="card"><b>Start Phase 1 now?</b> It works without Apple: you can onboard the first creators and watch sign-ups before Premium sales open.</div></div>
+</div>
+
+<p class="hint" style="margin-top:36px">Builds on migration 019 (invite codes, <code>referred_by</code>, <code>referrals</code>). Apple pieces: StoreKit 2, App Store Server Notifications v2, App Store Server API, <code>appAccountToken</code>, custom offer codes, Small Business Program. Verify Apple's current limits when Phase 0 starts.</p>
+</main>
+
+</body></html>

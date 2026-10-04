@@ -32,6 +32,7 @@ PUBLIC_PATHS = {
     "/api/v1/auth/refresh",
     "/api/v1/auth/token/refresh",
     "/api/v1/auth/register",          # invite-only sign-up (migration 019)
+    "/api/v1/auth/signup-config",     # what the sign-up screen shows (migration 029)
     "/api/v1/health",
     "/api/v1/version",
     "/api/v1/telegram/webhook",
@@ -41,7 +42,7 @@ PUBLIC_PATHS = {
     "/",
 }
 # Public path prefixes (a path parameter follows): invite-code lookup.
-PUBLIC_PREFIXES = ("/api/v1/auth/referral/",)
+PUBLIC_PREFIXES = ("/api/v1/auth/referral/", "/api/v1/public/")   # public: shared stock data for web pages
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -193,6 +194,9 @@ def _touch_last_seen(user_id: str | None) -> None:
             touch_user_last_seen(user_id)
         except Exception as e:  # before migration 014, or DB down: activity falls back to last_login
             logger.debug(f"last_seen_at not written for {user_id}: {e}")
+        from app.services import growth   # one activity row per day (migration 029), never raises
+        from app.services.dividends import today_et
+        growth.record_activity(user_id, today_et())
     _spawn(write)
 
 

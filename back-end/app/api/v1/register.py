@@ -6,12 +6,17 @@
         "client": "web" | "ios" (default "web"), "device_name": str | null,
         "country"?: "BR", "home_currency"?: "BRL", "language"?: "pt", "locale"?: "pt-BR"}
        (first profile settings; the currency defaults to the country's)
+       "source"?: {"utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+                   "heard_from" (GET /auth/signup-config), "asa_token" (Apple Search Ads)}
+       referral_code: required when SIGNUP_INVITE_REQUIRED (default); otherwise
+       optional, but a code that is sent must be valid
        201 — the same payload as a password-only POST /auth/login:
          {"message": "Account created", "session_token": null, "code_via": null,
           "access_token", "token_type": "bearer", "expires_in", "last_login": null,
           "refresh_token" (ios + 017), "session_id" (017), "session_expires_at" (017)}
        422 invalid_username | weak_password | invalid_referral, 409 username_taken,
        503 migration_required (019_referrals.sql)
+  GET  /api/v1/auth/signup-config       {"invite_required": bool, "heard_from": [str]}
   GET  /api/v1/auth/referral/{code}     lookup tier (20 / 15 min per IP)
        {"valid": bool} — case-insensitive, no personal data.
        503 migration_required (019_referrals.sql)
@@ -42,6 +47,9 @@ class RegisterRequest(DeviceInfo):
     home_currency: Optional[str] = Field(None, max_length=8)  # ISO 4217; default: the country's
     language: Optional[str] = Field(None, max_length=8)       # "en" | "pt"
     locale: Optional[str] = Field(None, max_length=20)        # e.g. "pt-BR" (fills what's missing)
+    # Where the person came from (migration 029, app/services/growth.py); bad values are dropped
+    source: Optional[dict] = None   # {"utm_source", "utm_medium", "utm_campaign", "utm_content",
+                                    #  "utm_term", "heard_from", "asa_token"}
 
 
 @router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
@@ -53,8 +61,18 @@ async def register(request: Request, body: RegisterRequest):
         get_client_ip(request), request.headers.get("User-Agent", ""),
         body.client, body.device_name,
         profile_service.signup_settings(body.country, body.home_currency, body.language, body.locale),
+        body.source,
     )
     return LoginResponse(**result)
+
+
+@router.get("/signup-config")
+async def signup_config():
+    """What the sign-up screen shows. (Public)
+    {"invite_required": bool, "heard_from": ["app_store", "instagram", ...]}"""
+    from app.core.config import settings
+    from app.services.growth import HEARD_FROM
+    return {"invite_required": settings.signup_invite_required, "heard_from": list(HEARD_FROM)}
 
 
 @router.get("/referral/{code}")

@@ -125,3 +125,14 @@ def _no_profile_writes(monkeypatch):
     from app.services import suggestions
     monkeypatch.setattr(queries, "upsert_symbol_profiles", lambda rows: None)
     suggestions.clear_cache()
+
+
+@pytest.fixture(autouse=True)
+def _no_growth_writes(monkeypatch):
+    """Sign-ups record their source and requests record the day's activity
+    (migration 029): never write those to a real database in tests."""
+    from app.db import queries
+    from app.services import growth
+    monkeypatch.setattr(queries, "insert_signup_source", lambda row: None)
+    monkeypatch.setattr(queries, "add_activity_day", lambda uid, day: None)
+    growth._activity_written.clear()

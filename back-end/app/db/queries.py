@@ -1259,3 +1259,78 @@ def replace_cofollows(rows: list[dict], run_started: str) -> int:
                                                 returning=ReturnMethod.minimal).execute()
     client.table("symbol_cofollows").delete(returning=ReturnMethod.minimal).lt("updated_at", run_started).execute()
     return len(rows)
+
+
+# ============================================================
+# Growth (migration 029): sign-up sources, activity days, funnel reads
+# ============================================================
+
+SIGNUP_SOURCE_COLUMNS = ("user_id, platform, country, heard_from, utm_source, utm_medium, utm_campaign, "
+                         "utm_content, utm_term, invite, asa_status, asa_campaign_id, asa_ad_group_id, "
+                         "asa_keyword_id, asa_country, asa_click_date, created_at")
+
+
+def insert_signup_source(row: dict) -> None:
+    """First touch wins: an existing row is left as it is."""
+    get_client().table("signup_sources").upsert(row, on_conflict="user_id", ignore_duplicates=True,
+                                                returning=ReturnMethod.minimal).execute()
+
+
+def get_signup_source(user_id: str) -> dict | None:
+    rows = (get_client().table("signup_sources").select(SIGNUP_SOURCE_COLUMNS).eq("user_id", user_id)
+            .limit(1).execute().data or [])
+    return rows[0] if rows else None
+
+
+def update_signup_source(user_id: str, data: dict) -> None:
+    get_client().table("signup_sources").update(data, returning=ReturnMethod.minimal).eq("user_id", user_id).execute()
+
+
+def get_pending_asa() -> list[dict]:
+    client = get_client()
+    return _select_all_pages(lambda: client.table("signup_sources").select("user_id, asa_token, created_at")
+                             .eq("asa_status", "pending").order("created_at").order("user_id"))
+
+
+def add_activity_day(user_id: str, day: str) -> None:
+    get_client().table("user_activity_days").upsert({"user_id": user_id, "day": day}, on_conflict="user_id,day",
+                                                    ignore_duplicates=True, returning=ReturnMethod.minimal).execute()
+
+
+def get_users_created(start_iso: str, end_iso: str) -> list[dict]:
+    """Users created in [start, end)."""
+    client = get_client()
+    return _select_all_pages(lambda: client.table("users").select("id, created_at, access_level")
+                             .gte("created_at", start_iso).lt("created_at", end_iso).order("created_at").order("id"))
+
+
+def get_signup_sources(user_ids: list[str]) -> list[dict]:
+    client = get_client()
+    out: list[dict] = []
+    for i in range(0, len(user_ids), 200):
+        part = user_ids[i:i + 200]
+        out.extend(_select_all_pages(lambda p=part: client.table("signup_sources").select(SIGNUP_SOURCE_COLUMNS)
+                                     .in_("user_id", p).order("user_id")))
+    return out
+
+
+def get_holding_times(user_ids: list[str]) -> list[dict]:
+    """[{user_id, created_at}] of every holding of these users."""
+    client = get_client()
+    out: list[dict] = []
+    for i in range(0, len(user_ids), 200):
+        part = user_ids[i:i + 200]
+        out.extend(_select_all_pages(lambda p=part: client.table("holdings").select("id, user_id, created_at")
+                                     .in_("user_id", p).order("id")))
+    return out
+
+
+def get_activity_days(user_ids: list[str], start_day: str, end_day: str) -> list[dict]:
+    client = get_client()
+    out: list[dict] = []
+    for i in range(0, len(user_ids), 200):
+        part = user_ids[i:i + 200]
+        out.extend(_select_all_pages(lambda p=part: client.table("user_activity_days").select("user_id, day")
+                                     .in_("user_id", p).gte("day", start_day).lte("day", end_day)
+                                     .order("user_id").order("day")))
+    return out

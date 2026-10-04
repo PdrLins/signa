@@ -1,10 +1,10 @@
 # Signa Database
 
-31 tables on Supabase (PostgreSQL). A new project is created by running
+33 tables on Supabase (PostgreSQL). A new project is created by running
 `schema.sql` once in the SQL Editor (idempotent). Every table has Row Level
 Security on with no policies: only the back-end's service_role key can read
 or write. Database changes: add `migrations/0NN_name.sql` (next free number),
-run it, and fold it into `schema.sql`. `migrations/010`–`028` are history and
+run it, and fold it into `schema.sql`. `migrations/010`–`029` are history and
 already included in `schema.sql`.
 
 Access goes through `queries.py` and the services (supabase-py / PostgREST).
@@ -48,6 +48,8 @@ Access goes through `queries.py` and the services (supabase-py / PostgREST).
 | **check_status_daily** | Daily Signa check status per followed symbol. |
 | **data_usage_daily** | Usage counters (provider calls, refreshed symbols). |
 | **symbol_profiles** | What a symbol is (sector, industry, country, size, dividend yield) for suggestions. |
+| **signup_sources** | Where each user came from: campaign tags, "how did you hear", Apple Search Ads ids. |
+| **user_activity_days** | One row per user per day they used the app (week-2 retention). |
 | **symbol_cofollows** | Anonymous "followed together" counts (pairs shared by 5+ users, no user ids). |
 
 ## Functions

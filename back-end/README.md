@@ -62,6 +62,7 @@ back-end/
 | Monthly recap push | 1st of the month, 9:05 |
 | Usage counters flush | every 5 min |
 | Suggestions data (followed-together counts, symbol profiles) | 3:00 |
+| Apple Search Ads attribution (sign-up campaign ids) | every 10 min |
 | Cleanup: expired tokens and codes, notification keys (45 days), check snapshots (60), audit log (180) | 2:00 |
 
 ## Environment Variables
@@ -69,11 +70,12 @@ back-end/
 See `.env.example`. Required: `JWT_SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.
 Optional: `TELEGRAM_BOT_TOKEN`, email (`EMAIL_PROVIDER`, `RESEND_API_KEY` or `SMTP_*`),
 iOS push (`APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_PRIVATE_KEY`, `APNS_BUNDLE_ID`).
+Sign-up: `SIGNUP_INVITE_REQUIRED` (default true = invite-only; false = open sign-up, needed before ads).
 
 ## Database
 
 `app/db/schema.sql` creates the whole database on an empty Supabase project
-(31 tables, Row Level Security on, service_role access only). Changes: add the
+(33 tables, Row Level Security on, service_role access only). Changes: add the
 next numbered file in `app/db/migrations/`, run it, then fold it into
 `schema.sql`. See `app/db/README.md`.
 

@@ -12,6 +12,7 @@ from app.scheduler.jobs import (
     holding_status_refresh,
     income_forecast_snapshots,
     suggestions_nightly,
+    apple_search_ads_attribution,
     portfolio_snapshots,
     monthly_recap_push,
     push_notifications,
@@ -159,6 +160,11 @@ def init_scheduler() -> AsyncIOScheduler:
     # Suggestions (migration 028): co-follow counts + symbol profiles, nightly.
     scheduler.add_job(suggestions_nightly, CronTrigger(hour=3, minute=0, timezone=settings.timezone),
                       id="suggestions_nightly", name="Suggestions data (3:00 AM ET)", replace_existing=True)
+
+    # Growth (migration 029): Apple Search Ads tokens -> campaign ids.
+    scheduler.add_job(apple_search_ads_attribution, CronTrigger(minute="*/10", timezone=settings.timezone),
+                      id="apple_search_ads_attribution", name="Apple Search Ads attribution (every 10 min)",
+                      replace_existing=True, max_instances=1, coalesce=True)
 
     # Data-usage counters (cost control, migration 014): flush every 5 minutes.
     scheduler.add_job(

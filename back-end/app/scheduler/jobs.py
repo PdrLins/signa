@@ -259,3 +259,16 @@ async def suggestions_nightly():
         logger.info(f"Suggestions: {await in_job_pool(run_nightly)}")
     except Exception as e:
         logger.error(f"Suggestions nightly failed: {e}")
+
+
+async def apple_search_ads_attribution():
+    """Every 10 min: resolve pending Apple Search Ads tokens (migration 029)."""
+    try:
+        from app.services.growth import resolve_asa
+        result = await in_job_pool(resolve_asa)
+        if result.get("pending"):
+            logger.info(f"Apple Search Ads attribution: {result}")
+    except Exception as e:
+        if "029" in str(e) or "signup_sources" in str(e):
+            return   # before migration 029
+        logger.warning(f"Apple Search Ads attribution failed: {e}")
