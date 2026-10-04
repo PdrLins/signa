@@ -120,7 +120,7 @@ async def enrich_signals_async(signals: list[dict]) -> list[dict]:
         sig["current_price"] = price
         sig["change_pct"] = change
         if not sig.get("asset_type"):
-            from app.scanners.universe import get_exchange
+            from app.market.universe import get_exchange
             exchange = get_exchange(symbol)
             sig["asset_type"] = "CRYPTO" if exchange == "CRYPTO" else "EQUITY"
             sig["exchange"] = exchange
@@ -153,7 +153,7 @@ def enrich_signals(signals: list[dict]) -> list[dict]:
         sig["current_price"] = price
         sig["change_pct"] = change
         if not sig.get("asset_type"):
-            from app.scanners.universe import get_exchange
+            from app.market.universe import get_exchange
             exchange = get_exchange(symbol)
             sig["asset_type"] = "CRYPTO" if exchange == "CRYPTO" else "EQUITY"
             sig["exchange"] = exchange

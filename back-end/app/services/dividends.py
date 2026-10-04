@@ -421,11 +421,86 @@ def _months_between(a: date, b: date) -> float:
     return (b - a).days / 30.44
 
 
+# Dividend yield from Yahoo info (units changed over time; see _dividend_yield_fraction)
+
+def _fraction(value) -> float | None:
+    """Coerce a yfinance value that is ALREADY a fraction (payoutRatio,
+    shortPercentOfFloat, trailingAnnualDividendYield, ETF `yield`).
+
+    Unlike `_normalize_pct` this never divides by 100 based on magnitude:
+    a payout ratio of 1.5 (150%) is real and must stay 1.5.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _dividend_yield_fraction(info: dict) -> float | None:
+    """Dividend yield as a FRACTION (0.04 = 4%), robust to yfinance units.
+
+    Why not `_normalize_pct(info["dividendYield"])`: since early 2025
+    Yahoo reports `dividendYield` in PERCENT (AAPL 0.44 means 0.44%).
+    The magnitude heuristic ("> 1 means percent") misread every sub-1%
+    yield as a fraction — 0.44 became 44%, which `_cap_dividend_yield`
+    then discarded as garbage, so low-yield names showed NO dividend.
+
+    Resolution order (first that is present wins):
+      1. dividendRate / price   — both unambiguous (USD per share / USD)
+      2. dividendYield / 100    — percent units in yfinance >= 0.2.54
+      3. trailingAnnualDividendYield — fraction
+      4. yield                  — fraction (ETFs)
+    """
+    rate = info.get("dividendRate")
+    price = (
+        info.get("regularMarketPrice") or info.get("currentPrice")
+        or info.get("previousClose")
+    )
+    try:
+        if rate is not None and price and float(price) > 0:
+            return float(rate) / float(price)
+    except (TypeError, ValueError):
+        pass
+    dy = info.get("dividendYield")
+    if dy is not None:
+        try:
+            return float(dy) / 100.0
+        except (TypeError, ValueError):
+            pass
+    for key in ("trailingAnnualDividendYield", "yield"):
+        v = _fraction(info.get(key))
+        if v is not None:
+            return v
+    return None
+
+
+def _cap_dividend_yield(value: float | None) -> float | None:
+    """Cap dividend yield at 15% to filter yfinance garbage data.
+
+    No legitimate, sustainable dividend yield exceeds ~15% (even REITs
+    and BDCs rarely go above 12%). yfinance regularly returns nonsense
+    values for ADRs and international stocks — PBR-A showed 744%,
+    AGI.TO showed 24%. These inflate the "Dividend Reliability" score
+    component and mislead the brain into thinking a stock has strong
+    income characteristics when it doesn't.
+
+    Values above 15% are capped to None (treated as no dividend data)
+    rather than capped to 15%, because a garbage value tells us the
+    data source is unreliable — better to score as "unknown" than to
+    assume the cap is the real yield.
+    """
+    if value is None:
+        return None
+    if value > 0.15:  # 15% in decimal form
+        return None
+    return value
+
+
 def build_profile(symbol: str, info: dict | None, raw_dividends: Any, calendar: dict | None,
                   today: date, price: float | None = None) -> dict:
     """The dividend profile from raw yfinance pieces. Pure."""
-    from app.scanners.market_scanner import _cap_dividend_yield, _dividend_yield_fraction, _fraction
-
     info = info or {}
     calendar = calendar or {}
     if is_crypto(symbol, info):

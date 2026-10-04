@@ -164,7 +164,7 @@ def _type_for(symbol: str, hint: str | None = None) -> str:
     if h in ("stock", "equity"):
         return "stock"
     try:
-        from app.scanners.universe import get_asset_class
+        from app.market.universe import get_asset_class
         return {"ETF": "etf", "CRYPTO": "crypto"}.get(get_asset_class(symbol), "stock")
     except Exception:
         return "stock"

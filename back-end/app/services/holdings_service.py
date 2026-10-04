@@ -233,7 +233,7 @@ def _exchange_label(symbol: str, info: dict) -> str:
     code = str((info or {}).get("exchange") or "").upper()
     if code in _EXCHANGE_CODES:
         return _EXCHANGE_CODES[code]
-    from app.services.stock_check import exchange_for
+    from app.market.symbols import exchange_for
     return exchange_for(symbol)
 
 
@@ -243,10 +243,10 @@ def _lookup_listing(symbol: str) -> dict | None:
     cached = _lookup_cache.get(symbol)
     if cached is not None:
         return cached or None
-    from app.services import long_term_check as ltc
-    from app.services.stock_check import _recent_price
+    from app.market import funds
+    from app.market.symbols import recent_price
 
-    price = _recent_price(symbol)
+    price = recent_price(symbol)
     if not price:
         _lookup_cache.set(symbol, False, ttl=1800)
         return None
@@ -260,8 +260,8 @@ def _lookup_listing(symbol: str) -> dict | None:
         "symbol": symbol,
         "name": info.get("longName") or info.get("shortName"),
         "exchange": _exchange_label(symbol, info),
-        "currency": ltc.currency_of(symbol, info),
-        "asset_type": ltc.asset_type_for(symbol, info) if info else _guess_asset_type(symbol),
+        "currency": funds.currency_of(symbol, info),
+        "asset_type": funds.asset_type_for(symbol, info) if info else _guess_asset_type(symbol),
         "price": round(float(price), 4),
     }
     _lookup_cache.set(symbol, out)
@@ -269,7 +269,7 @@ def _lookup_listing(symbol: str) -> dict | None:
 
 
 def _guess_asset_type(symbol: str) -> str:
-    from app.scanners.universe import get_asset_class
+    from app.market.universe import get_asset_class
     return get_asset_class(symbol)
 
 
@@ -283,7 +283,7 @@ async def resolve_input(sym: str) -> dict:
     A universe crypto (BTC -> BTC-USD) is preferred; SYMBOL-USD is only
     tried when neither stock listing exists.
     """
-    from app.services.stock_check import candidate_symbols
+    from app.market.symbols import candidate_symbols
 
     cands = candidate_symbols(sym, prefer_tsx=True)
     if len(cands) == 1:
@@ -624,7 +624,7 @@ OVERLAP_GROUPS: dict[str, set[str]] = {
 
 def fund_flags(symbol: str) -> dict:
     b = base_symbol(symbol)
-    from app.scanners.universe import is_leveraged_or_inverse
+    from app.market.universe import is_leveraged_or_inverse
     return {
         "covered_call": b in COVERED_CALL_FUNDS,
         "leveraged": b in LEVERAGED_FUNDS or is_leveraged_or_inverse(symbol),

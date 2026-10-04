@@ -134,7 +134,7 @@ def _expense_ratio(symbol: str) -> Optional[float]:
         fd = stock_page._fetch_fund(symbol)
     except Exception:
         return None
-    from app.services.long_term_check import expense_ratio_fraction
+    from app.market.funds import expense_ratio_fraction
     try:
         er, _src = expense_ratio_fraction({}, (fd or {}).get("expense_ratio_raw"))
     except Exception:

@@ -15,7 +15,7 @@ from app.core.config import settings
 from app.core.security import create_access_token
 from app.middleware import auth as auth_mw
 from app.services import dividends
-from app.services import holdings_monitor as hm
+from app.market import earnings as hm
 from app.services import stock_page as sp
 
 U1 = "11111111-1111-1111-1111-111111111111"
@@ -161,7 +161,7 @@ class Fakes:
         def fund(symbol):
             self.fund_fetches.append(symbol)
             return self.funds.get(symbol, {})
-        monkeypatch.setattr("app.services.long_term_check.fetch_funds_data", lambda symbol, ticker=None: fund(symbol))
+        monkeypatch.setattr("app.market.funds.fetch_funds_data", lambda symbol, ticker=None: fund(symbol))
         monkeypatch.setattr(access, "assert_ai_allowed", lambda what="": self.ai_calls.append(what))
 
     def fetch(self, symbol):
@@ -410,14 +410,14 @@ def test_fund_failure_and_timeout_fail_soft(monkeypatch):
 
     def boom(symbol, ticker=None):
         raise RuntimeError("yahoo down")
-    monkeypatch.setattr("app.services.long_term_check.fetch_funds_data", boom)
+    monkeypatch.setattr("app.market.funds.fetch_funds_data", boom)
     r = _client(monkeypatch, "free").get("/api/v1/stocks/XEQT.TO")
     assert r.status_code == 200 and r.json()["fund"] is None and r.json()["about"] is None
 
     import time as _time
     sp.clear_cache()
     monkeypatch.setattr(sp, "FUND_TIMEOUT_S", 0.05)
-    monkeypatch.setattr("app.services.long_term_check.fetch_funds_data",
+    monkeypatch.setattr("app.market.funds.fetch_funds_data",
                         lambda symbol, ticker=None: _time.sleep(0.5) or FUND_DATA)
     r = _client(monkeypatch, "free").get("/api/v1/stocks/XEQT.TO")
     assert r.status_code == 200 and r.json()["fund"] is None

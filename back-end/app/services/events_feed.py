@@ -19,7 +19,7 @@ reported in `sources` and never breaks the feed):
                     currency) + cash_home (USD/CAD only, else null).
   dividend_payment  the same events placed on their pay date (pay dates are
                     often projected: estimated=true).
-  earnings          stocks only: holdings_monitor.earnings_info (next report)
+  earnings          stocks only: market/earnings.earnings_info (next report)
                     + the average ABSOLUTE move over the last 8 reports:
                     for each past report date d, close of the last session
                     before d -> close of the first session after d (a
@@ -311,7 +311,7 @@ def fetch_closes(symbols: list[str]) -> dict:
 
 
 async def fetch_earnings(item: dict, today: date) -> dict | None:
-    from app.services.holdings_monitor import earnings_info
+    from app.market.earnings import earnings_info
     return await earnings_info(item, today)
 
 

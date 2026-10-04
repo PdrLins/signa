@@ -3,14 +3,13 @@
 The heart of the free tier (GET /api/v1/stocks/{symbol}, app/api/v1/stocks.py).
 It must cost nothing per user:
 
-  * NO AI. Nothing here calls Grok / Claude / Codex, nothing decorated with
-    @ai_guarded, nothing from app/ai/provider.py. The only thing used from
-    app/ai/ is `signal_engine.technical_filter`, a pure function.
+  * NO AI. Technical values and rules come from app/market/technicals.py
+    (plain pandas, pure).
   * Shared market data only (yfinance), cached per symbol and shared by
     every user: the page body for 15 minutes (PAGE_TTL), the dividend
     profile ~12h (services/dividends.py), earnings dates ~12h
-    (signals/earnings.py), ETF fund data (`fund`, funds_data via
-    long_term_check) ~12h, fetched in parallel and never waited on longer
+    (market/earnings.py), ETF fund data (`fund`, funds_data via
+    market/funds.py) ~12h, fetched in parallel and never waited on longer
     than FUND_TIMEOUT_S (then null).
   * The header quote is overlaid per request with the shared `quotes` row
     (overlay_live_quote) when it is at least as recent as the cached one.
@@ -24,7 +23,7 @@ symbol is an error (StockPageError not_found -> 404).
 
 Signa checks (`build_checks`, pure). They describe the stock; they are not
 buy/sell advice (a backtest showed they don't beat SPY on their own). The
-thresholds are the brain's technical filter settings (app/core/config.py):
+thresholds are the tech_filter_* settings (app/core/config.py):
 
   uptrend          price > SMA200 and SMA50 > SMA200
                    both -> pass, one -> warn, neither -> fail,
@@ -52,12 +51,12 @@ from typing import Any
 
 from loguru import logger
 
-from app.ai.signal_engine import technical_filter
 from app.core.cache import TTLCache
 from app.core.config import settings
 from app.core.market_calendar import trading_days_until
-from app.scanners import indicators
-from app.scanners.universe import get_asset_class
+from app.market import technicals as indicators
+from app.market.technicals import technical_filter
+from app.market.universe import get_asset_class
 from app.services import dividends
 
 PAGE_TTL = 15 * 60          # shared page body (quote + checks), per symbol
@@ -148,17 +147,15 @@ def _fetch_market(symbol: str) -> dict:
 
 def _fetch_fund(symbol: str) -> dict:
     """ETF funds_data for the `fund` block (blocking, never raises; tests
-    replace it). Cached per symbol FUND_TTL (FUND_FAIL_TTL when empty); a
-    hold-mode check's cached data (long_term_check._data_cache) is reused.
+    replace it). Cached per symbol FUND_TTL (FUND_FAIL_TTL when empty).
     The cache is filled here, so a fetch that outlives FUND_TIMEOUT_S
     still serves the next page build."""
     cached = _fund_cache.get(symbol)
     if cached is not None:
         return cached
-    from app.services import long_term_check as ltc
+    from app.market.funds import fetch_funds_data
 
-    prof = ltc._data_cache.get(symbol) or {}
-    fd = prof.get("fund") or ltc.fetch_funds_data(symbol)
+    fd = fetch_funds_data(symbol)
     ok = bool(fd.get("holdings") or fd.get("overview") or fd.get("sector_weights")
               or fd.get("expense_ratio_raw") is not None)
     _fund_cache.set(symbol, fd, ttl=FUND_TTL if ok else FUND_FAIL_TTL)
@@ -166,7 +163,7 @@ def _fetch_fund(symbol: str) -> dict:
 
 
 async def _fund(symbol: str, asset_type: str, info: dict) -> dict | None:
-    """`fund` block (ETFs only, else None): long_term_check.build_fund_info
+    """`fund` block (ETFs only, else None): market/funds.build_fund_info
     over the page's info + funds_data. Fails soft to None."""
     if asset_type != "ETF":
         return None
@@ -176,7 +173,7 @@ async def _fund(symbol: str, asset_type: str, info: dict) -> dict | None:
         logger.debug(f"stock_page: fund data({symbol}) unavailable: {e!r}")
         fd = {}
     try:
-        from app.services.long_term_check import build_fund_info
+        from app.market.funds import build_fund_info
         fund = build_fund_info(info or {}, fd or {})
     except Exception as e:
         logger.warning(f"stock_page: fund info({symbol}) failed: {e}")
@@ -200,7 +197,7 @@ async def _fund(symbol: str, asset_type: str, info: dict) -> dict | None:
 
 def asset_type_for(symbol: str, info: dict | None) -> str:
     """STOCK | ETF | CRYPTO (Yahoo quoteType first, then Signa's universe)."""
-    from app.services.long_term_check import asset_type_for as lt_asset_type
+    from app.market.funds import asset_type_for as lt_asset_type
 
     at = lt_asset_type(symbol, info or {})
     return at if at in ("STOCK", "ETF", "CRYPTO") else get_asset_class(symbol)
@@ -210,7 +207,7 @@ def exchange_for(symbol: str, info: dict | None) -> str:
     code = _EXCHANGE_CODES.get(str((info or {}).get("exchange") or "").upper())
     if code:
         return code
-    from app.services.stock_check import exchange_for as sc_exchange_for
+    from app.market.symbols import exchange_for as sc_exchange_for
     return sc_exchange_for(symbol)
 
 
@@ -438,10 +435,10 @@ def build_events(earnings: dict | None, profile: dict | None) -> dict:
 
 async def _earnings(symbol: str, asset_type: str, exchange: str, info: dict) -> dict | None:
     """Next earnings {"date", "days", "trading_days"} for stocks (shared, cached
-    in signals/earnings.py); falls back to the date in Yahoo's info."""
+    in market/earnings.py); falls back to the date in Yahoo's info."""
     if asset_type != "STOCK":
         return None
-    from app.services.holdings_monitor import earnings_info
+    from app.market.earnings import earnings_info
 
     try:
         e = await earnings_info({"symbol": symbol, "asset_type": "STOCK"})
@@ -450,8 +447,8 @@ async def _earnings(symbol: str, asset_type: str, exchange: str, info: dict) -> 
         e = None
     if e and e.get("date"):
         return e
-    from app.scanners.market_scanner import _next_earnings_date_from_info
-    iso = _next_earnings_date_from_info(info or {})
+    from app.market.earnings import next_earnings_date_from_info
+    iso = next_earnings_date_from_info(info or {})
     if not iso:
         return {"date": None, "days": None, "trading_days": None}
     nd, today = date.fromisoformat(iso), _today_et()
@@ -464,17 +461,17 @@ async def _earnings(symbol: str, asset_type: str, exchange: str, info: dict) -> 
 
 def normalize(raw: str) -> str:
     """Uppercase / trim; StockPageError(invalid_symbol) on a bad format."""
-    from app.services.stock_check import StockCheckError, normalize_input
+    from app.market.symbols import InvalidSymbol, normalize_input
     try:
         return normalize_input(raw)
-    except StockCheckError:
+    except InvalidSymbol:
         raise StockPageError("invalid_symbol", "Enter a ticker symbol like AAPL, XEQT.TO or BTC-USD.", 400)
 
 
 async def _resolve(sym: str) -> tuple[str, dict]:
     """(resolved symbol, raw market data). Tries SYM, SYM.TO, SYM-USD (universe
-    members first, stock_check.candidate_symbols); 404 when none trades."""
-    from app.services.stock_check import candidate_symbols
+    members first, market/symbols.candidate_symbols); 404 when none trades."""
+    from app.market.symbols import candidate_symbols
 
     known = _resolve_cache.get(sym)
     cands = [known] if known else candidate_symbols(sym)
@@ -495,7 +492,7 @@ async def _build(symbol: str, raw: dict) -> tuple[dict, bool]:
     history = raw.get("history")
     asset_type = asset_type_for(symbol, info)
     exchange = exchange_for(symbol, info)
-    from app.services.long_term_check import currency_of
+    from app.market.funds import currency_of
     currency = currency_of(symbol, info)
     quote = build_quote(history, info)
 
