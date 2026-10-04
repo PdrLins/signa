@@ -57,11 +57,11 @@ back-end/
 | Portfolio snapshots | 16:30 weekdays |
 | Holding status (price fallback, YTD base) | 17:45 weekdays |
 | Income forecast / check status snapshots | 18:00 / 18:15 weekdays |
-| Telegram digests / live alerts (Premium) | 8:30 daily, 18:30 weekdays / every 5 min in the session |
-| Push notifications (iOS; free basics, Premium all) | 8:31 daily, 18:31 weekdays / every 5 min in the session |
+| Telegram digests / live alerts (Premium) | 8:30 daily, 18:30 weekdays / every 5 min while a followed exchange trades |
+| Push notifications (iOS; free basics, Premium all) | 8:31 daily, 18:31 weekdays / every 5 min while a followed exchange trades |
 | Monthly recap push | 1st of the month, 9:05 |
 | Usage counters flush | every 5 min |
-| Token and code cleanup | 2:00 |
+| Cleanup: expired tokens and codes, notification keys (45 days), check snapshots (60), audit log (180) | 2:00 |
 
 ## Environment Variables
 

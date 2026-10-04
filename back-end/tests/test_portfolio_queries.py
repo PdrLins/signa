@@ -53,6 +53,9 @@ class _Query:
     def order(self, *a, **k):
         return self
 
+    def range(self, *a):   # paging (queries._select_all_pages): one short page
+        return self
+
     def limit(self, *a):
         return self
 

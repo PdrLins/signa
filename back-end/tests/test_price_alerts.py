@@ -230,6 +230,8 @@ def test_triggered_alerts_show_in_upcoming_as_recent(monkeypatch, db):
 
     # an account scope has no price alerts (like the watchlist)
     acc = db.add_account(U1, "TFSA")
+    from app.core import user_cache
+    user_cache.invalidate(U1)   # written straight to the fake DB, not through a request
     scoped = _client(monkeypatch).get(f"/api/v1/events/upcoming?account_id={acc}").json()
     assert "price_alerts" not in scoped["sources"]
     assert not [i for i in scoped["items"] if i["type"] == "price_alert"]

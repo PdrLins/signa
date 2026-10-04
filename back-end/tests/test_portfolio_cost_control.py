@@ -177,13 +177,7 @@ def test_last_seen_written_at_most_once_per_hour(monkeypatch):
     FakePortfolioDB(monkeypatch)
     calls: list[str] = []
 
-    class _Now:
-        def __init__(self, target, name=None, daemon=None):
-            self.target = target
-
-        def start(self):
-            self.target()
-    monkeypatch.setattr("threading.Thread", _Now)
+    monkeypatch.setattr(auth_mw, "_spawn", lambda fn: fn())
     monkeypatch.setattr(auth_mw, "touch_user_last_seen", lambda uid: calls.append(uid))
     c = make_client(monkeypatch, profile_api.router, level="free")
     c.get("/api/v1/profile")

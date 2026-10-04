@@ -36,12 +36,23 @@ def _no_live_fx(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_followed_symbols(monkeypatch):
+    """The after-close quotes refresh reads every followed symbol: no DB in tests."""
+    from app.db import queries
+    monkeypatch.setattr(queries, "get_all_followed_symbols", lambda: set())
+
+
+@pytest.fixture(autouse=True)
 def _fresh_follow_cache():
     """The quotes job caches who follows what for 5 minutes: start each test empty."""
     from app.services import quotes
     quotes.clear_follow_cache()
+    quotes.clear_quote_caches()
+    from app.core import user_cache
+    user_cache.clear()
     yield
     quotes.clear_follow_cache()
+    quotes.clear_quote_caches()
 
 
 @pytest.fixture(autouse=True)

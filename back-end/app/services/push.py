@@ -80,10 +80,12 @@ def remove_device(user_id: str, token: str) -> dict:
 
 
 def active_devices(user_id: str | None = None) -> list[dict]:
-    q = get_client().table("push_devices").select("token, user_id, environment").is_("disabled_at", "null")
-    if user_id:
-        q = q.eq("user_id", user_id)
-    return q.order("token").limit(1000).execute().data or []
+    from app.db.queries import _select_all_pages
+
+    def build():
+        q = get_client().table("push_devices").select("token, user_id, environment").is_("disabled_at", "null")
+        return (q.eq("user_id", user_id) if user_id else q).order("token")
+    return _select_all_pages(build)
 
 
 def disable_device(token: str) -> None:

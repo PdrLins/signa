@@ -53,17 +53,20 @@ def init_log_capture():
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     # Terminal output with clear ERROR/WARNING formatting and colors.
     # Scrub the fully formatted line too (covers exception tracebacks).
+    # DEBUG only with DEBUG=true; in production INFO, no colors, and written
+    # from a background thread (enqueue) so a slow stdout never blocks a request.
+    from app.core.config import settings
     logger.add(
         lambda m: print(scrub_secrets(m), end=""),
-        level="DEBUG",
+        level="DEBUG" if settings.debug else "INFO",
         format="<level>{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {module}:{function}:{line} - {message}</level>",
-        colorize=True,
+        colorize=settings.debug,
+        enqueue=not settings.debug,
     )
     # Persistent log file (daily rotation, 14 days kept) so a missed
     # scheduled job can be diagnosed after a restart. Messages are already
     # scrubbed by the patcher; diagnose=False keeps variable values out of
     # tracebacks.
-    from app.core.config import settings
     if settings.log_file_dir:
         from pathlib import Path
         log_dir = Path(settings.log_file_dir)

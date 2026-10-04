@@ -43,7 +43,7 @@ from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict
 
 from app.core.access import require_feature
-from app.core.api_errors import api_error, run_db_for
+from app.core.api_errors import api_error, run_db_for, run_db_write
 from app.core.dependencies import get_current_user
 from app.services import feedback as svc
 
@@ -75,7 +75,7 @@ class ReportUpdate(BaseModel):
 async def send_report(body: ReportIn, user: dict = Depends(get_current_user)):
     row = svc.clean_report(body.model_dump())
     migration = svc.DATA_MIGRATION if ("symbol" in row or row["kind"] == "data") else svc.MIGRATION
-    saved = await run_db_for(migration, svc.create, user["user_id"], row)
+    saved = await run_db_write(migration, svc.create, user["user_id"], row)
     asyncio.get_running_loop().run_in_executor(None, svc.notify_owner, saved, user.get("username"))
     return {k: saved.get(k) for k in svc.PUBLIC_COLUMNS.split(", ")}
 

@@ -100,7 +100,7 @@ def upgrade_hint(feature: str) -> dict:
     return {"feature": feature, "plan": "premium"}
 
 
-_level_cache = TTLCache(max_size=500, default_ttl=60)
+_level_cache = TTLCache(max_size=10000, default_ttl=60)
 _features_cache = TTLCache(max_size=1, default_ttl=60)
 
 # Access level of the user behind the current request; None outside a
@@ -167,7 +167,9 @@ def get_user_access(user_id: str) -> dict:
             access = {"level": "owner", "slot_bonus": 0}
         else:
             logger.error(f"Access level lookup failed for {user_id}: {e} — failing closed to free")
-            return {"level": DEFAULT_LEVEL, "slot_bonus": 0}  # not cached: retry next request
+            fallback = {"level": DEFAULT_LEVEL, "slot_bonus": 0}
+            _level_cache.set(user_id, fallback, ttl=5)   # brief: an outage doesn't hit the DB per request
+            return fallback
     _level_cache.set(user_id, access)
     return access
 

@@ -12,6 +12,8 @@ Uses in-memory tracking with bounded size and threading lock.
 For multi-worker production, replace with Redis TTL keys.
 """
 
+import asyncio
+import functools
 import threading
 import time
 from collections import OrderedDict
@@ -122,8 +124,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         attempt_count = 0
 
         with _lock:
-            # Check global block (from auth tier)
-            if ip in _blocked:
+            # Too many failed sign-ins from this address block the SIGN-IN routes
+            # only: a shared address (office, proxy) must not lose the whole app.
+            if tier_name == "auth" and ip in _blocked:
                 block_until = _blocked[ip]
                 if now < block_until:
                     remaining = int(block_until - now)
@@ -154,14 +157,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # DB I/O and response outside lock
         if should_block:
-            if should_audit:
-                insert_audit_log(
+            if should_audit:   # in a worker thread: never block the event loop on a DB write
+                asyncio.get_running_loop().run_in_executor(None, functools.partial(
+                    insert_audit_log,
                     event_type=AuditEvent.RATE_LIMIT_EXCEEDED,
                     success=False,
                     ip_address=ip,
                     user_agent=request.headers.get("User-Agent", ""),
                     metadata={"path": path, "tier": tier_name, "attempts": attempt_count},
-                )
+                ))
             logger.warning(f"Rate limit [{tier_name}] exceeded for {ip}: {attempt_count} requests on {path}")
             retry_after = window_seconds if tier_name == "auth" else 10
             return JSONResponse(

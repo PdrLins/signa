@@ -83,7 +83,7 @@ class TestMiddlewareOrder:
     def test_effective_chain(self):
         import main
         names = [m.cls.__name__ for m in main.app.user_middleware]  # outermost first
-        assert names == ["CORSMiddleware", "RateLimitMiddleware", "AuditMiddleware", "AuthMiddleware"]
+        assert names == ["CORSMiddleware", "GZipMiddleware", "RateLimitMiddleware", "AuditMiddleware", "AuthMiddleware"]
 
     def test_401_carries_cors_headers(self, monkeypatch):
         from fastapi.testclient import TestClient
@@ -115,3 +115,21 @@ def test_standard_rate_limit_is_per_user_not_per_ip():
     assert a == "user:user-a" and b == "user:user-b"      # same IP, separate buckets
     assert _standard_key(req({"Authorization": "Bearer not-a-token"})) is None   # falls back to IP
     assert _standard_key(req({})) is None
+
+
+class TestGzip:
+    def test_large_json_is_compressed(self):
+        from fastapi import FastAPI
+        from fastapi.middleware.gzip import GZipMiddleware
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
+
+        @app.get("/big")
+        def big():
+            return {"items": [{"symbol": "AAPL", "price": 1.0}] * 200}
+
+        r = TestClient(app).get("/big", headers={"Accept-Encoding": "gzip"})
+        assert r.headers.get("content-encoding") == "gzip"
+        assert len(r.json()["items"]) == 200

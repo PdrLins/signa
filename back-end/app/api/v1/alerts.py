@@ -44,7 +44,7 @@ from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict
 
 from app.core.access import require_feature
-from app.core.api_errors import api_error, run_db_for
+from app.core.api_errors import api_error, run_db_for, run_db_write
 from app.core.dependencies import get_current_user
 from app.services import price_alerts as svc
 
@@ -88,7 +88,7 @@ async def list_alerts(symbol: Optional[str] = Query(None, max_length=20),
              status_code=status.HTTP_201_CREATED)
 async def create_alert(body: AlertIn, user: dict = Depends(get_current_user)):
     sym = _symbol(body.symbol)
-    return await run_db_for(svc.MIGRATION, svc.create_alert, user, sym, body.model_dump(exclude={"symbol"}))
+    return await run_db_write(svc.MIGRATION, svc.create_alert, user, sym, body.model_dump(exclude={"symbol"}))
 
 
 @router.patch("/{alert_id}", dependencies=[Depends(require_feature("action.alerts.edit"))])

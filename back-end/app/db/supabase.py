@@ -17,11 +17,12 @@ _MAX_AGE = 1800  # Recreate client every 30 min; with_retry handles stale connec
 
 
 # Supabase (behind Cloudflare) closes idle keep-alive connections; reusing
-# one fails with "Server disconnected without sending a response". That
-# killed whole scans and brain-watchdog runs. The transport below retries
+# one fails with "Server disconnected without sending a response". The
+# transport below retries
 # such requests on a fresh connection: reads always, writes only when the
 # server provably sent nothing back (the request never reached it).
 _RETRY_ATTEMPTS = 3
+DB_TIMEOUT_S = 20.0
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 _NOT_SENT = ("server disconnected without sending a response", "connectionterminated",
              "connection reset", "broken pipe")
@@ -59,7 +60,9 @@ def _http_client() -> httpx.Client:
     return httpx.Client(
         transport=_ReconnectTransport(http2=False, limits=httpx.Limits(
             max_connections=50, max_keepalive_connections=20, keepalive_expiry=20)),
-        timeout=httpx.Timeout(120.0, connect=10.0),
+        # A slow query fails in seconds instead of holding a request thread
+        # (and the user's screen) for minutes; every read is paged.
+        timeout=httpx.Timeout(DB_TIMEOUT_S, connect=5.0),
         follow_redirects=True,
     )
 

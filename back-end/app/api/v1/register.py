@@ -24,7 +24,7 @@ from typing import Optional
 from fastapi import APIRouter, Path, Request, status
 from pydantic import Field
 
-from app.core.api_errors import run_db_for
+from app.core.api_errors import run_db_for, run_db_write
 from app.core.utils import get_client_ip
 from app.models.auth import DeviceInfo, LoginResponse
 from app.services import profile_service, referrals, registration
@@ -47,7 +47,7 @@ class RegisterRequest(DeviceInfo):
 @router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
 async def register(request: Request, body: RegisterRequest):
     """Create a free account with an invite code and sign it in. (Public)"""
-    result = await run_db_for(
+    result = await run_db_write(
         referrals.MIGRATION, registration.register,
         body.username, body.password, body.referral_code or "",
         get_client_ip(request), request.headers.get("User-Agent", ""),

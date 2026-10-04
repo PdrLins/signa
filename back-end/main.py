@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
@@ -72,6 +73,8 @@ def _warn_if_login_otp_disabled() -> None:
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     init_log_capture()  # first, so the secret scrubber applies to everything below
+    from app.core import executors
+    executors.install()   # 32 request threads (the default is ~5 on a small server)
     logger.info(f"Starting {settings.app_name}...")
     logger.info(f"Debug mode: {settings.debug}")
     _check_supabase_key_role()
@@ -110,13 +113,14 @@ app = FastAPI(
 
 # Middleware. Starlette wraps in reverse order of add_middleware(): the LAST
 # one added is the OUTERMOST. Effective request chain:
-#     CORS -> RateLimit -> Audit -> Auth -> routes
+#     CORS -> GZip -> RateLimit -> Audit -> Auth -> routes
 # CORS must be outermost so every response — including 401s from
 # AuthMiddleware and 429s from RateLimitMiddleware — carries CORS headers
 # (otherwise the browser hides the status from the front-end).
 app.add_middleware(AuthMiddleware)       # innermost: validates JWT
 app.add_middleware(AuditMiddleware)      # logs every request that passed rate limiting
 app.add_middleware(RateLimitMiddleware)  # rejects floods before any DB/auth work
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)  # JSON shrinks ~5-10x on phones
 app.add_middleware(                      # outermost
     CORSMiddleware,
     allow_origins=settings.cors_origins,

@@ -39,11 +39,15 @@ No AI.
 from __future__ import annotations
 
 import math
+import threading
 from datetime import datetime, time, timezone
 from typing import Iterable
 from zoneinfo import ZoneInfo
 
 from loguru import logger
+
+from app.core.cache import TTLCache
+from app.core.executors import download_threads
 
 from app.core.market_calendar import is_market_open
 from app.market import sessions
@@ -76,7 +80,7 @@ def _clean(symbols: Iterable[str]) -> list[str]:
 
 def _download(symbols: list[str]):
     import yfinance as yf
-    return yf.download(symbols, period="5d", interval="1d", progress=False, threads=False,
+    return yf.download(symbols, period="5d", interval="1d", progress=False, threads=download_threads(len(symbols)),
                        auto_adjust=False, group_by="column")
 
 
@@ -187,7 +191,15 @@ def refresh_quotes(symbols: Iterable[str]) -> dict[str, dict]:
             queries.upsert_quotes(list(quotes.values()))
         except Exception as e:
             logger.warning(f"quotes: could not store {len(quotes)} quotes (apply migration 013?): {e}")
+        for sym in quotes:
+            _stored.delete(sym)   # the next read sees the new price at once
     return quotes
+
+
+# Stored rows shared by every user for STORED_TTL_S: opening the app reads
+# each held symbol once, not once per screen. A refresh replaces them.
+STORED_TTL_S = 10
+_stored = TTLCache(max_size=20000, default_ttl=STORED_TTL_S)
 
 
 def get_stored_quotes(symbols: Iterable[str]) -> dict[str, dict]:
@@ -198,26 +210,77 @@ def get_stored_quotes(symbols: Iterable[str]) -> dict[str, dict]:
     out: dict[str, dict] = {}
     if not syms:
         return out
+    need = []
+    for sym in syms:
+        hit = _stored.get(sym)
+        if hit is not None:
+            out[sym] = dict(hit)
+        else:
+            need.append(sym)
+    if not need:
+        return out
     try:
-        for r in queries.get_quote_rows(syms):
+        for r in queries.get_quote_rows(need):
             if r.get("symbol") and _f(r.get("price")):
-                out[str(r["symbol"]).upper()] = {**r, **{k: _f(r.get(k)) for k in
-                                                         ("price", "prev_close", "change_pct", "day_high", "day_low")}}
+                sym = str(r["symbol"]).upper()
+                row = {**r, **{k: _f(r.get(k)) for k in ("price", "prev_close", "change_pct", "day_high", "day_low")}}
+                _stored.set(sym, row)
+                out[sym] = dict(row)
     except Exception as e:
         logger.debug(f"quotes table unavailable: {e}")
     return out
 
 
+QUOTE_MISS_TTL = 1800       # a symbol Yahoo can't price isn't asked again for 30 min
+_quote_miss = TTLCache(max_size=5000, default_ttl=QUOTE_MISS_TTL)
+_inflight_lock = threading.Lock()
+_inflight: dict[str, threading.Event] = {}
+
+
 def get_quotes(symbols: Iterable[str]) -> dict[str, dict]:
-    """Stored quotes; symbols missing from the table are fetched live."""
+    """Stored quotes; symbols missing from the table are fetched live, once:
+    a symbol another request is already fetching is waited for (not fetched
+    twice), and one Yahoo couldn't price is skipped for QUOTE_MISS_TTL."""
     syms = _clean(symbols)
     if not syms:
         return {}
     out = get_stored_quotes(syms)
-    missing = [s for s in syms if s not in out]
-    if missing:
-        out.update(refresh_quotes(missing))
+    missing = [s for s in syms if s not in out and not _quote_miss.get(s)]
+    if not missing:
+        return out
+    mine: list[str] = []
+    theirs: list[threading.Event] = []
+    with _inflight_lock:
+        for s_ in missing:
+            ev = _inflight.get(s_)
+            if ev is None:
+                _inflight[s_] = threading.Event()
+                mine.append(s_)
+            else:
+                theirs.append(ev)
+    try:
+        if mine:
+            got = refresh_quotes(mine)
+            out.update(got)
+            for s_ in mine:
+                if s_ not in got:
+                    _quote_miss.set(s_, True)
+    finally:
+        with _inflight_lock:
+            for s_ in mine:
+                ev = _inflight.pop(s_, None)
+                if ev is not None:
+                    ev.set()
+    if theirs:
+        for ev in theirs:
+            ev.wait(timeout=15)
+        out.update(get_stored_quotes([s_ for s_ in missing if s_ not in out]))
     return out
+
+
+def clear_quote_caches() -> None:
+    _quote_miss.clear()
+    _stored.clear()
 
 
 def in_market_session(now: datetime | None = None) -> bool:
@@ -333,6 +396,14 @@ def refresh_followed_quotes(force: bool = False, now: datetime | None = None) ->
     if not levels:
         return {"status": "ok", "followed": 0, "symbols": 0, "quotes": 0}
     now_ts = now.timestamp()
+    if force:
+        # The after-close refresh prices EVERY followed symbol (inactive users
+        # too), so their daily snapshot isn't valued at an old price.
+        try:
+            from app.db import queries
+            levels = {**{sym: "free" for sym in queries.get_all_followed_symbols()}, **levels}
+        except Exception as e:
+            logger.debug(f"quotes: all followed symbols unavailable ({e})")
     symbols = sorted(levels) if force else due_symbols(
         levels, _last_refresh, now_ts, settings.quotes_refresh_seconds_free, settings.quotes_refresh_seconds_premium)
     if not symbols:
@@ -345,7 +416,24 @@ def refresh_followed_quotes(force: bool = False, now: datetime | None = None) ->
     fired = price_alerts.evaluate_refreshed(quotes, now)   # price alerts (015); never raises
     if fired:
         out["alerts_triggered"] = fired
+    if quotes or fired:
+        mark_priced(now_ts)
     return out
+
+
+# When stock prices last changed (any exchange) or an alert fired: the live
+# notification jobs run only after that, so they follow B3, London, Tokyo ...
+# hours and holidays instead of a fixed New York window, and stay idle overnight.
+_last_priced_at = 0.0
+
+
+def mark_priced(ts: float) -> None:
+    global _last_priced_at
+    _last_priced_at = max(_last_priced_at, ts)
+
+
+def priced_since(ts: float) -> bool:
+    return _last_priced_at > ts
 
 
 # ============================================================
@@ -436,7 +524,7 @@ def fetch_extended(symbols: list[str]) -> dict[str, dict]:
     try:
         import yfinance as yf
         data = yf.download(symbols, period="2d", interval="5m", prepost=True, progress=False,
-                           threads=False, auto_adjust=False, group_by="column")
+                           threads=download_threads(len(symbols)), auto_adjust=False, group_by="column")
         return parse_extended(data, symbols)
     except Exception as e:
         logger.warning(f"quotes: extended-hours download failed for {len(symbols)} symbols: {e}")
@@ -527,6 +615,7 @@ def refresh_offhours(now: datetime | None = None) -> dict:
         fired = price_alerts.evaluate_refreshed(got, now)
         if fired:
             out["alerts_triggered"] = fired
+            mark_priced(now_ts)   # a crypto alert at night is sent within 5 min
 
     if phase in ("pre", "post"):
         us = {f"x:{s}": "premium" for s, t in levels.items() if t == "premium" and is_us_equity(s)}

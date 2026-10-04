@@ -48,7 +48,7 @@ from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, statu
 from pydantic import BaseModel, ConfigDict
 
 from app.core.access import require_feature
-from app.core.api_errors import api_error, run_db
+from app.core.api_errors import api_error, run_db, run_db_write, PORTFOLIO_MIGRATION
 from app.core.dependencies import get_current_user
 from app.services import transactions_service as svc
 
@@ -100,7 +100,7 @@ async def list_transactions(
 @router.post("", dependencies=[Depends(require_feature("action.transactions.edit"))],
              status_code=status.HTTP_201_CREATED)
 async def create_transaction(body: TransactionIn, user: dict = Depends(get_current_user)):
-    return await run_db(svc.create_transaction, user["user_id"], _sent(body))
+    return await run_db_write(PORTFOLIO_MIGRATION, svc.create_transaction, user["user_id"], _sent(body))
 
 
 @router.get("/template", dependencies=[Depends(require_feature("action.import.csv"))])
@@ -127,7 +127,7 @@ async def import_transactions(
     if len(content) > svc.MAX_IMPORT_BYTES:
         raise api_error("file_too_large", "The file is larger than 2 MB.",
                         413, max_bytes=svc.MAX_IMPORT_BYTES)
-    result = await run_db(svc.import_csv, user["user_id"], content, dry_run=dry_run,
+    result = await run_db_write(PORTFOLIO_MIGRATION, svc.import_csv, user["user_id"], content, dry_run=dry_run,
                           create_missing_accounts=create_missing_accounts, skip_errors=skip_errors,
                           date_format=date_format)
     return result

@@ -19,7 +19,7 @@ Delivery (run_delivery, scheduler)
             days vs the previous regular one, >= 1 %), earnings (within 2
             trading days), analyst actions on held stocks (last 2 days), Signa
             check changes (last 2 days), economy events (tomorrow).
-  "live"    every 5 min 09:00-16:55 ET weekdays (only today's quotes count): price alerts that fired in
+  "live"    every 5 min after prices moved on any exchange (only today's quotes count): price alerts that fired in
             the last 24 h, and held stocks whose day move >= the user's
             big_move.threshold_pct (once per symbol per day).
   Each user gets at most one message per run (lines grouped), in their profile

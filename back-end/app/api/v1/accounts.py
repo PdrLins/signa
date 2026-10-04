@@ -38,7 +38,7 @@ from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict
 
 from app.core.access import require_feature
-from app.core.api_errors import run_db
+from app.core.api_errors import run_db, run_db_write, PORTFOLIO_MIGRATION
 from app.core.dependencies import get_current_user
 from app.services import accounts_service as svc
 
@@ -79,7 +79,7 @@ async def list_people(user: dict = Depends(get_current_user)):
 @people_router.post("", dependencies=[Depends(require_feature("action.accounts.edit"))],
                     status_code=status.HTTP_201_CREATED)
 async def create_person(body: PersonIn, user: dict = Depends(get_current_user)):
-    return await run_db(svc.create_person, user["user_id"], _sent(body))
+    return await run_db_write(PORTFOLIO_MIGRATION, svc.create_person, user["user_id"], _sent(body))
 
 
 @people_router.patch("/{person_id}", dependencies=[Depends(require_feature("action.accounts.edit"))])
@@ -102,7 +102,7 @@ async def list_accounts(person_id: Optional[UUID] = Query(None), user: dict = De
 @router.post("", dependencies=[Depends(require_feature("action.accounts.edit"))],
              status_code=status.HTTP_201_CREATED)
 async def create_account(body: AccountIn, user: dict = Depends(get_current_user)):
-    return await run_db(svc.create_account, user, _sent(body))
+    return await run_db_write(PORTFOLIO_MIGRATION, svc.create_account, user, _sent(body))
 
 
 @router.patch("/{account_id}", dependencies=[Depends(require_feature("action.accounts.edit"))])

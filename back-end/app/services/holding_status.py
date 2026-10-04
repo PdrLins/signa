@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 import pandas as pd
 from loguru import logger
 
+from app.core.executors import download_threads
+
 HISTORY_PERIOD = "2y"
 
 _run_lock = asyncio.Lock()
@@ -95,7 +97,7 @@ def fetch_closes(symbols: list[str]) -> dict[str, pd.Series]:
         import yfinance as yf
 
         data = yf.download(syms, period=HISTORY_PERIOD, interval="1d", progress=False,
-                           threads=False, auto_adjust=True)
+                           threads=download_threads(len(syms)), auto_adjust=True)
         if data is None or data.empty:
             return {}
         multi = isinstance(data.columns, pd.MultiIndex) and len(syms) > 1

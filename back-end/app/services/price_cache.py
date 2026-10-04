@@ -7,6 +7,8 @@ from typing import Optional
 
 from loguru import logger
 
+from app.core.executors import download_threads
+
 from app.core.cache import TTLCache
 
 _fx_cache = TTLCache(max_size=8, default_ttl=3600)  # 1h — FX drift intraday is small
@@ -36,7 +38,7 @@ def _download_fx(codes: list[str]) -> dict[str, float]:
         import yfinance as yf
 
         tickers = [f"{c}=X" for c in codes]
-        data = yf.download(tickers, period="5d", interval="1d", progress=False, threads=False)
+        data = yf.download(tickers, period="5d", interval="1d", progress=False, threads=download_threads(len(tickers)))
         if data is None or data.empty:
             return out
         close = data["Close"]
@@ -203,7 +205,7 @@ def fetch_daily_closes(symbols: list[str], period: str = "1y") -> dict:
         from app.services import usage_metrics
         usage_metrics.record("provider_calls.daily_history")
         data = yf.download(missing, period=period, interval="1d", progress=False,
-                           threads=False, auto_adjust=True)
+                           threads=download_threads(len(missing)), auto_adjust=True)
         multi = data is not None and not data.empty and isinstance(data.columns, pd.MultiIndex) \
             and len(missing) > 1
         for sym in missing:

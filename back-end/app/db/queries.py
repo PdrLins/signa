@@ -285,7 +285,7 @@ def _select_holdings(build) -> list[dict]:
     import time
     if holdings_have_account_id():
         try:
-            rows = build(HOLDING_COLUMNS + ", account_id").execute().data or []
+            rows = _select_all_pages(lambda: build(HOLDING_COLUMNS + ", account_id"))
             _holdings_no_account_id_at = None
             return rows
         except Exception as e:
@@ -293,7 +293,7 @@ def _select_holdings(build) -> list[dict]:
                 raise
             logger.warning("holdings.account_id missing — apply migration 013_portfolio_foundation.sql")
             _holdings_no_account_id_at = time.time()
-    rows = build(HOLDING_COLUMNS).execute().data or []
+    rows = _select_all_pages(lambda: build(HOLDING_COLUMNS))
     return [{**r, "account_id": None} for r in rows]
 
 
@@ -302,14 +302,14 @@ def get_holdings(user_id: str) -> list[dict]:
     account_id (None before migration 013)."""
     client = get_client()
     return _select_holdings(lambda cols: (
-        client.table("holdings").select(cols).eq("user_id", user_id).order("created_at").limit(2000)
+        client.table("holdings").select(cols).eq("user_id", user_id).order("created_at").order("id")
     ))
 
 
 def get_all_holdings() -> list[dict]:
     """Every user's holdings (scheduler monitor)."""
     client = get_client()
-    return _select_holdings(lambda cols: client.table("holdings").select(cols).order("created_at").limit(5000))
+    return _select_holdings(lambda cols: client.table("holdings").select(cols).order("created_at").order("id"))
 
 
 def upsert_holdings(user_id: str, rows: list[dict]) -> list[dict]:
@@ -326,8 +326,8 @@ def upsert_holdings(user_id: str, rows: list[dict]) -> list[dict]:
         return []
     client = get_client()
     try:
-        existing = (client.table("holdings").select("id, symbol, account_id")
-                    .eq("user_id", user_id).limit(5000).execute().data or [])
+        existing = _select_all_pages(lambda: client.table("holdings").select("id, symbol, account_id")
+                                     .eq("user_id", user_id).order("id"))
     except Exception as e:
         if not _missing_schema(e):
             raise
@@ -805,7 +805,7 @@ def get_all_followed_symbols() -> set[str]:
     out: set[str] = set()
     for table in ("holdings", "watchlist"):
         try:
-            rows = _select_all_pages(lambda t=table: client.table(t).select("symbol"))
+            rows = _select_all_pages(lambda t=table: client.table(t).select("symbol").order("id"))
         except Exception as e:
             logger.debug(f"followed symbols: {table} unavailable: {e}")
             rows = []
@@ -891,7 +891,7 @@ def get_check_status_rows(symbols: list[str], since: str | None = None) -> list[
             "symbol", symbols[i:i + 200])
         if since:
             q = q.gte("check_date", since)
-        out.extend(q.order("check_date").limit(5000).execute().data or [])
+        out.extend(_select_all_pages(lambda q=q: q.order("check_date").order("symbol")))
     return out
 
 
@@ -935,7 +935,7 @@ def get_users_activity() -> list[dict]:
     client = get_client()
     for cols in ("id, access_level, last_seen_at, last_login", "id, access_level, last_login", "id, last_login"):
         try:
-            return (client.table("users").select(cols).eq("is_active", True).limit(10000).execute().data or [])
+            return _select_all_pages(lambda c=cols: client.table("users").select(c).eq("is_active", True).order("id"))
         except Exception as e:
             if not _missing_schema(e):
                 raise
@@ -948,7 +948,7 @@ def get_follow_rows() -> list[dict]:
     out: list[dict] = []
     for table in ("holdings", "watchlist"):
         try:
-            out.extend(_select_all_pages(lambda t=table: client.table(t).select("user_id, symbol")))
+            out.extend(_select_all_pages(lambda t=table: client.table(t).select("user_id, symbol").order("id")))
         except Exception as e:
             logger.debug(f"follow rows: {table} unavailable: {e}")
     return out
@@ -990,9 +990,9 @@ def get_price_alert(alert_id: str, user_id: str) -> dict | None:
 
 def count_active_price_alerts(user_id: str) -> int:
     client = get_client()
-    rows = (client.table("price_alerts").select("id").eq("user_id", user_id).eq("active", True)
-            .limit(10000).execute().data or [])
-    return len(rows)
+    res = (client.table("price_alerts").select("id", count="exact").eq("user_id", user_id).eq("active", True)
+           .limit(1).execute())
+    return int(res.count or 0)
 
 
 def insert_price_alert(user_id: str, data: dict) -> dict:
@@ -1021,8 +1021,9 @@ def get_active_price_alerts(symbols: list[str]) -> list[dict]:
     client = get_client()
     out: list[dict] = []
     for i in range(0, len(symbols), 200):
-        out.extend(client.table("price_alerts").select(PRICE_ALERT_COLUMNS).eq("active", True)
-                   .in_("symbol", symbols[i:i + 200]).limit(10000).execute().data or [])
+        chunk = symbols[i:i + 200]
+        out.extend(_select_all_pages(lambda c=chunk: client.table("price_alerts").select(PRICE_ALERT_COLUMNS)
+                                     .eq("active", True).in_("symbol", c).order("id")))
     return out
 
 
@@ -1044,7 +1045,8 @@ def get_triggered_price_alerts(user_id: str, since_iso: str) -> list[dict]:
 def get_active_alert_follow_rows() -> list[dict]:
     """[{user_id, symbol}] of active alerts: their symbols need fresh quotes."""
     client = get_client()
-    return _select_all_pages(lambda: client.table("price_alerts").select("user_id, symbol").eq("active", True))
+    return _select_all_pages(lambda: client.table("price_alerts").select("user_id, symbol").eq("active", True)
+                             .order("id"))
 
 
 # ============================================================
@@ -1061,7 +1063,8 @@ def get_telegram_link(user_id: str) -> dict | None:
 def get_telegram_links() -> list[dict]:
     """Every linked notification chat (delivery jobs)."""
     client = get_client()
-    return _select_all_pages(lambda: client.table("telegram_links").select("user_id, chat_id, username"))
+    return _select_all_pages(lambda: client.table("telegram_links").select("user_id, chat_id, username")
+                             .order("user_id"))
 
 
 def upsert_telegram_link(user_id: str, chat_id: str, username: str | None) -> dict:

@@ -66,6 +66,8 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from app.core.executors import download_threads
+
 from app.core.api_errors import api_error
 from app.core.cache import TTLCache
 from app.services import portfolio_context as pc
@@ -345,7 +347,7 @@ def _download_intraday(symbols: list[str], interval: str, prepost: bool = False)
     import yfinance as yf
 
     data = yf.download(symbols, period="1d", interval=interval, prepost=prepost, progress=False,
-                       threads=False, auto_adjust=False, group_by="column")
+                       threads=download_threads(len(symbols)), auto_adjust=False, group_by="column")
     return parse_intraday(data, symbols)
 
 
@@ -509,6 +511,22 @@ def range_return(points: list[tuple[Any, float]]) -> float | None:
 
 def _series_out(points: list[tuple[Any, float]]) -> list[dict]:
     return [{"t": t.isoformat(), "value": round(v, 2)} for t, v in points]
+
+
+MAX_DAILY_POINTS = 400   # a phone chart can't show more; 5Y/ALL go weekly past this
+
+
+def thin_weekly(points: list[tuple[Any, float]], max_points: int = MAX_DAILY_POINTS) -> list[tuple[Any, float]]:
+    """Long daily series -> the last point of each ISO week, keeping the
+    first and last points exact (range return unchanged). Pure (tested)."""
+    if len(points) <= max_points:
+        return points
+    out: list[tuple[Any, float]] = [points[0]]
+    for i in range(1, len(points) - 1):
+        if points[i][0].isocalendar()[:2] != points[i + 1][0].isocalendar()[:2]:
+            out.append(points[i])
+    out.append(points[-1])
+    return out
 
 
 def _closes_points(series, base: date, today: date) -> list[tuple[date, float]]:
@@ -704,6 +722,8 @@ def history_body(scope: dict, rng: str, interval: str, compare: str | None, toda
         start = points[0][0] if points else daily["base"]
         end = today
     bench_series = scale_benchmark(points, bench_pts) if compare else []
+    if rng in LONG_RANGES:
+        points, bench_series = thin_weekly(points), thin_weekly(bench_series)
     return {
         "range": rng,
         "interval": interval if rng == "1D" else "1d",

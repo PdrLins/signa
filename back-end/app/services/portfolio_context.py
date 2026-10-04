@@ -108,14 +108,19 @@ def load_scope(user: dict, account_id: str | None = None, person_id: str | None 
     from app.services import profile_service
     from app.services.price_cache import get_usdcad_rate
 
+    from app.core import user_cache
+
     uid = user["user_id"]
     level = user.get("access_level") or "free"
-    settings_row = profile_service.merged_settings(queries.get_profile_settings(uid))
-    accounts = queries.get_accounts(uid)
-    if person_id is not None and not any(str(p.get("id")) == person_id for p in queries.get_people(uid)):
+    # Rows shared by every screen: read once per USER_TTL_S, cleared by the user's writes.
+    settings_row = profile_service.merged_settings(
+        user_cache.get(uid, "settings", lambda: queries.get_profile_settings(uid)))
+    accounts = user_cache.get(uid, "accounts", lambda: queries.get_accounts(uid))
+    if person_id is not None and not any(str(p.get("id")) == person_id
+                                         for p in user_cache.get(uid, "people", lambda: queries.get_people(uid))):
         raise api_error("person_not_found", "Person not found.", status.HTTP_404_NOT_FOUND, field="person_id")
-    holdings = queries.get_holdings(uid)
-    txs = queries.get_all_transactions(uid) if with_transactions else []
+    holdings = user_cache.get(uid, "holdings", lambda: queries.get_holdings(uid))
+    txs = user_cache.get(uid, "transactions", lambda: queries.get_all_transactions(uid)) if with_transactions else []
     scope = scope_filter(accounts, holdings, txs, account_id, person_id)
     country = settings_row.get("country")
     stored_tax = settings_row.get("dividend_tax_view")

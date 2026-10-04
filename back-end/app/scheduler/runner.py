@@ -131,9 +131,9 @@ def init_scheduler() -> AsyncIOScheduler:
         )
         scheduler.add_job(
             telegram_notifications_live,
-            CronTrigger(minute="*/5", hour="9-16", day_of_week="mon-fri", timezone=settings.timezone),
+            CronTrigger(minute="*/5", timezone=settings.timezone),   # runs only after prices moved
             id="telegram_notifications_live",
-            name="Telegram price alerts + big moves (every 5 min, session)",
+            name="Telegram price alerts + big moves (every 5 min while any followed exchange trades)",
             replace_existing=True,
             max_instances=1,
         )
@@ -148,7 +148,7 @@ def init_scheduler() -> AsyncIOScheduler:
                           id="push_notifications_evening", name="Push digest (6:31 PM ET weekdays)",
                           replace_existing=True)
         scheduler.add_job(push_notifications_live,
-                          CronTrigger(minute="1-59/5", hour="9-16", day_of_week="mon-fri", timezone=settings.timezone),
+                          CronTrigger(minute="1-59/5", timezone=settings.timezone),   # runs only after prices moved
                           id="push_notifications_live", name="Push price alerts + big moves (every 5 min)",
                           replace_existing=True, max_instances=1)
         scheduler.add_job(monthly_recap_push, CronTrigger(day=1, hour=9, minute=5, timezone=settings.timezone),

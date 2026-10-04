@@ -3,36 +3,58 @@ Telegram notifications and maintenance. No AI."""
 
 from loguru import logger
 
+from app.core.executors import in_job_pool
 
-async def cleanup_expired_tokens():
-    """Daily cleanup — remove expired blacklisted tokens and used OTPs.
 
-    Runs at 2:00 AM ET to keep tables lean.
-    """
-    from datetime import datetime, timezone
+# Days kept by the nightly cleanup. Delivery keys carry their event date, so
+# a deleted key can't be sent again; check diffs only look a few days back.
+RETENTION_DAYS = {"notification_deliveries": 45, "check_status_daily": 60, "audit_logs": 180}
+
+
+def _cleanup_db(now=None) -> dict:
+    """Blocking: expired tokens and OTPs, then old rows of the growing tables."""
+    from datetime import datetime, timedelta, timezone
+
+    from postgrest.types import CountMethod, ReturnMethod
+
     from app.db.supabase import get_client
 
+    db = get_client()
+    now = now or datetime.now(timezone.utc)
+
+    def delete(q) -> int:
+        return q.execute().count or 0
+
+    def table(name):
+        return db.table(name).delete(count=CountMethod.exact, returning=ReturnMethod.minimal)
+
+    iso = now.isoformat()
+    out = {"tokens": delete(table("token_blacklist").lt("expires_at", iso)),
+           "otps": delete(table("otp_codes").not_.is_("used_at", "null"))
+           + delete(table("otp_codes").lt("expires_at", iso))}
+    cut = {t: now - timedelta(days=d) for t, d in RETENTION_DAYS.items()}
+    for name, col, value in (
+            ("notification_deliveries", "sent_at", cut["notification_deliveries"].isoformat()),
+            ("check_status_daily", "check_date", cut["check_status_daily"].date().isoformat()),
+            ("audit_logs", "created_at", cut["audit_logs"].isoformat())):
+        try:
+            out[name] = delete(table(name).lt(col, value))
+        except Exception as e:   # one missing table must not stop the rest
+            logger.warning(f"DB cleanup of {name} failed: {type(e).__name__}")
+    return out
+
+
+async def cleanup_expired_tokens():
+    """Daily 2:00 AM ET: expired tokens and OTPs, old notification keys,
+    check snapshots and audit rows (RETENTION_DAYS), in-memory caches."""
     try:
-        db = get_client()
-        now = datetime.now(timezone.utc).isoformat()
-
-        # Delete expired blacklisted tokens
-        bl_result = db.table("token_blacklist").delete().lt("expires_at", now).execute()
-        bl_count = len(bl_result.data) if bl_result.data else 0
-
-        # Delete OTPs that are either used or expired (safe — never deletes valid unexpired ones)
-        otp_used = db.table("otp_codes").delete().not_.is_("used_at", "null").execute()
-        otp_expired = db.table("otp_codes").delete().lt("expires_at", now).execute()
-        otp_count = (len(otp_used.data) if otp_used.data else 0) + (len(otp_expired.data) if otp_expired.data else 0)
-
-        if bl_count or otp_count:
-            logger.info(f"DB cleanup: {bl_count} expired tokens, {otp_count} old OTPs removed")
-        # Purge expired entries from in-memory caches
+        result = await in_job_pool(_cleanup_db)
+        if any(result.values()):
+            logger.info(f"DB cleanup: {result}")
         from app.core.cache import blacklist_cache, stats_cache, price_cache
         blacklist_cache.cleanup()
         stats_cache.cleanup()
         price_cache.cleanup()
-
     except Exception as e:
         logger.warning(f"DB cleanup failed: {e}")
 
@@ -64,7 +86,7 @@ async def quotes_refresh(force: bool = False):
         return
     try:
         from app.services.quotes import refresh_followed_quotes
-        result = await asyncio.to_thread(refresh_followed_quotes, force)
+        result = await in_job_pool(refresh_followed_quotes, force)
         if result.get("status") != "closed":
             logger.debug(f"Quotes refresh: {result}")
     except Exception as e:
@@ -88,7 +110,7 @@ async def quotes_offhours():
         return
     try:
         from app.services.quotes import refresh_offhours
-        result = await asyncio.to_thread(refresh_offhours)
+        result = await in_job_pool(refresh_offhours)
         if result.get("crypto") or result.get("extended"):
             logger.debug(f"Quotes off-hours: {result}")
     except Exception as e:
@@ -106,7 +128,7 @@ async def portfolio_snapshots():
         return
     try:
         from app.services.portfolio_snapshots import run_snapshots
-        result = await asyncio.to_thread(run_snapshots)
+        result = await in_job_pool(run_snapshots)
         logger.info(f"Portfolio snapshots: {result}")
     except Exception as e:
         logger.error(f"Portfolio snapshots failed: {e}")
@@ -184,12 +206,30 @@ async def monthly_recap_push():
         logger.error(f"Monthly recap failed: {e}")
 
 
+_live_ran: dict[str, float] = {}
+
+
+def _live_due(channel: str) -> bool:
+    """Live alerts only when prices moved (or an alert fired) since the last run."""
+    import time
+
+    from app.services import quotes
+
+    started = time.time()
+    if not quotes.priced_since(_live_ran.get(channel, 0.0)):
+        return False
+    _live_ran[channel] = started
+    return True
+
+
 async def push_notifications_live():
-    await push_notifications("live")
+    if _live_due("push"):
+        await push_notifications("live")
 
 
 async def telegram_notifications_live():
-    await telegram_notifications("live")
+    if _live_due("telegram"):
+        await telegram_notifications("live")
 
 
 async def usage_flush():
@@ -198,7 +238,7 @@ async def usage_flush():
 
     try:
         from app.services.usage_metrics import flush
-        result = await asyncio.to_thread(flush)
+        result = await in_job_pool(flush)
         if result.get("rows"):
             logger.debug(f"Usage flush: {result}")
     except Exception as e:

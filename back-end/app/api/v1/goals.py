@@ -22,7 +22,7 @@ from fastapi import APIRouter, Body, Depends, status
 from loguru import logger
 
 from app.core.access import require_feature
-from app.core.api_errors import run_db, run_db_for
+from app.core.api_errors import run_db, run_db_for, run_db_write
 from app.core.dependencies import get_current_user
 from app.services import goals as svc
 from app.services import portfolio_context
@@ -70,7 +70,7 @@ async def list_goals(user: dict = Depends(get_current_user)):
 @router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_feature("area.home"))])
 async def create_goal(body: dict = Body(...), user: dict = Depends(get_current_user)):
     scope = await run_db(portfolio_context.load_scope, user, None, None, False, False)
-    row = await run_db_for(svc.MIGRATION, svc.create, user, body, scope["home_currency"])
+    row = await run_db_write(svc.MIGRATION, svc.create, user, body, scope["home_currency"])
     _home, cur = await _currents(user, {row["kind"]})
     return {**row, "progress": svc.progress(row, *cur[row["kind"]])}
 

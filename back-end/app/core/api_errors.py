@@ -64,16 +64,29 @@ def is_transient(err: BaseException) -> bool:
 
 async def run_db_for(migration: str, fn: Callable, *args: Any, **kwargs: Any) -> Any:
     """run_db, naming `migration` in a migration_required error. A dropped
-    connection is retried up to twice with a fresh client before 503."""
+    connection is retried up to twice with a fresh client before 503 —
+    only for calls that are safe to repeat; creates use run_db_write."""
+    return await _run(migration, fn, 3, *args, **kwargs)
+
+
+async def run_db_write(migration: str, fn: Callable, *args: Any, **kwargs: Any) -> Any:
+    """run_db_for without retries, for calls that create something (sign-up,
+    a new alert, account, transaction, goal, report ...): after "server
+    disconnected" the write may already have happened, and repeating it would
+    duplicate it or fail with a confusing conflict. The client retries instead."""
+    return await _run(migration, fn, 1, *args, **kwargs)
+
+
+async def _run(migration: str, fn: Callable, attempts: int, *args: Any, **kwargs: Any) -> Any:
     from app.db.supabase import reset_client
 
-    for attempt in range(3):
+    for attempt in range(attempts):
         try:
             return await asyncio.to_thread(fn, *args, **kwargs)
         except HTTPException:
             raise
         except Exception as e:
-            if attempt < 2 and is_transient(e) and not is_missing_schema(e):
+            if attempt < attempts - 1 and is_transient(e) and not is_missing_schema(e):
                 logger.info(f"portfolio: connection dropped in {getattr(fn, '__name__', fn)}, retrying ({attempt + 1}/2)")
                 reset_client()
                 await asyncio.sleep(0.2 * (attempt + 1))
