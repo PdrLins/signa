@@ -20,10 +20,3 @@ def test_nan_bars_are_skipped_and_volume_defaults():
     assert pts[1]["volume"] == 0
     import json
     json.dumps(pts)   # must be valid JSON
-
-
-def test_fundamentals_numbers_are_cleaned():
-    from app.scanners.market_scanner import _finite_number
-    assert _finite_number("Infinity") is None and _finite_number("NaN") is None
-    assert _finite_number(float("inf")) is None and _finite_number(None) is None
-    assert _finite_number(27.4) == 27.4 and _finite_number("12.5") == 12.5 and _finite_number(3) == 3

@@ -27,7 +27,7 @@ def test_new_feature_keys_and_levels():
         assert cat[k][0] == "free", k
     assert cat["action.accounts.type"][0] == "free"      # free since migration 022
     assert cat["feature.tax_view"][0] == "premium"
-    assert cat["area.brain"][0] == "owner"   # brain keys untouched
+    assert "area.brain" not in cat          # the brain moved to Signa Advisor
 
 
 def test_migration_keys_match_catalog():

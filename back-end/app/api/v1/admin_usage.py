@@ -1,6 +1,6 @@
 """Data usage for pricing (owner only, migration 014). No AI.
 
-  GET /api/v1/admin/usage?days=30          area.integrations (owner)
+  GET /api/v1/admin/usage?days=30          area.admin (owner)
 
 Response:
 {
@@ -60,6 +60,6 @@ def _usage(days: int) -> dict:
     }
 
 
-@router.get("/usage", dependencies=[Depends(require_feature("area.integrations"))])
+@router.get("/usage", dependencies=[Depends(require_feature("area.admin"))])
 async def usage(days: int = Query(30, ge=1, le=365)):
     return await run_db_for(INSIGHTS_MIGRATION, _usage, days)

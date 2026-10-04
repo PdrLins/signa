@@ -162,7 +162,6 @@ class Fakes:
             self.fund_fetches.append(symbol)
             return self.funds.get(symbol, {})
         monkeypatch.setattr("app.market.funds.fetch_funds_data", lambda symbol, ticker=None: fund(symbol))
-        monkeypatch.setattr(access, "assert_ai_allowed", lambda what="": self.ai_calls.append(what))
 
     def fetch(self, symbol):
         self.fetches.append(symbol)
@@ -202,7 +201,7 @@ def _fresh_cache():
 
 @pytest.mark.real_access
 def test_free_user_gets_the_full_page(monkeypatch):
-    fakes = Fakes(monkeypatch)
+    Fakes(monkeypatch)
     r = _client(monkeypatch, "free").get("/api/v1/stocks/msft")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -229,7 +228,6 @@ def test_free_user_gets_the_full_page(monkeypatch):
     assert (st["low_52w"], st["high_52w"], st["market_cap"]) == (98.0, 125.0, 3.1e12)
     assert st["volume"] == 2_000_000 and st["avg_volume"] == 2_000_000   # from the bars (no info keys)
     assert st["day_high"] > st["day_low"] and st["pe_ratio"] is None
-    assert fakes.ai_calls == []  # never reached an @ai_guarded entry point
 
 
 @pytest.mark.real_access

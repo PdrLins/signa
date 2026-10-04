@@ -1,4 +1,4 @@
-"""Ticker detail + price history API — for charts and ticker pages."""
+"""Price history for charts (GET /tickers/{ticker}/chart). Free."""
 
 import asyncio
 from typing import Literal
@@ -6,10 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from loguru import logger
 
-from app.core.access import can, require_feature
 from app.core.dependencies import get_current_user
-from app.scanners import market_scanner
-from app.scanners.universe import get_exchange
 
 router = APIRouter(prefix="/tickers", tags=["Tickers"])
 
@@ -23,51 +20,6 @@ _PERIOD_CONFIG = {
     "1y": {"period": "1y", "interval": "1d"},      # Daily for 1 year
     "5y": {"period": "5y", "interval": "1wk"},     # Weekly for 5 years
 }
-
-
-@router.get("/{ticker}", dependencies=[Depends(require_feature("area.signals"))])
-async def get_ticker_detail(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10}$"),
-    user: dict = Depends(get_current_user),
-):
-    """Get full detail for a ticker — current price, fundamentals, latest signal.
-
-    This is the data for the ticker detail page in the frontend.
-    """
-    ticker = ticker.upper()
-
-    # Fetch price + fundamentals + period changes in parallel
-    price_task = market_scanner.get_current_price(ticker)
-    fundamentals_task = market_scanner.get_fundamentals(ticker)
-    periods_task = market_scanner.get_period_changes(ticker)
-    current_price, fundamentals, period_changes = await asyncio.gather(price_task, fundamentals_task, periods_task)
-
-    if current_price is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ticker {ticker} not found")
-
-    exchange = get_exchange(ticker)
-    asset_type = "CRYPTO" if exchange == "CRYPTO" else "EQUITY"
-
-    # Get latest signal for this ticker (if any)
-    from app.db import queries
-    signals = queries.get_signals_by_ticker(ticker, limit=1)
-    latest_signal = signals[0] if signals else None
-
-    # Get open position (if any)
-    positions = queries.get_open_positions(user["user_id"])
-    open_position = next((p for p in positions if p.get("symbol") == ticker), None)
-
-    return {
-        "ticker": ticker,
-        "company_name": fundamentals.get("company_name") if fundamentals else None,
-        "exchange": exchange,
-        "asset_type": asset_type,
-        "current_price": current_price,
-        "fundamentals": fundamentals,
-        "period_changes": period_changes,
-        "latest_signal": latest_signal,
-        "open_position": open_position,
-    }
 
 
 def chart_points(df) -> list[dict]:
@@ -147,24 +99,6 @@ async def get_ticker_chart(
     change = current - first
     change_pct = (change / first * 100) if first else 0
 
-    # Get signal overlay points (BUY/SELL signals in this period). The chart
-    # is free; the brain's signals are not — only users with area.signals
-    # get the markers.
-    signal_markers = []
-    if data_points and can(user.get("access_level") or "free", "area.signals"):
-        from app.db import queries
-        all_signals = queries.get_signals_by_ticker(ticker, limit=100)
-        chart_start = data_points[0]["date"]
-        for s in all_signals:
-            created = s.get("created_at", "")
-            if created >= chart_start and s.get("action") in ("BUY", "SELL", "AVOID"):
-                signal_markers.append({
-                    "date": created,
-                    "action": s["action"],
-                    "score": s.get("score"),
-                    "price": s.get("price_at_signal"),
-                })
-
     return {
         "ticker": ticker,
         "period": period,
@@ -178,17 +112,5 @@ async def get_ticker_chart(
             "change": round(change, 2),
             "change_pct": round(change_pct, 2),
         },
-        "signal_markers": signal_markers,
+        "signal_markers": [],   # kept for older clients; always empty
     }
-
-
-@router.get("/{ticker}/signals", dependencies=[Depends(require_feature("area.signals"))])
-async def get_ticker_signals(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.\-]{1,10}$"),
-    limit: int = Query(20, ge=1, le=100),
-    user: dict = Depends(get_current_user),
-):
-    """Get signal history for a ticker."""
-    from app.services import signal_service
-    signals = signal_service.get_signals_by_ticker(ticker.upper(), limit=limit)
-    return {"signals": signals, "count": len(signals)}

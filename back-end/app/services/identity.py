@@ -311,16 +311,12 @@ def account_status(user_id: str) -> dict:
 def delete_account(user_id: str, password: str) -> None:
     """Delete the user and everything that belongs to them (holdings,
     transactions, alerts, watchlist, sessions… cascade from users). The owner
-    account can't be deleted here (it holds the brain)."""
+    account can't be deleted here."""
     u = _full_user(user_id)
     if (u.get("access_level") or "free") == "owner":
         raise api_error("owner_cannot_delete", "The owner account can't be deleted from the app.", 409)
     if not verify_password(password or "", u["password_hash"]):
         raise api_error("wrong_password", "That password is not right.", 403)
     db = _db()
-    try:   # brain_sessions has no ON DELETE CASCADE
-        db.table("brain_sessions").delete().eq("user_id", user_id).execute()
-    except Exception as e:
-        logger.debug(f"delete: brain_sessions cleanup skipped: {e}")
     db.table("users").delete().eq("id", user_id).execute()
     logger.info(f"account {user_id} deleted by its user")

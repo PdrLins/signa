@@ -15,8 +15,7 @@ from tests.portfolio_fakes import U1, U2, FakePortfolioDB, make_client
 @pytest.fixture
 def db(monkeypatch):
     d = FakePortfolioDB(monkeypatch)
-    monkeypatch.setattr(holdings_api, "_kick_refresh", lambda uid: True)
-    holdings_api._reset_state()
+    monkeypatch.setattr(holdings_api.holding_status, "kick", lambda uid: True)
     return d
 
 

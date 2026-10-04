@@ -874,14 +874,6 @@ def long_term_dividend_assessment(profile: dict | None, asset_type: str, sector:
 LONG_VERDICT_ORDER = ("NOT_A_GOOD_FIT", "REASONABLE_WITH_CAVEATS", "SOLID")
 
 
-def apply_verdict_cap(verdict: str, cap: bool) -> tuple[str, dict | None]:
-    """SOLID -> REASONABLE_WITH_CAVEATS when the dividend cap fires."""
-    if cap and verdict == "SOLID":
-        return "REASONABLE_WITH_CAVEATS", {"code": "dividend_cut_unsustainable", "from": "SOLID",
-                                           "to": "REASONABLE_WITH_CAVEATS"}
-    return verdict, None
-
-
 def ai_summary(profile: dict | None) -> str:
     """One factual line for the AI prompts (kept short on purpose)."""
     p = profile or {}

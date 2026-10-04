@@ -74,7 +74,6 @@ class TestBcrypt:
 def _settings(**kw):
     base = dict(
         jwt_secret_key=STRONG_A,
-        brain_token_secret=STRONG_B,
         supabase_url="https://t.supabase.co",
         supabase_key="x",
         cors_origins=["http://localhost:3000"],
@@ -100,15 +99,6 @@ class TestSecretValidation:
         with pytest.raises(ValueError):
             _settings(jwt_secret_key=bad)
 
-    @pytest.mark.parametrize("bad", ["", "generate-with-openssl-rand-hex-32", "tooshort"])
-    def test_weak_brain_secret_rejected(self, bad):
-        with pytest.raises(ValueError):
-            _settings(brain_token_secret=bad)
-
-    def test_same_secret_for_both_rejected(self):
-        with pytest.raises(ValueError, match="different"):
-            _settings(jwt_secret_key=STRONG_A, brain_token_secret=STRONG_A)
-
     def test_env_example_placeholders_rejected(self):
         """Every secret-looking value shipped in .env.example must fail validation."""
         import pathlib
@@ -120,13 +110,16 @@ class TestSecretValidation:
                 values[k.strip()] = v.strip()
         with pytest.raises(ValueError):
             _settings(jwt_secret_key=values["JWT_SECRET_KEY"])
-        with pytest.raises(ValueError):
-            _settings(brain_token_secret=values["BRAIN_TOKEN_SECRET"])
 
     def test_auth_enabled_removed_and_tolerated(self):
         assert "auth_enabled" not in Settings.model_fields
         # An old .env still carrying AUTH_ENABLED must not crash startup.
         _settings(auth_enabled=False)
+
+    def test_retired_brain_keys_tolerated(self):
+        """An old .env with the brain's keys (now Signa Advisor) still loads."""
+        s = _settings(brain_token_secret="x", anthropic_api_key="k", xai_api_key="k", ai_enabled=True)
+        assert not hasattr(s, "brain_token_secret") and not hasattr(s, "anthropic_api_key")
 
 
 # ── 3. Token refresh ─────────────────────────────────────────────────

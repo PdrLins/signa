@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from app.services import holdings_service as hs
-from app.services import stock_check as sc
+from app.market import symbols as sc
 
 
 def _p(text):

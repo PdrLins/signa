@@ -35,20 +35,20 @@ class TestLogScrubber:
         msg = "Scan complete: AAPL score=82 at 12:30:05 (took 1234ms) BUY"
         assert scrub_secrets(msg) == msg
 
-    def test_buffer_and_stream_are_scrubbed(self):
+    def test_every_sink_gets_scrubbed_messages(self):
         from loguru import logger
 
         from app.services import log_service
 
-        q = log_service.subscribe()
-        sink_id = logger.add(log_service._loguru_sink, format="{message}")
+        seen: list[str] = []
+        logger.configure(patcher=log_service._scrub_patcher)
+        sink_id = logger.add(lambda m: seen.append(m.record["message"]), format="{message}")
         try:
             logger.error(f"boom https://api.telegram.org/bot{TG_TOKEN}/getMe")
         finally:
             logger.remove(sink_id)
-            log_service.unsubscribe(q)
-        assert TG_TOKEN not in log_service._LOG_BUFFER[-1]["message"]
-        assert TG_TOKEN not in q.get_nowait()["message"]
+            logger.configure(patcher=None)
+        assert seen and TG_TOKEN not in seen[-1]
 
 
 # ── 10. X-Forwarded-For handling ─────────────────────────────────────
@@ -75,16 +75,6 @@ class TestClientIp:
     def test_garbage_falls_back_to_peer(self):
         from app.core.utils import get_client_ip
         assert get_client_ip(_req("127.0.0.1", "not-an-ip")) == "127.0.0.1"
-
-
-class TestProgressExemption:
-    def test_only_real_progress_route(self):
-        from app.middleware.rate_limit import _PROGRESS_ROUTE
-        assert _PROGRESS_ROUTE.match("/api/v1/scans/0b6f3c1e-1234-4abc-9def-001122334455/progress")
-        assert not _PROGRESS_ROUTE.match("/api/v1/auth/login/progress")
-        assert not _PROGRESS_ROUTE.match("/api/v1/auth/login?x=/progress")
-        assert not _PROGRESS_ROUTE.match("/api/v1/scans/a/b/progress")
-        assert not _PROGRESS_ROUTE.match("/api/v1/scans/abc/progress/extra")
 
 
 # ── 8. Middleware order + CORS on 401 ────────────────────────────────

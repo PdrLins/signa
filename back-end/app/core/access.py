@@ -5,18 +5,16 @@ Every user has an `access_level` in the `users` table (migration 011):
     free < premium < owner
 
 Every area (a page) and action (a button / API operation) has a feature key
-with a minimum level, e.g. `area.holdings` -> free, `action.check.run` ->
-owner. The catalog below holds the defaults; rows in the `access_features`
-table override them, so a feature can move between levels with one SQL
-update, without a deploy.
+with a minimum level, e.g. `area.holdings` -> free, `feature.full_history`
+-> premium. The catalog below is the list of features and their defaults;
+rows in the `access_features` table override a catalog key's level, so a
+feature can move between levels with one SQL update, without a deploy. DB
+rows for keys not in the catalog (e.g. the brain's, now in Signa Advisor)
+are ignored.
 
 Enforcement happens on the server:
   * `require_feature(key)` is a FastAPI dependency on the routes (or whole
     routers) that belong to a feature -> 403 {"code": "upgrade_required"}.
-  * The AI layer calls `assert_ai_allowed()`: a request whose user lacks
-    `system.ai` cannot trigger a paid (or owner-subscription) AI call, even
-    if a route forgot its check. Scheduled jobs run without a request and
-    are allowed.
 
 The front-end gets the same keys from GET /auth/me and hides what the user
 cannot use; hiding is a convenience, the server is the gate.
@@ -43,43 +41,24 @@ DEFAULT_LEVEL = "free"
 # API operations; system keys are internal capabilities.
 FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     # --- Areas (pages) ---
-    "area.today": ("owner", "Today: brain dashboard"),
-    "area.signals": ("owner", "Signals from the brain's scans"),
-    "area.check": ("owner", "Check a stock (AI)"),
-    "area.positions": ("owner", "Paper-trading positions and wallet"),
-    "area.performance": ("owner", "Is it working? (brain track record)"),
-    "area.brain": ("owner", "Brain rules, knowledge and learning"),
     "area.holdings": ("free", "My holdings"),
     "area.stock": ("free", "Stock page: price, dividends, events, Signa checks"),
     "area.dividends": ("free", "Dividend calendar and expected income"),
     "area.watchlist": ("free", "Watchlist"),
-    "area.how_it_works": ("owner", "How it works (explains the brain)"),
     "area.settings": ("free", "Settings"),
     "area.home": ("free", "Home: portfolio overview"),
     "area.insights": ("free", "Portfolio insights (allocation, performance)"),
     "area.coming_up": ("free", "Coming up: dividends, earnings and events"),
     "area.profile": ("free", "Profile, preferences and notifications"),
-    "area.integrations": ("owner", "Integrations, AI config and budgets"),
-    "area.logs": ("owner", "Live logs"),
+    "area.admin": ("owner", "Admin: data usage"),
     # --- Actions (buttons / operations) ---
-    "action.scan.trigger": ("owner", "Start a scan"),
-    "action.check.run": ("owner", "Run an AI stock check"),
-    "action.check.compare": ("owner", "Compare 2-3 stocks with AI"),
     "action.holdings.edit": ("free", "Add, edit and remove holdings"),
-    "action.holdings.refresh": ("owner", "Refresh holdings monitor (may use Grok)"),
-    "action.holdings.review": ("owner", "AI review of holdings"),
-    "action.holdings.allocate": ("owner", "Where could new cash go? (AI)"),
     "action.watchlist.edit": ("free", "Add and remove watchlist stocks"),
     "action.accounts.edit": ("free", "Create, edit and delete accounts and people"),
     "action.accounts.type": ("free", "Tag accounts with a tax type (TFSA, RRSP, IRA ...)"),
     "action.transactions.edit": ("free", "Add, edit and delete transactions"),
     "action.alerts.edit": ("free", "Create, edit and delete price alerts"),
     "action.import.csv": ("free", "Import transactions from a CSV file"),
-    "action.positions.manage": ("owner", "Open, edit and close positions"),
-    "action.wallet.manage": ("owner", "Deposit to / withdraw from the paper wallet"),
-    "action.brain.edit": ("owner", "Edit brain rules and knowledge"),
-    "action.learning.manage": ("owner", "Approve / apply learning suggestions"),
-    "action.settings.ai": ("owner", "Change AI config and budgets"),
     # --- Features (behaviour inside an area) ---
     "feature.tax_view": ("premium", "After-tax dividend view"),
     "feature.intraday_chart": ("free", "5-minute intraday chart"),
@@ -91,7 +70,6 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "feature.income_quality": ("premium", "Income quality of option-income / covered-call ETFs"),
     "feature.similar_funds": ("premium", "Similar funds compared (fee, yield, return)"),
     # --- System capabilities ---
-    "system.ai": ("owner", "Trigger AI calls (Grok, Claude, Codex)"),
     "system.unlimited_slots": ("premium", "No limit on followed stocks"),
 }
 
@@ -128,10 +106,6 @@ _features_cache = TTLCache(max_size=1, default_ttl=60)
 _request_level: ContextVar[Optional[str]] = ContextVar("signa_request_level", default=None)
 
 
-class AIAccessDenied(PermissionError):
-    """An AI call was attempted on behalf of a user without system.ai."""
-
-
 def normalize_level(level: object) -> str:
     return level if isinstance(level, str) and level in LEVEL_RANK else DEFAULT_LEVEL
 
@@ -157,7 +131,7 @@ def get_feature_levels() -> dict[str, str]:
         rows = get_client().table("access_features").select("key,min_level").execute().data or []
         for r in rows:
             key, lvl = r.get("key"), r.get("min_level")
-            if isinstance(key, str) and lvl in LEVEL_RANK:
+            if key in levels and lvl in LEVEL_RANK:
                 levels[key] = lvl
     except Exception as e:  # table missing (before 011) or DB down: defaults
         logger.debug(f"access_features unavailable, using defaults: {e}")
@@ -264,24 +238,3 @@ def require_feature(feature: str) -> Callable:
             raise upgrade_required(feature)
     _dep.__name__ = f"require_{feature.replace('.', '_')}"
     return _dep
-
-
-def assert_ai_allowed(what: str = "AI call") -> None:
-    """Hard stop in the AI layer. Outside a request (scheduler) -> allowed."""
-    level = _request_level.get()
-    if level is not None and not can(level, "system.ai"):
-        logger.warning(f"Blocked {what}: requesting user's level '{level}' lacks system.ai")
-        raise AIAccessDenied(f"{what} is not available on this plan")
-
-
-def ai_guarded(what: str) -> Callable:
-    """Decorator for async AI entry points: assert_ai_allowed() first."""
-    import functools
-
-    def wrap(fn: Callable) -> Callable:
-        @functools.wraps(fn)
-        async def inner(*args, **kwargs):
-            assert_ai_allowed(what)
-            return await fn(*args, **kwargs)
-        return inner
-    return wrap

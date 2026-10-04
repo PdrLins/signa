@@ -218,7 +218,7 @@ def price_suggestions(groups: list[dict], quotes: dict[str, dict]) -> list[dict]
 
 
 def _display_names(symbols: list[str]) -> dict[str, str]:
-    """Names Signa already stores (tickers table / holdings), else the curated suggestion names."""
+    """Names Signa already knows (known symbols / holdings), else the curated suggestion names."""
     from app.services import symbol_search
 
     curated = {s: n for group in SUGGESTIONS.values() for s, n in group}

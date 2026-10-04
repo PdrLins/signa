@@ -8,7 +8,6 @@ import os
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 # Set env vars BEFORE importing app
 os.environ["AUTH_ENABLED"] = "true"
@@ -142,71 +141,9 @@ def test_login_returns_session_token(mock_login):
 
 
 def test_protected_route_without_token():
-    """GET /api/v1/signals without token → 401."""
-    with patch("app.db.queries.get_signals", return_value=[]):
-        resp = client.get("/api/v1/signals")
+    """GET /api/v1/holdings without token → 401."""
+    resp = client.get("/api/v1/holdings")
     assert resp.status_code == 401
-
-
-@patch("app.db.queries.get_signals")
-@patch("app.services.price_cache.enrich_signals", side_effect=lambda s: s)
-def test_signals_returns_list(mock_enrich, mock_get):
-    """GET /api/v1/signals → 200 + list (can be empty)."""
-    mock_get.return_value = [SAMPLE_SIGNAL]
-    resp = client.get("/api/v1/signals", headers=_AUTH_HEADERS)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "signals" in data
-    assert isinstance(data["signals"], list)
-    assert data["count"] >= 0
-
-
-@patch("app.db.queries.get_signals")
-@patch("app.services.price_cache.enrich_signals", side_effect=lambda s: s)
-def test_signals_gems_never_404(mock_enrich, mock_get):
-    """GET /api/v1/signals/gems → 200 + list (never 404)."""
-    mock_get.return_value = []
-    resp = client.get("/api/v1/signals/gems", headers=_AUTH_HEADERS)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "signals" in data
-    assert isinstance(data["signals"], list)
-
-
-@patch("app.db.queries.get_signals")
-@patch("app.db.queries.get_scans")
-def test_stats_daily_shape(mock_scans, mock_signals):
-    """GET /api/v1/stats/daily → 200 + all required fields."""
-    mock_signals.return_value = [SAMPLE_SIGNAL]
-    mock_scans.return_value = [SAMPLE_SCAN]
-
-    resp = client.get("/api/v1/stats/daily", headers=_AUTH_HEADERS)
-    assert resp.status_code == 200
-    data = resp.json()
-
-    required_fields = [
-        "gems_today", "gems_yesterday", "win_rate_30d",
-        "tickers_scanned", "next_scan_time",
-        "ai_cost_today", "claude_cost", "grok_cost",
-    ]
-    for field in required_fields:
-        assert field in data, f"Missing field: {field}"
-
-
-@patch("app.db.queries.get_scans")
-def test_scans_today_returns_4(mock_get):
-    """GET /api/v1/scans/today → 200 + list of exactly 4 items."""
-    mock_get.return_value = [SAMPLE_SCAN]
-    resp = client.get("/api/v1/scans/today", headers=_AUTH_HEADERS)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert isinstance(data, list)
-    assert len(data) == 4
-    for item in data:
-        assert "scan_type" in item
-        assert "label" in item
-        assert "scheduled_time" in item
-        assert "status" in item
 
 
 @patch("app.db.queries.remove_from_watchlist")

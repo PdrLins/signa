@@ -1,6 +1,5 @@
-"""/api/v1/holdings — auth, user scoping, upsert merge, patch/delete,
-resolve, review jobs + weekly review-all limit, allocate ideas.
-DB (app.db.queries), yfinance, AI and the monitor are mocked."""
+"""/api/v1/holdings — auth, user scoping, upsert merge, patch/delete, resolve.
+DB (app.db.queries), yfinance and the holding-status refresh are mocked."""
 
 import time
 import uuid
@@ -10,7 +9,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1 import holdings as api
-from app.api.v1 import stock_check as check_api
 from app.core.config import settings
 from app.core.security import create_access_token
 from app.db import queries
@@ -27,7 +25,6 @@ def _auth(uid=U1):
 class FakeDB:
     def __init__(self):
         self.rows: dict[str, dict] = {}
-        self.review_all_at: dict[str, str | None] = {}
 
     def add(self, uid, symbol, **kw):
         hid = str(uuid.uuid4())
@@ -66,12 +63,6 @@ class FakeDB:
         del self.rows[hid]
         return True
 
-    def get_review_all(self, uid):
-        return self.review_all_at.get(uid)
-
-    def set_review_all(self, uid, at):
-        self.review_all_at[uid] = at
-
 
 @pytest.fixture
 def db(monkeypatch):
@@ -80,8 +71,6 @@ def db(monkeypatch):
     monkeypatch.setattr(queries, "upsert_holdings", d.upsert_holdings)
     monkeypatch.setattr(queries, "update_holding", d.update_holding)
     monkeypatch.setattr(queries, "delete_holding", d.delete_holding)
-    monkeypatch.setattr(queries, "get_holdings_review_all_at", d.get_review_all)
-    monkeypatch.setattr(queries, "set_holdings_review_all_at", d.set_review_all)
     monkeypatch.setattr(queries, "get_watchlist", lambda uid: [])
     monkeypatch.setattr(queries, "get_accounts", lambda uid: [])
     monkeypatch.setattr("app.services.price_cache.get_usdcad_rate", lambda: 1.4)
@@ -94,7 +83,7 @@ def db(monkeypatch):
 @pytest.fixture
 def refreshes(monkeypatch):
     calls = []
-    monkeypatch.setattr(api, "_kick_refresh", lambda uid: calls.append(uid) or True)
+    monkeypatch.setattr(api.holding_status, "kick", lambda uid: calls.append(uid) or True)
     return calls
 
 
@@ -102,15 +91,11 @@ def refreshes(monkeypatch):
 def client(monkeypatch, db, refreshes):
     monkeypatch.setattr(auth_mw, "is_token_blacklisted", lambda jti: False)
     monkeypatch.setattr(auth_mw, "insert_audit_log", lambda *a, **k: None)
-    api._reset_state()
-    check_api._reset_state()
     app = FastAPI()
     app.add_middleware(auth_mw.AuthMiddleware)
     app.include_router(api.router, prefix="/api/v1")
     with TestClient(app) as c:
         yield c
-    api._reset_state()
-    check_api._reset_state()
 
 
 # ── auth ──
@@ -121,8 +106,6 @@ def client(monkeypatch, db, refreshes):
     ("post", "/api/v1/holdings/resolve", {"text": "XEQT"}),
     ("patch", f"/api/v1/holdings/{uuid.uuid4()}", {"shares": 1}),
     ("delete", f"/api/v1/holdings/{uuid.uuid4()}", None),
-    ("post", "/api/v1/holdings/review", {"all": True}),
-    ("get", "/api/v1/holdings/allocate-ideas", None),
 ])
 def test_routes_require_auth(client, method, path, body):
     kw = {"json": body} if body is not None else {}
@@ -143,7 +126,7 @@ def test_list_is_user_scoped_with_math(client, db):
     assert body["totals"]["value_cad"] == 4400.0 and body["totals"]["currency"] == "CAD"
     x = next(i for i in body["items"] if i["symbol"] == "XEQT.TO")
     assert x["position"]["unrealized"] == 500.0
-    assert body["review_all"]["allowed"] is True
+    assert body["review_all"]["allowed"] is False and body["review_running"] is False   # AI review: Advisor
 
 
 def test_list_prices_with_live_quote_and_falls_back_to_last_close(client, db):
@@ -272,7 +255,7 @@ def test_resolve_endpoint(client, db, monkeypatch):
              "NVDA": {"symbol": "NVDA", "name": "NVIDIA", "exchange": "NASDAQ", "currency": "USD",
                       "asset_type": "STOCK", "price": 180.0}}
     monkeypatch.setattr(hs, "_lookup_listing", lambda s: table.get(s))
-    monkeypatch.setattr("app.services.stock_check.get_all_tickers", lambda: [])
+    monkeypatch.setattr("app.market.symbols.get_all_tickers", lambda: [])
     r = client.post("/api/v1/holdings/resolve", headers=_auth(), json={"text": "ENS 3 @ 15\nNVDA\nNOPE1"})
     body = r.json()
     assert r.status_code == 200
@@ -285,119 +268,3 @@ def test_resolve_endpoint(client, db, monkeypatch):
 
 def test_resolve_empty_text_400(client):
     assert client.post("/api/v1/holdings/resolve", headers=_auth(), json={"text": "# nothing"}).status_code == 400
-
-
-# ── reviews ──
-
-class FakeReview:
-    def __init__(self, monkeypatch):
-        self.calls = []
-        from app.services import long_term_check
-        monkeypatch.setattr(long_term_check, "run_long_check", self.run)
-
-    async def run(self, resolved, progress=None):
-        self.calls.append(resolved["symbol"])
-        return {"symbol": resolved["symbol"], "verdict": "SOLID", "verdict_source": "scorecard",
-                "scorecard": [{"key": "cost", "rating": "good", "reason": "cheap"}], "red_flags": [],
-                "ai_assessment": None, "checked_at": "2026-09-28T00:00:00+00:00", "asset_type": "ETF"}
-
-
-def _wait(client, job_id, uid=U1, timeout=5.0):
-    end = time.time() + timeout
-    while time.time() < end:
-        body = client.get(f"/api/v1/holdings/review/{job_id}", headers=_auth(uid)).json()
-        if body.get("status") != "running":
-            return body
-        time.sleep(0.02)
-    raise AssertionError("review did not finish")
-
-
-def test_review_selected_stores_summary_and_fills_check_cache(client, db, monkeypatch):
-    fr = FakeReview(monkeypatch)
-    hid = db.add(U1, "XEQT.TO", holding_status={"price": 34.0})
-    r = client.post("/api/v1/holdings/review", headers=_auth(), json={"ids": [hid]})
-    assert r.status_code == 202, r.text
-    done = _wait(client, r.json()["job_id"])
-    assert done["status"] == "done" and done["results"][0]["verdict"] == "SOLID"
-    assert db.rows[hid]["last_review"]["verdict"] == "SOLID" and db.rows[hid]["last_reviewed_at"]
-    assert fr.calls == ["XEQT.TO"]
-    assert check_api._cached_result("XEQT.TO", "long") is not None     # shared with /check?mode=long
-    # a second review reuses the cached long check (no new analysis)
-    r2 = client.post("/api/v1/holdings/review", headers=_auth(), json={"ids": [hid]})
-    _wait(client, r2.json()["job_id"])
-    assert fr.calls == ["XEQT.TO"]
-
-
-def test_review_does_not_consume_check_daily_limit(client, db, monkeypatch):
-    FakeReview(monkeypatch)
-    hid = db.add(U1, "XEQT.TO")
-    before = check_api._daily_count()
-    _wait(client, client.post("/api/v1/holdings/review", headers=_auth(), json={"ids": [hid]}).json()["job_id"])
-    assert check_api._daily_count() == before
-
-
-def test_review_all_weekly_limit(client, db, monkeypatch):
-    FakeReview(monkeypatch)
-    db.add(U1, "XEQT.TO")
-    db.add(U1, "NVDA")
-    r = client.post("/api/v1/holdings/review", headers=_auth(), json={"all": True})
-    assert r.status_code == 202 and r.json()["total"] == 2
-    _wait(client, r.json()["job_id"])
-    assert db.review_all_at[U1]
-    r2 = client.post("/api/v1/holdings/review", headers=_auth(), json={"all": True})
-    assert r2.status_code == 429
-    d = r2.json()["detail"]
-    assert d["code"] == "review_all_limit" and d["next_allowed_at"] and d["days"] == settings.holdings_review_all_days
-    # selected reviews are still allowed
-    assert client.post("/api/v1/holdings/review", headers=_auth(),
-                       json={"ids": [next(iter(db.rows))]}).status_code == 202
-
-
-def test_review_all_refunded_when_nothing_reviewed(client, db, monkeypatch):
-    from app.services import long_term_check
-
-    async def fail(resolved, progress=None):
-        raise RuntimeError("yahoo down")
-    monkeypatch.setattr(long_term_check, "run_long_check", fail)
-    db.add(U1, "XEQT.TO")
-    done = _wait(client, client.post("/api/v1/holdings/review", headers=_auth(), json={"all": True}).json()["job_id"])
-    assert done["results"][0]["error"] == "internal"
-    assert db.review_all_at[U1] is None
-    assert client.post("/api/v1/holdings/review", headers=_auth(), json={"all": True}).status_code == 202
-
-
-def test_review_limits_and_scoping(client, db, monkeypatch):
-    FakeReview(monkeypatch)
-    theirs = db.add(U2, "AAPL")
-    assert client.post("/api/v1/holdings/review", headers=_auth(), json={"ids": [theirs]}).status_code == 404
-    assert client.post("/api/v1/holdings/review", headers=_auth(), json={}).status_code == 400
-    many = [str(uuid.uuid4()) for _ in range(settings.holdings_review_max_ids + 1)]
-    assert client.post("/api/v1/holdings/review", headers=_auth(), json={"ids": many}).status_code == 400
-
-
-def test_review_job_not_visible_to_other_user(client, db, monkeypatch):
-    FakeReview(monkeypatch)
-    hid = db.add(U1, "XEQT.TO")
-    jid = client.post("/api/v1/holdings/review", headers=_auth(), json={"ids": [hid]}).json()["job_id"]
-    _wait(client, jid)
-    assert client.get(f"/api/v1/holdings/review/{jid}", headers=_auth(U2)).status_code == 404
-    assert client.get("/api/v1/holdings/review/current", headers=_auth(U2)).json() == {"job": None}
-    assert client.get("/api/v1/holdings/review/current", headers=_auth()).json()["job"]["job_id"] == jid
-
-
-# ── allocate ──
-
-def test_allocate_endpoint(client, db):
-    db.add(U1, "XEQT.TO", currency="CAD", shares=10,
-           holding_status={"price": 30.0, "drawdown_pct": -8, "pct_vs_sma200": 4, "trend_break": False},
-           last_review={"verdict": "SOLID"})
-    db.add(U1, "RGTI", currency="USD",
-           holding_status={"price": 10.0, "drawdown_pct": -60, "pct_vs_sma200": -30, "trend_break": True},
-           last_review={"verdict": "NOT_A_GOOD_FIT"})
-    db.add(U1, "QQQ", holding_status={"price": 500.0})
-    db.add(U1, "TQQQ", holding_status={"price": 80.0})
-    body = client.get("/api/v1/holdings/allocate-ideas", headers=_auth()).json()
-    assert [i["symbol"] for i in body["ideas"]][0] == "XEQT.TO"
-    assert body["ideas"][-1]["symbol"] == "RGTI"
-    assert "overlap_us_large_tech" in {n["code"] for n in body["notes"]}
-    assert body["caveat"]

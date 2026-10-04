@@ -1,5 +1,4 @@
-"""services/dividends.py — pure computations and the brain's dividend rules,
-plus their wiring into Check a stock (trade + hold) and compare.
+"""services/dividends.py — pure computations and the dividend rules.
 No network: yfinance is never called (conftest patches _fetch_raw)."""
 
 import asyncio
@@ -9,7 +8,6 @@ import pandas as pd
 import pytest
 
 from app.services import dividends as dv
-from app.services import stock_compare as scmp
 
 TODAY = date(2026, 9, 29)
 
@@ -309,10 +307,6 @@ def test_long_recent_cut_plus_payout_over_one_caps_verdict():
                                                 growth_5y_cagr=-0.1, years_without_cut=1.3), "STOCK")
     assert a["item"]["rating"] == "poor" and a["cap"] is True
     assert {"recent_cut", "payout_unsustainable", "cap_verdict"} <= set(codes(a))
-    assert dv.apply_verdict_cap("SOLID", True) == ("REASONABLE_WITH_CAVEATS", {
-        "code": "dividend_cut_unsustainable", "from": "SOLID", "to": "REASONABLE_WITH_CAVEATS"})
-    assert dv.apply_verdict_cap("NOT_A_GOOD_FIT", True) == ("NOT_A_GOOD_FIT", None)
-    assert dv.apply_verdict_cap("SOLID", False) == ("SOLID", None)
 
 
 def test_long_payout_over_one_alone_is_poor_but_no_cap():
@@ -352,97 +346,3 @@ def test_ai_summary_is_short_and_factual():
     assert s.startswith("Dividend: yield 3.00%") and "(estimated)" in s and "recent cut: no" in s
     assert len(s) < 300
     assert dv.ai_summary({"pays_dividend": False}) == "No regular dividend."
-
-
-# ============================================================
-# Wiring: long check (verdict cap), prompts, compare
-# ============================================================
-
-def test_long_check_dividend_cap_overrides_ai_solid(monkeypatch):
-    from tests.test_long_term_check import AI_OK, STOCK_PROFILE, Harness
-
-    cut_hist = series(date(2021, 1, 10), 14, 0.52) + series(date(2024, 7, 10), 6, 0.25)
-    info = {**STOCK_PROFILE["info"], "payoutRatio": 1.3, "dividendRate": 1.0, "regularMarketPrice": 45.0}
-    monkeypatch.setattr(dv, "_fetch_raw", lambda symbol, info=None: {"info": info, "dividends": cut_hist,
-                                                                      "calendar": {}})
-    monkeypatch.setattr(dv, "today_et", lambda: date(2025, 12, 1))
-    h = Harness(symbol="ACME", profile={**STOCK_PROFILE, "info": info}, ai_result=dict(AI_OK))
-    h.sent.return_value = {"confidence": 0}
-    r = h.run()
-    item = next(s for s in r["scorecard"] if s["key"] == "dividend")
-    assert item["rating"] == "poor"
-    assert r["verdict"] == "REASONABLE_WITH_CAVEATS" and r["verdict_source"] == "ai"
-    assert r["verdict_adjustments"][0]["code"] == "dividend_cut_unsustainable"
-    assert any(n["code"] == "dividend_cap" for n in r["notes"])
-    assert r["dividend"]["recent_cut"] is True and r["dividend_rules"]
-    prompt = h.ai.call_args.args[1]
-    assert "## Dividend" in prompt and "recent cut: yes" in prompt
-
-
-def test_long_check_non_payer_unchanged():
-    from tests.test_long_term_check import AI_OK, Harness
-
-    r = Harness(ai_result=dict(AI_OK)).run()
-    assert r["verdict"] == "SOLID" and r["verdict_adjustments"] == []
-    assert r["dividend"]["pays_dividend"] is False
-
-
-def test_format_fundamentals_includes_dividend_summary_only_when_given():
-    from app.ai.prompts import format_fundamentals
-
-    assert "Dividend:" not in format_fundamentals({"dividend_yield": 0.02})
-    assert "- Dividend: yield" in format_fundamentals({"_dividend_summary": "Dividend: yield 2.00%."})
-
-
-def test_compare_dividend_rows():
-    res = [
-        {"symbol": "MSFT", "verdict": "SOLID", "dividend": {"pays_dividend": True, "yield": 0.0077,
-                                                           "next_ex_date": "2026-11-18", "next_estimated": False,
-                                                           "growth_5y_cagr": 0.10}},
-        {"symbol": "T", "verdict": "SOLID", "dividend": {"pays_dividend": True, "yield": 0.045,
-                                                        "next_ex_date": "2026-10-08", "next_estimated": True,
-                                                        "growth_5y_cagr": -0.11, "recent_cut": False}},
-        {"symbol": "TSLA", "verdict": "SOLID", "dividend": {"pays_dividend": False}},
-    ]
-    for mode in ("long", "short"):
-        cmp = scmp.build_comparison(mode, res)
-        m = {x["key"]: x for x in cmp["metrics"] if x["group"] == "dividend"}
-        assert set(m) == {"dividend_yield", "next_ex_date", "dividend_growth_5y"}
-        assert m["dividend_yield"]["values"] == {"MSFT": 0.77, "T": 4.5, "TSLA": None}
-        assert m["dividend_yield"]["best"] is None                 # informational
-        assert m["dividend_growth_5y"]["best"] == ["MSFT"]
-        assert m["next_ex_date"]["format"] == "date" and m["next_ex_date"]["detail"]["T"]["estimated"] is True
-
-
-# ============================================================
-# Wiring: trade-mode check
-# ============================================================
-
-def test_short_check_reports_ex_date_in_window_without_changing_verdict(monkeypatch):
-    from tests.test_stock_check_service import Harness
-
-    base = Harness().run()
-    soon = dv.today_et() + timedelta(days=14)
-    prof = {**dv.empty_profile("ACME"), "pays_dividend": True, "yield": 0.02, "frequency": "quarterly",
-            "next_ex_date": soon.isoformat(), "next_amount": 0.5, "next_estimated": True}
-
-    async def fake_profile(symbol, info=None, price=None):
-        return prof
-
-    monkeypatch.setattr(dv, "get_dividend_profile", fake_profile)
-    h = Harness()
-    r = h.run()
-    assert r["verdict"] == base["verdict"]
-    assert r["dividend"]["pays_dividend"] is True
-    assert [x["code"] for x in r["dividend_rules"]][0] == "ex_dividend_in_window"
-    assert any(n["code"] == "ex_dividend_in_window" for n in r["notes"])
-    assert r["levels"]["dividend"]["amount"] == 0.5 and r["levels"]["dividend"]["pct"] == pytest.approx(0.5, abs=0.05)
-    fund_arg = h.synth.call_args_list[0].args[2]
-    assert fund_arg["_dividend_summary"].startswith("Dividend: yield 2.00%")
-
-
-def test_short_check_non_payer_has_no_dividend_rules():
-    from tests.test_stock_check_service import Harness
-
-    r = Harness().run()
-    assert r["dividend"]["pays_dividend"] is False and r["dividend_rules"] == [] and r["levels"]["dividend"] is None

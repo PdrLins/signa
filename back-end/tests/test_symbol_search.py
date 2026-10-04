@@ -281,7 +281,6 @@ def test_preferred_shares_rank_after_common(env):
 
 def test_known_names_seed_local_candidates(monkeypatch):
     from app.db import queries
-    monkeypatch.setattr(queries, "get_active_tickers", lambda: [{"symbol": "TSLA", "name": None, "exchange": "NASDAQ"}])
     monkeypatch.setattr(queries, "get_all_holdings", lambda: [{"symbol": "XEQT.TO", "name": "iShares Core Equity", "asset_type": "ETF"}])
     monkeypatch.setattr(queries, "get_all_watchlist_symbols", lambda: {"hood"})
     cands = {c["symbol"]: c for c in ss._load_local()}

@@ -99,7 +99,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         _touch_last_seen(payload.get("sub"))
 
-        # The AI layer reads this to refuse calls for users without system.ai.
+        # The current request's level (access.current_request_level) for code without the request.
         level_token = set_request_level(level)
         try:
             return await call_next(request)

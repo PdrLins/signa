@@ -61,7 +61,7 @@ _QUOTE_TYPES = {"EQUITY": "stock", "ETF": "etf", "CRYPTOCURRENCY": "crypto"}
 _SUFFIX_LABELS = ((".TO", "TSX"), (".V", "TSXV"), (".NE", "NEO"), ("-USD", "Crypto"))
 _CAN_LABELS = {"TSX", "TSXV", "NEO"}
 
-# Common crypto names -> Yahoo symbol (names are not in the tickers table).
+# Common crypto names -> Yahoo symbol (the known-symbol list has no names).
 CRYPTO_ALIASES = {
     "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum", "SOL-USD": "Solana", "BNB-USD": "BNB",
     "XRP-USD": "XRP", "ADA-USD": "Cardano", "AVAX-USD": "Avalanche", "DOT-USD": "Polkadot",
@@ -69,8 +69,7 @@ CRYPTO_ALIASES = {
     "DOGE-USD": "Dogecoin", "SHIB-USD": "Shiba Inu", "LTC-USD": "Litecoin", "NEAR-USD": "NEAR Protocol",
 }
 
-# Well-known names for symbols the tickers table stores without one (most
-# universe rows have no name). Lets typos resolve locally ("telas" -> Tesla)
+# Well-known names for symbols in the known-symbol list (it has no names). Lets typos resolve locally ("telas" -> Tesla)
 # and seeds the corrected Yahoo re-query.
 KNOWN_NAMES = {
     # US mega / large caps
@@ -192,7 +191,10 @@ def _load_local() -> list[dict]:
 
     for sym, name in CRYPTO_ALIASES.items():
         add(sym, name, None, "crypto")
-    for loader, label in ((queries.get_active_tickers, "tickers"), (queries.get_all_holdings, "holdings")):
+    from app.market.universe import get_all_tickers, get_exchange
+    for sym in get_all_tickers():   # Signa's known symbols (static list)
+        add(sym, None, get_exchange(sym))
+    for loader, label in ((queries.get_all_holdings, "holdings"),):
         try:
             for r in loader() or []:
                 add(r.get("symbol"), r.get("name"), r.get("exchange"), r.get("asset_type"))

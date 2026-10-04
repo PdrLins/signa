@@ -1,45 +1,34 @@
 # Signa
 
-AI-powered investment signal engine for Canadian self-directed investors.
+Portfolio tracker for self-directed investors (Canada and US): holdings across
+accounts and people, live prices, dividends and income, allocation, what's
+coming up, price alerts and Telegram notifications. Free and Premium plans.
+Clients: the iOS app (`signa-ios`) and the web app (`front-end/`).
 
-Scans 188+ stocks and crypto across TSX, NYSE, NASDAQ, and major crypto markets — four times every trading day. Combines technical analysis, fundamental data, macro indicators, and AI sentiment to produce BUY/HOLD/SELL/AVOID signals with confidence scores.
-
-## Features
-
-- **4 daily scans** — Pre-market (6 AM), Market open (10 AM), Pre-close (3 PM), After-close (4:30 PM ET)
-- **Two-pass scanning** — Pre-scores all candidates with technicals first, then sends only the top 15 to AI (saves ~77% on AI costs)
-- **Two-bucket strategy** — Safe Income (dividends, TFSA) and High Risk (momentum, RRSP)
-- **GEM alerts** — Highest-conviction signals sent instantly via Telegram
-- **Market regime detection** — Adapts based on VIX: TRENDING / VOLATILE / CRISIS
-- **Kelly position sizing** — Recommends position sizes based on score and risk/reward
-- **6 visual themes** — Light + dark modes
-- **Bilingual** — English + Brazilian Portuguese
-- **Telegram bot** — Alerts, OTP login, scan digests, position monitoring
-- **Brain Editor** — Protected rule editor with separate Telegram 2FA
-- **On-demand scans** — Scan Now button with real-time progress bar
+The AI signal engine ("the brain": scans, signals, AI checks, paper trading)
+is a separate product, **Signa Advisor**, in the `signa-advisor` repository.
 
 ## Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js 14, TypeScript, Tailwind CSS, Zustand, React Query |
-| Backend | Python, FastAPI, APScheduler |
+| Back-end | Python 3.12, FastAPI, APScheduler (in-process) |
 | Database | Supabase (PostgreSQL) |
-| AI | Claude (Anthropic), Gemini (Google), Grok (xAI) — configurable priority |
-| Data | yfinance, FRED API, pandas-ta |
-| Alerts | Telegram Bot API |
+| Market data | yfinance |
+| Notifications | Telegram Bot API, email (Resend / SMTP) |
+| Web | Next.js 14, TypeScript, Tailwind CSS, React Query |
 
 ## Quick Start
 
 ```bash
-# Backend
+# Back-end
 cd back-end
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env  # Fill in API keys
+cp .env.example .env  # fill in Supabase, JWT secret, Telegram bot
 python -m uvicorn main:app --reload --port 8000
 
-# Frontend
+# Web
 cd front-end
 npm install
 npm run dev
@@ -47,12 +36,12 @@ npm run dev
 
 ## Environment Variables
 
-See `back-end/.env.example`. Required:
-- `JWT_SECRET_KEY` — Auth signing
-- `SUPABASE_URL` + `SUPABASE_KEY` — Database
-- `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` — Alerts + OTP
-- At least one AI provider: `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `XAI_API_KEY`
+See `back-end/.env.example`. Required: `JWT_SECRET_KEY`, `SUPABASE_URL`,
+`SUPABASE_KEY` (service_role). `TELEGRAM_BOT_TOKEN` for sign-in codes and
+notifications.
 
-## Status
+## Versions
 
-In active development.
+Every commit bumps the back-end (`back-end/VERSION`, `GET /api/v1/version`)
+and web (`front-end/package.json`) versions via `.githooks/pre-commit`
+(`git config core.hooksPath .githooks` in a new clone).

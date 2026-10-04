@@ -1,6 +1,4 @@
-"""Access levels: feature catalog, slots, route gating and the AI hard stop."""
-
-import asyncio
+"""Access levels: feature catalog, slots and route gating."""
 
 import pytest
 from fastapi import FastAPI
@@ -41,16 +39,42 @@ def test_unknown_feature_requires_owner():
     assert access.can("owner", "area.does_not_exist")
 
 
-def test_free_gets_tracker_not_brain():
+def test_free_gets_tracker_not_premium():
     feats = set(access.allowed_features("free"))
     assert {"area.holdings", "action.holdings.edit", "area.watchlist"} <= feats
-    assert not feats & {"area.brain", "area.signals", "action.check.run", "system.ai"}
+    assert not feats & {"feature.full_history", "feature.allocation_plan", "area.admin"}
     assert set(access.allowed_features("owner")) == set(DEFAULTS)
 
 
+def test_catalog_has_no_advisor_features():
+    brain = ("area.brain", "area.signals", "area.today", "area.check", "area.positions", "area.performance",
+             "area.logs", "area.integrations", "action.check.run", "action.scan.trigger", "system.ai")
+    assert not set(brain) & set(DEFAULTS)
+
+
 def test_db_override_moves_a_feature(monkeypatch):
-    monkeypatch.setattr(access, "get_feature_levels", lambda: {**DEFAULTS, "area.check": "premium"})
-    assert access.can("premium", "area.check") and not access.can("free", "area.check")
+    monkeypatch.setattr(access, "get_feature_levels", lambda: {**DEFAULTS, "feature.similar_funds": "free"})
+    assert access.can("free", "feature.similar_funds")
+
+
+def test_db_rows_for_unknown_keys_are_ignored(monkeypatch):
+    class _Q:
+        def table(self, _name):
+            return self
+
+        def select(self, _cols):
+            return self
+
+        def execute(self):
+            rows = [{"key": "area.brain", "min_level": "free"}, {"key": "feature.tax_view", "min_level": "free"}]
+            return type("R", (), {"data": rows})()
+
+    monkeypatch.undo()   # the real get_feature_levels (the autouse fixture patches it)
+    access.clear_access_cache()
+    monkeypatch.setattr("app.db.supabase.get_client", lambda: _Q())
+    levels = access.get_feature_levels()
+    access.clear_access_cache()
+    assert "area.brain" not in levels and levels["feature.tax_view"] == "free"
 
 
 def test_slot_limits():
@@ -127,12 +151,12 @@ def _client(monkeypatch, *routers):
 
 
 def test_free_user_gets_403_upgrade_required(monkeypatch):
-    from app.api.v1 import stock_check
+    from app.api.v1 import admin_usage
     _as(monkeypatch, "free")
-    r = _client(monkeypatch, stock_check.router).post("/api/v1/check", json={"ticker": "MSFT"})
+    r = _client(monkeypatch, admin_usage.router).get("/api/v1/admin/usage")
     assert r.status_code == 403
     assert r.json()["detail"]["code"] == "upgrade_required"
-    assert r.json()["detail"]["feature"] in ("area.check", "action.check.run")
+    assert r.json()["detail"]["feature"] == "area.admin"
 
 
 def test_me_reports_level_features_and_slots(monkeypatch):
@@ -142,9 +166,9 @@ def test_me_reports_level_features_and_slots(monkeypatch):
     monkeypatch.setattr(slots, "followed_symbols", lambda _uid: {"MSFT", "ENB.TO"})
     body = _client(monkeypatch, auth.router).get("/api/v1/auth/me").json()
     assert body["access_level"] == "free"
-    assert "area.holdings" in body["features"] and "area.brain" not in body["features"]
-    assert {"key": "area.brain", "min_level": "owner"}.items() <= next(
-        c for c in body["catalog"] if c["key"] == "area.brain").items()
+    assert "area.holdings" in body["features"] and "area.admin" not in body["features"]
+    assert {"key": "area.admin", "min_level": "owner"}.items() <= next(
+        c for c in body["catalog"] if c["key"] == "area.admin").items()
     assert body["slots"] == {"used": 2, "limit": 10, "remaining": 8}
 
 
@@ -194,65 +218,19 @@ def test_every_route_is_gated_or_explicitly_free():
     assert not missing, f"routes without require_feature: {missing}"
 
 
-# ---------------------------------------------------------------- AI hard stop
-
-def test_ai_guard_blocks_free_requests_only():
-    @access.ai_guarded("test call")
-    async def call():
-        return "ran"
-
-    assert asyncio.run(call()) == "ran"  # no request (scheduler): allowed
-    tok = access.set_request_level("free")
-    try:
-        with pytest.raises(access.AIAccessDenied):
-            asyncio.run(call())
-    finally:
-        access.reset_request_level(tok)
-    tok = access.set_request_level("owner")
-    try:
-        assert asyncio.run(call()) == "ran"
-    finally:
-        access.reset_request_level(tok)
-
-
-def test_holdings_monitor_skips_grok_for_free(monkeypatch):
-    from app.services import holdings_monitor as hm
-    called = []
-
-    async def fake_flags(*a, **k):
-        called.append(1)
-        return [], {}
-
-    async def no_earnings(*a, **k):
-        return None
-
-    monkeypatch.setattr(hm, "red_flag_check", fake_flags)
-    monkeypatch.setattr(hm, "earnings_info", no_earnings)
-    monkeypatch.setattr(hm, "fetch_closes", lambda syms: {})
-    h = {"id": "h1", "user_id": "u", "symbol": "MSFT"}
-    updates, _ = asyncio.run(hm.monitor_holdings([h], ai_allowed=False))
-    assert not called and updates[0]["holding_status"]["sentiment"] == {"skipped": "plan"}
-    asyncio.run(hm.monitor_holdings([h], ai_allowed=True))
-    assert called
-
-
-def test_chart_hides_signal_markers_from_free(monkeypatch):
+def test_chart_has_no_signal_markers(monkeypatch):
     import pandas as pd
 
     from app.api.v1 import tickers
-    from app.db import queries
 
     idx = pd.date_range("2026-09-01", periods=3, freq="D")
     df = pd.DataFrame({"Open": [1, 2, 3], "High": [1, 2, 3], "Low": [1, 2, 3], "Close": [1, 2, 3],
                        "Volume": [10, 10, 10]}, index=idx)
     monkeypatch.setattr("yfinance.Ticker", lambda _t: type("T", (), {"history": lambda self, **k: df})())
-    monkeypatch.setattr(queries, "get_signals_by_ticker",
-                        lambda *a, **k: [{"created_at": "2026-09-02", "action": "BUY", "score": 80}])
-    for level, expected in (("free", 0), ("owner", 1)):
+    for level in ("free", "owner"):
         _as(monkeypatch, level)
-        tickers._chart_cache.clear() if hasattr(tickers, "_chart_cache") else None
         body = _client(monkeypatch, tickers.router).get("/api/v1/tickers/MSFT/chart").json()
-        assert len(body["signal_markers"]) == expected, (level, body)
+        assert body["signal_markers"] == [] and body["count"] == 3
 
 
 def test_view_as_only_for_owner_with_dev_tools(monkeypatch):
@@ -278,7 +256,7 @@ def test_me_reports_view_as(monkeypatch):
     c = _client(monkeypatch, auth.router)
     body = c.get("/api/v1/auth/me", headers={"X-View-As": "free"}).json()
     assert body["access_level"] == "free" and body["real_access_level"] == "owner" and body["dev_tools"] is True
-    assert "area.brain" not in body["features"]
+    assert "area.admin" not in body["features"]
     _as(monkeypatch, "free")
     body = c.get("/api/v1/auth/me", headers={"X-View-As": "owner"}).json()
     assert body["access_level"] == "free" and body["dev_tools"] is False

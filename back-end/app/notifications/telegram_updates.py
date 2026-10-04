@@ -3,7 +3,6 @@
 process_update(update) handles:
   /start 2fa_<code>   a user setting up two-step sign-in (app/services/two_factor.py)
   /start <code>       a user connecting a notification chat (telegram_notify)
-  /<command>          the owner's bot commands (owner chat only)
 Everything else is ignored.
 
 Polling (settings.telegram_polling): the webhook needs a public HTTPS
@@ -51,11 +50,8 @@ async def _handle_2fa_start(start_code: str, chat: dict, sender: dict) -> bool:
 
 async def process_update(data: dict[str, Any]) -> None:
     """Handle one Telegram update. Never raises."""
-    from app.notifications.telegram_bot import handle_command, send_message
-
     try:
         message = data.get("message") or {}
-        chat_id = (message.get("chat") or {}).get("id")
         text = message.get("text") or ""
         if not isinstance(text, str):
             return
@@ -67,22 +63,7 @@ async def process_update(data: dict[str, Any]) -> None:
                 return
             # a user connecting their notification chat (telegram_notify)
             from app.services.telegram_notify import handle_start
-            if await handle_start(code, message.get("chat") or {}, message.get("from") or {}):
-                return
-
-        # Only the bot owner may run commands
-        if str(chat_id) != settings.telegram_chat_id:
-            return
-        if text.startswith("/"):
-            parts = text.split(maxsplit=1)
-            command = parts[0].lstrip("/").split("@")[0]
-            args = parts[1] if len(parts) > 1 else ""
-            from app.db import queries as db_queries
-            tg_user = db_queries.get_user_by_telegram_chat_id(str(chat_id))
-            user_id = tg_user["id"] if tg_user else ""
-            response_text = await handle_command(command, args, user_id=user_id)
-            if chat_id and response_text:
-                await send_message(str(chat_id), response_text)
+            await handle_start(code, message.get("chat") or {}, message.get("from") or {})
     except Exception:
         logger.exception("Telegram update error")
 

@@ -12,7 +12,6 @@ Uses in-memory tracking with bounded size and threading lock.
 For multi-worker production, replace with Redis TTL keys.
 """
 
-import re
 import threading
 import time
 from collections import OrderedDict
@@ -56,13 +55,8 @@ _AUTH_COUNT_ALL_PATHS = {
 # GET /auth/referral/{code}
 _LOOKUP_PREFIX = "/api/v1/auth/referral/"
 
-_STRICT_PATHS = {
-    "/api/v1/scans/trigger",
-    "/api/v1/learning/analyze",
-    "/api/v1/learning/outcomes",
-    "/api/v1/check",            # POST: starts a paid on-demand stock check
-    "/api/v1/check/compare",    # POST: starts 2-3 on-demand stock checks
-}
+# Expensive operations (none today; the brain's scans and AI checks moved to Signa Advisor)
+_STRICT_PATHS: set[str] = set()
 
 # Paths exempt from rate limiting
 _EXEMPT_PATHS = {
@@ -74,13 +68,6 @@ _EXEMPT_PATHS = {
     "/",
 }
 
-# Scan progress polling (GET every 2-3s) — exempt, but ONLY this exact route.
-# A substring check ("/progress" in path) let any path dodge rate limiting.
-_PROGRESS_ROUTE = re.compile(r"^/api/v1/scans/[A-Za-z0-9_-]{1,64}/progress$")
-# Stock-check job polling (GET every 2s) — same treatment, exact route only.
-_CHECK_JOB_ROUTE = re.compile(r"^/api/v1/check/(?:compare/)?[a-f0-9]{32}$")
-# My-holdings review job polling (GET every 2s) — exact route only.
-_HOLDINGS_REVIEW_JOB_ROUTE = re.compile(r"^/api/v1/holdings/review/(?:[a-f0-9]{32}|current)$")
 
 # ── Thread-safe storage ──
 _lock = threading.Lock()
@@ -122,14 +109,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # Skip exempt paths (includes scan progress polling)
-        if (
-            path in _EXEMPT_PATHS
-            or path.startswith("/docs")
-            or path.startswith("/redoc")
-            or (request.method == "GET" and (_PROGRESS_ROUTE.match(path) or _CHECK_JOB_ROUTE.match(path)
-                                               or _HOLDINGS_REVIEW_JOB_ROUTE.match(path)))
-        ):
+        # Skip exempt paths
+        if path in _EXEMPT_PATHS or path.startswith("/docs") or path.startswith("/redoc"):
             return await call_next(request)
 
         ip = get_client_ip(request)

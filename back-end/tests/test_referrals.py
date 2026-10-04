@@ -283,7 +283,7 @@ def _ref(rdb):
 def test_reward_on_first_holding(monkeypatch, invited):
     from app.api.v1 import holdings
     FakePortfolioDB(monkeypatch)
-    monkeypatch.setattr(holdings, "_kick_refresh", lambda uid: False)
+    monkeypatch.setattr(holdings.holding_status, "kick", lambda uid: False)
     sent = []
     monkeypatch.setattr(referrals, "notify_referrer", lambda rid: _record(sent, rid))
     assert referrals.rewarded_count(rf.REFERRER_ID) == 0       # cached...

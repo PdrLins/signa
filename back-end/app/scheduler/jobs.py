@@ -1,41 +1,7 @@
-"""Scheduled scan jobs — 4 daily scans on market days + maintenance."""
+"""Scheduled jobs: quotes, portfolio snapshots, insights history,
+Telegram notifications and maintenance. No AI."""
 
 from loguru import logger
-
-
-async def pre_market_scan():
-    """6:00 AM ET — Pre-market scan."""
-    logger.info("⏰ Pre-market scan triggered (6:00 AM ET)")
-    from app.services.scan_service import run_scan
-    await run_scan("PRE_MARKET")
-
-
-async def morning_scan():
-    """10:00 AM ET — Morning confirmation."""
-    logger.info("⏰ Morning scan triggered (10:00 AM ET)")
-    from app.services.scan_service import run_scan
-    await run_scan("MORNING")
-
-
-async def pre_close_scan():
-    """3:00 PM ET — Pre-close check."""
-    logger.info("⏰ Pre-close scan triggered (3:00 PM ET)")
-    from app.services.scan_service import run_scan
-    await run_scan("PRE_CLOSE")
-
-
-async def midday_scan():
-    """12:00 PM ET — Midday scan."""
-    logger.info("Midday scan triggered (12:00 PM ET)")
-    from app.services.scan_service import run_scan
-    await run_scan("MIDDAY")
-
-
-async def after_close_scan():
-    """4:30 PM ET — After-close full scan."""
-    logger.info("⏰ After-close scan triggered (4:30 PM ET)")
-    from app.services.scan_service import run_scan
-    await run_scan("AFTER_CLOSE")
 
 
 async def cleanup_expired_tokens():
@@ -59,15 +25,8 @@ async def cleanup_expired_tokens():
         otp_expired = db.table("otp_codes").delete().lt("expires_at", now).execute()
         otp_count = (len(otp_used.data) if otp_used.data else 0) + (len(otp_expired.data) if otp_expired.data else 0)
 
-        # Delete expired brain sessions
-        bs_result = db.table("brain_sessions").delete().lt("expires_at", now).execute()
-        bs_count = len(bs_result.data) if bs_result.data else 0
-
-        if bl_count or otp_count or bs_count:
-            logger.info(
-                f"DB cleanup: {bl_count} expired tokens, "
-                f"{otp_count} old OTPs, {bs_count} brain sessions removed"
-            )
+        if bl_count or otp_count:
+            logger.info(f"DB cleanup: {bl_count} expired tokens, {otp_count} old OTPs removed")
         # Purge expired entries from in-memory caches
         from app.core.cache import blacklist_cache, stats_cache, price_cache
         blacklist_cache.cleanup()
@@ -78,163 +37,19 @@ async def cleanup_expired_tokens():
         logger.warning(f"DB cleanup failed: {e}")
 
 
-async def virtual_portfolio_snapshot():
-    """5:00 PM ET — Daily snapshot of virtual portfolio for equity curve."""
-    import asyncio
-    from app.services.virtual_portfolio import snapshot_virtual_portfolio
-
-    try:
-        result = await asyncio.to_thread(snapshot_virtual_portfolio)
-        logger.info(f"📊 Virtual portfolio snapshot: brain_cum={result.get('brain_cumulative_pnl', 0):+.1f}%")
-    except Exception as e:
-        logger.warning(f"Virtual portfolio snapshot failed: {e}")
-
-
-async def catch_up_missed_scans():
-    """Run on startup -- check which scheduled scans were missed today and run them."""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    et = ZoneInfo("America/New_York")
-    now_et = datetime.now(et)
-
-    # Only on weekdays
-    if now_et.weekday() >= 5:
-        return
-
-    from app.core.scan_schedule import SCAN_SCHEDULE
-    from app.db import queries
-
-    # Get today's completed scans (exclude manual)
-    today_start = now_et.replace(hour=0, minute=0, second=0, microsecond=0)
-    recent_scans = queries.get_scans(limit=20)
-    completed_types = set()
-    for s in recent_scans:
-        started = s.get("started_at", "")
-        if started and started >= today_start.isoformat():
-            if s.get("triggered_by", "scheduler") != "manual" and s.get("status") == "COMPLETE":
-                completed_types.add(s.get("scan_type"))
-
-    # Find missed scans (scheduled time has passed but no completed scan)
-    missed = []
-    for slot in SCAN_SCHEDULE:
-        scheduled_time = now_et.replace(hour=slot.hour, minute=slot.minute, second=0, microsecond=0)
-        if now_et > scheduled_time and slot.scan_type not in completed_types:
-            missed.append(slot.scan_type)
-
-    if not missed:
-        logger.info("Startup catch-up: no missed scans")
-        return
-
-    logger.info(f"Startup catch-up: running {len(missed)} missed scan(s): {missed}")
-    from app.services.scan_service import run_scan
-    for scan_type in missed:
-        try:
-            logger.info(f"Catch-up: running missed {scan_type} scan")
-            await run_scan(scan_type)
-        except Exception as e:
-            logger.error(f"Catch-up scan {scan_type} failed: {e}")
-
-
-async def candidate_outcome_tracking():
-    """5:15 PM ET — seed + fill counterfactual candidate outcomes.
-
-    Runs after the AFTER_CLOSE scan (so today's signals get seeded) and
-    before the 5:30 PM daily learning loop (which reads the filled rows).
-    Seeds one candidate_outcomes row per new signal, then fills every
-    5/10/20 trading-day horizon that has elapsed with forward returns vs
-    SPY. Idempotent; see app/services/decision_outcomes.py.
-    """
-    import asyncio
-    from app.core.config import settings
-
-    if not settings.outcomes_enabled:
-        return
-    try:
-        from app.services.decision_outcomes import run_outcome_tracking
-        result = await asyncio.to_thread(run_outcome_tracking)
-        logger.info(f"Candidate outcomes: {result}")
-    except Exception as e:
-        logger.error(f"Candidate outcome tracking failed: {e}")
-
-
-async def daily_learning_loop():
-    """5:30 PM ET — Autonomous Daily Learning Loop.
-
-    Runs after the AFTER_CLOSE scan (16:30 ET) and virtual_portfolio_snapshot
-    (17:00 ET) have completed for the day. Produces a daily MD report at
-    docs/daily-reports/YYYY-MM-DD.md, a Telegram digest (heartbeat — fires
-    every market day including zero-finding days), brain_suggestions
-    INVESTIGATE rows for actionable findings, and auto-creates / auto-
-    graduates / auto-rejects signal_thinking hypotheses based on
-    observed cohort drift and explicit pattern matchers.
-
-    See `app/services/daily_learning/` for the full design.
-    """
-    logger.info("⏰ Daily Learning Loop triggered (5:30 PM ET)")
-    try:
-        from app.services.daily_learning import run_daily_learning
-        result = await run_daily_learning()
-        logger.info(
-            f"📋 Daily Learning complete: {result.get('status')} "
-            f"findings={result.get('findings_count', 0)} "
-            f"created={result.get('hypotheses_created', 0)} "
-            f"graduated={result.get('hypotheses_graduated', 0)}"
-        )
-    except Exception as e:
-        logger.error(f"Daily Learning Loop failed: {e}")
-
-
-async def brain_watchdog():
-    """Every 15 min during market hours -- monitor open brain positions.
-
-    When concerned about any position, schedules a follow-up check in 5 min
-    for faster sentiment confirmation.
-    """
-    from app.services.watchdog_service import run_watchdog
-
-    try:
-        result = await run_watchdog()
-        if result.get("concerned"):
-            logger.info(f"Watchdog: {result}")
-            try:
-                from app.scheduler.runner import get_scheduler
-                from datetime import datetime, timedelta, timezone as tz
-                from apscheduler.triggers.date import DateTrigger
-                sched = get_scheduler()
-                if sched and sched.running:
-                    run_at = datetime.now(tz.utc) + timedelta(minutes=5)
-                    sched.add_job(
-                        brain_watchdog,
-                        DateTrigger(run_date=run_at),
-                        id="watchdog_followup",
-                        name="Watchdog follow-up (5 min, one-shot)",
-                        replace_existing=True,
-                    )
-                    logger.info("Watchdog: scheduled 5-min follow-up due to concerned positions")
-            except Exception as e:
-                logger.debug(f"Watchdog follow-up scheduling failed: {e}")
-    except Exception as e:
-        logger.error(f"Brain watchdog failed: {e}")
-
-
-async def holdings_monitor():
-    """5:45 PM ET weekdays — watch the owner's REAL long-term holdings.
-
-    Trend / drawdown / earnings / cited red flags (stocks only, free AI
-    path, <= 1 AI call per holding per day) / concentration. Telegram only
-    on state changes. See app/services/holdings_monitor.py.
-    """
+async def holding_status_refresh():
+    """17:45 ET weekdays — daily price snapshot on every holding (price
+    fallback and YTD base; app/services/holding_status.py). No AI."""
     from app.core.config import settings
 
     if not settings.holdings_monitor_enabled:
         return
     try:
-        from app.services.holdings_monitor import run_holdings_monitor
-        result = await run_holdings_monitor()
-        logger.info(f"Holdings monitor: {result}")
+        from app.services.holding_status import refresh
+        result = await refresh()
+        logger.info(f"Holding status: {result}")
     except Exception as e:
-        logger.error(f"Holdings monitor failed: {e}")
+        logger.error(f"Holding status refresh failed: {e}")
 
 
 async def quotes_refresh(force: bool = False):

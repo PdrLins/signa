@@ -161,21 +161,6 @@ def _jwt_decode(token: str) -> dict:
     return pyjwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
 
 
-def create_brain_token(user_id: str, jti: str) -> str:
-    """Create a brain editor JWT signed with the separate brain secret."""
-    import jwt as pyjwt
-    now = datetime.now(timezone.utc)
-    expires_delta = timedelta(minutes=settings.brain_token_expire_minutes)
-    payload = {
-        "sub": user_id,
-        "type": "brain_editor",
-        "iat": now,
-        "exp": now + expires_delta,
-        "jti": jti,
-    }
-    return pyjwt.encode(payload, settings.brain_token_secret, algorithm=settings.jwt_algorithm)
-
-
 def supabase_key_role(key: str) -> str | None:
     """Return the `role` claim of a Supabase API key JWT, or None.
 

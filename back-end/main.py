@@ -1,9 +1,8 @@
-"""Signa Backend — FastAPI application entry point.
+"""Signa back-end (portfolio tracker, Free + Premium) — FastAPI entry point.
 
 Run with: uvicorn main:app --reload --port 8000
 """
 
-import asyncio
 import hmac
 from contextlib import asynccontextmanager
 
@@ -12,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from app.api.v1 import auth, brain, health, holdings, insights, learning, logs, portfolio, positions, scans, signals, stats, stock_check, symbols, tickers, wallet, watchlist
+from app.api.v1 import auth, health, holdings, portfolio, stats, symbols, tickers, watchlist
 from app.api.v1 import dividends as dividends_api
 from app.api.v1 import stocks as stocks_api
 from app.api.v1 import accounts as accounts_api
@@ -33,7 +32,7 @@ from app.core.exceptions import register_exception_handlers
 from app.middleware.audit import AuditMiddleware
 from app.middleware.auth import AuthMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
-from app.notifications.telegram_bot import handle_command, send_message, start_telegram_worker, stop_telegram_worker
+from app.notifications.telegram_bot import start_telegram_worker, stop_telegram_worker
 from app.scheduler.runner import init_scheduler, start_scheduler, stop_scheduler
 from app.services.log_service import init_log_capture
 
@@ -77,23 +76,15 @@ async def lifespan(app: FastAPI):
     _check_supabase_key_role()
     _warn_if_login_otp_disabled()
 
-    from app.core import keep_awake
-    keep_awake.start()   # macOS: scans and the watchdog must not freeze in idle sleep
-
     init_scheduler()
     start_scheduler()
     start_telegram_worker()
     from app.notifications import telegram_updates
     telegram_updates.start_polling()   # local: bot messages without a public webhook
 
-    # Catch up any missed scans (e.g., app was down during scheduled time)
-    from app.scheduler.jobs import catch_up_missed_scans
-    asyncio.ensure_future(catch_up_missed_scans())
-
     yield
 
     stop_scheduler()
-    keep_awake.stop()
     await telegram_updates.stop_polling()
     await stop_telegram_worker()
 
@@ -107,7 +98,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Signa API",
-    description="AI Investment Signal Engine",
+    description="Signa: portfolio tracker",
     version=APP_VERSION,
     lifespan=lifespan,
     # Disable docs in production
@@ -130,7 +121,7 @@ app.add_middleware(                      # outermost
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Brain-Token", "X-View-As"],
+    allow_headers=["Authorization", "Content-Type", "X-View-As"],
 )
 
 register_exception_handlers(app)
@@ -138,20 +129,11 @@ register_exception_handlers(app)
 # Routes — all versioned under /api/v1/
 api_prefix = "/api/v1"
 app.include_router(auth.router, prefix=api_prefix)
-app.include_router(signals.router, prefix=api_prefix)
 app.include_router(tickers.router, prefix=api_prefix)
-app.include_router(positions.router, prefix=api_prefix)
 app.include_router(watchlist.router, prefix=api_prefix)
 app.include_router(portfolio.router, prefix=api_prefix)
-app.include_router(scans.router, prefix=api_prefix)
 app.include_router(stats.router, prefix=api_prefix)
-app.include_router(brain.router, prefix=api_prefix)
-app.include_router(learning.router, prefix=api_prefix)
-app.include_router(logs.router, prefix=api_prefix)
 app.include_router(health.router, prefix=api_prefix)
-app.include_router(wallet.router, prefix=api_prefix)
-app.include_router(insights.router, prefix=api_prefix)
-app.include_router(stock_check.router, prefix=api_prefix)
 app.include_router(holdings.router, prefix=api_prefix)
 app.include_router(symbols.router, prefix=api_prefix)
 app.include_router(dividends_api.router, prefix=api_prefix)

@@ -58,8 +58,6 @@ class FakePortfolioDB:
             "mark_price_alert_triggered", "get_triggered_price_alerts", "get_active_alert_follow_rows",
         ):
             monkeypatch.setattr(queries, name, self._wrap(getattr(self, name)))
-        monkeypatch.setattr(queries, "get_holdings_review_all_at", lambda uid: None)
-        monkeypatch.setattr(queries, "set_holdings_review_all_at", lambda uid, at: None)
         monkeypatch.setattr(queries, "get_watchlist", lambda uid: [dict(w) for w in self.watchlist.get(uid, [])])
         monkeypatch.setattr("app.services.price_cache.get_usdcad_rate", lambda *a, **k: 1.4)
         monkeypatch.setattr("app.services.quotes.get_quotes",
