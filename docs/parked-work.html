@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signa Parked Work</title>
+<style>
+/* One list per kind of work; each item says what it is, why it matters, and what it needs. */
+:root{
+  --bg:#f7f7f4;--surface:#ffffff;--alt:#f0efe9;--text:#1c1c1a;--sub:#5d5c56;--hint:#8a8880;
+  --line:#e2e0d8;--accent:#2f6f4f;--accent-soft:#e3efe8;--warn:#a5631b;--warn-soft:#f8ecdc;
+  --bad:#a83a32;--bad-soft:#f6e1de;--info:#2e5c8a;--info-soft:#e1ebf5;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#151614;--surface:#1d1f1c;--alt:#262825;--text:#ecebe6;--sub:#b3b1a9;--hint:#85837c;
+    --line:#33352f;--accent:#6fc196;--accent-soft:#1f3329;--warn:#e0a35c;--warn-soft:#382a19;
+    --bad:#e5847b;--bad-soft:#3a2220;--info:#82b2e0;--info-soft:#1d2b3a;color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#151614;--surface:#1d1f1c;--alt:#262825;--text:#ecebe6;--sub:#b3b1a9;--hint:#85837c;
+  --line:#33352f;--accent:#6fc196;--accent-soft:#1f3329;--warn:#e0a35c;--warn-soft:#382a19;
+  --bad:#e5847b;--bad-soft:#3a2220;--info:#82b2e0;--info-soft:#1d2b3a;color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 var(--sans)}
+main{max-width:900px;margin:0 auto;padding-block:32px 80px;padding-inline:16px}
+h1{font-size:30px;line-height:1.2;margin:0 0 6px;letter-spacing:-.01em}
+h2{font-size:20px;margin:40px 0 10px;padding-top:8px;border-top:1px solid var(--line);text-wrap:balance}
+p{margin:8px 0;max-width:72ch}
+.sub{color:var(--sub)}
+.hint{color:var(--hint);font-size:13px}
+a{color:var(--info)}
+code{font:13px/1.4 var(--mono);background:var(--alt);padding:1px 5px;border-radius:5px}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+.pill{display:inline-block;font-size:12.5px;padding:3px 10px;border-radius:999px;background:var(--alt);color:var(--sub);white-space:nowrap}
+.pill.red{background:var(--bad-soft);color:var(--bad)}
+.pill.amber{background:var(--warn-soft);color:var(--warn)}
+.pill.green{background:var(--accent-soft);color:var(--accent)}
+.pill.blue{background:var(--info-soft);color:var(--info)}
+.list{display:grid;gap:10px}
+.item{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:0}
+.item-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;justify-content:space-between}
+.item h3{margin:0;font-size:16px}
+.item p{margin:6px 0 0}
+.needs{font-size:13px;color:var(--sub);margin-top:6px}
+.choice{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+@media (max-width:640px){.choice{grid-template-columns:1fr}}
+.opt{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--alt)}
+.opt b{display:block;margin-bottom:2px}
+.rec{color:var(--accent);font-weight:600}
+ul{padding-left:20px;margin:6px 0}
+li{margin:4px 0}
+</style>
+</head><body>
+
+<main>
+<h1>Signa Parked Work</h1>
+<p class="sub">Ideas and tasks set aside on purpose, to revisit later. Nothing here is started. Each item says why it matters and what it needs before it can be done.</p>
+<div class="meta">
+  <span class="pill">Parked 2026-10-04 · back-end 1.0.6</span>
+  <span class="pill blue">Related: <a href="https://claude.ai/artifact/5n2JLexkLjevLUW4SdbUZ8">Health check</a> · <a href="https://claude.ai/artifact/GsA52sNahjBy6LVGuDtWr7">Creator program</a> · <a href="https://claude.ai/artifact/EckGU7ivut5x14MDwtKeTQ">Feature plan</a></span>
+</div>
+
+<h2>Before the App Store (launch blockers)</h2>
+<div class="list">
+  <div class="item">
+    <div class="item-head"><h3>Privacy policy, terms and support page</h3><span class="pill red">Blocker</span></div>
+    <p>App Store Connect asks for a privacy policy URL and a support URL; Apple reviewers open them in a browser. The app then opens the same pages in an in-app browser. Drafts in English and Portuguese, written from what Signa really stores: data and retention, LGPD rights with the data protection contact (encarregado), PIPEDA and Quebec Law 25, "not investment advice", Yahoo / Apple / Telegram as third parties. A lawyer should review them.</p>
+    <div class="choice">
+      <div class="opt"><b>A. Back-end serves the pages</b><code>GET /privacy</code>, <code>/terms</code> on the API's address. No extra hosting; the link looks technical (api.signa.app/privacy).</div>
+      <div class="opt"><b>B. Small static website <span class="rec">(recommended)</span></b>A <code>website/</code> folder hosted free (Cloudflare Pages / GitHub Pages) on your domain. Also holds the landing page for ads and creators, the support page, Apple's universal-links file and, later, public stock pages for Google.</div>
+    </div>
+    <p class="needs"><b>Needs:</b> a domain for Signa (e.g. signa.app or signa.com.br); a contact email for privacy requests.</p>
+  </div>
+  <div class="item">
+    <div class="item-head"><h3>Demo account for App Review</h3><span class="pill red">Blocker</span></div>
+    <p>A script that creates a reviewer account with holdings in Brazil, Canada and the US, dividends, goals and alerts, so Apple sees a full app instead of an empty one. The review notes explain the optional two-step sign-in.</p>
+    <p class="needs"><b>Needs:</b> nothing; about an hour.</p>
+  </div>
+</div>
+
+<h2>Money</h2>
+<div class="list">
+  <div class="item">
+    <div class="item-head"><h3>In-App Purchase on the back-end</h3><span class="pill amber">Unblocks Premium and creators</span></div>
+    <p>Subscription tables, Apple's purchase / renewal / refund messages (App Store Server Notifications v2) with signature checks, Premium derived from the active subscription (keeping owner and manual overrides), restore support. Can be built against Apple's documented formats now; real purchases need the Apple account. Then set <code>PREMIUM_ON_SALE=true</code>.</p>
+    <p class="needs"><b>Needs:</b> final monthly and yearly prices per market, trial length; Apple Developer account to test.</p>
+  </div>
+</div>
+
+<h2>Keeping users</h2>
+<div class="list">
+  <div class="item">
+    <div class="item-head"><h3>Forgot password</h3><span class="pill green">Done 2026-10-04</span></div>
+    <p>Back-end 1.0.7: reset by username or email; the code goes to the verified email, or to the Telegram two-step chat when there's no email; users can add an email in Profile. iOS screens sent to the iOS session.</p>
+    <p class="needs"><b>Still needs:</b> an email provider (Resend or similar) once hosted; until then email codes only reach the server log.</p>
+  </div>
+  <div class="item">
+    <div class="item-head"><h3>Weekly push digest</h3><span class="pill green">Done 2026-10-04</span></div>
+    <p>Back-end 1.0.7: Sunday 10:00 New York "your week" push (value change without deposits, dividends received, next week's payments), Free and Premium, with an off switch and hide-amounts support. iOS toggle sent to the iOS session.</p>
+  </div>
+  <div class="item">
+    <div class="item-head"><h3>Broker import presets</h3><span class="pill amber">High</span></div>
+    <p>Import files straight from B3 Área do Investidor, Wealthsimple, Questrade (then Schwab, Fidelity). Typing a portfolio by hand is where people quit, especially in Brazil where competitors sync with B3.</p>
+    <p class="needs"><b>Needs:</b> sample export files from each broker.</p>
+  </div>
+  <div class="item">
+    <div class="item-head"><h3>Brazilian fixed income</h3><span class="pill amber">High for Brazil</span></div>
+    <p>Manual assets (Tesouro Direto, CDB, LCI/LCA) with value and rate or % of CDI, plus CDI as a benchmark. Kinvo and Investidor10 have it; Brazilian investors expect it.</p>
+  </div>
+</div>
+
+<h2>After hosting</h2>
+<div class="item"><ul>
+  <li>Sentry error tracking (back-end and iOS); central logs.</li>
+  <li>Make sure the web proxy passes the real visitor IP (rate limits).</li>
+  <li>Guard against two server copies running (jobs would run twice).</li>
+  <li>Bot checks for open sign-up: Turnstile on web, App Attest on iOS.</li>
+  <li>Backups: Supabase Pro (daily backups, point-in-time restore) and a restore drill.</li>
+  <li>Uptime monitor on <code>/health</code> with alerts; a simple status page.</li>
+  <li>A licensed market-data feed before scaling (Yahoo's terms and throttling).</li>
+</ul></div>
+
+<h2>On your side</h2>
+<div class="item"><ul>
+  <li>Choose hosting.</li>
+  <li>Pay the Apple Developer account; create the push key (.p8); TestFlight beta with friends in Canada and Brazil.</li>
+  <li>Domain for Signa; privacy contact email.</li>
+  <li>Set <code>SIGNUP_INVITE_REQUIRED=false</code> before ads; paste a fresh Telegram bot token.</li>
+  <li>First Apple Search Ads campaign (CA$100–200 a month), then read the growth report.</li>
+  <li>Accountant question before any creator payout (see the creator plan).</li>
+</ul></div>
+
+<p class="hint" style="margin-top:32px">Also parked earlier: the creator program (plan ready, needs In-App Purchase first), social feed, Apple Watch / Live Activities, options / screener / Excel / public API, AI advice.</p>
+</main>
+
+</body></html>

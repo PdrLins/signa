@@ -28,13 +28,14 @@ from typing import Optional
 from loguru import logger
 
 from app.core.api_errors import api_error
+from app.core.cache import TTLCache
 from app.core.config import settings
 from app.core.security import create_session_token, generate_otp, hash_otp, hash_password, verify_password
 
 MIGRATION = "018_email_sign_in.sql"
 PURPOSES = ("login", "reset", "email")
 _EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
-MIN_PASSWORD = 10
+MIN_PASSWORD = 8   # same rule as sign-up (registration.check_password)
 _USER_COLS = ("id, username, password_hash, telegram_chat_id, is_active, last_login, login_attempts, "
               "locked_until, access_level, email, email_verified_at")
 
@@ -222,20 +223,45 @@ def activate_if_pending(otp: dict) -> None:
 
 # ---------------------------------------------------------------- password reset
 
-def start_reset(email: str) -> dict:
-    """Email a reset code. Same answer whether or not the account exists."""
+RESET_MESSAGE = "If this account can receive a code, we sent one to its email or Telegram."
+RESETS_PER_HOUR = 3
+_resets = TTLCache(max_size=20000, default_ttl=3600)
+
+
+def start_reset(identifier: str) -> tuple[dict, Optional[tuple[str, str, str]]]:
+    """Forgot password, by username or email. The code goes to the account's
+    verified email, else to its Telegram (two-step sign-in chat). Same answer
+    whether or not the account exists or can get a code. Returns (response,
+    (chat_id, code, language) for the route to send on Telegram, or None)."""
     from app.services import email_sender
 
-    e = normalize_email(email)
-    if not e:
-        raise _422("invalid_email", "Enter a valid email address.", "email")
-    msg = "If this email has a Signa account, we sent it a code."
-    user = find_user_by_email(e)
-    if not user or not user.get("email_verified_at") or not user.get("is_active"):
-        return {"session_token": create_session_token(), "message": msg}
-    token, code = issue_code(user["id"], "reset", e)
-    email_sender.send_code(e, "reset", code, _language(user["id"]))
-    return {"session_token": token, "message": msg}
+    ident = (identifier or "").strip()
+    if not ident or len(ident) > 254:
+        raise _422("invalid_identifier", "Enter your username or email.", "identifier")
+    decoy = {"session_token": create_session_token(), "message": RESET_MESSAGE}
+    if "@" in ident:
+        e = normalize_email(ident)
+        user = find_user_by_email(e) if e else None
+    else:
+        from app.db import queries
+        user = queries.get_user_by_username(ident.lower())
+    if not user or user.get("is_active") is False:
+        return decoy, None
+    uid = str(user["id"])
+    sent = _resets.get(uid) or 0
+    if sent >= RESETS_PER_HOUR:   # no flood of codes to someone's inbox / Telegram
+        return decoy, None
+    email_ok = bool(user.get("email") and user.get("email_verified_at"))
+    chat = user.get("telegram_chat_id")
+    if not email_ok and not chat:
+        return decoy, None   # no way to reach the owner: support has to help
+    _resets.set(uid, sent + 1)
+    token, code = issue_code(uid, "reset", user.get("email") if email_ok else None)
+    lang = _language(uid)
+    if email_ok:
+        email_sender.send_code(user["email"], "reset", code, lang)
+        return {"session_token": token, "message": RESET_MESSAGE}, None
+    return {"session_token": token, "message": RESET_MESSAGE}, (str(chat), code, lang)
 
 
 def finish_reset(session_token: str, code: str, new_password: str) -> str:
@@ -254,7 +280,13 @@ def finish_reset(session_token: str, code: str, new_password: str) -> str:
     try:
         sessions.revoke_others(uid, None, "password_changed")
     except Exception as e:
-        logger.warning(f"reset: sessions not revoked: {e}")
+        logger.warning(f"reset: sessions not revoked: {type(e).__name__}")
+    try:
+        from app.db import queries
+        queries.insert_audit_log(event_type="PASSWORD_RESET", success=True, user_id=uid)
+    except Exception:
+        pass
+    logger.info(f"password reset for {uid[:8]}")
     return uid
 
 
@@ -304,19 +336,3 @@ def account_status(user_id: str) -> dict:
     via = "telegram" if (u.get("telegram_chat_id") and settings.login_otp_enabled) else "email" if verified else None
     return {"email": u.get("email"), "email_verified": verified,
             "has_telegram": bool(u.get("telegram_chat_id")), "signin_code": via}
-
-
-# ---------------------------------------------------------------- delete account
-
-def delete_account(user_id: str, password: str) -> None:
-    """Delete the user and everything that belongs to them (holdings,
-    transactions, alerts, watchlist, sessions… cascade from users). The owner
-    account can't be deleted here."""
-    u = _full_user(user_id)
-    if (u.get("access_level") or "free") == "owner":
-        raise api_error("owner_cannot_delete", "The owner account can't be deleted from the app.", 409)
-    if not verify_password(password or "", u["password_hash"]):
-        raise api_error("wrong_password", "That password is not right.", 403)
-    db = _db()
-    db.table("users").delete().eq("id", user_id).execute()
-    logger.info(f"account {user_id} deleted by its user")

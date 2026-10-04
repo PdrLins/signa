@@ -206,6 +206,7 @@ UNGATED = {
     ("DELETE", "/api/v1/auth/sessions/{session_id}"), ("POST", "/api/v1/auth/sessions/revoke-others"),
     ("POST", "/api/v1/auth/register"), ("GET", "/api/v1/auth/referral/{code}"),   # public (migration 019)
     ("GET", "/api/v1/auth/signup-config"), ("GET", "/api/v1/public/stocks/{symbol}"),   # public (029)
+    ("POST", "/api/v1/auth/password/forgot"), ("POST", "/api/v1/auth/password/reset"),   # public, AUTH tier
     ("GET", "/api/v1/health"), ("GET", "/api/v1/version"), ("GET", "/api/v1/symbols/search"),
     ("GET", "/api/v1/stats/user-settings"), ("PUT", "/api/v1/stats/user-settings"),
     ("GET", "/api/v1/tickers/{ticker}/chart"),

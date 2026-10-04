@@ -330,3 +330,17 @@ async def apple_search_ads_attribution():
         if is_missing_schema(e):
             return   # before migration 029
         logger.warning(f"Apple Search Ads attribution failed: {e}")
+
+
+@tracked("weekly_digest")
+async def weekly_digest():
+    """Sunday 10:00 ET: "your week" push to every user with the app (app/services/weekly_digest.py)."""
+    try:
+        from app.services.weekly_digest import run
+        result = await run()
+        logger.info(f"Weekly digest: {result}")
+        if result.get("status") == "failed":
+            fail("weekly_digest", str(result))
+    except Exception as e:
+        fail("weekly_digest", e)
+        logger.error(f"Weekly digest failed: {e}")

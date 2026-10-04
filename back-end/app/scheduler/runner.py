@@ -13,6 +13,7 @@ from app.scheduler.jobs import (
     income_forecast_snapshots,
     suggestions_nightly,
     apple_search_ads_attribution,
+    weekly_digest,
     portfolio_snapshots,
     monthly_recap_push,
     push_notifications,
@@ -153,6 +154,8 @@ def init_scheduler() -> AsyncIOScheduler:
                           CronTrigger(minute="1-59/5", timezone=settings.timezone),   # runs only after prices moved
                           id="push_notifications_live", name="Push price alerts + big moves (every 5 min)",
                           replace_existing=True, max_instances=1)
+        scheduler.add_job(weekly_digest, CronTrigger(day_of_week="sun", hour=10, minute=0, timezone=settings.timezone),
+                          id="weekly_digest", name="Weekly digest push (Sunday 10:00 AM ET)", replace_existing=True)
         scheduler.add_job(monthly_recap_push, CronTrigger(day=1, hour=9, minute=5, timezone=settings.timezone),
                           id="monthly_recap_push", name="Monthly recap push (1st, 9:05 AM ET)",
                           replace_existing=True)

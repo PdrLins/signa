@@ -31,6 +31,7 @@ from app.api.v1 import suggestions as suggestions_api
 from app.api.v1 import growth as growth_api
 from app.api.v1 import public as public_api
 from app.api.v1 import account as account_api
+from app.api.v1 import password as password_api
 from app.api.v1 import portfolio_home as portfolio_home_api
 from app.api.v1 import referrals as referrals_api
 from app.api.v1 import register as register_api
@@ -82,7 +83,8 @@ async def _catch_up_missed_jobs() -> None:
     from app.scheduler import health, jobs
     await asyncio.sleep(60)
     try:
-        await health.catch_up({name: getattr(jobs, name) for name in (*health.DAILY, *health.MONTHLY)})
+        await health.catch_up({name: getattr(jobs, name)
+                               for name in (*health.DAILY, *health.MONTHLY, *health.WEEKLY)})
     except Exception as e:
         logger.warning(f"Missed-job catch-up failed: {type(e).__name__}")
 
@@ -187,6 +189,7 @@ app.include_router(suggestions_api.router, prefix=api_prefix)
 app.include_router(growth_api.router, prefix=api_prefix)
 app.include_router(public_api.router, prefix=api_prefix)
 app.include_router(account_api.router, prefix=api_prefix)
+app.include_router(password_api.router, prefix=api_prefix)
 
 
 @app.post("/api/v1/telegram/webhook")

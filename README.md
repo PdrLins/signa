@@ -30,6 +30,7 @@ Status: in development, not deployed yet. Hosting is still to be decided.
 | Home-screen widgets (iOS) | 1 | All |
 | Goals (portfolio value, monthly dividend income) | 1 | Unlimited |
 | Monthly recap | ✓ | ✓ |
+| Weekly digest push ("your week") | ✓ | ✓ |
 | Report a problem / report wrong data | ✓ | ✓ |
 | Stock suggestions (similar stocks, "also followed"; no AI) | 3 per list | All, plus gaps in your portfolio |
 

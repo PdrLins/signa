@@ -12,6 +12,7 @@ email) can be added later without changing the shape:
   big_move         {"enabled": true, "threshold_pct": 5}   daily move >= threshold
   analyst_ratings  {"enabled": false}  analyst up/downgrades
   economy          {"enabled": true}   big economy events (rates, CPI)
+  weekly_digest    {"enabled": true}   Sunday "your week" push (app/services/weekly_digest.py)
   privacy          {"hide_amounts": false}   pushes say "2 dividends paid today",
                                              never money (lock screens)
 
@@ -38,6 +39,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "big_move": {"enabled": True, "threshold_pct": 5.0},
     "analyst_ratings": {"enabled": False},
     "economy": {"enabled": True},
+    "weekly_digest": {"enabled": True},
     "privacy": {"hide_amounts": False},
 }
 THRESHOLD_MIN, THRESHOLD_MAX = 1.0, 50.0

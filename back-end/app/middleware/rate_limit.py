@@ -49,12 +49,14 @@ _AUTH_PATHS = {
     # two-step sign-in: wrong codes / passwords count (migration 020)
     "/api/v1/auth/2fa/telegram/confirm",
     "/api/v1/auth/2fa/disable",
+    "/api/v1/auth/password/reset",    # wrong codes count
 }
 
 # AUTH tier, but EVERY attempt counts (a successful sign-up creates an
 # account, so it must not be free to repeat).
 _AUTH_COUNT_ALL_PATHS = {
     "/api/v1/auth/register",
+    "/api/v1/auth/password/forgot",   # each one can send a code: every request counts
 }
 # GET /auth/referral/{code}
 _LOOKUP_PREFIX = "/api/v1/auth/referral/"

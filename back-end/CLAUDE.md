@@ -54,6 +54,8 @@ Push notifications (APNs, migration 025, `services/push.py`; devices under `/not
 - **Limits:** request bodies 64 KB (3 MB for CSV import), public data 30/min per IP and known symbols only, 50k transactions and 200 kept alerts per user, two-step setup needs the password, code resend 60 s / 5 an hour, lockout per username + device.
 - **Jobs:** every job is `@tracked` (`app/scheduler/health.py`): `GET /admin/jobs`, owner alert after 2 failures in a row, missed daily runs caught up a minute after startup. Database circuit breaker in `app/db/supabase.py`.
 - **Referrals** pay only for real returning friends (`referrals.earned`: 7+ days old, back 3+ days after sign-up); "followed together" counts only such accounts (min 10, rounded).
+- **Forgot password:** `POST /auth/password/forgot {identifier}` (username or email; same answer always; code to the verified email, else the Telegram two-step chat; 3 an hour) and `/auth/password/reset` (every device signed out). Users add an email under `/account/email` (+ `/confirm`). Email stays on the console sender until an email provider is set.
+- **Weekly digest:** Sunday 10:00 ET push (`app/services/weekly_digest.py`), every user with the app, `notification_prefs.weekly_digest`, deduped per ISO week, caught up the same day.
 - `PREMIUM_ON_SALE=false` (default) → `/auth/me` `premium_on_sale: false`, apps hide upgrade buttons.
 
 ## Access levels

@@ -33,6 +33,8 @@ PUBLIC_PATHS = {
     "/api/v1/auth/token/refresh",
     "/api/v1/auth/register",          # invite-only sign-up (migration 019)
     "/api/v1/auth/signup-config",     # what the sign-up screen shows (migration 029)
+    "/api/v1/auth/password/forgot",   # forgot password (public, AUTH tier)
+    "/api/v1/auth/password/reset",
     "/api/v1/health",
     "/api/v1/version",
     "/api/v1/telegram/webhook",

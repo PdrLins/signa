@@ -60,6 +60,7 @@ back-end/
 | Telegram digests / live alerts (Premium) | 8:30 daily, 18:30 weekdays / every 5 min while a followed exchange trades |
 | Push notifications (iOS; free basics, Premium all) | 8:31 daily, 18:31 weekdays / every 5 min while a followed exchange trades |
 | Monthly recap push | 1st of the month, 9:05 |
+| Weekly digest push ("your week") | Sunday 10:00 |
 | Usage counters flush | every 5 min |
 | Suggestions data (followed-together counts, symbol profiles) | 3:00 |
 | Apple Search Ads attribution (sign-up campaign ids) | every 10 min |

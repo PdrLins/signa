@@ -32,6 +32,14 @@ _MESSAGES = {
               "Digite no app Signa para ativar a verificação em duas etapas. Ele expira em 10 minutos. "
               "Se você não pediu isto, ignore esta mensagem.",
     },
+    "user_reset_code": {
+        "en": "🔑 <b>Reset your Signa password</b>\n\nYour code: <code>{code}</code>\n\n"
+              "Type it in the Signa app to choose a new password. It expires in 10 minutes. "
+              "If you didn't ask for this, ignore this message: nobody can change your password without it.",
+        "pt": "🔑 <b>Redefinir sua senha do Signa</b>\n\nSeu código: <code>{code}</code>\n\n"
+              "Digite no app Signa para escolher uma nova senha. Ele expira em 10 minutos. "
+              "Se você não pediu isto, ignore esta mensagem: ninguém troca sua senha sem ele.",
+    },
     "user_2fa_on": {
         "en": "✅ <b>Two-step sign-in is on</b>\n\nFrom now on, Signa sends your sign-in codes to this chat.",
         "pt": "✅ <b>Verificação em duas etapas ativada</b>\n\nA partir de agora, o Signa envia seus códigos de acesso para este chat.",

@@ -34,6 +34,7 @@ DAILY = {
     "check_status_snapshots": (18, 15, True, True),
 }
 MONTHLY = {"monthly_recap_push": (1, 9, 5)}   # day, hour, minute
+WEEKLY = {"weekly_digest": (6, 10, 0)}        # weekday (Sunday = 6), hour, minute
 _state: dict[str, dict] = {}
 _pending_error: dict[str, str] = {}
 
@@ -74,7 +75,7 @@ async def _record(job_id: str, started: datetime, error: str | None) -> None:
             await _alert_owner(job_id, error)
     else:
         s.update(last_success_at=now, failures=0)
-    if job_id in DAILY or job_id in MONTHLY or error:
+    if job_id in DAILY or job_id in MONTHLY or job_id in WEEKLY or error:
         try:
             await in_job_pool(_save, dict(s))
         except Exception as e:
@@ -133,6 +134,11 @@ def last_due(job_id: str, now: datetime) -> datetime | None:
             if due <= local:
                 return due
         return None
+    if job_id in WEEKLY:
+        wd, h, m = WEEKLY[job_id]
+        back = (local.weekday() - wd) % 7
+        due = datetime.combine(local.date() - timedelta(days=back), time(h, m), tzinfo=ET)
+        return due if due <= local else due - timedelta(days=7)
     if job_id in MONTHLY:
         day, h, m = MONTHLY[job_id]
         due = datetime(local.year, local.month, day, h, m, tzinfo=ET)
@@ -153,6 +159,8 @@ def overdue(job_id: str, last_success: datetime | None, now: datetime) -> bool:
         if same_day:   # a market-close snapshot is only right on its own day
             return due.date() == now.astimezone(ET).date()
         return now - due < timedelta(hours=24)
+    if job_id in WEEKLY:
+        return now - due < timedelta(hours=12)   # a "your week" push on Monday evening is too late
     return now - due < timedelta(days=7)   # monthly recap: within the first week
 
 
