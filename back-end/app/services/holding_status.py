@@ -112,8 +112,8 @@ async def refresh(user_id: str | None = None) -> dict:
     """Recompute and store holding_status for every holding (or one user's)."""
     from app.db import queries
 
-    if _run_lock.locked():
-        return {"status": "busy"}
+    if user_id is not None and _run_lock.locked():
+        return {"status": "busy"}   # a user refresh never queues; the daily run waits its turn
     async with _run_lock:
         try:
             rows = await asyncio.to_thread(queries.get_holdings, user_id) if user_id \

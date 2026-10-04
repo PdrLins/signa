@@ -55,8 +55,8 @@ _AUTH_COUNT_ALL_PATHS = {
 # GET /auth/referral/{code}
 _LOOKUP_PREFIX = "/api/v1/auth/referral/"
 
-# Expensive operations (none today; the brain's scans and AI checks moved to Signa Advisor)
-_STRICT_PATHS: set[str] = set()
+# (method, path) limited to TIER_STRICT per IP: user reports (each one pings the owner).
+_STRICT_ROUTES: set[tuple[str, str]] = {("POST", "/api/v1/feedback")}
 
 # Paths exempt from rate limiting
 _EXEMPT_PATHS = {
@@ -80,7 +80,7 @@ _attempts: dict[str, OrderedDict[str, list[float]]] = {
 _blocked: OrderedDict[str, float] = OrderedDict()
 
 
-def _get_tier(path: str) -> tuple[str, int, int, bool]:
+def _get_tier(path: str, method: str = "GET") -> tuple[str, int, int, bool]:
     """Return (tier_name, max_requests, window_seconds, count_only_failures)."""
     if path in _AUTH_PATHS:
         return ("auth", *TIER_AUTH)
@@ -88,7 +88,7 @@ def _get_tier(path: str) -> tuple[str, int, int, bool]:
         return ("auth", TIER_AUTH[0], TIER_AUTH[1], False)
     if path.startswith(_LOOKUP_PREFIX):
         return ("lookup", *TIER_LOOKUP)
-    if path in _STRICT_PATHS:
+    if (method, path) in _STRICT_ROUTES:
         return ("strict", *TIER_STRICT)
     return ("standard", *TIER_STANDARD)
 
@@ -115,7 +115,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         ip = get_client_ip(request)
         now = time.time()
-        tier_name, max_requests, window_seconds, count_only_failures = _get_tier(path)
+        tier_name, max_requests, window_seconds, count_only_failures = _get_tier(path, request.method)
         bucket_key = f"{_standard_key(request) or ip}|{tier_name}" if tier_name == "standard" else f"{ip}|{tier_name}"
         should_block = False
         should_audit = False

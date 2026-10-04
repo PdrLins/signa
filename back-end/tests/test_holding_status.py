@@ -35,3 +35,18 @@ def test_refresh_writes_one_download_for_all_users(monkeypatch):
     assert set(saved) == {"h1", "h2"} and saved["h2"][0] == "u2"
     assert "holding_status" in saved["h1"][1] and "status_updated_at" in saved["h1"][1]
     assert "alert_state" not in saved["h1"][1]
+
+
+def test_daily_run_waits_for_a_user_refresh(monkeypatch):
+    monkeypatch.setattr(queries, "get_all_holdings", lambda: [])
+    monkeypatch.setattr(queries, "get_holdings", lambda uid: [])
+
+    async def scenario():
+        await hst._run_lock.acquire()          # a user refresh is running
+        daily = asyncio.create_task(hst.refresh())
+        busy = await hst.refresh("u1")         # another user refresh: skipped
+        hst._run_lock.release()
+        return busy, await daily
+
+    busy, daily = asyncio.run(scenario())
+    assert busy == {"status": "busy"} and daily["status"] == "ok"
