@@ -271,7 +271,12 @@ def test_account_id_null_before_migration(monkeypatch):
 
 @pytest.fixture
 def invited(rdb):
-    rdb.add_user("me", "MEMEMEME", uid=U1, referred_by=rf.REFERRER_ID)
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    # a real friend: signed up 10 days ago and came back 5 days later (referrals.earned)
+    rdb.add_user("me", "MEMEMEME", uid=U1, referred_by=rf.REFERRER_ID,
+                 created_at=(now - timedelta(days=10)).isoformat(),
+                 last_seen_at=(now - timedelta(days=5)).isoformat())
     rdb.add_referral(rf.REFERRER_ID, U1)
     return rdb
 
@@ -381,3 +386,22 @@ def test_signup_settings_from_locale():
     assert s("US", None, "en", "pt-BR") == {"country": "US", "home_currency": "USD", "language": "en"}
     assert s(None, "EUR", None, "de_DE") == {"country": "DE", "home_currency": "EUR", "language": "en"}
     assert s("XX", "ZZZ", "fr", None) == {}
+
+
+
+def test_new_account_is_not_rewarded_yet(monkeypatch, rdb):
+    """A brand-new friend (or a throwaway sign-up) doesn't pay out on the first follow."""
+    from datetime import datetime, timezone
+    rdb.add_user("fresh", "FRESHFRE", uid=U1, referred_by=rf.REFERRER_ID,
+                 last_seen_at=datetime.now(timezone.utc).isoformat())
+    rdb.add_referral(rf.REFERRER_ID, U1)
+    assert referrals.reward_first_follow(U1) is None
+    assert rdb.tables["referrals"][0]["status"] == "pending"
+
+
+def test_earned_rule():
+    from datetime import datetime, timezone
+    now = datetime(2026, 10, 20, tzinfo=timezone.utc)
+    assert referrals.earned({"created_at": "2026-10-01T00:00:00Z", "last_seen_at": "2026-10-05T00:00:00Z"}, now)
+    assert not referrals.earned({"created_at": "2026-10-01T00:00:00Z", "last_seen_at": "2026-10-02T00:00:00Z"}, now)
+    assert not referrals.earned({"created_at": "2026-10-18T00:00:00Z", "last_seen_at": "2026-10-19T00:00:00Z"}, now)

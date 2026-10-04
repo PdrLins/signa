@@ -66,18 +66,29 @@ def test_profile_from_info_yield_is_a_fraction():
 # ---------------------------------------------------------------- co-follows (pure)
 
 def test_cofollows_need_min_users_and_name_nobody():
-    rows = [{"user_id": f"u{i}", "symbol": s} for i in range(6) for s in ("ENB.TO", "TRP.TO")]
-    rows += [{"user_id": f"v{i}", "symbol": s} for i in range(4) for s in ("ENB.TO", "SHOP.TO")]   # only 4
+    rows = [{"user_id": f"u{i}", "symbol": s} for i in range(12) for s in ("ENB.TO", "TRP.TO")]
+    rows += [{"user_id": f"v{i}", "symbol": s} for i in range(8) for s in ("ENB.TO", "SHOP.TO")]   # only 8
     pairs = sg.compute_cofollows(rows)
-    assert {(r["symbol"], r["other"], r["users"]) for r in pairs} == {("ENB.TO", "TRP.TO", 6), ("TRP.TO", "ENB.TO", 6)}
+    assert {(r["symbol"], r["other"], r["users"]) for r in pairs} == {("ENB.TO", "TRP.TO", 12), ("TRP.TO", "ENB.TO", 12)}
     assert all(set(r) == {"symbol", "other", "users"} for r in pairs)
 
 
+def test_only_real_returning_accounts_count():
+    from datetime import datetime, timezone
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    users = [{"id": "old_back", "created_at": "2026-10-01T00:00:00Z", "last_seen_at": "2026-11-20T00:00:00Z"},
+             {"id": "new", "created_at": "2026-11-25T00:00:00Z", "last_seen_at": "2026-11-30T00:00:00Z"},
+             {"id": "never_back", "created_at": "2026-10-01T00:00:00Z", "last_seen_at": "2026-10-02T00:00:00Z"}]
+    assert sg.eligible_users(users, now) == {"old_back"}
+    rows = [{"user_id": f"bot{i}", "symbol": s} for i in range(20) for s in ("AAPL", "PUMP")]
+    assert sg.compute_cofollows(rows, eligible={"old_back"}) == []   # 20 fresh bots count for nothing
+
+
 def test_also_followed_rounds_counts_and_skips_followed():
-    rows = [{"symbol": "ENB.TO", "other": "TRP.TO", "users": 13}, {"symbol": "ENB.TO", "other": "SU.TO", "users": 6},
+    rows = [{"symbol": "ENB.TO", "other": "TRP.TO", "users": 23}, {"symbol": "ENB.TO", "other": "SU.TO", "users": 12},
             {"symbol": "ENB.TO", "other": "PPL.TO", "users": 30}]
     out = sg.also_followed(["ENB.TO"], rows, exclude={"PPL.TO"}, followed={"PPL.TO"}, pool=POOL, limit=10)
-    assert [(r["symbol"], r["params"]["users"]) for r in out] == [("TRP.TO", 10), ("SU.TO", 5)]
+    assert [(r["symbol"], r["params"]["users"]) for r in out] == [("TRP.TO", 20), ("SU.TO", 10)]
     assert out[0]["reason"] == "also_followed" and out[0]["params"]["via"] == "ENB.TO"
 
 
@@ -123,7 +134,7 @@ def db(monkeypatch):
     monkeypatch.setattr(queries, "get_symbol_profiles", lambda: list(POOL.values()))
     monkeypatch.setattr(queries, "get_cofollows", lambda syms: [
         {"symbol": "ENB.TO", "other": s, "users": n}
-        for s, n in (("TRP.TO", 20), ("SU.TO", 15), ("PPL.TO", 12), ("KMI", 9), ("SHOP.TO", 6))])
+        for s, n in (("TRP.TO", 40), ("SU.TO", 35), ("PPL.TO", 25), ("KMI", 15), ("SHOP.TO", 11))])
     monkeypatch.setattr("app.services.slots.followed_symbols", lambda uid: {"ENB.TO"})
     return d
 
@@ -167,7 +178,10 @@ def test_nightly_writes_pairs_and_refreshes_stale_profiles(monkeypatch):
     from datetime import datetime, timezone
     written = {}
     monkeypatch.setattr(queries, "get_follow_rows", lambda: [{"user_id": f"u{i}", "symbol": s}
-                                                             for i in range(5) for s in ("ENB.TO", "TRP.TO")])
+                                                             for i in range(10) for s in ("ENB.TO", "TRP.TO")])
+    monkeypatch.setattr(queries, "get_users_age", lambda: [
+        {"id": f"u{i}", "created_at": "2026-08-01T00:00:00Z", "last_seen_at": "2026-09-20T00:00:00Z"}
+        for i in range(10)])
     monkeypatch.setattr(queries, "replace_cofollows", lambda rows, stamp: written.setdefault("pairs", rows) and len(rows))
     monkeypatch.setattr(queries, "get_symbol_profiles", lambda: [
         {"symbol": "ENB.TO", "updated_at": "2026-10-02T00:00:00+00:00"}])   # fresh: not refetched

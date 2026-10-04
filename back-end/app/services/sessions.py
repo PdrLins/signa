@@ -329,7 +329,8 @@ def is_active(sid: Optional[str]) -> bool:
         rows = _db().table("auth_sessions").select("revoked_at, expires_at, absolute_expires_at") \
             .eq("id", sid).limit(1).execute().data
     except Exception as e:
-        logger.debug(f"sessions: active check failed for {sid}: {e}")
+        logger.debug(f"sessions: active check failed for {sid}: {type(e).__name__}")
+        _active_cache.set(sid, True, ttl=5)   # fail open, briefly: an outage doesn't hit the DB per request
         return True
     if not rows:
         active = False
@@ -364,7 +365,8 @@ def revoke(sid: str, user_id: Optional[str], reason: str) -> bool:
     if user_id:
         q = q.eq("user_id", user_id)
     done = bool(q.execute().data)
-    _active_cache.set(str(sid), False, ttl=settings.session_check_cache_seconds)
+    if done:   # only a session this call really ended (not someone else's id)
+        _active_cache.set(str(sid), False, ttl=settings.session_check_cache_seconds)
     if done:
         logger.info(f"sessions: revoked {sid} ({reason})")
     return done

@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signa Health Check</title>
+<style>
+/* Scorecard first, then one section per area: score bar, what's strong, what's weak, the fix. */
+:root{
+  --bg:#f7f7f4;--surface:#ffffff;--alt:#f0efe9;--text:#1c1c1a;--sub:#5d5c56;--hint:#8a8880;
+  --line:#e2e0d8;--accent:#2f6f4f;--accent-soft:#e3efe8;--warn:#a5631b;--warn-soft:#f8ecdc;
+  --bad:#a83a32;--bad-soft:#f6e1de;--info:#2e5c8a;--info-soft:#e1ebf5;--track:#e7e5dd;
+  --s0:#a83a32;--s1:#c0552f;--s2:#c98a24;--s3:#9a9a2e;--s4:#4f8a5b;--s5:#2f6f4f;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#151614;--surface:#1d1f1c;--alt:#262825;--text:#ecebe6;--sub:#b3b1a9;--hint:#85837c;
+    --line:#33352f;--accent:#6fc196;--accent-soft:#1f3329;--warn:#e0a35c;--warn-soft:#382a19;
+    --bad:#e5847b;--bad-soft:#3a2220;--info:#82b2e0;--info-soft:#1d2b3a;--track:#2c2e2a;
+    --s0:#e5847b;--s1:#e8996c;--s2:#e0b35c;--s3:#c6c463;--s4:#7cc08b;--s5:#6fc196;color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#151614;--surface:#1d1f1c;--alt:#262825;--text:#ecebe6;--sub:#b3b1a9;--hint:#85837c;
+  --line:#33352f;--accent:#6fc196;--accent-soft:#1f3329;--warn:#e0a35c;--warn-soft:#382a19;
+  --bad:#e5847b;--bad-soft:#3a2220;--info:#82b2e0;--info-soft:#1d2b3a;--track:#2c2e2a;
+  --s0:#e5847b;--s1:#e8996c;--s2:#e0b35c;--s3:#c6c463;--s4:#7cc08b;--s5:#6fc196;color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 var(--sans)}
+main{max-width:940px;margin:0 auto;padding-block:32px 80px;padding-inline:16px}
+h1{font-size:30px;line-height:1.2;margin:0 0 6px;letter-spacing:-.01em}
+h2{font-size:21px;margin:44px 0 12px;padding-top:8px;border-top:1px solid var(--line);text-wrap:balance}
+h3{font-size:16px;margin:18px 0 6px}
+p{margin:8px 0;max-width:74ch}
+.sub{color:var(--sub)}
+.hint{color:var(--hint);font-size:13px}
+code{font:13px/1.4 var(--mono);background:var(--alt);padding:1px 5px;border-radius:5px;word-break:break-word}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+.pill{display:inline-block;font-size:12.5px;padding:3px 10px;border-radius:999px;background:var(--alt);color:var(--sub);white-space:nowrap}
+.pill.red{background:var(--bad-soft);color:var(--bad)}
+.pill.amber{background:var(--warn-soft);color:var(--warn)}
+.pill.green{background:var(--accent-soft);color:var(--accent)}
+.pill.blue{background:var(--info-soft);color:var(--info)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:12px 0;min-width:0}
+/* scorecard */
+.scores{display:grid;gap:2px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:8px 16px;margin:14px 0}
+.srow{display:grid;grid-template-columns:minmax(0,1.3fr) 150px 44px minmax(0,2fr);gap:14px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.srow:last-child{border-bottom:none}
+.srow a{color:var(--text);text-decoration:none;font-weight:600}
+.srow a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.bar{display:grid;grid-template-columns:repeat(5,1fr);gap:3px}
+.bar i{height:10px;border-radius:3px;background:var(--track)}
+.n{font:600 15px var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.why{color:var(--sub);font-size:13.5px}
+.s0 .bar i:nth-child(-n+0){background:var(--s0)}
+.s1 .bar i:nth-child(-n+1){background:var(--s1)}.s1 .n{color:var(--s1)}
+.s2 .bar i:nth-child(-n+2){background:var(--s2)}.s2 .n{color:var(--s2)}
+.s3 .bar i:nth-child(-n+3){background:var(--s3)}.s3 .n{color:var(--s3)}
+.s4 .bar i:nth-child(-n+4){background:var(--s4)}.s4 .n{color:var(--s4)}
+.s5 .bar i:nth-child(-n+5){background:var(--s5)}.s5 .n{color:var(--s5)}
+@media (max-width:680px){.srow{grid-template-columns:minmax(0,1fr) 110px 36px}.srow .why{grid-column:1/-1;margin-top:-4px}}
+.overall{display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;margin:6px 0}
+.overall b{font:600 34px var(--mono);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12.5px;color:var(--hint)}
+/* areas */
+.area-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.area-head h2{border:none;margin:0;padding:0}
+.sect{margin-top:44px;padding-top:12px;border-top:1px solid var(--line)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:720px){.cols{grid-template-columns:1fr}}
+.good li::marker{color:var(--accent)}
+ul{padding-left:20px;margin:6px 0}
+li{margin:5px 0}
+.tbl{width:100%;overflow-x:auto;margin:10px 0;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:620px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--hint);background:var(--alt)}
+tr:last-child td{border-bottom:none}
+td.eff{white-space:nowrap;font-family:var(--mono);font-size:13px}
+.sev{font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.sev.h{color:var(--bad)}.sev.m{color:var(--warn)}.sev.l{color:var(--hint)}
+</style>
+</head><body>
+
+<main>
+<h1>Signa Health Check</h1>
+<p class="sub">Second audit, after the speed pass, suggestions and growth tracking. Four reviewers read every file: security, privacy, performance and reliability, and product and launch readiness. Each area gets a score from 0 to 5 so weak spots stand out. The key findings were checked against the code.</p>
+<div class="meta">
+  <span class="pill">2026-10-04 · back-end 1.0.5 · 849 tests passing</span>
+  <span class="pill blue">Read-only audit: nothing changed yet</span>
+</div>
+
+<h2>Scorecard</h2>
+<div class="overall"><b>2.7</b><span class="sub">/ 5 average. A solid core with launch work still missing (App Store requirements, privacy rights, operations).</span></div>
+<div class="legend"><span>0 missing</span><span>1 weak</span><span>2 risky</span><span>3 fair</span><span>4 good</span><span>5 strong</span></div>
+<div class="scores">
+  <div class="srow s4"><a href="#perf">Performance</a><div class="bar"><i></i><i></i><i></i><i></i><i></i></div><span class="n">4</span><span class="why">Fast after two passes; the nightly "followed together" job won't scale</span></div>
+  <div class="srow s4"><a href="#code">Code quality and tests</a><div class="bar"><i></i><i></i><i></i><i></i><i></i></div><span class="n">4</span><span class="why">849 tests, documented APIs; gaps on failure paths</span></div>
+  <div class="srow s4"><a href="#growth">Growth measurement</a><div class="bar"><i></i><i></i><i></i><i></i><i></i></div><span class="n">4</span><span class="why">Sign-up sources and funnel just built; no crash data or day-1/7/30 retention yet</span></div>
+  <div class="srow s3"><a href="#security">Security</a><div class="bar"><i></i><i></i><i></i><i></i><i></i></div><span class="n">3</span><span class="why">Strong sign-in and per-user checks; spoofable IP limits, a fail-open owner bug, takeover paths</span></div>
+  <div class="srow s3"><a href="#money">Data correctness</a><div class="bar"><i></i><i></i><i></i><i></i><i></i></div><span class="n">3</span><span class="why">Recap counts deposits as gains; wrong-currency snapshot fallback; day boundaries</span></div>
+  <div class="srow s3"><a href="#product">Product</a><div class="bar"><i></i><i></i><i></i><i></i><i></i></div><span class="n">3</span><span class="why">Rich and worldwide; Brazil needs fixed income and broker import; Premium is thin</span></div>
+  <div class="srow s2"><a href="#privacy">Privacy</a><div class="bar"><i></i><i></i><i></i><i></i><i></i></div><span class="n">2</span><span class="why">No account deletion or export; personal data in logs; amounts on lock screen</span></div>
+  <div class="srow s2"><a href="#abuse">Abuse and fraud</a><div class="bar"><i></i><i></i><i></i><i></i><i></i></div><span class="n">2</span><span class="why">Open sign-up invites bots: referral farming, poisoned suggestions</span></div>
+  <div class="srow s2"><a href="#ops">Reliability and operations</a><div class="bar"><i></i><i></i><i></i><i></i><i></i></div><span class="n">2</span><span class="why">No error tracking, no job alerts, missed jobs lost, one race can crash a screen</span></div>
+  <div class="srow s1"><a href="#launch">App Store readiness</a><div class="bar"><i></i><i></i><i></i><i></i><i></i></div><span class="n">1</span><span class="why">Deletion stub, no privacy policy or manifest, upgrade buttons lead nowhere, no hosting</span></div>
+  <div class="srow s1"><a href="#monet">Monetization</a><div class="bar"><i></i><i></i><i></i><i></i><i></i></div><span class="n">1</span><span class="why">Plans and gates are ready; nothing to buy yet (no In-App Purchase, no final prices)</span></div>
+</div>
+
+<!-- ============ SECURITY ============ -->
+<section class="sect" id="security">
+<div class="area-head"><h2>Security</h2><span class="pill amber">3 / 5</span></div>
+<div class="cols">
+  <div class="card"><h3>Strong</h3><ul class="good">
+    <li>Every read, edit and delete is checked against the signed-in user (no cross-user access found).</li>
+    <li>Sign-in tokens: pinned algorithm, strong secret enforced, expiry, revocation, sessions per device, single-use iOS refresh tokens with reuse detection.</li>
+    <li>Sign-in codes: hashed, 3 attempts, 30 s expiry, constant-time checks. Passwords: bcrypt.</li>
+    <li>No injection paths; no slow-regex attacks (tested). Errors never leak database text.</li>
+    <li>Admin routes owner-only; "View as" only for the owner in development.</li>
+  </ul></div>
+  <div class="card"><h3>Weak</h3><ul>
+    <li><span class="sev h">High</span> Behind the web app's proxy, a client can fake its IP and skip every per-IP limit, or lock out someone else's IP. Safe when the phone calls the back-end directly.</li>
+    <li><span class="sev h">High</span> If the database ever reports a missing access column, <b>every user becomes owner</b> (confirmed in code). One-line fix: fail closed.</li>
+    <li><span class="sev m">Med</span> Unsigned-in public stock pages can be used to hammer Yahoo with random symbols; Yahoo then throttles Signa for everyone.</li>
+    <li><span class="sev m">Med</span> Anyone can keep a known account locked (1 wrong password every 15 min); usernames can be guessed.</li>
+    <li><span class="sev m">Med</span> No request size limit: a huge sign-up body is read into memory.</li>
+    <li><span class="sev m">Med</span> Two-step sign-in can be turned on without the password; a password reset doesn't sign out other devices.</li>
+    <li><span class="sev l">Low</span> "Resend code" can flood the shared Telegram bot and resets attempt counts.</li>
+  </ul></div>
+</div>
+</section>
+
+<!-- ============ PRIVACY ============ -->
+<section class="sect" id="privacy">
+<div class="area-head"><h2>Privacy and data protection</h2><span class="pill red">2 / 5</span></div>
+<div class="cols">
+  <div class="card"><h3>Strong</h3><ul class="good">
+    <li>No user ever sees another user's data; password hashes never returned.</li>
+    <li>Codes and refresh tokens stored only as hashes; nightly cleanup of old tokens, sessions, logs.</li>
+    <li>"Followed together" stores no user ids; the growth report and feedback triage are owner-only.</li>
+    <li>Apple Search Ads tokens are cleared once resolved; Yahoo only ever sees ticker symbols.</li>
+  </ul></div>
+  <div class="card"><h3>Weak</h3><ul>
+    <li><span class="sev h">High</span> <b>No account deletion route</b> (the function exists, nothing calls it; iOS shows "not available yet"). Required by Apple and LGPD. Design proposed: 30-day grace, restore on sign-in, "delete now".</li>
+    <li><span class="sev h">High</span> After deletion, security logs and problem reports would keep IPs, device details and messages.</li>
+    <li><span class="sev m">Med</span> No data export (LGPD / PIPEDA right of access).</li>
+    <li><span class="sev m">Med</span> Logs record username + IP + every path (tickers, device tokens); a queued Telegram message can log a sign-in code.</li>
+    <li><span class="sev m">Med</span> Lock-screen pushes show money amounts (recap, dividends) with no "hide amounts" option.</li>
+    <li><span class="sev m">Med</span> "Followed together" can be broken with 4 fake accounts to learn a real user's other holdings.</li>
+    <li><span class="sev l">Low</span> Daily activity and sign-up sources are kept forever.</li>
+  </ul></div>
+</div>
+</section>
+
+<!-- ============ ABUSE ============ -->
+<section class="sect" id="abuse">
+<div class="area-head"><h2>Abuse and fraud</h2><span class="pill red">2 / 5</span></div>
+<div class="card"><ul>
+  <li><span class="sev m">Med</span> With open sign-up there is no bot check: 5 fake friends give anyone +25 free stocks.</li>
+  <li><span class="sev m">Med</span> 5+ bots following AAPL and a chosen ticker make that ticker appear as "people who follow AAPL also follow X". That's a stock-promotion channel.</li>
+  <li><span class="sev m">Med</span> Bots also pollute the growth report you'll use to judge ads.</li>
+  <li><b>Fix:</b> reward a referral only after real use (7 days, several active days, different device); count "followed together" only from accounts 30+ days old and active; raise the minimum to 10 while small; Turnstile on web, App Attest on iOS.</li>
+</ul></div>
+</section>
+
+<!-- ============ PERFORMANCE ============ -->
+<section class="sect" id="perf">
+<div class="area-head"><h2>Performance</h2><span class="pill green">4 / 5</span></div>
+<div class="cols">
+  <div class="card"><h3>Strong</h3><ul class="good">
+    <li>One Yahoo fetch per symbol for everyone, failures cached briefly, separate thread pools for jobs and requests.</li>
+    <li>Sign-in check answered from memory; per-user cache with safe invalidation; paged reads, chunked filters, gzip.</li>
+    <li>Chart math in milliseconds for 300 holdings.</li>
+  </ul></div>
+  <div class="card"><h3>Weak</h3><ul>
+    <li><span class="sev h">High</span> The nightly "followed together" count grows with the square of each user's list: 1,000 users × 200 stocks took 13 s and about 1 GB. Fix: drop symbols with fewer than 5 followers first, or count in Postgres.</li>
+    <li><span class="sev m">Med</span> Stock pages don't remember a Yahoo failure, so people waiting on the same symbol retry one by one.</li>
+    <li><span class="sev l">Low</span> "Similar" builds every candidate row before keeping 10; the hourly pool reload blocks the requests that need it.</li>
+  </ul></div>
+</div>
+</section>
+
+<!-- ============ OPS ============ -->
+<section class="sect" id="ops">
+<div class="area-head"><h2>Reliability and operations</h2><span class="pill red">2 / 5</span></div>
+<div class="card"><ul>
+  <li><span class="sev h">High</span> <b>Crash:</b> opening a new stock while someone else views "Similar" can raise "dictionary changed size", which returns a 500 (reproduced). Fix: never change the shared pool in place.</li>
+  <li><span class="sev h">High</span> Behind the web proxy, all web users share one IP bucket: the 6th sign-up in 15 min blocks web sign-in for everyone.</li>
+  <li><span class="sev m">Med</span> No error tracking: unhandled errors don't reach the log file, no request ids, no Sentry (the app already expects a Sentry id).</li>
+  <li><span class="sev m">Med</span> No alert when a job fails or is skipped; a Mac asleep at 16:30 or on the 1st loses that day's snapshot or the month's recap.</li>
+  <li><span class="sev m">Med</span> Nothing stops two copies running: jobs and pushes would run twice.</li>
+  <li><span class="sev m">Med</span> During a database outage all 32 request threads wait on timeouts (no circuit breaker), and Premium users briefly see the upgrade screen.</li>
+  <li><span class="sev m">Med</span> Not deployed: no host, no backups plan (Supabase Pro for daily backups), logs only on the Mac.</li>
+</ul></div>
+</section>
+
+<!-- ============ MONEY ============ -->
+<section class="sect" id="money">
+<div class="area-head"><h2>Data correctness</h2><span class="pill amber">3 / 5</span></div>
+<div class="card"><ul>
+  <li><span class="sev m">Med</span> The monthly recap counts deposits as gains: adding R$10k shows "+R$10k" for the month.</li>
+  <li><span class="sev m">Med</span> If the currency lookup fails, snapshots are saved in CAD for everyone; users without settings default to CAD instead of their country's currency.</li>
+  <li><span class="sev m">Med</span> No snapshot on days only B3 trades (US/Canadian holidays).</li>
+  <li><span class="sev m">Med</span> The growth report mixes UTC and New York days at the edges.</li>
+  <li><span class="sev l">Low</span> No sanity band on non-CAD exchange rates; a bad Yahoo print would mis-size a currency for an hour.</li>
+</ul></div>
+</section>
+
+<!-- ============ PRODUCT ============ -->
+<section class="sect" id="product">
+<div class="area-head"><h2>Product</h2><span class="pill amber">3 / 5</span></div>
+<div class="cols">
+  <div class="card"><h3>Strong</h3><ul class="good">
+    <li>Works in any market; "PETR4" finds B3; pence handled; exchange holidays.</li>
+    <li>Easy entry: paste tickers, CSV import in Portuguese or English, decimal commas, undo import.</li>
+    <li>Push asked at the right moment; complete Portuguese (0 missing strings); Face ID, hide amounts, sessions list.</li>
+    <li>Plans can move features between Free and Premium with one database change.</li>
+  </ul></div>
+  <div class="card"><h3>Gaps that matter for keeping users</h3><ul>
+    <li><span class="sev h">High</span> Brazil: no fixed income (Tesouro, CDB, LCI) or CDI benchmark; Kinvo and Investidor10 have it.</li>
+    <li><span class="sev h">High</span> No broker import presets (B3 Área do Investidor, Wealthsimple, Questrade, Schwab); typing a portfolio is where people quit.</li>
+    <li><span class="sev h">High</span> Forgot password = lost account (no email or reset route; the code exists, unrouted).</li>
+    <li><span class="sev m">Med</span> Dividends received aren't logged automatically for people without transactions.</li>
+    <li><span class="sev m">Med</span> Free is very generous (up to 40 stocks with friends); Premium has little a Brazilian would pay for.</li>
+  </ul></div>
+</div>
+</section>
+
+<!-- ============ LAUNCH ============ -->
+<section class="sect" id="launch">
+<div class="area-head"><h2>App Store readiness</h2><span class="pill red">1 / 5</span></div>
+<div class="card"><ul>
+  <li><span class="sev h">Blocker</span> In-app account deletion (stub today).</li>
+  <li><span class="sev h">Blocker</span> Privacy policy, terms and support URLs (the strings exist, no pages, nothing linked).</li>
+  <li><span class="sev h">Blocker</span> iOS privacy manifest (<code>PrivacyInfo.xcprivacy</code>) missing for the app and the widget.</li>
+  <li><span class="sev h">Blocker</span> "Upgrade to Premium" leads to "coming soon": hide it for v1, or ship In-App Purchase.</li>
+  <li><span class="sev h">Blocker</span> Production hosting, paid Apple account, push key, a demo account for App Review.</li>
+  <li><span class="sev m">Med</span> Claims to fix: "prices every minute" vs "delayed 15 min"; lock-screen widgets promised but not built; old "10 stocks" text on the web.</li>
+  <li>App Privacy label data is listed by the review (financial info, identifiers, usage, attribution; no tracking).</li>
+</ul></div>
+</section>
+
+<!-- ============ MONETIZATION / GROWTH / CODE ============ -->
+<section class="sect" id="monet">
+<div class="area-head"><h2>Monetization</h2><span class="pill red">1 / 5</span></div>
+<div class="card"><ul>
+  <li>Ready: Free/Premium gates on every feature, limits with upgrade prompts, pricing draft per market, creator plan.</li>
+  <li>Missing: In-App Purchase (StoreKit 2, Apple's purchase messages, Premium from the subscription, restore and manage buttons), final monthly and yearly prices, free trial, offer codes. This also blocks the creator program.</li>
+</ul></div>
+</section>
+<section class="sect" id="growth">
+<div class="area-head"><h2>Growth measurement</h2><span class="pill green">4 / 5</span></div>
+<div class="card"><ul>
+  <li>Ready: sign-up sources, Apple Search Ads attribution, daily activity, funnel by channel, campaign, country or week.</li>
+  <li>Missing: crash and error rates, day-1/7/30 retention, push open rates, App Store rating prompt; hide groups smaller than 5 people.</li>
+</ul></div>
+</section>
+<section class="sect" id="code">
+<div class="area-head"><h2>Code quality and tests</h2><span class="pill green">4 / 5</span></div>
+<div class="card"><ul>
+  <li>Ready: 849 tests in about a minute, every route documented, speed rules written down, migrations folded into one schema.</li>
+  <li>Missing tests: Yahoo down on public pages, rate limits behind a proxy, day boundaries, recap with deposits, Premium during a database outage.</li>
+</ul></div>
+</section>
+
+<!-- ============ PLAN ============ -->
+<h2>What to do, in order</h2>
+<p class="sub">Effort: S = hours, M = about a day, L = several days. Back-end items I can do now; iOS items go to the iOS session as a prompt.</p>
+<div class="tbl"><table>
+<tr><th>When</th><th>Fix</th><th>Area</th><th>Effort</th></tr>
+<tr><td><span class="pill red">Now</span></td><td>Access fails closed (never owner); "Similar" pool crash; remember Yahoo failures 30 s; public pages: own rate limit + known symbols only; request size limit</td><td>Security · Ops</td><td class="eff">S</td></tr>
+<tr><td><span class="pill red">Now</span></td><td>Two-step sign-in needs the password; reset signs out other devices; resend cooldown; lock per user + IP; revoke cache bug</td><td>Security</td><td class="eff">S</td></tr>
+<tr><td><span class="pill red">Now</span></td><td>Logs without personal data (route templates, no message text, no codes); retention for activity and sign-up data</td><td>Privacy</td><td class="eff">S</td></tr>
+<tr><td><span class="pill red">Now</span></td><td>Recap without deposits; snapshot currency fallback; B3-only days; funnel day boundaries; FX sanity band; Apple Search Ads job robustness</td><td>Correctness</td><td class="eff">M</td></tr>
+<tr><td><span class="pill amber">Before launch</span></td><td>Account deletion with 30-day grace + restore + "delete now"; data export</td><td>Privacy · Launch</td><td class="eff">M</td></tr>
+<tr><td><span class="pill amber">Before launch</span></td><td>Error tracking (catch-all handler, request ids, Sentry); job health + Telegram alert; catch up missed jobs; single-instance guard</td><td>Ops</td><td class="eff">M</td></tr>
+<tr><td><span class="pill amber">Before launch</span></td><td>Anti-bot for open sign-up: referral reward after real use, "followed together" from aged active accounts, minimum 10</td><td>Abuse</td><td class="eff">M</td></tr>
+<tr><td><span class="pill amber">Before launch</span></td><td>"Followed together" job in Postgres (scales); hide amounts on lock screen</td><td>Perf · Privacy</td><td class="eff">M</td></tr>
+<tr><td><span class="pill amber">Before launch</span></td><td>iOS: deletion screen, privacy manifest, policy/terms links, hide upgrade buttons, claim wording · You: privacy policy text, hosting, Apple account, demo account</td><td>Launch</td><td class="eff">M</td></tr>
+<tr><td><span class="pill blue">After launch</span></td><td>In-App Purchase + prices + trial; forgot-password (email); broker import presets; Brazilian fixed income + CDI; auto-logged dividends; weekly digest; milestone share cards; rating prompt; French</td><td>Product · Money</td><td class="eff">L</td></tr>
+</table></div>
+<p class="hint">Also worth budgeting before scaling: a licensed market-data feed (Yahoo's terms likely don't allow commercial use, and it throttles often).</p>
+</main>
+
+</body></html>

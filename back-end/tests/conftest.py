@@ -136,3 +136,15 @@ def _no_growth_writes(monkeypatch):
     monkeypatch.setattr(queries, "insert_signup_source", lambda row: None)
     monkeypatch.setattr(queries, "add_activity_day", lambda uid, day: None)
     growth._activity_written.clear()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_breaker_and_no_pending(monkeypatch):
+    """The database circuit breaker is process-wide: start every test closed.
+    Pending-deletion lookups (migration 030) return nobody unless a test says so."""
+    from app.db import queries, supabase
+    supabase.breaker._failures.clear()
+    supabase.breaker._open_until = 0.0
+    monkeypatch.setattr(queries, "pending_deletion_ids", lambda: set())
+    from app.services import account
+    monkeypatch.setattr(account, "username_reserved", lambda name, now=None: False)

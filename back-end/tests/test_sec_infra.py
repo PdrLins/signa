@@ -83,7 +83,7 @@ class TestMiddlewareOrder:
     def test_effective_chain(self):
         import main
         names = [m.cls.__name__ for m in main.app.user_middleware]  # outermost first
-        assert names == ["CORSMiddleware", "GZipMiddleware", "RateLimitMiddleware", "AuditMiddleware", "AuthMiddleware"]
+        assert names == ["CORSMiddleware", "GZipMiddleware", "BodyLimitMiddleware", "RateLimitMiddleware", "AuditMiddleware", "AuthMiddleware"]
 
     def test_401_carries_cors_headers(self, monkeypatch):
         from fastapi.testclient import TestClient

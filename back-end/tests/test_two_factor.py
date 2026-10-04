@@ -108,7 +108,7 @@ def test_is_enabled_rules():
 
 
 def test_full_setup_with_link(db):
-    view, target = two_factor.start_telegram(UID, "SignaBot", False)
+    view, target = two_factor.start_telegram(UID, "SignaBot", False, "correct horse")
     assert view["step"] == "open_telegram" and target is None
     assert view["url"].startswith("https://t.me/SignaBot?start=2fa_")
     st = two_factor.status_payload(UID, "SignaBot")
@@ -134,13 +134,13 @@ def test_full_setup_with_link(db):
 def test_use_connected_notification_chat(db):
     db.tables["telegram_links"].append({"user_id": UID, "chat_id": "777", "username": "@ana"})
     assert two_factor.status_payload(UID, "SignaBot")["telegram"]["connected_chat"] == "@ana"
-    view, (chat, code) = two_factor.start_telegram(UID, "SignaBot", True)
+    view, (chat, code) = two_factor.start_telegram(UID, "SignaBot", True, "correct horse")
     assert view["step"] == "enter_code" and chat == "777"
     assert two_factor.confirm(UID, code) == "777"
 
 
 def test_three_wrong_codes_end_setup(db):
-    view, _ = two_factor.start_telegram(UID, "SignaBot", False)
+    view, _ = two_factor.start_telegram(UID, "SignaBot", False, "correct horse")
     _, code = two_factor.chat_pressed_start(_code_from_start(view["url"]), "555", None)
     wrong = "000000" if code != "000000" else "111111"
     for _ in range(2):
@@ -155,10 +155,10 @@ def test_three_wrong_codes_end_setup(db):
 
 
 def test_expired_link_and_chat_in_use(db):
-    view, _ = two_factor.start_telegram(UID, "SignaBot", False)
+    view, _ = two_factor.start_telegram(UID, "SignaBot", False, "correct horse")
     db.tables["two_factor_setup"][0]["expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     assert two_factor.chat_pressed_start(_code_from_start(view["url"]), "555", None) is None
-    view, _ = two_factor.start_telegram(UID, "SignaBot", False)
+    view, _ = two_factor.start_telegram(UID, "SignaBot", False, "correct horse")
     _, code = two_factor.chat_pressed_start(_code_from_start(view["url"]), "999", None)   # the owner's chat
     with pytest.raises(HTTPException) as e:
         two_factor.confirm(UID, code)
@@ -194,9 +194,31 @@ async def test_update_router_sends_2fa_code(db, monkeypatch):
         sent.append((chat_id, key, kw.get("code")))
         return True
     monkeypatch.setattr(two_factor, "send", fake_send)
-    view, _ = two_factor.start_telegram(UID, "SignaBot", False)
+    view, _ = two_factor.start_telegram(UID, "SignaBot", False, "correct horse")
     await telegram_updates.process_update({"message": {
         "text": f"/start 2fa_{_code_from_start(view['url'])}",
         "chat": {"id": 555, "type": "private"}, "from": {"username": "ana"}}})
     assert sent and sent[0][0] == "555" and sent[0][1] == "user_2fa_code" and len(sent[0][2]) == 6
     assert two_factor.status_payload(UID, "SignaBot")["setup"]["chat_label"] == "@ana"
+
+
+def test_start_needs_the_password(db):
+    with pytest.raises(HTTPException) as e:
+        two_factor.start_telegram(UID, "SignaBot", False)
+    assert e.value.detail["code"] == "password_required"
+    with pytest.raises(HTTPException) as e:
+        two_factor.start_telegram(UID, "SignaBot", False, "wrong")
+    assert e.value.status_code == 403 and e.value.detail["code"] == "wrong_password"
+
+
+def test_resend_cooldown_and_keeps_attempts(db):
+    two_factor._resend_last.clear()
+    two_factor._resend_hour.clear()
+    view, _ = two_factor.start_telegram(UID, "SignaBot", False, "correct horse")
+    two_factor.chat_pressed_start(_code_from_start(view["url"]), "555", None)
+    two_factor.resend(UID)
+    with pytest.raises(HTTPException) as e:
+        two_factor.resend(UID)                      # within 60 s
+    assert e.value.status_code == 429 and e.value.detail["code"] == "resend_too_soon"
+    two_factor._resend_last.clear()
+    two_factor._resend_hour.clear()

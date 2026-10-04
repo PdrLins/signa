@@ -26,6 +26,11 @@ _SCRUB_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{8,}"), r"\1" + _REDACTED),
     # Secret-looking query/form params: ?api_key=..., &key=..., token=...
     (re.compile(r"(?i)\b((?:api[_-]?key|apikey|key|token|access_token|jwt|secret|password)=)[^&\s\"'<>]+"), r"\1" + _REDACTED),
+    # Personal data that must never sit in a log: sign-in codes inside messages,
+    # email addresses, APNs device tokens (64 hex)
+    (re.compile(r"<code>\s*\d{4,8}\s*</code>"), "<code>" + _REDACTED + "</code>"),
+    (re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "[EMAIL]"),
+    (re.compile(r"\b[0-9a-fA-F]{64}\b"), "[DEVICE_TOKEN]"),
 ]
 
 
@@ -41,6 +46,15 @@ def scrub_secrets(text: str) -> str:
 def _scrub_patcher(record) -> None:
     """Loguru patcher: scrub the message before any sink sees it."""
     record["message"] = scrub_secrets(record["message"])
+
+
+class _InterceptHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+        logger.opt(exception=record.exc_info, depth=6).log(level, record.getMessage())
 
 
 def init_log_capture():
@@ -83,4 +97,11 @@ def init_log_capture():
             backtrace=False,
             diagnose=False,
         )
+    # uvicorn's own errors ("Exception in ASGI application" tracebacks) go
+    # through stdlib logging: route them into loguru so they reach the log
+    # file and the scrubber too.
+    for name in ("uvicorn.error",):
+        std = logging.getLogger(name)
+        std.handlers = [_InterceptHandler()]
+        std.propagate = False
     logger.info("Logging initialized")

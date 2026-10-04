@@ -252,10 +252,17 @@ def _reject_if_crossed(direction: str, target: float, ccy: str, symbol: str,
                         422, field="target_price", current_price=round(price, 4), currency=ccy)
 
 
+MAX_ALERTS_KEPT = 200   # active + triggered, a storage guard (Premium's active alerts are unlimited)
+
+
 def create_alert(user: dict, symbol: str, body: dict) -> dict:
     from app.db import queries
     data = validate(body)
     _check_limit(user)
+    if queries.count_rows("price_alerts", user["user_id"]) >= MAX_ALERTS_KEPT:
+        raise api_error("alert_total_limit",
+                        f"You can keep up to {MAX_ALERTS_KEPT} alerts (active and triggered). Delete old ones first.",
+                        422, limit=MAX_ALERTS_KEPT)
     qs, usdcad = _quotes_for({symbol})
     q = qs.get(symbol)
     ccy = data.get("currency") or str((q or {}).get("currency") or default_currency(symbol)).upper()

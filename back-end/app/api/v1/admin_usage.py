@@ -63,3 +63,15 @@ def _usage(days: int) -> dict:
 @router.get("/usage", dependencies=[Depends(require_feature("area.admin"))])
 async def usage(days: int = Query(30, ge=1, le=365)):
     return await run_db_for(INSIGHTS_MIGRATION, _usage, days)
+
+
+
+@router.get("/jobs", dependencies=[Depends(require_feature("area.admin"))])
+async def jobs_health():
+    """Scheduled jobs (migration 030): [{"job_id", "last_started_at", "last_success_at",
+    "last_error", "last_error_at", "failures" (in a row)}], failing jobs first.
+    The owner also gets a Telegram/push alert after 2 failures in a row."""
+    import asyncio
+
+    from app.scheduler import health
+    return {"jobs": await asyncio.to_thread(health.report)}

@@ -9,9 +9,11 @@ Three sources, all plain rules and counts:
    +0.5 both pay dividends, +0.5 listed on the user's home exchange. Same kind
    only (a stock never suggests a fund); leveraged / inverse funds never.
 2. People who follow X also follow Y. Anonymous counts of users following
-   both symbols (symbol_cofollows), computed nightly from every holdings and
-   watchlist; a pair is kept only when at least MIN_COFOLLOW_USERS share it,
-   and the count shown is rounded down to a multiple of 5. No user is ever named.
+   both symbols (symbol_cofollows), computed nightly from holdings and
+   watchlists of real, returning accounts only (eligible_users: 30+ days
+   old, back a week after sign-up); a pair is kept only when at least
+   MIN_COFOLLOW_USERS share it, counts are rounded down to a multiple of 5 and
+   the order uses the rounded counts. No user is ever named.
 3. Gaps in your portfolio (Premium, feature.portfolio_gaps): one position over
    20% of the portfolio, one sector over 40% of the stocks, almost nothing
    outside the home country, no dividend payers. Each gap lists a few broad
@@ -28,6 +30,7 @@ for followed symbols and the curated lists, NIGHTLY_PROFILE_MAX per night.
 
 from __future__ import annotations
 
+import heapq
 import threading
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -42,9 +45,10 @@ FEATURE_ALL = "feature.suggestions_all"
 FEATURE_GAPS = "feature.portfolio_gaps"
 FREE_LIMIT = 3
 FULL_LIMIT = 10
-MIN_COFOLLOW_USERS = 5
+MIN_COFOLLOW_USERS = 10          # raise later only if the user base is large
+MIN_ACCOUNT_AGE_DAYS = 30
 MAX_PAIRS_PER_SYMBOL = 20
-MAX_SYMBOLS_PER_USER = 200        # a huge watchlist doesn't dominate the pair counts
+MAX_SYMBOLS_PER_USER = 60         # a big portfolio counts its 60 most-followed stocks (pairs grow with the square)
 MIN_SIMILAR_SCORE = 2.0
 PROFILE_REFRESH_DAYS = 7
 NIGHTLY_PROFILE_MAX = 400
@@ -159,33 +163,72 @@ def profile_from_info(symbol: str, info: dict | None) -> dict | None:
     }
 
 
+PROFILE_STALE_S = 24 * 3600   # a page rebuild re-saves the profile at most once a day
+
+
 def record_from_info(symbol: str, info: dict | None) -> None:
-    """Store a profile from info a caller already has (stock page). Never raises."""
-    row = profile_from_info(symbol, info)
+    """Store a profile from info a caller already has (stock page). Only when
+    it's missing or a day old, so page rebuilds (and crawlers) don't write on
+    every build. Never raises."""
+    sym = (symbol or "").upper()
+    cur = (_pool.get("pool") or _pool.get("last") or {}).get(sym)
+    if cur:
+        try:
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(str(cur.get("updated_at")).replace("Z", "+00:00"))
+            if age.total_seconds() < PROFILE_STALE_S:
+                return
+        except ValueError:
+            pass
+    row = profile_from_info(sym, info)
     if not row:
         return
     try:
         from app.db import queries
         queries.upsert_symbol_profiles([row])
+    except Exception as e:
+        logger.debug(f"suggestions: profile for {sym} not stored ({type(e).__name__})")
+        return
+    with _pool_lock:   # copy, never change in place: readers iterate the old dict safely
         pool = _pool.get("pool")
         if pool is not None:
-            pool[row["symbol"]] = row
-    except Exception as e:
-        logger.debug(f"suggestions: profile for {symbol} not stored ({type(e).__name__})")
+            _pool.set("pool", {**pool, sym: row})
+
+
+_pool_refreshing = threading.Event()
+
+
+def _reload_pool() -> dict[str, dict]:
+    from app.db import queries
+    pool = {str(r["symbol"]).upper(): r for r in queries.get_symbol_profiles()}
+    _pool.set("pool", pool)
+    _pool.set("last", pool, ttl=24 * 3600)
+    return pool
 
 
 def load_pool() -> dict[str, dict]:
-    """symbol -> profile for every stored symbol, cached POOL_TTL_S (one load at a time)."""
+    """symbol -> profile for every stored symbol (read-only: never change it).
+    Cached POOL_TTL_S; after that the old pool keeps answering while one
+    background thread reloads it, so no request waits on the full table."""
     pool = _pool.get("pool")
     if pool is not None:
         return pool
+    last = _pool.get("last")
+    if last is not None:
+        if not _pool_refreshing.is_set():
+            _pool_refreshing.set()
+
+            def run():
+                try:
+                    _reload_pool()
+                except Exception as e:
+                    logger.debug(f"suggestions: pool reload failed ({type(e).__name__})")
+                finally:
+                    _pool_refreshing.clear()
+            threading.Thread(target=run, name="suggestions-pool", daemon=True).start()
+        return last
     with _pool_lock:
         pool = _pool.get("pool")
-        if pool is None:
-            from app.db import queries
-            pool = {str(r["symbol"]).upper(): r for r in queries.get_symbol_profiles()}
-            _pool.set("pool", pool)
-    return pool
+        return pool if pool is not None else _reload_pool()
 
 
 def clear_cache() -> None:
@@ -252,15 +295,20 @@ def similar_to(symbol: str, pool: dict[str, dict], followed: set[str], home_exch
             seen.add(peer)
             out.append(_row(peer, pool.get(peer) or {"name": name, "quote_type": "ETF"}, "same_fund_group", followed))
     me = pool.get(sym)
-    if me:
+    if me and len(out) < limit:
         scored = []
         for other, prof in pool.items():
             if other in seen:
                 continue
             score, reason = similarity(me, prof, home_exch)
-            if score >= MIN_SIMILAR_SCORE and not _leveraged(other, prof):
+            if score >= MIN_SIMILAR_SCORE:
                 scored.append((-score, -(_f(prof.get("market_cap")) or 0), other, reason))
-        for _s, _c, other, reason in sorted(scored):
+        # rows (and the leveraged check) only for the best few, not every match
+        for _s, _c, other, reason in heapq.nsmallest(limit * 3, scored):
+            if len(out) >= limit:
+                break
+            if _leveraged(other, pool[other]):
+                continue
             key = "industry" if reason == "same_industry" else "sector" if reason == "same_sector" else "category"
             out.append(_row(other, pool[other], reason, followed, **{key: me.get(key)}))
     return out[:limit]
@@ -270,20 +318,51 @@ def similar_to(symbol: str, pool: dict[str, dict], followed: set[str], home_exch
 # 2. Co-follows
 # ============================================================
 
+def eligible_users(users: Iterable[dict], now: datetime) -> set[str]:
+    """Accounts that count in "followed together": at least MIN_ACCOUNT_AGE_DAYS
+    old and seen again a week or more after signing up. Fake accounts made to
+    reveal a real user's holdings, or to push a ticker, have to live a month
+    and keep coming back first. Pure."""
+    out = set()
+    for u in users:
+        created = _ts(u.get("created_at"))
+        seen = _ts(u.get("last_seen_at"))
+        if not created or not seen:
+            continue
+        if (now - created).days >= MIN_ACCOUNT_AGE_DAYS and (seen - created).days >= 7:
+            out.add(str(u["id"]))
+    return out
+
+
+def _ts(v: Any) -> datetime | None:
+    try:
+        t = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
 def compute_cofollows(follow_rows: Iterable[dict], min_users: int = MIN_COFOLLOW_USERS,
-                      top: int = MAX_PAIRS_PER_SYMBOL) -> list[dict]:
+                      top: int = MAX_PAIRS_PER_SYMBOL, eligible: set[str] | None = None) -> list[dict]:
     """[{symbol, other, users}] from [{user_id, symbol}]: pairs shared by at
-    least min_users users, the top `top` per symbol. Pure."""
+    least min_users users, the top `top` per symbol. Pure.
+
+    Scales: a symbol with fewer than min_users followers can't be in any
+    pair, so it is dropped before pairing; each user is cut to their
+    MAX_SYMBOLS_PER_USER most-followed symbols (not the alphabetically first)."""
     by_user: dict[str, set[str]] = defaultdict(set)
     for r in follow_rows:
         uid, sym = r.get("user_id"), str(r.get("symbol") or "").upper()
-        if uid and sym:
+        if uid and sym and (eligible is None or str(uid) in eligible):
             by_user[str(uid)].add(sym)
+    followers: Counter = Counter(sym for syms in by_user.values() for sym in syms)
+    popular = {sym for sym, n in followers.items() if n >= min_users}
     pairs: Counter = Counter()
     for syms in by_user.values():
-        s = sorted(syms)[:MAX_SYMBOLS_PER_USER]
-        for i, a in enumerate(s):
-            for b in s[i + 1:]:
+        keep = sorted((x for x in syms if x in popular), key=lambda x: (-followers[x], x))[:MAX_SYMBOLS_PER_USER]
+        keep.sort()
+        for i, a in enumerate(keep):
+            for b in keep[i + 1:]:
                 pairs[(a, b)] += 1
     per: dict[str, list[tuple[int, str]]] = defaultdict(list)
     for (a, b), n in pairs.items():
@@ -310,10 +389,10 @@ def also_followed(symbols: Iterable[str], rows: list[dict], exclude: set[str], f
     for r in rows:
         if str(r.get("symbol")).upper() not in wanted:
             continue
-        other, n = str(r.get("other")).upper(), int(r.get("users") or 0)
+        other, n = str(r.get("other")).upper(), _rounded(int(r.get("users") or 0))
         if other in exclude or other in wanted:
             continue
-        score[other] += n
+        score[other] += n   # rounded counts only: the order never reveals exact numbers
         if n > best.get(other, (0, ""))[0]:
             best[other] = (n, str(r["symbol"]).upper())
     out = []
@@ -499,7 +578,8 @@ def run_nightly(now: datetime | None = None) -> dict:
     out: dict = {"status": "ok"}
     try:
         follows = queries.get_follow_rows()
-        rows = compute_cofollows(follows)
+        eligible = eligible_users(queries.get_users_age(), now) - queries.pending_deletion_ids()
+        rows = compute_cofollows(follows, eligible=eligible)
         stamp = now.isoformat()
         out["pairs"] = queries.replace_cofollows([{**r, "updated_at": stamp} for r in rows], stamp)
     except Exception as e:

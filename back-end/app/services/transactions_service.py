@@ -280,7 +280,19 @@ def list_transactions(user_id: str, filters: dict, limit: int, offset: int) -> d
             "has_more": offset + len(items) < total}
 
 
+MAX_TRANSACTIONS_PER_USER = 50_000   # a storage guard far above any real ledger
+
+
+def _check_room(user_id: str, adding: int) -> None:
+    have = queries.count_rows("transactions", user_id)
+    if have + adding > MAX_TRANSACTIONS_PER_USER:
+        raise api_error("transaction_limit",
+                        f"An account can hold up to {MAX_TRANSACTIONS_PER_USER:,} transactions.", 422,
+                        limit=MAX_TRANSACTIONS_PER_USER, current=have)
+
+
 def create_transaction(user_id: str, raw: dict) -> dict:
+    _check_room(user_id, 1)
     accounts = _accounts_map(user_id)
     _, home = profile_service.get_country_and_currency(user_id)
     clean, errors = validate_transaction(raw, accounts=accounts, home_currency=home)
@@ -576,6 +588,7 @@ def import_csv(user_id: str, content: bytes, *, dry_run: bool, create_missing_ac
     if not valid:
         raise api_error("nothing_to_import", "No valid rows to import.", 422,
                         summary=summary)
+    _check_room(user_id, len(valid))
 
     created: list[dict] = []
     if parsed["accounts_to_create"]:

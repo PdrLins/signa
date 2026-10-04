@@ -7,11 +7,12 @@ is upper-cased before lookup.
   * Sign-up (app/services/registration.py, create_user.py --referral) needs
     a valid code of an ACTIVE user; it sets users.referred_by and creates a
     `referrals` row (status 'pending', add_pending).
-  * The referral becomes 'rewarded' the first time the invited user follows
-    a stock (holdings upsert or watchlist add): reward_first_follow() runs a
-    conditional update (WHERE status = 'pending'), so it happens once even
-    under concurrent requests, and only the winner notifies.
-  * Free slots: 10 + min(5 x rewarded, 25) (app.core.access.slot_limit).
+  * The referral becomes 'rewarded' when the invited user has followed a
+    stock AND is a real returning user (earned(): account 7+ days old, used
+    again 3+ days after signing up). Checked on each follow and nightly
+    (reward_due). The conditional update (WHERE status = 'pending') makes it
+    happen once even under concurrent requests; only the winner notifies.
+  * Free slots: 15 + min(5 x rewarded, 25) (app.core.access.slot_limit).
     Premium / owner stay unlimited. users.slot_bonus is ignored.
   * The referrer gets a Telegram message ("Your friend joined Signa — +5
     stocks to follow") when they have a linked notification chat and
@@ -186,13 +187,42 @@ def summary(user: dict) -> dict:
 
 # ---------------------------------------------------------------- reward
 
+EARN_MIN_AGE_DAYS = 7      # the invited account must be a week old
+EARN_CAME_BACK_DAYS = 3    # and used again at least 3 days after signing up
+
+
+def earned(user: dict, now: datetime) -> bool:
+    """A referral pays only for a real person: the friend's account is
+    EARN_MIN_AGE_DAYS old and was used again EARN_CAME_BACK_DAYS or more after
+    signing up (so 5 throwaway sign-ups can't farm +25 stocks). Pure."""
+    def ts(v):
+        try:
+            t = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    created, seen = ts(user.get("created_at")), ts(user.get("last_seen_at"))
+    return bool(created and seen and (now - created).days >= EARN_MIN_AGE_DAYS
+                and (seen - created).days >= EARN_CAME_BACK_DAYS)
+
+
 def reward_first_follow(user_id: str) -> Optional[str]:
-    """Mark the user's pending referral rewarded. Returns the referrer's id
-    when THIS call rewarded it, else None. Idempotent and race-safe
-    (conditional update on status = 'pending'). Never raises."""
+    """Mark the user's pending referral rewarded once it is earned (a follow
+    plus earned()). Returns the referrer's id when THIS call rewarded it, else
+    None. Idempotent and race-safe (conditional update on status = 'pending').
+    Never raises. Not earned yet: stays pending; the nightly reward_due() pays it later."""
     if not user_id or _settled_cache.get(user_id):
         return None
-    now = datetime.now(timezone.utc).isoformat()
+    now_dt = datetime.now(timezone.utc)
+    try:
+        u = (_db().table("users").select("created_at, last_seen_at").eq("id", user_id).limit(1)
+             .execute().data or [{}])[0]
+    except Exception as e:
+        logger.debug(f"referrals: reward check skipped: {type(e).__name__}")
+        return None
+    if not earned(u, now_dt):
+        return None
+    now = now_dt.isoformat()
     try:
         rows = (_db().table("referrals").update({"status": "rewarded", "rewarded_at": now})
                 .eq("referred_id", user_id).eq("status", "pending").execute().data or [])
@@ -204,8 +234,31 @@ def reward_first_follow(user_id: str) -> Optional[str]:
         return None
     referrer = str(rows[0]["referrer_id"])
     _rewarded_cache.delete(referrer)
-    logger.info(f"referrals: {user_id} followed a first stock — referral of {referrer} rewarded")
+    logger.info(f"referrals: referral of {referrer[:8]} rewarded")
     return referrer
+
+
+def reward_due(now: Optional[datetime] = None) -> list[str]:
+    """Nightly: pay pending referrals whose friend now qualifies (followed a
+    stock + earned()). Returns the referrers rewarded (to notify). Blocking."""
+    from app.db.queries import _select_all_pages
+    now = now or datetime.now(timezone.utc)
+    db = _db()
+    pending = _select_all_pages(lambda: db.table("referrals").select("referred_id").eq("status", "pending")
+                                .not_.is_("referred_id", "null").order("id"))
+    out = []
+    for r in pending:
+        uid = str(r["referred_id"])
+        try:
+            followed = (db.table("holdings").select("id").eq("user_id", uid).limit(1).execute().data
+                        or db.table("watchlist").select("id").eq("user_id", uid).limit(1).execute().data)
+        except Exception:
+            continue
+        if followed:
+            ref = reward_first_follow(uid)
+            if ref:
+                out.append(ref)
+    return out
 
 
 async def notify_referrer(referrer_id: str) -> bool:

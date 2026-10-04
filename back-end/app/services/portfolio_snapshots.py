@@ -130,13 +130,14 @@ def compute_snapshot_rows(holdings: list[dict], accounts: list[dict], quotes: di
 
 
 def run_snapshots(on_date: date | None = None) -> dict:
-    """Scheduler entry (sync — run in a thread). Skips days both TSX and NYSE are closed."""
+    """Scheduler entry (sync — run in a thread). Skips days NYSE, TSX and B3 are all closed."""
     from app.db import queries
     from app.services.price_cache import get_usdcad_rate
     from app.services.quotes import get_quotes
 
     d = on_date or datetime.now(_ET).date()
-    if not (is_market_open("NYSE", d) or is_market_open("TSX", d)):
+    # any of the first markets trading counts: a US/Canadian holiday is a normal B3 day
+    if not any(is_market_open(x, d) for x in ("NYSE", "TSX", "B3")):
         return {"status": "market_closed", "date": d.isoformat()}
     try:
         holdings = queries.get_all_holdings()
@@ -156,8 +157,10 @@ def run_snapshots(on_date: date | None = None) -> dict:
     try:
         currencies = queries.get_user_home_currencies(users)
     except Exception as e:
-        logger.warning(f"snapshots: home currencies unavailable, using CAD: {e}")
-        currencies = {}
+        # never save a day in the wrong currency (a BRL portfolio stored as CAD
+        # breaks history, recap and performance): skip the run, it can be redone
+        logger.error(f"snapshots: home currencies unavailable, run skipped: {type(e).__name__}")
+        return {"status": "failed", "reason": "home_currencies_unavailable", "date": d.isoformat()}
     quotes = get_quotes({str(h.get("symbol") or "").upper() for h in holdings if h.get("symbol")})
     usdcad = get_usdcad_rate()
     rows_by_user = {uid: compute_snapshot_rows(by_user_h.get(uid, []), by_user_a.get(uid, []), quotes,

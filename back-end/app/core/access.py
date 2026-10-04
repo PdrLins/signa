@@ -177,12 +177,14 @@ def get_feature_levels() -> dict[str, str]:
     return last[0]
 
 
+_last_level = TTLCache(max_size=20000, default_ttl=24 * 3600)   # outage fallback, see below
+
+
 def get_user_access(user_id: str) -> dict:
     """{"level", "slot_bonus"} for a user, cached 60s.
 
-    Before migration 011 there is no access_level column; Signa then had a
-    single user (the owner), so every account is treated as owner. Any other
-    failure fails closed to free.
+    On a database error: the user's last known level (kept 24 h), else free.
+    Never owner.
     """
     if not user_id:
         return {"level": DEFAULT_LEVEL, "slot_bonus": 0}
@@ -191,27 +193,29 @@ def get_user_access(user_id: str) -> dict:
         return cached
     try:
         from app.db.supabase import get_client
-        rows = (get_client().table("users").select("access_level,slot_bonus")
+        rows = (get_client().table("users").select("access_level")
                 .eq("id", user_id).limit(1).execute().data or [])
         row = rows[0] if rows else {}
-        access = {"level": normalize_level(row.get("access_level")),
-                  "slot_bonus": int(row.get("slot_bonus") or 0)}
+        access = {"level": normalize_level(row.get("access_level")), "slot_bonus": 0}
     except Exception as e:
-        if _is_missing_column(e, "access_level") or _is_missing_column(e, "slot_bonus"):
-            logger.warning("users.access_level missing — apply migration 011; treating user as owner")
-            access = {"level": "owner", "slot_bonus": 0}
-        else:
-            logger.error(f"Access level lookup failed for {user_id}: {e} — failing closed to free")
-            fallback = {"level": DEFAULT_LEVEL, "slot_bonus": 0}
-            _level_cache.set(user_id, fallback, ttl=5)   # brief: an outage doesn't hit the DB per request
-            return fallback
+        # Never fail OPEN: an error can't make anyone owner. A known user keeps
+        # their last level through an outage (no upgrade screen for Premium);
+        # an unknown one is free until the database answers.
+        last = _last_level.get(user_id)
+        fallback = last or {"level": DEFAULT_LEVEL, "slot_bonus": 0}
+        logger.error(f"Access level lookup failed for {user_id}: {type(e).__name__} — using "
+                     f"{'the last known level' if last else 'free'}")
+        _level_cache.set(user_id, fallback, ttl=5)   # brief: an outage doesn't hit the DB per request
+        return fallback
     _level_cache.set(user_id, access)
+    _last_level.set(user_id, access)
     return access
 
 
 def clear_access_cache() -> None:
     global _features_last
     _level_cache.clear()
+    _last_level.clear()
     _features_last = None
 
 

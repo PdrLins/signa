@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     # false = open sign-up (the code is optional; a friend's code still counts).
     # Turn off before running ads: people from an ad have no code.
     signup_invite_required: bool = True
+    # Premium can be bought (In-App Purchase built). false = clients hide every
+    # upgrade button and say "coming later" (GET /auth/me "premium_on_sale").
+    premium_on_sale: bool = False
     email_code_expire_seconds: int = 600
     email_provider: str = "console"   # console (logs, dev) | resend | smtp
     email_from: str = "Signa <no-reply@localhost>"

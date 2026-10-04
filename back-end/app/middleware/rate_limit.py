@@ -2,8 +2,9 @@
 
 Tiers:
 - AUTH: 5 requests per 15 minutes (login, OTP)
-- STRICT: 3 requests per 5 minutes (scan trigger, learning analyze)
+- STRICT: 3 requests per 5 minutes per user (problem reports)
 - LOOKUP: 20 requests per 15 minutes per IP (invite-code lookup)
+- PUBLIC: 30 requests per minute per IP (public stock data, no sign-in)
 - STANDARD: 240 requests per minute per signed-in user (per IP when there is
   no valid token). The web app proxies every call through 127.0.0.1, so an
   IP key would put all users in one bucket.
@@ -36,6 +37,7 @@ TIER_AUTH = (5, 15 * 60, True)       # 5 failed attempts per 15 min
 TIER_STRICT = (3, 5 * 60, False)     # 3 requests per 5 min
 TIER_STANDARD = (240, 60, False)     # 240 requests per minute, per signed-in user (else per IP)
 TIER_LOOKUP = (20, 15 * 60, False)   # invite-code lookups: 20 per 15 min per IP
+TIER_PUBLIC = (30, 60, False)        # unsigned-in public stock data: 30 per minute per IP
 
 # Path → tier mapping
 _AUTH_PATHS = {
@@ -56,6 +58,8 @@ _AUTH_COUNT_ALL_PATHS = {
 }
 # GET /auth/referral/{code}
 _LOOKUP_PREFIX = "/api/v1/auth/referral/"
+# GET /public/* (no sign-in; each unseen symbol costs Yahoo calls)
+_PUBLIC_PREFIX = "/api/v1/public/"
 
 # (method, path) limited to TIER_STRICT per IP: user reports (each one pings the owner).
 _STRICT_ROUTES: set[tuple[str, str]] = {("POST", "/api/v1/feedback")}
@@ -78,6 +82,7 @@ _attempts: dict[str, OrderedDict[str, list[float]]] = {
     "strict": OrderedDict(),
     "standard": OrderedDict(),
     "lookup": OrderedDict(),
+    "public": OrderedDict(),
 }
 _blocked: OrderedDict[str, float] = OrderedDict()
 
@@ -90,6 +95,8 @@ def _get_tier(path: str, method: str = "GET") -> tuple[str, int, int, bool]:
         return ("auth", TIER_AUTH[0], TIER_AUTH[1], False)
     if path.startswith(_LOOKUP_PREFIX):
         return ("lookup", *TIER_LOOKUP)
+    if path.startswith(_PUBLIC_PREFIX):
+        return ("public", *TIER_PUBLIC)
     if (method, path) in _STRICT_ROUTES:
         return ("strict", *TIER_STRICT)
     return ("standard", *TIER_STANDARD)
@@ -118,7 +125,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         ip = get_client_ip(request)
         now = time.time()
         tier_name, max_requests, window_seconds, count_only_failures = _get_tier(path, request.method)
-        bucket_key = f"{_standard_key(request) or ip}|{tier_name}" if tier_name == "standard" else f"{ip}|{tier_name}"
+        # Signed-in tiers count per user (several people can share one address);
+        # sign-in, look-up and public tiers count per address.
+        per_user = tier_name in ("standard", "strict")
+        bucket_key = f"{(_standard_key(request) if per_user else None) or ip}|{tier_name}"
         should_block = False
         should_audit = False
         attempt_count = 0
@@ -150,7 +160,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
             if attempt_count >= max_requests:
                 should_block = True
-                if tier_name == "auth":
+                # never block the proxy's own address: that would lock out everyone behind it
+                if tier_name == "auth" and ip not in settings.trusted_proxies:
                     _blocked[ip] = now + window_seconds
                     _evict_if_needed(_blocked, MAX_TRACKED_IPS)
                     should_audit = True

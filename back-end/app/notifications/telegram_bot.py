@@ -127,7 +127,7 @@ def enqueue(chat_id: str, text: str, parse_mode: str = "HTML", urgent: bool = Fa
             return
         _get_queue().put_nowait(item)
     except asyncio.QueueFull:
-        logger.warning(f"Telegram queue full — dropped message: {text[:80]}...")
+        logger.warning(f"Telegram queue full — dropped a message ({len(text)} chars)")
     except Exception as e:
         logger.warning(f"Telegram enqueue failed: {e}")
 
@@ -136,7 +136,7 @@ def _put(item: tuple) -> None:
     try:
         _get_queue().put_nowait(item)
     except asyncio.QueueFull:
-        logger.warning(f"Telegram queue full — dropped message: {item[1][:80]}...")
+        logger.warning("Telegram queue full — dropped a message")
 
 
 # ── Direct send (still used by health ping and as the worker's backend) ──
@@ -154,7 +154,7 @@ async def send_message(chat_id: str, text: str, parse_mode: str = "HTML", urgent
     """
     from app.notifications.messages import is_quiet_hours
     if not urgent and is_quiet_hours():
-        logger.debug(f"Telegram message suppressed (quiet hours): {text[:50]}...")
+        logger.debug("Telegram message suppressed (quiet hours)")
         return False
     try:
         client = _get_http_client()

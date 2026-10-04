@@ -44,7 +44,7 @@ class FakePortfolioDB:
             "get_profile_settings", "upsert_profile_settings", "get_user_email",
             "get_people", "insert_person", "update_person", "delete_person",
             "get_accounts", "insert_accounts", "update_account", "delete_account", "move_account_transactions",
-            "get_holdings", "upsert_holdings", "update_holding", "delete_holding", "move_holdings",
+            "get_holdings", "upsert_holdings", "update_holding", "delete_holding", "move_holdings", "count_rows",
             "list_transactions", "get_transaction", "insert_transactions", "update_transaction",
             "delete_transaction", "delete_transaction_batch",
             "get_notification_prefs", "upsert_notification_prefs",
@@ -81,6 +81,10 @@ class FakePortfolioDB:
     @staticmethod
     def _id() -> str:
         return str(uuid.uuid4())
+
+    def count_rows(self, table, uid):
+        store = {"transactions": self.txs, "price_alerts": self.alerts, "holdings": self.holdings}[table]
+        return sum(1 for r in store.values() if r.get("user_id") == uid)
 
     # ---- profile
     def get_profile_settings(self, uid):

@@ -12,6 +12,8 @@ email) can be added later without changing the shape:
   big_move         {"enabled": true, "threshold_pct": 5}   daily move >= threshold
   analyst_ratings  {"enabled": false}  analyst up/downgrades
   economy          {"enabled": true}   big economy events (rates, CPI)
+  privacy          {"hide_amounts": false}   pushes say "2 dividends paid today",
+                                             never money (lock screens)
 
 No row -> DEFAULTS. PUT merges a partial object; unknown keys/fields -> 422.
 """
@@ -36,6 +38,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "big_move": {"enabled": True, "threshold_pct": 5.0},
     "analyst_ratings": {"enabled": False},
     "economy": {"enabled": True},
+    "privacy": {"hide_amounts": False},
 }
 THRESHOLD_MIN, THRESHOLD_MAX = 1.0, 50.0
 
@@ -46,8 +49,10 @@ def merge_with_defaults(stored: dict | None) -> dict:
     for key, val in (stored or {}).items():
         if key not in out or not isinstance(val, dict):
             continue
-        if isinstance(val.get("enabled"), bool):
+        if isinstance(val.get("enabled"), bool) and "enabled" in out[key]:
             out[key]["enabled"] = val["enabled"]
+        if key == "privacy" and isinstance(val.get("hide_amounts"), bool):
+            out[key]["hide_amounts"] = val["hide_amounts"]
         if key == "big_move":
             t = val.get("threshold_pct")
             if isinstance(t, (int, float)) and not isinstance(t, bool) and THRESHOLD_MIN <= t <= THRESHOLD_MAX:
@@ -73,7 +78,11 @@ def apply_patch(current: dict, patch: dict) -> dict:
         for field, v in val.items():
             if field not in allowed:
                 raise _bad(f"Unknown field '{field}' in '{key}'.", key)
-            if field == "enabled":
+            if field == "hide_amounts":
+                if not isinstance(v, bool):
+                    raise _bad("'privacy.hide_amounts' must be true or false.", key)
+                out[key]["hide_amounts"] = v
+            elif field == "enabled":
                 if not isinstance(v, bool):
                     raise _bad(f"'{key}.enabled' must be true or false.", key)
                 out[key]["enabled"] = v
@@ -97,3 +106,7 @@ def update_prefs(user_id: str, patch: dict) -> dict:
     new = apply_patch(merge_with_defaults((row or {}).get("prefs")), patch)
     saved = queries.upsert_notification_prefs(user_id, new)
     return {"prefs": new, "is_default": False, "updated_at": saved.get("updated_at")}
+
+
+def hide_amounts(prefs: dict | None) -> bool:
+    return bool(((prefs or {}).get("privacy") or {}).get("hide_amounts"))

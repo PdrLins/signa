@@ -31,6 +31,7 @@ def native_currency(symbol: str | None) -> str:
 
 FX_TTL = 3600
 FX_MISS_TTL = 300
+FX_MAX_JUMP = 0.20   # a rate moving more than 20% between refreshes is treated as a bad print
 
 
 def _download_fx(codes: list[str]) -> dict[str, float]:
@@ -80,6 +81,12 @@ def usd_rates(codes) -> dict[str, float]:
                 out[c] = cached
     if missing:
         got = _download_fx(missing)
+        for c in list(got):
+            prev = _last_good.get(c)
+            if prev and not (1 - FX_MAX_JUMP <= got[c] / prev <= 1 + FX_MAX_JUMP):
+                # one bad Yahoo print must not mis-size every position in that currency
+                logger.warning(f"FX {c}: {got[c]} is more than {FX_MAX_JUMP:.0%} away from {prev}, ignored")
+                del got[c]
         for c in missing:
             if c in got:
                 _last_good[c] = got[c]

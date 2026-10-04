@@ -131,7 +131,8 @@ def register(username: str, password: str, referral_code: str, ip_address: str, 
         if (code or app_settings.signup_invite_required) and not referrer:
             raise RegistrationError("invalid_referral", "That invite code isn't valid.",
                                     422)
-        if _username_exists(name):
+        from app.services import account
+        if _username_exists(name) or account.username_reserved(name):   # a just-deleted name stays taken
             raise RegistrationError("username_taken", "That username is taken.", status.HTTP_409_CONFLICT)
         user = create_account(name, password, referrer["id"] if referrer else None)
     except RegistrationError as e:
@@ -148,6 +149,6 @@ def register(username: str, password: str, referral_code: str, ip_address: str, 
                          invite="friend" if referrer else "none")   # never fails the sign-up
     _audit(AuditEvent.USER_REGISTERED, True, ip_address, user_agent, user_id=str(user["id"]),
            referrer_id=referrer["id"] if referrer else None, client=client)
-    logger.info(f"register: new account {name}" + (f" invited by {referrer['id']}" if referrer else ""))
+    logger.info(f"register: new account {str(user['id'])[:8]}" + (" (invited)" if referrer else ""))
     token = auth_service._issue_access_token(user, ip_address, user_agent, client, device_name)
     return {"message": "Account created", "session_token": None, **token}

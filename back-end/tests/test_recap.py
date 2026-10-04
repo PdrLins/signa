@@ -72,3 +72,13 @@ def test_recap_endpoint(monkeypatch):
     assert body["next_month"]["payments"] == 0
     r = make_client(monkeypatch, portfolio_home.router).get("/api/v1/portfolio/recap?month=2099-01")
     assert r.status_code == 422 and r.json()["detail"]["code"] == "invalid_month"
+
+
+def test_deposits_in_the_month_are_not_gains():
+    from datetime import date
+
+    from app.services import portfolio_performance as perf
+    txs = [{"type": "deposit", "trade_date": "2026-09-10", "amount": 10000, "currency": "BRL"}]
+    fl = perf.external_flows(txs, date(2026, 8, 31), date(2026, 9, 30), "BRL", None)
+    md = perf.modified_dietz(20000, 30500, fl["flows"], date(2026, 8, 31), date(2026, 9, 30))
+    assert round(md["gain"], 2) == 500 and md["net_flows"] == 10000   # +R$10k deposited, R$500 earned

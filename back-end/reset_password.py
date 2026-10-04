@@ -45,7 +45,11 @@ def main():
         "login_attempts": 0,
         "locked_until": None,
     }).eq("id", user["id"]).execute()
-    print(f"Password updated. Log in as '{user['username']}' (lowercase).")
+    # A reset usually means the account may be compromised: end every session.
+    from app.services import sessions
+    ended = sessions.revoke_others(str(user["id"]), None, "password_reset")
+    print(f"Password updated; {ended} signed-in device(s) were signed out. "
+          f"Log in as '{user['username']}' (lowercase).")
 
 
 if __name__ == "__main__":

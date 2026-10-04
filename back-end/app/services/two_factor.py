@@ -28,6 +28,7 @@ from fastapi import status
 from loguru import logger
 
 from app.core.api_errors import api_error
+from app.core.cache import TTLCache
 from app.core.config import settings
 from app.core.security import generate_otp, hash_otp, verify_otp, verify_password
 
@@ -114,26 +115,56 @@ def status_payload(user_id: str, bot: Optional[str]) -> dict:
     }
 
 
-def _send_code_to(user_id: str, chat_id: str, chat_label: Optional[str]) -> str:
+def _send_code_to(user_id: str, chat_id: str, chat_label: Optional[str], reset_attempts: bool = True) -> str:
     """Store a fresh 6-digit code for the setup chat. Returns the plain code
-    (the caller sends it to Telegram)."""
+    (the caller sends it to Telegram). A resend keeps the wrong-code count,
+    so resending can't be used to get unlimited guesses."""
     code = generate_otp()
-    _db().table("two_factor_setup").update({
-        "chat_id": chat_id, "chat_label": chat_label, "otp_hash": hash_otp(code, salt=user_id),
-        "otp_attempts": 0, "expires_at": (_now() + SETUP_TTL).isoformat(),
-    }).eq("user_id", user_id).execute()
+    row = {"chat_id": chat_id, "chat_label": chat_label, "otp_hash": hash_otp(code, salt=user_id),
+           "expires_at": (_now() + SETUP_TTL).isoformat()}
+    if reset_attempts:
+        row["otp_attempts"] = 0
+    _db().table("two_factor_setup").update(row).eq("user_id", user_id).execute()
     return code
 
 
-def start_telegram(user_id: str, bot: Optional[str], use_connected_chat: bool) -> tuple[dict, Optional[tuple[str, str]]]:
+RESEND_COOLDOWN_S = 60
+RESEND_PER_HOUR = 5
+_resend_last = TTLCache(max_size=20000, default_ttl=RESEND_COOLDOWN_S)
+_resend_hour = TTLCache(max_size=20000, default_ttl=3600)
+
+
+def _check_resend(user_id: str) -> None:
+    """60 s between codes and 5 an hour per user (the bot is shared by everyone)."""
+    import time
+    last = _resend_last.get(user_id)
+    if last:
+        wait = max(1, int(RESEND_COOLDOWN_S - (time.time() - last)))
+        raise api_error("resend_too_soon", f"Wait {wait} s before asking for another code.", 429,
+                        retry_after=wait)
+    sent = _resend_hour.get(user_id) or 0
+    if sent >= RESEND_PER_HOUR:
+        raise api_error("resend_too_soon", "Too many codes this hour. Try again later.", 429, retry_after=3600)
+    _resend_last.set(user_id, time.time())
+    _resend_hour.set(user_id, sent + 1)
+
+
+def start_telegram(user_id: str, bot: Optional[str], use_connected_chat: bool,
+                   password: Optional[str] = None) -> tuple[dict, Optional[tuple[str, str]]]:
     """Begin (or restart) setup. Returns (setup view, (chat_id, code) to send
-    now or None). The route does the Telegram send."""
+    now or None). The route does the Telegram send. The password is required:
+    a stolen session must not be able to tie the account to the thief's Telegram."""
     if not settings.telegram_bot_token or not bot:
         raise api_error("telegram_not_configured", "Telegram isn't set up on this server yet.",
                         status.HTTP_503_SERVICE_UNAVAILABLE)
     u = _user(user_id)
     if is_enabled(u):
         raise api_error("already_enabled", "Two-step sign-in is already on.", status.HTTP_409_CONFLICT)
+    if not password:
+        raise api_error("password_required", "Enter your password to turn on two-step sign-in.", 422,
+                        field="password")
+    if not verify_password(password, u["password_hash"]):
+        raise api_error("wrong_password", "That password is not right.", status.HTTP_403_FORBIDDEN)
     start_code = secrets.token_urlsafe(18)
     _db().table("two_factor_setup").upsert({
         "user_id": user_id, "method": "telegram", "code_hash": hash_start_code(start_code),
@@ -172,7 +203,8 @@ def resend(user_id: str) -> tuple[dict, tuple[str, str]]:
     row = _setup_row(user_id)
     if not row or not row.get("chat_id") or setup_view(row, None, _now()) is None:
         raise api_error("setup_expired", "This setup expired. Please start again.", status.HTTP_410_GONE)
-    code = _send_code_to(user_id, str(row["chat_id"]), row.get("chat_label"))
+    _check_resend(user_id)
+    code = _send_code_to(user_id, str(row["chat_id"]), row.get("chat_label"), reset_attempts=False)
     return setup_view(_setup_row(user_id), None, _now()), (str(row["chat_id"]), code)
 
 

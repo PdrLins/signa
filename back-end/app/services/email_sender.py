@@ -77,7 +77,7 @@ def _send_resend(to: str, subject: str, text: str, body: str) -> bool:
                    headers={"Authorization": f"Bearer {settings.resend_api_key}"},
                    json={"from": settings.email_from, "to": [to], "subject": subject, "text": text, "html": body})
     if r.status_code >= 300:
-        logger.warning(f"email: Resend refused the message ({r.status_code}): {r.text[:200]}")
+        logger.warning(f"email: Resend refused the message ({r.status_code})")
         return False
     return True
 

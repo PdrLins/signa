@@ -18,6 +18,9 @@ class LoginRequest(DeviceInfo):
     # a username or, for email accounts (migration 018), the email address
     username: str = Field(..., min_length=1, max_length=254)
     password: str = Field(..., min_length=1, max_length=128)
+    # an account waiting for deletion (migration 030) answers 403
+    # account_pending_deletion; sign in again with this set to keep it
+    restore_account: bool = False
 
 
 class LoginResponse(BaseModel):

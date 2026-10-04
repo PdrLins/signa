@@ -70,6 +70,8 @@ def clean_report(body: dict) -> dict:
             raise _invalid("invalid_diagnostics", "diagnostics must be an object.")
         if len(json.dumps(diagnostics, default=str)) > DIAGNOSTICS_MAX_BYTES:
             raise _invalid("invalid_diagnostics", f"diagnostics must be under {DIAGNOSTICS_MAX_BYTES} bytes.")
+        # only known keys with short plain values are kept (no tokens, amounts or holdings)
+        diagnostics = clean_diagnostics(diagnostics)
     row = {"kind": kind, "message": message, "platform": platform, "diagnostics": diagnostics}
     symbol = body.get("symbol")
     if symbol is not None:
@@ -81,6 +83,29 @@ def clean_report(body: dict) -> dict:
     for name in SHORT_FIELDS:
         row[name] = _short(name, body.get(name))
     return row
+
+
+DIAGNOSTIC_KEYS = frozenset({
+    "app_version", "build", "server_version", "os_version", "device_model", "locale", "screen",
+    "request_id", "last_error", "network", "sentry_event_id",
+    "field", "shown", "expected",   # wrong-data reports (kind "data")
+})
+LAST_REQUEST_KEYS = frozenset({"path", "status", "code", "request_id"})
+
+
+def clean_diagnostics(d: dict) -> dict | None:
+    """Only known keys with short plain values (no tokens, amounts or holdings).
+    last_request may be an object, with only path / status / code / request_id. Pure."""
+    def plain(v):
+        return v if isinstance(v, (int, float, bool)) or v is None else str(v)[:500]
+    out: dict = {}
+    for k, v in d.items():
+        if k == "last_request" and isinstance(v, dict):
+            out[k] = {kk: plain(vv) for kk, vv in v.items()
+                      if kk in LAST_REQUEST_KEYS and not isinstance(vv, (dict, list))}
+        elif k in DIAGNOSTIC_KEYS and not isinstance(v, (dict, list)):
+            out[k] = plain(v)
+    return out or None
 
 
 def clean_update(body: dict) -> dict:
@@ -118,9 +143,9 @@ STATUS_TEXT = {"open": "is open again", "in_progress": "is being looked at", "fi
 
 def status_message(report: dict) -> str:
     """Push text for a status change. Pure."""
-    first = (report.get("message") or "").strip().splitlines()[0][:60] if report.get("message") else ""
-    what = f'Your report "{first}"' if first else "Your report"
-    return f"{what} {STATUS_TEXT.get(report.get('status'), 'was updated')}."
+    # never the report's own words: pushes show on the lock screen
+    kind = {"data": "wrong-data report", "idea": "idea"}.get(str(report.get("kind")), "report")
+    return f"Your {kind} {STATUS_TEXT.get(report.get('status'), 'was updated')}."
 
 
 # ---------------------------------------------------------------- storage (blocking)

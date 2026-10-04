@@ -162,3 +162,11 @@ def test_data_report_needs_a_symbol(monkeypatch, store):
                                          "diagnostics": {"field": "dividend_amount", "shown": "1.40", "expected": "0.70"}})
     assert r.status_code == 201 and r.json()["symbol"] == "VXUS" and r.json()["kind"] == "data"
     assert c.post("/api/v1/feedback", json={"message": "x", "symbol": "not a ticker!"}).status_code == 422
+
+
+def test_diagnostics_keep_only_known_keys():
+    from app.services import feedback as fb
+    got = fb.clean_diagnostics({"app_version": "1.2", "token": "abc", "holdings": [1, 2],
+                                "last_request": {"path": "/x", "status": 500, "authorization": "Bearer y"}})
+    assert got == {"app_version": "1.2", "last_request": {"path": "/x", "status": 500}}
+    assert fb.clean_diagnostics({"evil": 1}) is None

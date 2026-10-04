@@ -42,13 +42,17 @@ from loguru import logger
 
 from app.core.cache import TTLCache
 
+from zoneinfo import ZoneInfo
+
 MIGRATION = "029_growth.sql"
+_ET = ZoneInfo("America/New_York")
 HEARD_FROM = ("app_store", "instagram", "youtube", "tiktok", "facebook", "google", "reddit", "x",
               "friend", "creator", "podcast", "news", "other")
 UTM_FIELDS = ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term")
 GROUPS = ("channel", "campaign", "heard_from", "country", "platform", "week")
 ASA_URL = "https://api-adservices.apple.com/api/v1/"
 ASA_TOKEN_HOURS = 24
+ASA_RUN_BUDGET_S = 120
 ACTIVATION_DAYS = 7
 MAX_RANGE_DAYS = 366
 _SAFE = re.compile(r"[^a-z0-9_.\-]+")
@@ -105,6 +109,8 @@ def add_attribution(user_id: str, body: dict | None) -> dict:
     if "asa_token" in patch and cur.get("asa_status") in ("attributed", "organic"):
         patch.pop("asa_token")
         patch.pop("asa_status", None)
+    elif "asa_token" in patch:   # a fresh token after a failed one is worth another try
+        patch["asa_status"] = "pending"
     if patch:
         queries.update_signup_source(user_id, {**patch, "updated_at": datetime.now(timezone.utc).isoformat()})
     return {"saved": sorted(patch)}
@@ -115,12 +121,12 @@ def record_activity(user_id: str, day: date) -> None:
     key = f"{user_id}|{day.isoformat()}"
     if _activity_written.get(key):
         return
-    _activity_written.set(key, True)
     try:
         from app.db import queries
         queries.add_activity_day(user_id, day.isoformat())
+        _activity_written.set(key, True)   # only once it's saved: a failure is retried
     except Exception as e:
-        logger.debug(f"growth: activity not saved for {user_id} ({type(e).__name__})")
+        logger.debug(f"growth: activity not saved ({type(e).__name__})")
 
 
 # ============================================================
@@ -156,26 +162,34 @@ def resolve_asa(now: datetime | None = None, post=None) -> dict:
     post = post or (lambda tok: httpx.post(ASA_URL, content=tok, headers={"Content-Type": "text/plain"},
                                            timeout=10))
     out = {"pending": len(rows), "attributed": 0, "organic": 0, "failed": 0, "waiting": 0}
+    import time as _time
+    budget_end = _time.time() + ASA_RUN_BUDGET_S
     for r in rows:
-        created = datetime.fromisoformat(str(r["created_at"]).replace("Z", "+00:00"))
-        if now - created > timedelta(hours=ASA_TOKEN_HOURS):
-            queries.update_signup_source(r["user_id"], {"asa_status": "failed", "asa_token": None})
-            out["failed"] += 1
-            continue
-        try:
-            resp = post(r["asa_token"])
-        except Exception as e:
-            logger.debug(f"growth: Apple attribution request failed ({type(e).__name__})")
+        if _time.time() > budget_end:   # the rest waits for the next run
             out["waiting"] += 1
             continue
-        if resp.status_code == 200:
-            fields = parse_asa(resp.json())
-            queries.update_signup_source(r["user_id"], fields)
-            out[fields["asa_status"]] += 1
-        elif resp.status_code == 400:   # invalid token: never resolvable
-            queries.update_signup_source(r["user_id"], {"asa_status": "failed", "asa_token": None})
-            out["failed"] += 1
-        else:   # 404: Apple doesn't have it yet; 5xx: try again later
+        try:
+            created = _d(r.get("created_at")) or now
+            if now - created > timedelta(hours=ASA_TOKEN_HOURS):
+                queries.update_signup_source(r["user_id"], {"asa_status": "failed", "asa_token": None})
+                out["failed"] += 1
+                continue
+            resp = post(r["asa_token"])
+            if resp.status_code == 200:
+                try:
+                    fields = parse_asa(resp.json())
+                except ValueError:   # not JSON: treat like "not ready yet"
+                    out["waiting"] += 1
+                    continue
+                queries.update_signup_source(r["user_id"], fields)
+                out[fields["asa_status"]] += 1
+            elif resp.status_code == 400:   # invalid token: never resolvable
+                queries.update_signup_source(r["user_id"], {"asa_status": "failed", "asa_token": None})
+                out["failed"] += 1
+            else:   # 404: Apple doesn't have it yet; 5xx: try again later
+                out["waiting"] += 1
+        except Exception as e:   # one bad row never stops the others
+            logger.debug(f"growth: Apple attribution for one sign-up failed ({type(e).__name__})")
             out["waiting"] += 1
     return out
 
@@ -234,7 +248,7 @@ def build_funnel(users: list[dict], sources: dict[str, dict], holdings: list[dic
         if not created:
             continue
         src = sources.get(uid) or {}
-        signup_day = created.date()
+        signup_day = created.astimezone(_ET).date()   # same day boundary as activity days (New York)
         if group == "channel":
             key = channel_of(src)
         elif group == "campaign":
@@ -283,7 +297,9 @@ def funnel_body(start: date, end: date, group: str, today: date | None = None) -
         raise api_error("invalid_group", f"group must be one of {', '.join(GROUPS)}.", 422, field="group")
     if end < start or (end - start).days > MAX_RANGE_DAYS:
         raise api_error("invalid_range", f"from must be before to, at most {MAX_RANGE_DAYS} days.", 422)
-    users = queries.get_users_created(start.isoformat(), (end + timedelta(days=1)).isoformat())
+    def et_midnight(d: date) -> str:
+        return datetime(d.year, d.month, d.day, tzinfo=_ET).isoformat()
+    users = queries.get_users_created(et_midnight(start), et_midnight(end + timedelta(days=1)))
     ids = [str(u["id"]) for u in users]
     sources = {str(r["user_id"]): r for r in queries.get_signup_sources(ids)} if ids else {}
     holdings = queries.get_holding_times(ids) if ids else []

@@ -28,6 +28,8 @@ All routes: area.profile (every signed-in user).
 
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Body, Depends, Response, status
 from pydantic import BaseModel, Field
 
@@ -42,6 +44,7 @@ router = APIRouter(prefix="/auth/2fa", tags=["Two-step sign-in"],
 
 class StartBody(BaseModel):
     use_connected_chat: bool = False
+    password: Optional[str] = Field(None, max_length=128)   # required (422 password_required)
 
 
 class ConfirmBody(BaseModel):
@@ -74,7 +77,7 @@ async def _send_code(target, user_id: str) -> None:
 @router.post("/telegram/start")
 async def start(body: StartBody = Body(default_factory=StartBody), user: dict = Depends(get_current_user)):
     bot = await telegram_notify.bot_username()
-    view, target = await _db(two_factor.start_telegram, user["user_id"], bot, body.use_connected_chat)
+    view, target = await _db(two_factor.start_telegram, user["user_id"], bot, body.use_connected_chat, body.password)
     await _send_code(target, user["user_id"])
     return view
 
@@ -89,6 +92,9 @@ async def resend(user: dict = Depends(get_current_user)):
 @router.post("/telegram/confirm")
 async def confirm(body: ConfirmBody, user: dict = Depends(get_current_user)):
     chat_id = await _db(two_factor.confirm, user["user_id"], body.code)
+    # two-step is now on: end every other session (one opened by a thief included)
+    from app.services import sessions
+    await _db(sessions.revoke_others, user["user_id"], user.get("sid"))
     await two_factor.send(chat_id, "user_2fa_on", user["user_id"])
     return {"enabled": True, "method": "telegram"}
 

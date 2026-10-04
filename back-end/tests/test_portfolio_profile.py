@@ -160,7 +160,8 @@ def test_prefs_defaults_without_row(monkeypatch, db):
     assert b["is_default"] is True
     p = b["prefs"]
     assert set(p) == {"exdiv_reminder", "dividend_paid", "dividend_change", "check_changed", "earnings",
-                      "big_move", "analyst_ratings", "economy"}
+                      "big_move", "analyst_ratings", "economy", "privacy"}
+    assert p["privacy"] == {"hide_amounts": False}
     assert p["big_move"] == {"enabled": True, "threshold_pct": 5.0}
     assert p["analyst_ratings"]["enabled"] is False and p["economy"]["enabled"] is True
 

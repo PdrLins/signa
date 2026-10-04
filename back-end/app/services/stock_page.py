@@ -82,6 +82,8 @@ _page_cache = TTLCache(max_size=3000, default_ttl=PAGE_TTL)   # worldwide: many 
 _fund_cache = TTLCache(max_size=2000, default_ttl=FUND_TTL)
 _resolve_cache = TTLCache(max_size=5000, default_ttl=24 * 3600)   # input -> resolved symbol
 _missing_cache = TTLCache(max_size=5000, default_ttl=MISSING_TTL)
+# Yahoo failed for this symbol: everyone waiting gets the 503 at once, retried after 30 s
+_unavailable_cache = TTLCache(max_size=5000, default_ttl=30)
 _locks: dict[str, asyncio.Lock] = {}
 
 
@@ -115,6 +117,7 @@ def clear_cache() -> None:
     _fund_cache.clear()
     _resolve_cache.clear()
     _missing_cache.clear()
+    _unavailable_cache.clear()
     _locks.clear()
 
 
@@ -562,6 +565,29 @@ async def _build(symbol: str, raw: dict) -> tuple[dict, bool]:
     return body, complete
 
 
+def is_known(raw_symbol: str) -> bool:
+    """Public pages only serve symbols Signa already knows (built pages, the
+    suggestion pool, the static universe, anything a user follows), so an
+    anonymous caller can't make the server fetch arbitrary symbols from Yahoo."""
+    sym = normalize(raw_symbol)
+    if _page_cache.get(_resolve_cache.get(sym) or sym) is not None:
+        return True
+    from app.market.universe import get_all_tickers
+    if sym in set(get_all_tickers()):
+        return True
+    try:
+        from app.services import suggestions
+        if sym in suggestions.load_pool():
+            return True
+    except Exception:
+        pass
+    try:
+        from app.services.quotes import _followed_levels
+        return sym in _followed_levels(datetime.now(timezone.utc))
+    except Exception:
+        return False
+
+
 async def get_shared_page(raw_symbol: str) -> dict:
     """Shared (per-symbol, cross-user) part of the page. Raises StockPageError."""
     sym = normalize(raw_symbol)
@@ -569,13 +595,22 @@ async def get_shared_page(raw_symbol: str) -> dict:
     cached = _page_cache.get(resolved)
     if cached is not None:
         return cached
+    if _unavailable_cache.get(sym):   # Yahoo failed moments ago: answer at once
+        raise StockPageError("data_unavailable", "Price data is unavailable right now. Please try again.", 503)
     lock = _locks.setdefault(sym, asyncio.Lock())
     async with lock:
         resolved = _resolve_cache.get(sym) or sym
         cached = _page_cache.get(resolved)
         if cached is not None:
             return cached
-        symbol, raw = await _resolve(sym)
+        if _unavailable_cache.get(sym):   # the request ahead of us just failed
+            raise StockPageError("data_unavailable", "Price data is unavailable right now. Please try again.", 503)
+        try:
+            symbol, raw = await _resolve(sym)
+        except StockPageError as e:
+            if e.code == "data_unavailable":
+                _unavailable_cache.set(sym, True)
+            raise
         body, complete = await _build(symbol, raw)
         if raw.get("info"):   # what this symbol is, for suggestions (migration 028); in the background
             from app.core.executors import spawn

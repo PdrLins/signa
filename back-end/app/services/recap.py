@@ -86,7 +86,14 @@ def symbol_returns(closes: dict, first: date, last: date) -> list[tuple[str, flo
 
 def dividends_in(transactions: list[dict], first: date, last: date, home: str, usdcad: float | None
                  ) -> tuple[float | None, int]:
-    total, n, any_tx = 0.0, 0, bool(transactions)
+    total, n, _bad = _dividends_in(transactions, first, last, home, usdcad)
+    return total, n
+
+
+def _dividends_in(transactions: list[dict], first: date, last: date, home: str, usdcad: float | None
+                  ) -> tuple[float | None, int, int]:
+    """(total in home currency or None without transactions, payments, unconverted). Pure."""
+    total, n, bad, any_tx = 0.0, 0, 0, bool(transactions)
     for t in transactions or []:
         if t.get("type") != "dividend":
             continue
@@ -94,10 +101,12 @@ def dividends_in(transactions: list[dict], first: date, last: date, home: str, u
         if not d or not (first <= d <= last):
             continue
         amt = pc.to_home(_f(t.get("amount")), str(t.get("currency") or home), home, usdcad)
-        if amt is not None:
+        n += 1
+        if amt is None:
+            bad += 1
+        else:
             total += amt
-            n += 1
-    return (round(total, 2) if any_tx else None), n
+    return (round(total, 2) if any_tx else None), n, bad
 
 
 def build(scope: dict, first: date, last: date, today: date, next_events: list[dict]) -> dict:
@@ -109,23 +118,40 @@ def build(scope: dict, first: date, last: date, today: date, next_events: list[d
     points = sorted(daily["points"])
     start = value_at(points, first - timedelta(days=1))
     end = value_at(points, last)
-    change_abs = round(end - start, 2) if start is not None and end is not None else None
-    change_pct = round((end / start - 1) * 100, 2) if start and end is not None else None
+    txs = scope.get("transactions") or []
+    net_deposits = None
+    if txs and start is not None and end is not None:
+        # money added or taken out during the month is not a gain or a loss
+        fl = perf.external_flows(txs, first - timedelta(days=1), last, home, usdcad)
+        extra = fl["dividends"] if fl["basis"] == "trades" else 0.0
+        md = perf.modified_dietz(start, end, fl["flows"], first - timedelta(days=1), last, extra)
+        change_abs = round(md["gain"], 2)
+        change_pct = round(md["return_pct"], 2) if md["return_pct"] is not None else None
+        net_deposits = round(md["net_flows"], 2)
+    else:
+        change_abs = round(end - start, 2) if start is not None and end is not None else None
+        change_pct = round((end / start - 1) * 100, 2) if start and end is not None else None
     held = {p["symbol"] for p in live["merged"]}
     rets = [r for r in symbol_returns(daily["closes"], first, last) if r[0] in held]
-    received, payments = dividends_in(scope.get("transactions") or [], first, last, home, usdcad)
+    received, payments, unconverted = _dividends_in(txs, first, last, home, usdcad)
     nm_first = last + timedelta(days=1)
     nm_last = date(nm_first.year + (nm_first.month == 12), nm_first.month % 12 + 1, 1) - timedelta(days=1)
     nxt = [e for e in next_events if e.get("owned") and nm_first.isoformat() <= str(e.get("date")) <= nm_last.isoformat()]
     expected = 0.0
     for e in nxt:
         amt = pc.to_home(_f(e.get("expected_cash")), str(e.get("currency") or home), home, usdcad)
+        if amt is None and _f(e.get("expected_cash")):
+            unconverted += 1
         expected += amt or 0.0
     return {
         "month": first.strftime("%Y-%m"), "currency": home,
         "start_value": round(start, 2) if start is not None else None,
         "end_value": round(end, 2) if end is not None else None,
         "change": {"abs": change_abs, "pct": change_pct},
+        # money added (or withdrawn, negative) during the month, from transactions; not counted
+        # as a gain. null without transactions (then the change is simply end - start).
+        "net_deposits": net_deposits,
+        "unconverted": unconverted,   # amounts left out because a currency couldn't be converted
         "dividends_received": received, "dividend_payments": payments,
         "best": [{"symbol": s, "return_pct": r} for s, r in rets[:MOVERS] if r > 0],
         "worst": [{"symbol": s, "return_pct": r} for s, r in reversed(rets[-MOVERS:]) if r < 0],
@@ -153,6 +179,13 @@ def push_text(recap: dict, money, lang: str = "en") -> str:
     if len(parts) > 1:
         return " ".join(parts)
     return f"Resumo de {month.lower()} pronto." if pt else f"{month} recap is ready."
+
+
+def ready_text(recap: dict, lang: str = "en") -> str:
+    """No amounts (privacy.hide_amounts): "September recap is ready". Pure."""
+    m = int(recap["month"].split("-")[1])
+    month = (PT_MONTHS if lang == "pt" else EN_MONTHS)[m - 1]
+    return f"Seu resumo de {month.lower()} está pronto." if lang == "pt" else f"Your {month} recap is ready."
 
 
 NEXT_EVENTS_TIMEOUT_S = 6.0
@@ -184,7 +217,7 @@ async def run_monthly_push(today: date | None = None) -> dict:
     from loguru import logger
 
     from app.core.access import get_user_access
-    from app.services import portfolio_context, push
+    from app.services import notification_prefs, portfolio_context, push
     from app.services.telegram_notify import money, user_language
 
     today = today or perf.today_et()
@@ -199,17 +232,27 @@ async def run_monthly_push(today: date | None = None) -> dict:
     from app.services.telegram_notify import DELIVERY_CONCURRENCY
     sem = asyncio.Semaphore(DELIVERY_CONCURRENCY)
 
+    month_key = f"push:recap:{first.strftime('%Y-%m')}"
+
     async def one(uid: str) -> int:
         async with sem:
             try:
+                from app.db import queries
+                if await in_job_pool(queries.get_delivered_keys, uid, [month_key]):
+                    return 0   # already sent (a catch-up or a restart never sends it twice)
                 user = {"user_id": uid, "access_level": (await in_job_pool(get_user_access, uid))["level"]}
                 scope = await in_job_pool(portfolio_context.load_scope, user, None, None, True)
                 if not scope["holdings"]:
                     return 0
                 r = await in_job_pool(build, scope, first, last, today, await next_month_events(scope))
                 lang = await in_job_pool(user_language, uid)
-                return 1 if await push.notify_user(uid, "Signa", push_text(r, money, lang),
-                                                   {"kind": "monthly_recap", "month": r["month"]}) else 0
+                prefs = (await in_job_pool(notification_prefs.get_prefs, uid))["prefs"]
+                text = (ready_text(r, lang) if notification_prefs.hide_amounts(prefs)
+                        else push_text(r, money, lang))
+                if not await push.notify_user(uid, "Signa", text, {"kind": "monthly_recap", "month": r["month"]}):
+                    return 0
+                await in_job_pool(queries.insert_deliveries, uid, [("monthly_recap", month_key)])
+                return 1
             except Exception as e:
                 logger.warning(f"recap: {uid} failed: {type(e).__name__}: {e}")
                 return 0

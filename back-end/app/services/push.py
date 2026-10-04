@@ -131,7 +131,8 @@ def payload(title: str, body: str, data: dict | None = None, badge: int | None =
 async def send_to_device(device: dict, body: dict) -> bool:
     """True when Apple accepted it. Disables tokens Apple rejects as gone."""
     if not configured():
-        logger.info(f"push (not configured, logged only) to {device['token'][:8]}…: {body['aps']['alert']}")
+        logger.info(f"push (not configured, logged only): kind={body.get('kind')}, "
+                    f"{len(str(body['aps']['alert'].get('body') or ''))} chars")
         return True
     url = f"{HOSTS.get(device.get('environment'), HOSTS['production'])}/3/device/{device['token']}"
     headers = {"authorization": f"bearer {_provider_token()}", "apns-topic": settings.apns_bundle_id,
@@ -182,6 +183,24 @@ def allowed_lines(lines: list[tuple[str, str, str]], level: str) -> list[tuple[s
     return [ln for ln in lines if ln[0] in FREE_KINDS]
 
 
+PRIVATE_TEXT = {
+    "en": {"dividend_paid": "A dividend was paid", "exdiv_reminder": "An ex-dividend date is coming up",
+           "earnings": "Earnings are coming up", "price_alert": "A price alert was triggered",
+           "big_move": "A stock you hold moved a lot today", "many": "{n} new updates in Signa"},
+    "pt": {"dividend_paid": "Um dividendo foi pago", "exdiv_reminder": "Uma data-com está chegando",
+           "earnings": "Resultados chegando", "price_alert": "Um alerta de preço disparou",
+           "big_move": "Uma ação sua se mexeu muito hoje", "many": "{n} novidades no Signa"},
+}
+
+
+def private_text(kinds: list[str], lang: str = "en") -> str:
+    """Lock-screen text without amounts or tickers (privacy.hide_amounts). Pure."""
+    t = PRIVATE_TEXT["pt" if lang == "pt" else "en"]
+    if len(kinds) == 1 and kinds[0] in t:
+        return t[kinds[0]]
+    return t["many"].format(n=len(kinds))
+
+
 def compose(lines: list[str]) -> str:
     first = plain(lines[0])
     return first if len(lines) == 1 else f"{first} (+{len(lines) - 1} more)"
@@ -203,7 +222,10 @@ async def deliver_user(user_id: str, devices: list[dict], mode: str, today: date
     fresh = [ln for ln in unique if KEY_PREFIX + ln[1] not in done]
     if not fresh:
         return 0
-    body = payload(TITLE, compose([t for _, _, t in fresh]), {"kind": fresh[0][0]})
+    from app.services import notification_prefs
+    hide = notification_prefs.hide_amounts((await asyncio.to_thread(notification_prefs.get_prefs, user_id))["prefs"])
+    text = private_text([k for k, _, _ in fresh], _lang) if hide else compose([t for _, _, t in fresh])
+    body = payload(TITLE, text, {"kind": fresh[0][0]})
     ok = False
     for d in devices:
         ok = await send_to_device(d, body) or ok

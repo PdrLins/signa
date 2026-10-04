@@ -184,19 +184,28 @@ def effective_level(real_level: str, view_as: str | None) -> str:
 
 
 def _touch_last_seen(user_id: str | None) -> None:
-    """Fire-and-forget users.last_seen_at update, at most hourly. Never raises."""
-    if not user_id or _last_seen_written.get(user_id):
+    """Fire-and-forget users.last_seen_at update (at most hourly) and the
+    day's activity row (once per New York day, migration 029). Never raises."""
+    if not user_id:
         return
-    _last_seen_written.set(user_id, True)
+    from app.services import growth
+    from app.services.dividends import today_et
+    day = today_et()
+    need_seen = not _last_seen_written.get(user_id)
+    need_day = not growth._activity_written.get(f"{user_id}|{day.isoformat()}")
+    if not (need_seen or need_day):
+        return
+    if need_seen:
+        _last_seen_written.set(user_id, True)
 
     def write() -> None:
-        try:
-            touch_user_last_seen(user_id)
-        except Exception as e:  # before migration 014, or DB down: activity falls back to last_login
-            logger.debug(f"last_seen_at not written for {user_id}: {e}")
-        from app.services import growth   # one activity row per day (migration 029), never raises
-        from app.services.dividends import today_et
-        growth.record_activity(user_id, today_et())
+        if need_seen:
+            try:
+                touch_user_last_seen(user_id)
+            except Exception as e:  # before migration 014, or DB down: activity falls back to last_login
+                logger.debug(f"last_seen_at not written: {type(e).__name__}")
+        if need_day:
+            growth.record_activity(user_id, day)
     _spawn(write)
 
 

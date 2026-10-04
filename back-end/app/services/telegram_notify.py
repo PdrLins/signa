@@ -521,6 +521,8 @@ async def run_delivery(mode: str, today: date | None = None, now: datetime | Non
             return {"status": "migration_required"}
         logger.warning(f"telegram: could not load linked chats: {type(e).__name__}")
         return {"status": "failed"}
+    pending = await asyncio.to_thread(queries.pending_deletion_ids)   # accounts waiting for deletion
+    links = [ln for ln in links if str(ln.get("user_id")) not in pending]
     if mode == "live":
         wanted = await asyncio.to_thread(live_candidates, today, now)
         if wanted is not None:

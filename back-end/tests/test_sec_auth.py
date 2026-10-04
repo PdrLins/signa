@@ -142,6 +142,11 @@ class FakeQueries:
     def insert_audit_log(self, **kw):
         self.audit.append(kw)
 
+    inactive: set = set()
+
+    def get_user_by_id(self, user_id):
+        return {"id": user_id, "is_active": user_id not in self.inactive}
+
 
 @pytest.fixture
 def fake_queries(monkeypatch):
@@ -330,6 +335,37 @@ class TestLoginGenericErrors:
         assert "remaining" not in e1.value.detail
 
     @pytest.mark.asyncio
+    async def test_locked_account_still_opens_for_the_owner_elsewhere(self, login_env, monkeypatch):
+        """An attacker's failures lock THEIR device; the owner, on a device that
+        hasn't failed, signs in with the right password. Unknown usernames
+        get the same lock answer after 5 tries (no enumeration)."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.core.config import settings
+        from app.core.exceptions import AccountLockedError, AuthenticationError
+        auth_service, _ = login_env
+        auth_service._device_failures.clear()
+        monkeypatch.setattr(settings, "login_otp_enabled", False)
+        monkeypatch.setattr(auth_service.queries, "update_user_last_login", lambda uid: None, raising=False)
+        locked = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+        user = {"id": "u1", "username": "pedro", "password_hash": KNOWN_HASH, "telegram_chat_id": "1",
+                "login_attempts": 5, "locked_until": locked}
+        auth_service.queries.get_user_by_username = lambda u: dict(user) if u == "pedro" else None
+        for _ in range(5):   # attacker at 6.6.6.6
+            with pytest.raises((AuthenticationError, AccountLockedError)):
+                await auth_service.login("pedro", "wrong", "6.6.6.6", "ua")
+        with pytest.raises(AccountLockedError):
+            await auth_service.login("pedro", KNOWN_PASSWORD, "6.6.6.6", "ua")   # the failing device stays out
+        res = await auth_service.login("pedro", KNOWN_PASSWORD, "1.2.3.4", "ua")  # the owner gets in
+        assert res["access_token"]
+        for _ in range(5):
+            with pytest.raises(AuthenticationError):
+                await auth_service.login("nobody", "wrong", "6.6.6.7", "ua")
+        with pytest.raises(AccountLockedError):
+            await auth_service.login("nobody", "wrong", "6.6.6.7", "ua")       # same as a real account
+        auth_service._device_failures.clear()
+
+    @pytest.mark.asyncio
     async def test_password_only_login_issues_token_without_otp(self, login_env, monkeypatch):
         from app.core.config import settings
         auth_service, _ = login_env
@@ -399,3 +435,13 @@ class TestSupabaseKeyRole:
         assert supabase_key_role("x") is None
         assert supabase_key_role("") is None
         assert supabase_key_role("a.!!!.c") is None
+
+
+
+def test_refresh_refused_for_a_disabled_account(fake_queries, refresh_client):
+    """A deactivated (or pending-deletion) account can't keep refreshing its web token."""
+    from app.core.security import create_access_token
+    fake_queries.inactive = {"u-off"}
+    token = create_access_token(user_id="u-off", username="off")
+    r = refresh_client.post("/api/v1/auth/refresh", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401

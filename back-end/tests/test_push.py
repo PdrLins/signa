@@ -93,8 +93,10 @@ def test_gone_token_is_disabled(monkeypatch):
 
 # ---------------------------------------------------------------- delivery
 
-def _fake_delivery(monkeypatch, lines, level="free"):
+def _fake_delivery(monkeypatch, lines, level="free", hide=False):
     sent, recorded = [], []
+    from app.services import notification_prefs
+    monkeypatch.setattr(notification_prefs, "get_prefs", lambda uid: {"prefs": {"privacy": {"hide_amounts": hide}}})
 
     async def lines_for(user, mode, today, now):
         return "en", lines
@@ -119,6 +121,15 @@ def test_deliver_user_one_push_with_new_free_lines(monkeypatch):
     assert n == 2 and len(sent) == 1
     assert sent[0]["aps"]["alert"]["body"] == "XEQT.TO paid $12 (+1 more)"
     assert recorded == [("dividend_paid", "push:paid:XEQT.TO:2026-10-03"), ("price_alert", "push:alert:7")]
+
+
+def test_hide_amounts_sends_no_money_or_tickers(monkeypatch):
+    lines = [("dividend_paid", "paid:XEQT.TO:2026-10-03", "<b>XEQT.TO</b> paid $12"),
+             ("price_alert", "alert:7", "MSFT above 400")]
+    sent, _ = _fake_delivery(monkeypatch, lines, hide=True)
+    asyncio.run(push.deliver_user(U1, [{"token": TOKEN}], "events", date(2026, 10, 3), datetime.now(timezone.utc)))
+    assert sent[0]["aps"]["alert"]["body"] == "2 new updates in Signa"
+    assert push.private_text(["dividend_paid"], "pt") == "Um dividendo foi pago"
 
 
 def test_nothing_new_sends_nothing(monkeypatch):

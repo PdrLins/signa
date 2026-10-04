@@ -193,7 +193,7 @@ def insert_audit_log(
         "event_type": event_type,
         "user_id": user_id,
         "ip_address": ip_address,
-        "user_agent": user_agent,
+        "user_agent": (user_agent or "")[:300],
         "metadata": metadata or {},
         "success": success,
     }
@@ -482,7 +482,7 @@ def add_to_watchlist(user_id: str, symbol: str, notes: str | None = None) -> dic
     client = get_client()
     data = {"user_id": user_id, "symbol": symbol.upper(), "notes": notes}
     result = client.table("watchlist").upsert(data, on_conflict="user_id,symbol").execute()
-    logger.info(f"Added {symbol} to watchlist for user {user_id}")
+    logger.debug(f"watchlist add for user {str(user_id)[:8]}")
     return result.data[0] if result.data else {}
 
 
@@ -498,7 +498,7 @@ def remove_from_watchlist(user_id: str, symbol: str) -> bool:
     )
     removed = len(result.data) > 0 if result.data else False
     if removed:
-        logger.info(f"Removed {symbol} from watchlist for user {user_id}")
+        logger.debug(f"watchlist remove for user {str(user_id)[:8]}")
     return removed
 
 
@@ -596,9 +596,12 @@ def get_user_home_currencies(user_ids: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for i in range(0, len(user_ids), 200):
         chunk = user_ids[i:i + 200]
-        rows = (client.table("user_settings").select("user_id, home_currency")
+        rows = (client.table("user_settings").select("user_id, home_currency, country")
                 .in_("user_id", chunk).execute().data or [])
-        out.update({str(r["user_id"]): r.get("home_currency") or "CAD" for r in rows})
+        from app.services.profile_service import COUNTRY_CURRENCY
+        out.update({str(r["user_id"]): (r.get("home_currency")
+                                        or COUNTRY_CURRENCY.get(str(r.get("country") or "").upper()) or "CAD")
+                    for r in rows})
     return out
 
 
@@ -993,6 +996,24 @@ def touch_user_last_seen(user_id: str) -> None:
         "id", user_id).execute()
 
 
+def pending_deletion_ids() -> set[str]:
+    """Users waiting for deletion (migration 030); empty before it."""
+    client = get_client()
+    try:
+        rows = _select_all_pages(lambda: client.table("users").select("id")
+                                 .not_.is_("deletion_scheduled_at", "null").order("id"))
+    except Exception:
+        return set()
+    return {str(r["id"]) for r in rows}
+
+
+def get_users_age() -> list[dict]:
+    """[{id, created_at, last_seen_at}] of every active user (suggestions)."""
+    client = get_client()
+    return _select_all_pages(lambda: client.table("users").select("id, created_at, last_seen_at")
+                             .eq("is_active", True).order("id"))
+
+
 def get_users_activity() -> list[dict]:
     """[{id, access_level, last_seen_at, last_login}] for every active user.
     Falls back gracefully before 011 (no access_level) / 014 (no last_seen_at)."""
@@ -1057,6 +1078,12 @@ def count_active_price_alerts(user_id: str) -> int:
     client = get_client()
     res = (client.table("price_alerts").select("id", count="exact").eq("user_id", user_id).eq("active", True)
            .limit(1).execute())
+    return int(res.count or 0)
+
+
+def count_rows(table: str, user_id: str) -> int:
+    """How many rows the user has in `table` (exact count, no rows sent)."""
+    res = get_client().table(table).select("id", count="exact").eq("user_id", user_id).limit(1).execute()
     return int(res.count or 0)
 
 

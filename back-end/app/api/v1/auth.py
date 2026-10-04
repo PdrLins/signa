@@ -34,6 +34,7 @@ async def login(request: Request, body: LoginRequest):
         user_agent=request.headers.get("User-Agent", ""),
         client=body.client,
         device_name=body.device_name,
+        restore_account=body.restore_account,
     )
     return LoginResponse(**result)
 
@@ -208,4 +209,6 @@ async def me(user: dict = Depends(get_current_user)):
             for k in sorted(levels)
         ],
         "slots": slot_info,
+        # false until In-App Purchase exists: clients hide upgrade buttons (PREMIUM_ON_SALE)
+        "premium_on_sale": settings.premium_on_sale,
     }

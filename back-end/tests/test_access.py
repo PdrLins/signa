@@ -124,12 +124,22 @@ class _FakeDB:
 @pytest.mark.parametrize("exc,row,expected", [
     (None, {"access_level": "premium", "slot_bonus": 5}, "premium"),
     (None, {"access_level": "bogus"}, "free"),
-    (Exception('column users.access_level does not exist (42703)'), None, "owner"),  # before 011
+    (Exception('column users.access_level does not exist (42703)'), None, "free"),   # never owner on an error
     (Exception("connection reset"), None, "free"),  # fail closed
 ])
 def test_get_user_access(monkeypatch, exc, row, expected):
     monkeypatch.setattr("app.db.supabase.get_client", lambda: _FakeDB(exc, row))
     assert access.get_user_access("u1")["level"] == expected
+
+
+def test_outage_keeps_the_last_known_level(monkeypatch):
+    access.clear_access_cache()
+    monkeypatch.setattr("app.db.supabase.get_client", lambda: _FakeDB(None, {"access_level": "premium"}))
+    assert access.get_user_access("u9")["level"] == "premium"
+    access._level_cache.clear()
+    monkeypatch.setattr("app.db.supabase.get_client", lambda: _FakeDB(Exception("timeout"), None))
+    assert access.get_user_access("u9")["level"] == "premium"   # no upgrade screen during an outage
+    access.clear_access_cache()
 
 
 # ---------------------------------------------------------------- API gating

@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
+from app.core.cache import TTLCache
+
 from app.core.config import settings
 from app.core.exceptions import (
     AccountLockedError,
@@ -48,6 +50,10 @@ INVALID_CREDENTIALS = "Invalid credentials."
 _DUMMY_HASH = "$2b$12$6pxyrxnCXf11H1Wprx7.desTp9kmB9IIsFnnPfsi6.k3ylpbxMQCG"
 
 
+# username|ip -> failed attempts in the last 15 min (see _login_sync)
+_device_failures = TTLCache(max_size=50000, default_ttl=15 * 60)
+
+
 def lockout_seconds(attempts: int) -> int:
     """Lock duration for a given consecutive-failure count (0 = no lock)."""
     if attempts < LOCKOUT_THRESHOLD:
@@ -70,6 +76,7 @@ async def login(
     user_agent: str,
     client: str = "web",
     device_name: str | None = None,
+    restore_account: bool = False,
 ) -> dict:
     """Step 1: Validate credentials and send OTP via Telegram.
 
@@ -77,7 +84,7 @@ async def login(
     worker thread, so a sign-in never freezes other users' requests. Only the
     Telegram enqueue (an asyncio queue) runs here."""
     result, otp = await asyncio.to_thread(_login_sync, username, password, ip_address, user_agent,
-                                          client, device_name)
+                                          client, device_name, restore_account)
     if otp:
         await send_otp_message(*otp)
     return result
@@ -90,6 +97,7 @@ def _login_sync(
     user_agent: str,
     client: str = "web",
     device_name: str | None = None,
+    restore_account: bool = False,
 ) -> tuple[dict, tuple[str, str] | None]:
     """(response, (chat_id, code) to send or None). Blocking."""
     from app.db.supabase import get_client
@@ -98,15 +106,25 @@ def _login_sync(
     # a username, or an email address (migration 018; active or not)
     user = identity.find_user_for_login(username) if "@" in username else queries.get_user_by_username(username.lower())
 
+    # Failures from THIS device (username + IP): an account lock only stops
+    # devices that have been failing. The owner, on a device that hasn't
+    # failed, still gets in with the right password, so a stranger can't keep
+    # an account locked by sending one wrong password every 15 minutes.
+    fail_key = f"{username.strip().lower()}|{ip_address}"
+    device_fails = _device_failures.get(fail_key) or 0
+    if lockout_seconds(device_fails):
+        raise _locked_error(LOCKOUT_BASE_SECONDS)   # same answer for real and unknown usernames
+
     # ── Check DB lockout ──
+    locked_remaining = 0
     if user:
         locked_until = user.get("locked_until")
         if locked_until:
             lock_time = datetime.fromisoformat(locked_until)
             now = datetime.now(timezone.utc)
             if now < lock_time:
-                raise _locked_error(int((lock_time - now).total_seconds()))
-            if (now - lock_time).total_seconds() > LOCKOUT_DECAY_SECONDS:
+                locked_remaining = int((lock_time - now).total_seconds())
+            elif (now - lock_time).total_seconds() > LOCKOUT_DECAY_SECONDS:
                 # Lock expired long ago — forget the failure streak
                 db.table("users").update({
                     "login_attempts": 0,
@@ -117,9 +135,17 @@ def _login_sync(
 
     if user is None:
         verify_password(password, _DUMMY_HASH)  # constant-ish timing
+        _device_failures.set(fail_key, device_fails + 1)
         raise AuthenticationError(INVALID_CREDENTIALS)
 
-    if not verify_password(password, user["password_hash"]):
+    password_ok = verify_password(password, user["password_hash"])
+    if locked_remaining and not (password_ok and device_fails == 0):
+        if not password_ok:
+            _device_failures.set(fail_key, device_fails + 1)
+        raise _locked_error(locked_remaining)
+
+    if not password_ok:
+        _device_failures.set(fail_key, device_fails + 1)
         # ── Increment failed attempts in DB ──
         attempts = (user.get("login_attempts") or 0) + 1
         lock_secs = lockout_seconds(attempts)
@@ -140,6 +166,17 @@ def _login_sync(
             logger.warning(f"Account locked for {lock_secs}s after {attempts} failed attempts")
         # Same generic error whether or not this attempt triggered a lock.
         raise AuthenticationError(INVALID_CREDENTIALS)
+
+    # ── Account waiting for deletion (migration 030): ask before restoring ──
+    from app.services import account
+    pending = account.pending_deletion_date(user)
+    if pending:
+        if not restore_account:
+            from app.core.api_errors import api_error
+            raise api_error("account_pending_deletion",
+                            f"This account is scheduled for deletion on {pending}. Sign in again to restore it.",
+                            403, deletion_date=pending)
+        account.restore(str(user["id"]))
 
     # ── Inactive account: an unconfirmed sign-up gets a fresh code; any
     # other inactive account looks like a wrong password. ──
@@ -192,7 +229,7 @@ def _login_sync(
         user_agent=user_agent,
     )
 
-    logger.info(f"OTP sent to user {username}")
+    logger.info(f"OTP sent to user {str(user['id'])[:8]}")
 
     return {
         "message": "OTP sent to your Telegram",
@@ -329,7 +366,7 @@ def _issue_access_token(user: dict, ip_address: str, user_agent: str,
         user_agent=user_agent,
     )
 
-    logger.info(f"JWT issued for user {user['username']}")
+    logger.info(f"JWT issued for user {str(user['id'])[:8]}")
 
     return {
         "access_token": access_token,
@@ -388,6 +425,10 @@ def refresh_token(payload: dict, ip_address: str, user_agent: str) -> dict:
         raise TokenRefreshError("Token has been revoked")
 
     sid = payload.get("sid")
+    u = queries.get_user_by_id(user_id)   # a disabled or deleted account can't refresh
+    if not u or u.get("is_active") is False:
+        raise TokenRefreshError("Account is not active")
+
     if sid and not sessions.is_active(sid):
         raise TokenRefreshError("Session has been revoked")
 

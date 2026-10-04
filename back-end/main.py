@@ -30,6 +30,7 @@ from app.api.v1 import goals as goals_api
 from app.api.v1 import suggestions as suggestions_api
 from app.api.v1 import growth as growth_api
 from app.api.v1 import public as public_api
+from app.api.v1 import account as account_api
 from app.api.v1 import portfolio_home as portfolio_home_api
 from app.api.v1 import referrals as referrals_api
 from app.api.v1 import register as register_api
@@ -38,6 +39,7 @@ from app.core.version import APP_VERSION
 from app.core.exceptions import register_exception_handlers
 from app.middleware.audit import AuditMiddleware
 from app.middleware.auth import AuthMiddleware
+from app.middleware.body_limit import BodyLimitMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.notifications.telegram_bot import start_telegram_worker, stop_telegram_worker
 from app.scheduler.runner import init_scheduler, start_scheduler, stop_scheduler
@@ -72,6 +74,19 @@ def _warn_if_login_otp_disabled() -> None:
         )
 
 
+async def _catch_up_missed_jobs() -> None:
+    """A minute after startup, run daily jobs missed while the server was off
+    or the Mac asleep (app/scheduler/health.py). Never raises."""
+    import asyncio
+
+    from app.scheduler import health, jobs
+    await asyncio.sleep(60)
+    try:
+        await health.catch_up({name: getattr(jobs, name) for name in (*health.DAILY, *health.MONTHLY)})
+    except Exception as e:
+        logger.warning(f"Missed-job catch-up failed: {type(e).__name__}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
@@ -85,6 +100,8 @@ async def lifespan(app: FastAPI):
 
     init_scheduler()
     start_scheduler()
+    from app.core.executors import spawn
+    spawn(_catch_up_missed_jobs())
     start_telegram_worker()
     from app.notifications import telegram_updates
     telegram_updates.start_polling()   # local: bot messages without a public webhook
@@ -116,13 +133,14 @@ app = FastAPI(
 
 # Middleware. Starlette wraps in reverse order of add_middleware(): the LAST
 # one added is the OUTERMOST. Effective request chain:
-#     CORS -> GZip -> RateLimit -> Audit -> Auth -> routes
+#     CORS -> GZip -> BodyLimit -> RateLimit -> Audit -> Auth -> routes
 # CORS must be outermost so every response — including 401s from
 # AuthMiddleware and 429s from RateLimitMiddleware — carries CORS headers
 # (otherwise the browser hides the status from the front-end).
 app.add_middleware(AuthMiddleware)       # innermost: validates JWT
 app.add_middleware(AuditMiddleware)      # logs every request that passed rate limiting
 app.add_middleware(RateLimitMiddleware)  # rejects floods before any DB/auth work
+app.add_middleware(BodyLimitMiddleware)  # 413 for oversized bodies before anything reads them
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)  # JSON shrinks ~5-10x on phones
 app.add_middleware(                      # outermost
     CORSMiddleware,
@@ -168,6 +186,7 @@ app.include_router(goals_api.router, prefix=api_prefix)
 app.include_router(suggestions_api.router, prefix=api_prefix)
 app.include_router(growth_api.router, prefix=api_prefix)
 app.include_router(public_api.router, prefix=api_prefix)
+app.include_router(account_api.router, prefix=api_prefix)
 
 
 @app.post("/api/v1/telegram/webhook")

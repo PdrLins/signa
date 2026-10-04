@@ -40,13 +40,56 @@ def should_retry_disconnect(method: str, err: Exception) -> bool:
     return any(m in text for m in _NOT_SENT)
 
 
+class _Breaker:
+    """Circuit breaker for the database. After BREAK_AFTER connection
+    failures or timeouts within BREAK_WINDOW_S, every call fails at once for
+    BREAK_OPEN_S instead of waiting on its own timeout. Without it, an outage
+    ties up every request thread for 20 s each and the whole API stalls,
+    including requests that only needed cached data."""
+
+    BREAK_AFTER, BREAK_WINDOW_S, BREAK_OPEN_S = 5, 10.0, 10.0
+    TRIPS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.PoolTimeout)
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._failures: list[float] = []
+        self._open_until = 0.0
+
+    def check(self) -> None:
+        if time.time() < self._open_until:
+            raise httpx.ConnectError("database unavailable (circuit open)")
+
+    def success(self) -> None:
+        if self._failures:
+            with self._lock:
+                self._failures.clear()
+
+    def failure(self, err: Exception) -> None:
+        if not isinstance(err, self.TRIPS):
+            return
+        now = time.time()
+        with self._lock:
+            self._failures = [t for t in self._failures if now - t < self.BREAK_WINDOW_S] + [now]
+            if len(self._failures) >= self.BREAK_AFTER and now >= self._open_until:
+                self._open_until = now + self.BREAK_OPEN_S
+                self._failures.clear()
+                logger.warning(f"Database unreachable: failing fast for {self.BREAK_OPEN_S:.0f} s")
+
+
+breaker = _Breaker()
+
+
 class _ReconnectTransport(httpx.HTTPTransport):
     def handle_request(self, request: httpx.Request) -> httpx.Response:
+        breaker.check()
         request.read()   # buffered body, so it can be sent again
         for attempt in range(_RETRY_ATTEMPTS):
             try:
-                return super().handle_request(request)
+                response = super().handle_request(request)
+                breaker.success()
+                return response
             except Exception as e:
+                breaker.failure(e)
                 if attempt == _RETRY_ATTEMPTS - 1 or not should_retry_disconnect(request.method, e):
                     raise
                 logger.info(f"Supabase connection dropped ({type(e).__name__}) on {request.method} "
