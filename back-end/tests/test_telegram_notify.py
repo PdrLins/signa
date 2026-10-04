@@ -315,7 +315,22 @@ def test_price_alert_lines_last_24h_only():
          "currency": "USD", "triggered_at": (NOW - timedelta(days=3)).isoformat()},
     ]
     lines = tn.alert_lines(rows, "en", NOW)
-    assert [k for _, k, _ in lines] == ["alert:a1"] and "fell to C$50.00 (now C$49.80)" in lines[0][2]
+    assert [k for _, k, _ in lines] == [f"alert:a1:{rows[0]['triggered_at'][:19]}"]   # one key per firing
+    assert "fell to C$50.00 (now C$49.80)" in lines[0][2]
+
+
+def test_percent_and_day_move_alert_text():
+    pct = {"id": "p", "symbol": "RY.TO", "kind": "percent", "direction": "above", "percent": 10,
+           "last_price": 188.2, "currency": "CAD", "triggered_at": NOW.isoformat()}
+    assert tn.alert_message(pct, "en") == "🎯 <b>RY.TO</b> is up 10% since you set the alert (C$188.20)"
+    assert tn.alert_message(pct, "en", hide_amounts=True) == "🎯 <b>RY.TO</b> is up 10% since you set the alert"
+    day = {"id": "d", "symbol": "RY.TO", "kind": "day_move", "direction": "either", "percent": 5,
+           "last_change_pct": -5.3, "currency": "CAD", "triggered_at": NOW.isoformat()}
+    assert tn.alert_message(day, "en") == "📈 <b>RY.TO</b> moved −5.3% today"
+    assert tn.alert_message(day, "pt") == "📈 <b>RY.TO</b> variou −5,3% hoje"
+    price = {"id": "x", "symbol": "ENB.TO", "direction": "below", "target_price": 50, "last_price": 49.8,
+             "currency": "CAD"}
+    assert "C$" not in tn.alert_message(price, "en", hide_amounts=True)
 
 
 # ---------------------------------------------------------------- delivery job

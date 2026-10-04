@@ -167,3 +167,21 @@ def test_report_status_change_pushes_the_reporter(monkeypatch):
     assert owner.patch(f"/api/v1/feedback/{rid}", json={"status": "fixed"}).status_code == 200
     assert pushed and pushed[0][0] == "u9" and pushed[0][1] == 'Your report "Total is wrong\\nmore" was fixed.'[:0] + pushed[0][1]
     assert "was fixed" in pushed[0][1] and pushed[0][2]["kind"] == "report"
+
+
+def test_alert_push_carries_kind_and_hides_money(monkeypatch):
+    lines = [("price_alert", "alert:p1:2026-10-03T14:00:00", "<b>RY.TO</b> is up 10% since you set the alert (C$188.20)")]
+    alert = {"id": "p1", "symbol": "RY.TO", "kind": "percent", "direction": "above", "percent": 10,
+             "last_price": 188.2, "currency": "CAD"}
+    monkeypatch.setattr(queries, "get_price_alert", lambda aid, uid: dict(alert) if aid == "p1" else None)
+    sent, _ = _fake_delivery(monkeypatch, lines, hide=True)
+    asyncio.run(push.deliver_user(U1, [{"token": TOKEN}], "live", date(2026, 10, 3), datetime.now(timezone.utc)))
+    body = sent[0]
+    assert body["aps"]["alert"]["body"] == "🎯 RY.TO is up 10% since you set the alert"
+    assert body["kind"] == "price_alert" and body["alert_kind"] == "percent" and body["percent"] == 10.0
+    assert body["symbol"] == "RY.TO"
+
+
+def test_day_move_push_data():
+    data = push.alert_data({"id": "d", "symbol": "RY.TO", "kind": "day_move", "percent": 5, "last_change_pct": -5.3})
+    assert data == {"alert_kind": "day_move", "symbol": "RY.TO", "alert_id": "d", "percent": 5.0, "change_pct": -5.3}

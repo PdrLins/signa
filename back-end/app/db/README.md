@@ -4,7 +4,7 @@
 `schema.sql` once in the SQL Editor (idempotent). Every table has Row Level
 Security on with no policies: only the back-end's service_role key can read
 or write. Database changes: add `migrations/0NN_name.sql` (next free number),
-run it, and fold it into `schema.sql`. `migrations/010`–`030` are history and
+run it, and fold it into `schema.sql`. `migrations/010`–`031` are history and
 already included in `schema.sql`.
 
 Access goes through `queries.py` and the services (supabase-py / PostgREST).

@@ -56,6 +56,7 @@ class FakePortfolioDB:
             "list_price_alerts", "get_price_alert", "count_active_price_alerts", "insert_price_alert",
             "update_price_alert", "delete_price_alert", "get_active_price_alerts",
             "mark_price_alert_triggered", "get_triggered_price_alerts", "get_active_alert_follow_rows",
+            "mark_day_move_triggered",
         ):
             monkeypatch.setattr(queries, name, self._wrap(getattr(self, name)))
         monkeypatch.setattr(queries, "get_watchlist", lambda uid: [dict(w) for w in self.watchlist.get(uid, [])])
@@ -328,6 +329,12 @@ class FakePortfolioDB:
         a = self.alerts.get(aid)
         if a and a["active"]:
             a.update({"active": False, "triggered_at": triggered_at, "last_price": last_price})
+
+    def mark_day_move_triggered(self, aid, triggered_at, last_price, change_pct, day):
+        a = self.alerts.get(aid)
+        if a and a["active"] and str(a.get("last_triggered_on") or "") != day:
+            a.update({"triggered_at": triggered_at, "last_price": last_price, "last_change_pct": change_pct,
+                      "last_triggered_on": day})
 
     def get_triggered_price_alerts(self, uid, since_iso):
         rows = [dict(a) for a in self.alerts.values()

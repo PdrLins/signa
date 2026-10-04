@@ -1054,23 +1054,47 @@ def get_data_usage(since: str) -> list[dict]:
 
 # ---- price alerts (migration 015) ----
 
-PRICE_ALERT_COLUMNS = ("id, user_id, symbol, direction, target_price, currency, note, active, "
+_ALERT_BASE_COLUMNS = ("id, user_id, symbol, direction, target_price, currency, note, active, "
                        "triggered_at, last_price, created_at")
+_ALERT_KIND_COLUMNS = ", kind, percent, reference_price, last_triggered_on, last_change_pct"   # migration 031
+_alert_kinds_missing = False
+
+
+def _alert_cols() -> str:
+    return _ALERT_BASE_COLUMNS if _alert_kinds_missing else _ALERT_BASE_COLUMNS + _ALERT_KIND_COLUMNS
+
+
+def _with_alert_cols(run):
+    """run(columns): with the 031 columns, falling back to the old ones before
+    the migration (then every alert is a "price" alert)."""
+    global _alert_kinds_missing
+    try:
+        return run(_alert_cols())
+    except Exception as e:
+        if _alert_kinds_missing or not _missing_schema(e):
+            raise
+        _alert_kinds_missing = True
+        return run(_alert_cols())
+
+
+PRICE_ALERT_COLUMNS = _ALERT_BASE_COLUMNS   # kept for callers outside this module
 
 
 def list_price_alerts(user_id: str, symbol: str | None = None) -> list[dict]:
     client = get_client()
 
-    def build():
-        q = client.table("price_alerts").select(PRICE_ALERT_COLUMNS).eq("user_id", user_id)
-        return (q.eq("symbol", symbol) if symbol else q).order("created_at", desc=True).order("id")
-    return _select_all_pages(build)
+    def run(cols):
+        def build():
+            q = client.table("price_alerts").select(cols).eq("user_id", user_id)
+            return (q.eq("symbol", symbol) if symbol else q).order("created_at", desc=True).order("id")
+        return _select_all_pages(build)
+    return _with_alert_cols(run)
 
 
 def get_price_alert(alert_id: str, user_id: str) -> dict | None:
     client = get_client()
-    rows = (client.table("price_alerts").select(PRICE_ALERT_COLUMNS).eq("id", alert_id)
-            .eq("user_id", user_id).limit(1).execute().data or [])
+    rows = _with_alert_cols(lambda cols: client.table("price_alerts").select(cols).eq("id", alert_id)
+                            .eq("user_id", user_id).limit(1).execute().data or [])
     return rows[0] if rows else None
 
 
@@ -1114,8 +1138,8 @@ def get_active_price_alerts(symbols: list[str]) -> list[dict]:
     out: list[dict] = []
     for i in range(0, len(symbols), 200):
         chunk = symbols[i:i + 200]
-        out.extend(_select_all_pages(lambda c=chunk: client.table("price_alerts").select(PRICE_ALERT_COLUMNS)
-                                     .eq("active", True).in_("symbol", c).order("id")))
+        out.extend(_with_alert_cols(lambda cols, c=chunk: _select_all_pages(
+            lambda: client.table("price_alerts").select(cols).eq("active", True).in_("symbol", c).order("id"))))
     return out
 
 
@@ -1128,10 +1152,21 @@ def mark_price_alert_triggered(alert_id: str, triggered_at: str, last_price: flo
      .eq("id", alert_id).eq("active", True).execute())
 
 
+def mark_day_move_triggered(alert_id: str, triggered_at: str, last_price: float | None, change_pct: float,
+                            day: str) -> None:
+    """A day_move alert fired: it stays active; once per day (a row already
+    marked for `day` isn't touched, so overlapping job runs can't fire it twice)."""
+    get_client().table("price_alerts").update(
+        {"triggered_at": triggered_at, "last_price": last_price, "last_change_pct": change_pct,
+         "last_triggered_on": day}, returning=ReturnMethod.minimal
+    ).eq("id", alert_id).eq("active", True).or_(f"last_triggered_on.is.null,last_triggered_on.neq.{day}").execute()
+
+
 def get_triggered_price_alerts(user_id: str, since_iso: str) -> list[dict]:
     client = get_client()
-    return (client.table("price_alerts").select(PRICE_ALERT_COLUMNS).eq("user_id", user_id)
-            .gte("triggered_at", since_iso).order("triggered_at", desc=True).limit(500).execute().data or [])
+    return _with_alert_cols(lambda cols: client.table("price_alerts").select(cols).eq("user_id", user_id)
+                            .gte("triggered_at", since_iso).order("triggered_at", desc=True).limit(500)
+                            .execute().data or [])
 
 
 def get_mover_quotes(min_abs_pct: float) -> list[dict]:

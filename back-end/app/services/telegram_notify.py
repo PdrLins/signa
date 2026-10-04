@@ -382,6 +382,46 @@ def big_move_lines(positions: list[dict], prefs: dict, today: date, lang: str) -
     return out
 
 
+def _num_text(v: float, lang: str, signed: bool = False) -> str:
+    """5 -> "5", 2.5 -> "2.5" / "2,5"; signed: "+5.3" / "−5.3" (true minus sign). Pure."""
+    t = f"{abs(v):.1f}".rstrip("0").rstrip(".") if not float(v).is_integer() else f"{abs(v):.0f}"
+    if lang == "pt":
+        t = t.replace(".", ",")
+    if signed:
+        return ("+" if v >= 0 else "−") + t
+    return ("−" if v < 0 else "") + t
+
+
+def alert_message(r: dict, lang: str, hide_amounts: bool = False) -> str:
+    """One triggered alert as a line (Telegram HTML; push strips the tags).
+    hide_amounts drops money (lock screens) but keeps the ticker and percent. Pure."""
+    sym = escape(str(r.get("symbol") or ""))
+    kind = r.get("kind") or "price"
+    ccy = r.get("currency")
+    price = _f(r.get("last_price"))
+    if kind == "day_move":
+        change = _f(r.get("last_change_pct"))
+        return msg_for(lang, "user_tg_alert_day_move", symbol=sym,
+                       change=_num_text(change, lang, signed=True) if change is not None else "?")
+    if kind == "percent" and _f(r.get("percent")) is not None:
+        key = "user_tg_alert_pct_up" if r.get("direction") == "above" else "user_tg_alert_pct_down"
+        text = msg_for(lang, key, symbol=sym, pct=_num_text(_f(r["percent"]), lang))
+        return text if hide_amounts or price is None else f"{text} ({money(price, ccy, lang)})"
+    if hide_amounts:
+        key = "user_tg_alert_pct_up" if r.get("direction") == "above" else "user_tg_alert_pct_down"
+        word = {"en": "reached your alert price", "pt": "chegou ao preço do seu alerta"}["pt" if lang == "pt" else "en"]
+        return f"🎯 <b>{sym}</b> {word}"
+    key = "user_tg_alert_above" if r.get("direction") == "above" else "user_tg_alert_below"
+    return msg_for(lang, key, symbol=sym, target=money(_f(r.get("target_price")), ccy, lang),
+                   price=money(price, ccy, lang))
+
+
+def alert_key(r: dict) -> str:
+    """One delivery per firing: a day_move alert fires once a day, a re-armed
+    price alert can fire again, so the firing time is part of the key."""
+    return f"alert:{r.get('id')}:{str(r.get('triggered_at') or '')[:19]}"
+
+
 def alert_lines(rows: list[dict], lang: str, now: datetime) -> list[tuple[str, str, str]]:
     """Price alerts that fired in the last 24 h (always on: the user set them)."""
     out = []
@@ -395,11 +435,7 @@ def alert_lines(rows: list[dict], lang: str, now: datetime) -> list[tuple[str, s
             when = when.replace(tzinfo=timezone.utc)
         if now - when > timedelta(hours=24):
             continue
-        ccy = r.get("currency")
-        key = "user_tg_alert_above" if r.get("direction") == "above" else "user_tg_alert_below"
-        out.append(("price_alert", f"alert:{r.get('id')}",
-                    msg_for(lang, key, symbol=escape(str(r.get("symbol") or "")),
-                            target=money(_f(r.get("target_price")), ccy, lang), price=money(_f(r.get("last_price")), ccy, lang))))
+        out.append(("price_alert", alert_key(r), alert_message(r, lang)))
     return out
 
 

@@ -9,7 +9,7 @@
 -- How: Supabase dashboard -> SQL Editor -> New query -> paste -> Run.
 -- Idempotent (IF NOT EXISTS / ON CONFLICT): safe to run twice. Tested on
 -- Postgres: one run creates 35 tables with RLS on; a second run changes nothing.
--- Changes after 030: add a numbered file in migrations/ (031, 032, ...),
+-- Changes after 031: add a numbered file in migrations/ (032, 033, ...),
 -- run it on the database, and fold it into this file.
 --
 -- Afterwards: put the new project's URL and service_role key in the
@@ -771,14 +771,20 @@ CREATE TABLE IF NOT EXISTS price_alerts (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     symbol        VARCHAR(24) NOT NULL,
-    direction     VARCHAR(5) NOT NULL CHECK (direction IN ('above', 'below')),
-    target_price  NUMERIC NOT NULL CHECK (target_price > 0),
+    direction     VARCHAR(8) NOT NULL,      -- price/percent: above | below; day_move: up | down | either (031)
+    target_price  NUMERIC CHECK (target_price > 0),   -- null for day_move (031)
     currency      VARCHAR(3) NOT NULL,
     note          VARCHAR(200),
     active        BOOLEAN NOT NULL DEFAULT true,
     triggered_at  TIMESTAMPTZ,
     last_price    NUMERIC,
-    created_at    TIMESTAMPTZ DEFAULT now()
+    created_at    TIMESTAMPTZ DEFAULT now(),
+    -- 031: percentage alerts
+    kind               TEXT NOT NULL DEFAULT 'price',   -- price | percent | day_move
+    percent            NUMERIC,
+    reference_price    NUMERIC,
+    last_triggered_on  DATE,
+    last_change_pct    NUMERIC
 );
 CREATE INDEX IF NOT EXISTS idx_price_alerts_user_id ON price_alerts (user_id);
 CREATE INDEX IF NOT EXISTS idx_price_alerts_symbol ON price_alerts (symbol);
@@ -1598,6 +1604,53 @@ CREATE TABLE IF NOT EXISTS job_runs (
     failures         INTEGER NOT NULL DEFAULT 0   -- consecutive
 );
 ALTER TABLE public.job_runs ENABLE ROW LEVEL SECURITY;
+
+-- ############################################################
+-- 031_alert_kinds.sql
+-- ############################################################
+
+-- ============================================================================
+-- 031_alert_kinds.sql — percentage price alerts
+-- ============================================================================
+-- price_alerts.kind
+--   price     (default, every existing row) fires once at target_price
+--   percent   up/down N% from reference_price (the price when it was set);
+--             target_price is computed and stored, then it fires like price
+--   day_move  the day's move reaches N% (vs the previous close), at most once
+--             per trading day; stays active and re-arms the next session
+-- percent / reference_price   kept for display (percent and day_move kinds)
+-- last_triggered_on / last_change_pct   day_move: the day it last fired and
+--             that day's move (for the push text and "once a day")
+-- direction now also allows up / down / either (day_move).
+-- Idempotent.
+-- ============================================================================
+
+ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'price';
+ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS percent NUMERIC;
+ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS reference_price NUMERIC;
+ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS last_triggered_on DATE;
+ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS last_change_pct NUMERIC;
+
+ALTER TABLE price_alerts DROP CONSTRAINT IF EXISTS price_alerts_kind_check;
+ALTER TABLE price_alerts ADD CONSTRAINT price_alerts_kind_check CHECK (kind IN ('price', 'percent', 'day_move'));
+
+-- day_move has no target price
+ALTER TABLE price_alerts ALTER COLUMN target_price DROP NOT NULL;
+
+DO $$
+DECLARE c TEXT;
+BEGIN
+    -- the original direction check allowed only above / below
+    FOR c IN SELECT conname FROM pg_constraint
+             WHERE conrelid = 'public.price_alerts'::regclass AND contype = 'c'
+               AND pg_get_constraintdef(oid) ILIKE '%direction%'
+    LOOP
+        EXECUTE format('ALTER TABLE price_alerts DROP CONSTRAINT %I', c);
+    END LOOP;
+END $$;
+ALTER TABLE price_alerts ALTER COLUMN direction TYPE VARCHAR(8);   -- "either" is 6 letters
+ALTER TABLE price_alerts ADD CONSTRAINT price_alerts_direction_check
+    CHECK (direction IN ('above', 'below', 'up', 'down', 'either'));
 
 -- ############################################################
 -- Signa only: drop the brain's feature keys (inserted by 011, they now

@@ -118,6 +118,18 @@ _MESSAGES = {
         "en": "🎯 <b>{symbol}</b> reached {target} (now {price})",
         "pt": "🎯 <b>{symbol}</b> chegou a {target} (agora {price})",
     },
+    "user_tg_alert_pct_up": {
+        "en": "🎯 <b>{symbol}</b> is up {pct}% since you set the alert",
+        "pt": "🎯 <b>{symbol}</b> subiu {pct}% desde que você criou o alerta",
+    },
+    "user_tg_alert_pct_down": {
+        "en": "🎯 <b>{symbol}</b> is down {pct}% since you set the alert",
+        "pt": "🎯 <b>{symbol}</b> caiu {pct}% desde que você criou o alerta",
+    },
+    "user_tg_alert_day_move": {
+        "en": "📈 <b>{symbol}</b> moved {change}% today",
+        "pt": "📈 <b>{symbol}</b> variou {change}% hoje",
+    },
     "user_tg_alert_below": {
         "en": "🎯 <b>{symbol}</b> fell to {target} (now {price})",
         "pt": "🎯 <b>{symbol}</b> caiu para {target} (agora {price})",

@@ -31,12 +31,26 @@ paused alerts don't count. Over the limit -> 403
 
 Creating an alert whose condition already holds at the current price is
 rejected (422 already_crossed, with current_price) — it would fire at once.
+
+Kinds (migration 031, `kind`):
+  price     the above (target_price, direction above | below)
+  percent   up / down N% from the price when it was set: reference_price is
+            the quote then, target_price = reference x (1 +/- N/100), and it
+            fires like a price alert. Changing percent / direction (or
+            re-arming) re-bases it on the current price.
+  day_move  the day's move (quote change_pct vs the previous close) reaches
+            N% in direction up | down | either, at most once per New York
+            day (last_triggered_on). It stays active and re-arms by itself
+            the next session; target_price is null.
+  percent: 0.5 to 100 (below on the percent kind: up to 99) -> else 422 invalid_percent.
+GET /alerts leaves day_move alerts out unless ?kinds=all (old clients expect a
+target_price on every alert).
 """
 
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import status
@@ -47,7 +61,11 @@ from app.core.api_errors import api_error
 from app.services.portfolio_snapshots import convert
 
 MIGRATION = "015_price_alerts_and_slots.sql"
+KINDS_MIGRATION = "031_alert_kinds.sql"
+KINDS = ("price", "percent", "day_move")
 DIRECTIONS = ("above", "below")
+MOVE_DIRECTIONS = ("up", "down", "either")
+PERCENT_MIN, PERCENT_MAX, PERCENT_BELOW_MAX = 0.5, 100.0, 99.0
 RECENT_DAYS = 7
 NOTE_MAX = 200
 
@@ -97,11 +115,21 @@ def evaluate(alerts: list[dict], quotes: dict[str, dict], usdcad: float | None,
              now: datetime | None = None) -> list[dict]:
     """[{"id", "triggered_at", "last_price"}] for the active alerts that fire. Pure."""
     now = now or datetime.now(timezone.utc)
+    today = _et_date(now)
     fired = []
     for a in alerts or []:
         if not a.get("active", True):
             continue
         q = quotes.get(str(a.get("symbol") or "").upper()) or {}
+        if (a.get("kind") or "price") == "day_move":
+            hit = day_move_hit(a, q, today)
+            if hit is not None:
+                ccy = str(a.get("currency") or "").upper() or None
+                price = price_in(_f(q.get("price")), q.get("currency"), ccy, usdcad) if ccy else None
+                fired.append({"id": a["id"], "user_id": a.get("user_id"), "symbol": a.get("symbol"),
+                              "triggered_at": now.isoformat(), "last_price": round(price, 4) if price else None,
+                              "keep_active": True, "change_pct": round(hit, 2), "day": today.isoformat()})
+            continue
         ccy = str(a.get("currency") or "").upper() or None
         target = _f(a.get("target_price"))
         if ccy is None or target is None:
@@ -111,6 +139,35 @@ def evaluate(alerts: list[dict], quotes: dict[str, dict], usdcad: float | None,
             fired.append({"id": a["id"], "user_id": a.get("user_id"), "symbol": a.get("symbol"),
                           "triggered_at": now.isoformat(), "last_price": round(price, 4)})
     return fired
+
+
+def _et_date(v) -> date | None:
+    from zoneinfo import ZoneInfo
+    if isinstance(v, datetime):
+        t = v
+    else:
+        try:
+            t = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return t.astimezone(ZoneInfo("America/New_York")).date()
+
+
+def day_move_hit(alert: dict, quote: dict, today) -> float | None:
+    """The day's move (percent) when a day_move alert should fire now, else
+    None: the quote is today's, the move reaches the threshold in the
+    alert's direction, and it hasn't fired today. Pure."""
+    pct = _f(alert.get("percent"))
+    ch = _f((quote or {}).get("change_pct"))
+    if pct is None or ch is None or _et_date((quote or {}).get("as_of")) != today:
+        return None
+    if str(alert.get("last_triggered_on") or "")[:10] == str(today):
+        return None
+    d = str(alert.get("direction") or "either")
+    hit = ch >= pct if d == "up" else ch <= -pct if d == "down" else abs(ch) >= pct
+    return ch if hit else None
 
 
 def enrich(alert: dict, quote: dict | None, usdcad: float | None) -> dict:
@@ -131,8 +188,15 @@ def enrich(alert: dict, quote: dict | None, usdcad: float | None) -> dict:
         "last_price": _f(alert.get("last_price")),
         "created_at": alert.get("created_at"),
         "current_price": round(cur, 4) if cur is not None else None,
-        "distance_pct": distance_pct(target, cur) if alert.get("active") else None,
+        "distance_pct": distance_pct(target, cur) if alert.get("active") and target is not None else None,
         "as_of": q.get("as_of"),
+        # migration 031
+        "kind": alert.get("kind") or "price",
+        "percent": _f(alert.get("percent")),
+        "reference_price": _f(alert.get("reference_price")),
+        "last_triggered_on": str(alert["last_triggered_on"])[:10] if alert.get("last_triggered_on") else None,
+        "last_change_pct": _f(alert.get("last_change_pct")),
+        "change_pct_today": _f(q.get("change_pct")),
     }
 
 
@@ -146,11 +210,22 @@ def feed_items(rows: list[dict], names: dict[str, dict] | None = None) -> list[d
             continue
         sym = str(a.get("symbol") or "").upper()
         target, price = _f(a.get("target_price")), _f(a.get("last_price"))
+        kind = a.get("kind") or "price"
+        pct, change = _f(a.get("percent")), _f(a.get("last_change_pct"))
+        if kind == "day_move" and change is not None:
+            title = f"{sym} moved {change:+.1f}% today"
+        elif kind == "percent" and pct is not None:
+            title = f"{sym} {'rose' if a.get('direction') == 'above' else 'fell'} {pct:g}% since the alert was set"
+        elif target is not None:
+            title = f"{sym} {'rose above' if a.get('direction') == 'above' else 'fell below'} {target:g}"
+        else:
+            title = sym
         out.append({
             "type": "price_alert", "date": when, "symbol": sym,
             "name": (names.get(sym) or {}).get("name"),
-            "title": f"{sym} {'rose above' if a.get('direction') == 'above' else 'fell below'} {target:g}"
-            if target is not None else sym,
+            "title": title,
+            "alert_kind": kind, "percent": pct, "reference_price": _f(a.get("reference_price")),
+            "change_pct": change,
             "detail": f"Price {price:g} {a.get('currency') or ''}".strip() if price is not None else "",
             "cash": None, "cash_home": None, "currency": a.get("currency"), "estimated": False,
             "owned": bool((names.get(sym) or {}).get("shares")), "recent": True,
@@ -164,19 +239,48 @@ def feed_items(rows: list[dict], names: dict[str, dict] | None = None) -> list[d
 # Validation
 # ============================================================
 
-def validate(body: dict, partial: bool = False) -> dict:
-    """Clean {symbol?, direction, target_price, currency, note, active?}; 422 on bad input."""
+def validate(body: dict, partial: bool = False, kind: str | None = None) -> dict:
+    """Clean fields for one alert kind; 422 on bad input. `kind`: the existing
+    alert's kind on PATCH (it can't change), else body["kind"] or "price"."""
     out: dict = {}
-    if "direction" in body or not partial:
-        d = str(body.get("direction") or "").lower()
-        if d not in DIRECTIONS:
-            raise api_error("invalid_direction", "direction must be 'above' or 'below'.", 422, field="direction")
+    given = body.get("kind")
+    if partial:
+        if given is not None and given != kind:
+            raise api_error("invalid_kind", "An alert's kind can't change. Create a new alert instead.", 422,
+                            field="kind")
+    else:
+        kind = str(given or "price").lower()
+        if kind not in KINDS:
+            raise api_error("invalid_kind", f"kind must be one of {', '.join(KINDS)}.", 422, field="kind")
+        out["kind"] = kind
+    kind = kind or "price"
+    if body.get("direction") is not None or not partial:
+        d = str(body.get("direction") or ("either" if kind == "day_move" else "")).lower()
+        allowed = MOVE_DIRECTIONS if kind == "day_move" else DIRECTIONS
+        if d not in allowed:
+            raise api_error("invalid_direction", f"direction must be one of {', '.join(allowed)}.", 422,
+                            field="direction")
         out["direction"] = d
-    if "target_price" in body or not partial:
-        p = _f(body.get("target_price"))
-        if p is None or p <= 0:
-            raise api_error("invalid_price", "target_price must be a positive number.", 422, field="target_price")
-        out["target_price"] = p
+    if kind == "price":
+        if body.get("percent") is not None:
+            raise api_error("invalid_percent", "percent is for percent and day_move alerts.", 422, field="percent")
+        if "target_price" in body or not partial:
+            p = _f(body.get("target_price"))
+            if p is None or p <= 0:
+                raise api_error("invalid_price", "target_price must be a positive number.", 422, field="target_price")
+            out["target_price"] = p
+    else:
+        if body.get("target_price") is not None:
+            raise api_error("invalid_price", "This alert is set with percent, not target_price.", 422,
+                            field="target_price")
+        if body.get("percent") is not None or not partial:
+            pct = _f(body.get("percent"))
+            top = PERCENT_BELOW_MAX if kind == "percent" and out.get("direction", body.get("_direction")) == "below" \
+                else PERCENT_MAX
+            if pct is None or not (PERCENT_MIN <= pct <= top):
+                raise api_error("invalid_percent", f"percent must be between {PERCENT_MIN:g} and {top:g}.", 422,
+                                field="percent", min=PERCENT_MIN, max=top)
+            out["percent"] = pct
     if body.get("currency") is not None:
         c = str(body["currency"]).strip().upper()
         if len(c) != 3 or not c.isalpha():
@@ -190,6 +294,12 @@ def validate(body: dict, partial: bool = False) -> dict:
     if partial and "active" in body and body["active"] is not None:
         out["active"] = bool(body["active"])
     return out
+
+
+def percent_target(reference: float, direction: str, percent: float) -> float:
+    """Target for a percent alert. Pure."""
+    k = 1 + percent / 100 if direction == "above" else 1 - percent / 100
+    return round(reference * k, 4)
 
 
 def alert_limit_error(limit: int, active: int):
@@ -223,9 +333,11 @@ def summary(user: dict, rows: list[dict]) -> dict:
     return {"active": active, "limit": limit, "remaining": None if limit is None else max(0, limit - active)}
 
 
-def list_alerts(user: dict, symbol: str | None = None) -> dict:
+def list_alerts(user: dict, symbol: str | None = None, all_kinds: bool = False) -> dict:
     from app.db import queries
     rows = queries.list_price_alerts(user["user_id"], symbol)
+    if not all_kinds:   # old clients expect a target_price on every alert
+        rows = [r for r in rows if (r.get("kind") or "price") != "day_move"]
     all_rows = rows if symbol is None else queries.list_price_alerts(user["user_id"])
     qs, usdcad = _quotes_for({str(r["symbol"]).upper() for r in rows if r.get("symbol")})
     items = [enrich(r, qs.get(str(r.get("symbol") or "").upper()), usdcad) for r in rows]
@@ -255,9 +367,17 @@ def _reject_if_crossed(direction: str, target: float, ccy: str, symbol: str,
 MAX_ALERTS_KEPT = 200   # active + triggered, a storage guard (Premium's active alerts are unlimited)
 
 
+def _reference(symbol: str, ccy: str, q: dict | None, usdcad: float | None) -> float:
+    """The current price in the alert currency, or 503 data_unavailable."""
+    ref = price_in(_f((q or {}).get("price")), (q or {}).get("currency"), ccy, usdcad)
+    if not ref:
+        raise api_error("data_unavailable", f"No current price for {symbol} right now. Please try again.", 503)
+    return ref
+
+
 def create_alert(user: dict, symbol: str, body: dict) -> dict:
     from app.db import queries
-    data = validate(body)
+    data = validate({**body, "_direction": str(body.get("direction") or "").lower()})
     _check_limit(user)
     if queries.count_rows("price_alerts", user["user_id"]) >= MAX_ALERTS_KEPT:
         raise api_error("alert_total_limit",
@@ -266,12 +386,27 @@ def create_alert(user: dict, symbol: str, body: dict) -> dict:
     qs, usdcad = _quotes_for({symbol})
     q = qs.get(symbol)
     ccy = data.get("currency") or str((q or {}).get("currency") or default_currency(symbol)).upper()
-    _reject_if_crossed(data["direction"], data["target_price"], ccy, symbol, q, usdcad)
-    row = queries.insert_price_alert(user["user_id"], {
-        "symbol": symbol, "direction": data["direction"], "target_price": data["target_price"],
-        "currency": ccy, "note": data.get("note"), "active": True,
-    })
-    return enrich(row, q, usdcad)
+    kind = data["kind"]
+    row = {"symbol": symbol, "direction": data["direction"], "currency": ccy, "note": data.get("note"),
+           "active": True}
+    if kind == "price":
+        _reject_if_crossed(data["direction"], data["target_price"], ccy, symbol, q, usdcad)
+        row["target_price"] = data["target_price"]
+    else:   # only these columns need migration 031: price alerts keep working before it
+        row.update(kind=kind, percent=data["percent"])
+        if kind == "percent":
+            ref = _reference(symbol, ccy, q, usdcad)
+            row.update(reference_price=round(ref, 4),
+                       target_price=percent_target(ref, data["direction"], data["percent"]))
+            _reject_if_crossed(data["direction"], row["target_price"], ccy, symbol, q, usdcad)
+        else:   # day_move
+            ref = price_in(_f((q or {}).get("price")), (q or {}).get("currency"), ccy, usdcad)
+            row.update(reference_price=round(ref, 4) if ref else None, target_price=None)
+            today = _et_date(datetime.now(timezone.utc))
+            if q and day_move_hit({**row, "last_triggered_on": None}, q, today) is not None:
+                row["last_triggered_on"] = today.isoformat()   # already moved today: from the next move on
+    saved = queries.insert_price_alert(user["user_id"], row)
+    return enrich(saved, q, usdcad)
 
 
 def update_alert(user: dict, alert_id: str, body: dict) -> dict:
@@ -279,7 +414,9 @@ def update_alert(user: dict, alert_id: str, body: dict) -> dict:
     cur = queries.get_price_alert(alert_id, user["user_id"])
     if not cur:
         raise api_error("alert_not_found", "Alert not found.", status.HTTP_404_NOT_FOUND)
-    data = validate(body, partial=True)
+    kind = cur.get("kind") or "price"
+    data = validate({**body, "_direction": str(body.get("direction") or cur.get("direction") or "").lower()},
+                    partial=True, kind=kind)
     if not data:
         raise api_error("nothing_to_update", "Send at least one field to change.", 422)
     merged = {**cur, **data}
@@ -288,10 +425,19 @@ def update_alert(user: dict, alert_id: str, body: dict) -> dict:
         _check_limit(user)
     sym = str(merged["symbol"]).upper()
     qs, usdcad = _quotes_for({sym})
-    if merged.get("active") and ({"direction", "target_price", "currency"} & set(data) or reactivating):
+    if kind == "percent" and merged.get("active") and ({"percent", "direction", "currency"} & set(data)
+                                                       or reactivating):
+        # re-base on the current price: "N% from now"
+        ccy = str(merged["currency"]).upper()
+        ref = _reference(sym, ccy, qs.get(sym), usdcad)
+        data.update(reference_price=round(ref, 4),
+                    target_price=percent_target(ref, merged["direction"], float(merged["percent"])))
+        merged.update(data)
+    if kind != "day_move" and merged.get("active") and (
+            {"direction", "target_price", "currency", "percent"} & set(data) or reactivating):
         _reject_if_crossed(merged["direction"], float(merged["target_price"]),
                            str(merged["currency"]).upper(), sym, qs.get(sym), usdcad)
-    if reactivating or (merged.get("active") and {"direction", "target_price"} & set(data)):
+    if reactivating or (merged.get("active") and {"direction", "target_price", "percent"} & set(data)):
         data.update({"triggered_at": None, "last_price": None})
     row = queries.update_price_alert(alert_id, user["user_id"], data)
     if not row:
@@ -349,6 +495,11 @@ def evaluate_refreshed(quotes: dict[str, dict], now: datetime | None = None) -> 
     n = 0
     for f in fired:
         try:
+            if f.get("keep_active"):   # day_move: once a day, stays active
+                queries.mark_day_move_triggered(f["id"], f["triggered_at"], f["last_price"], f["change_pct"],
+                                                f["day"])
+                n += 1
+                continue
             queries.mark_price_alert_triggered(f["id"], f["triggered_at"], f["last_price"])
             n += 1
             logger.info(f"alerts: {f['symbol']} alert {f['id']} fired at {f['last_price']}")

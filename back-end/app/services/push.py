@@ -201,6 +201,27 @@ def private_text(kinds: list[str], lang: str = "en") -> str:
     return t["many"].format(n=len(kinds))
 
 
+def _alert_of(line: tuple, user_id: str) -> dict | None:
+    """The alert row behind a "price_alert" line (key alert:<id>:<time>). Never raises."""
+    try:
+        alert_id = line[1].split(":")[1]
+        from app.db import queries
+        return queries.get_price_alert(alert_id, user_id)
+    except Exception:
+        return None
+
+
+def alert_data(alert: dict) -> dict:
+    """Push payload fields for an alert: what the app needs to open the right screen. Pure."""
+    kind = alert.get("kind") or "price"
+    out = {"alert_kind": kind, "symbol": alert.get("symbol"), "alert_id": alert.get("id")}
+    if kind in ("percent", "day_move"):
+        out["percent"] = float(alert["percent"]) if alert.get("percent") is not None else None
+    if kind == "day_move":
+        out["change_pct"] = float(alert["last_change_pct"]) if alert.get("last_change_pct") is not None else None
+    return out
+
+
 def compose(lines: list[str]) -> str:
     first = plain(lines[0])
     return first if len(lines) == 1 else f"{first} (+{len(lines) - 1} more)"
@@ -224,8 +245,18 @@ async def deliver_user(user_id: str, devices: list[dict], mode: str, today: date
         return 0
     from app.services import notification_prefs
     hide = notification_prefs.hide_amounts((await asyncio.to_thread(notification_prefs.get_prefs, user_id))["prefs"])
-    text = private_text([k for k, _, _ in fresh], _lang) if hide else compose([t for _, _, t in fresh])
-    body = payload(TITLE, text, {"kind": fresh[0][0]})
+    data: dict = {"kind": fresh[0][0]}
+    alert = await asyncio.to_thread(_alert_of, fresh[0], user_id) if fresh[0][0] == "price_alert" else None
+    if alert:
+        data.update(alert_data(alert))
+    if hide and len(fresh) == 1 and alert:
+        from app.services.telegram_notify import alert_message
+        text = plain(alert_message(alert, _lang, hide_amounts=True))   # ticker and percent, no money
+    elif hide:
+        text = private_text([k for k, _, _ in fresh], _lang)
+    else:
+        text = compose([t for _, _, t in fresh])
+    body = payload(TITLE, text, data)
     ok = False
     for d in devices:
         ok = await send_to_device(d, body) or ok
