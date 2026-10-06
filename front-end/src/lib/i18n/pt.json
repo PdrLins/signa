@@ -2764,7 +2764,8 @@
       "earnings": "resultados",
       "analyst": "avaliações de analistas",
       "check_changed": "verificações do Signa",
-      "economy": "economia"
+      "economy": "economia",
+      "price_alerts": "alertas de preço"
     },
     "emptyBody": "Adicione uma ação que você tem para ver aqui as datas de dividendos e resultados.",
     "sourcesFailed": "Alguns dados não puderam ser carregados agora: {sources}.",

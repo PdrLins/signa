@@ -322,6 +322,9 @@ def update_transaction(user_id: str, tx_id: str, patch: dict) -> dict:
         _raise_invalid(errors)
     if cur.get("source") == "auto":   # the user checked it: now it's their record, no longer an estimate
         clean = {**clean, "source": "manual"}
+        from app.services.auto_dividends import NOTES
+        if clean.get("note") in NOTES:   # Signa's "estimated" note no longer applies
+            clean["note"] = None
     row = queries.update_transaction(tx_id, user_id, clean)
     if not row:
         raise api_error("not_found", "Transaction not found.", status.HTTP_404_NOT_FOUND)

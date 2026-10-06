@@ -58,6 +58,7 @@ class ProfileUpdate(BaseModel):
     dividend_tax_view: Optional[Any] = None
     compare_index: Optional[Any] = None
     holdings_native_currency: Optional[Any] = None
+    auto_dividends: Optional[Any] = None   # migration 032 (the service answers 422 invalid_value if not a bool)
 
 
 @router.get("", dependencies=[Depends(require_feature("area.profile"))])

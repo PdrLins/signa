@@ -5,7 +5,7 @@ GET /api/v1/widgets/summary                                   area.home
   "currency": "CAD",                         # the user's home currency
   "value": 12845.67 | null,                  # market value + cash (= /portfolio/summary total)
   "day_change": {"abs": 120.5 | null, "pct": 0.95 | null},
-  "market_phase": "pre" | "open" | "post" | "closed" | null,
+  "market_phase": "pre" | "regular" | "post" | "closed" | null,
   "holdings_count": 7,
   "next_dividends": [                        # up to 3 owned payouts from today on, by date
     {"symbol": "ENB.TO", "name": "Enbridge", "date": "2026-10-15",

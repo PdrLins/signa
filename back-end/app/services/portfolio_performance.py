@@ -672,8 +672,14 @@ def _live(scope: dict) -> dict:
     mv = sum(p["value_home"] for p in positions if p["value_home"] is not None)
     prev = sum((p["prev_value_home"] if p["prev_value_home"] is not None else (p["value_home"] or 0.0))
                for p in positions if p["value_home"] is not None)
-    return {"positions": positions, "merged": merged, "cash": cash, "total": mv + cash,
-            "prev_total": prev + cash, "meta": pc.price_meta(positions)}
+    # fixed income (migration 032) is part of today's value, like in the summary and the
+    # snapshots: without it the chart's last point and the returns drop by its value
+    from app.services import fixed_income
+    fixed = fixed_income.scope_value(scope.get("fixed_income") or [], home, usdcad)
+    return {"positions": positions, "merged": merged, "cash": cash,
+            "fixed": fixed["value"], "fixed_invested": fixed["invested"],
+            "total": mv + cash + fixed["value"], "prev_total": prev + cash + fixed["value"],
+            "meta": pc.price_meta(positions)}
 
 
 def _all_base(scope: dict, snaps: dict[date, float], today: date) -> date:
@@ -731,8 +737,10 @@ def _daily_build(scope: dict, live: dict, rng: str, today: date, extra_symbols: 
     syms = [p["symbol"] for p in live["merged"] if p.get("shares") and p.get("price")]
     closes = price_cache.fetch_daily_closes(list(dict.fromkeys(syms + list(extra_symbols))),
                                             period=closes_period(base, today)) if (syms or extra_symbols) else {}
-    est, truncated = estimate_series(live["merged"], closes, base, today, home, usdcad, live["cash"])
-    points, reason = combine_daily(est, snaps, base, today, live["total"] if live["merged"] or live["cash"] else None)
+    # cash and fixed income are carried at today's value through the estimate
+    const = live["cash"] + live["fixed"]
+    est, truncated = estimate_series(live["merged"], closes, base, today, home, usdcad, const)
+    points, reason = combine_daily(est, snaps, base, today, live["total"] if live["merged"] or const else None)
     return {"points": points, "reason": reason, "base": base, "closes": closes,
             "truncated": bool(truncated and reason in ("no_snapshots", "partial_snapshots")),
             "snapshots": len(snaps), "estimated_points": len(est)}
@@ -753,10 +761,10 @@ def history_body(scope: dict, rng: str, interval: str, compare: str | None, toda
         from app.core.access import can
         prepost = can(scope.get("level") or "free", "feature.extended_hours")
         bars = get_intraday_bars(syms + ([compare] if compare else []), interval, prepost) if (syms or compare) else {}
-        points = intraday_series(live["merged"], bars, home, scope["usdcad"], live["cash"])
+        points = intraday_series(live["merged"], bars, home, scope["usdcad"], live["cash"] + live["fixed"])
         reason = None
         if not points:
-            if live["merged"] or live["cash"]:
+            if live["merged"] or live["cash"] or live["fixed"]:
                 now = datetime.now(timezone.utc)
                 open_t = datetime.combine(today, time(9, 30), tzinfo=ET).astimezone(timezone.utc)
                 points = [(open_t, live["prev_total"]), (max(now, open_t), live["total"])]
@@ -886,7 +894,9 @@ def performance_body(scope: dict, rng: str, compare: str | None, today: date | N
             start = first_tx - timedelta(days=1)
             fl = external_flows(txs, start, today, home, usdcad)
             if fl["basis"] == "trades":
-                v1 = v1 - live["cash"]   # cash isn't a flow on this basis: it isn't a gain either
+                # cash and the money put into fixed income aren't flows on this basis:
+                # they aren't gains either (fixed income's own interest still counts)
+                v1 = v1 - live["cash"] - live["fixed_invested"]
         extra = fl["dividends"] if fl["basis"] == "trades" else 0.0
         md = modified_dietz(v0 or 0.0, v1, fl["flows"], start, today, extra)
         ret, gain, net = md["return_pct"], md["gain"], md["net_flows"]

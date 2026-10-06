@@ -205,9 +205,10 @@ def feed_items(rows: list[dict], names: dict[str, dict] | None = None) -> list[d
     names = names or {}
     out = []
     for a in rows or []:
-        when = str(a.get("triggered_at") or "")[:10]
-        if not when:
+        d = _et_date(a.get("triggered_at")) if a.get("triggered_at") else None   # New York day, like "today"
+        if not d:
             continue
+        when = d.isoformat()
         sym = str(a.get("symbol") or "").upper()
         target, price = _f(a.get("target_price")), _f(a.get("last_price"))
         kind = a.get("kind") or "price"

@@ -35,6 +35,12 @@ LOOKBACK_DAYS = 45
 DEDUPE_DAYS = 15
 DEFAULT_PAY_GAP_DAYS = 21
 NOTE = "Estimated by Signa from the dividend history (before tax). Edit or delete it if it differs."
+NOTE_PT = "Estimado pelo Signa a partir do histórico de dividendos (antes do imposto). Edite ou apague se for diferente."
+NOTES = {NOTE, NOTE_PT}
+
+
+def note_for(lang: str | None) -> str:
+    return NOTE_PT if lang == "pt" else NOTE
 
 
 def _f(v: Any) -> float | None:
@@ -81,7 +87,7 @@ def shares_before(ex_date: date, holding: dict, trades: list[dict]) -> float:
 
 
 def plan(holdings: list[dict], transactions: list[dict], profiles: dict[str, dict | None], today: date,
-         dismissed: set[str]) -> tuple[list[dict], list[str]]:
+         dismissed: set[str], lang: str = "en") -> tuple[list[dict], list[str]]:
     """(rows to insert, ids of estimates to remove because a real record now
     matches). Pure."""
     from app.services.dividend_calendar import _pay_offset
@@ -132,7 +138,7 @@ def plan(holdings: list[dict], transactions: list[dict], profiles: dict[str, dic
                 "trade_date": pay.isoformat(), "quantity": round(shares, 8), "price": round(per_share, 6),
                 "amount": round(shares * per_share, 2),
                 "currency": str(prof.get("currency") or holding_currency(h)).upper(),
-                "fee": 0, "note": NOTE, "source": SOURCE, "auto_ref": ref, "import_batch_id": None,
+                "fee": 0, "note": note_for(lang), "source": SOURCE, "auto_ref": ref, "import_batch_id": None,
             })
             known_refs.add(ref)
     return rows, remove
@@ -168,7 +174,9 @@ async def run(today: date | None = None) -> dict:
         try:
             txs = await in_job_pool(queries.get_all_transactions, uid)
             dismissed = await in_job_pool(queries.get_dismissed_auto_refs, uid)
-            rows, remove = plan(hs, txs, profiles, today, dismissed)
+            from app.services.telegram_notify import user_language
+            lang = await in_job_pool(user_language, uid)
+            rows, remove = plan(hs, txs, profiles, today, dismissed, lang)
             if rows:
                 await in_job_pool(queries.insert_transactions, uid, rows)
                 added += len(rows)

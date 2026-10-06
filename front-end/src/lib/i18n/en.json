@@ -2764,7 +2764,8 @@
       "earnings": "earnings",
       "analyst": "analyst ratings",
       "check_changed": "Signa checks",
-      "economy": "economy"
+      "economy": "economy",
+      "price_alerts": "price alerts"
     },
     "emptyBody": "Add a stock you own to see its dividends and earnings dates here.",
     "sourcesFailed": "Some data could not be loaded right now: {sources}.",

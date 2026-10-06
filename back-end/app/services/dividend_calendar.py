@@ -441,7 +441,11 @@ async def fetch_profiles(symbols: Iterable[str], fetch: ProfileFn | None = None,
 async def get_calendar(holdings: list[dict], watchlist: list[dict] | None = None, months: int = 12,
                        usdcad: float | None = None, today: date | None = None,
                        fetch: ProfileFn | None = None, home: str = "CAD") -> dict:
-    """Fetch the shared dividend profiles and build the calendar."""
+    """Fetch the shared dividend profiles and build the calendar. Holdings are
+    merged by symbol here (a stock in two accounts is one position with both
+    lots' shares), so every caller gets full amounts."""
+    from app.services.holdings_service import merge_by_symbol
+    holdings = merge_by_symbol(holdings or [])
     wl = list(watchlist or [])[:MAX_WATCHLIST] if watchlist is not None else None
     symbols = [str(h.get("symbol") or "").upper() for h in holdings or []]
     symbols += [str(w.get("symbol") or "").upper() for w in wl or []]

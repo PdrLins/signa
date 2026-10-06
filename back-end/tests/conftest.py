@@ -160,3 +160,12 @@ def _no_live_fixed_income(monkeypatch):
     monkeypatch.setattr(br_rates, "_download", lambda code, since, until: {})
     monkeypatch.setattr(fixed_income, "rows_for", lambda uid: [])
     monkeypatch.setattr(portfolio_snapshots, "_fixed_values", lambda currencies, usdcad, d: {})
+
+
+@pytest.fixture(autouse=True)
+def _no_live_intraday(monkeypatch):
+    """1D charts download intraday bars from Yahoo: never in tests (no bars
+    unless a test provides them)."""
+    from app.services import portfolio_performance
+    monkeypatch.setattr(portfolio_performance, "_download_intraday",
+                        lambda symbols, interval, prepost=False: {})

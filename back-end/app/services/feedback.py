@@ -87,7 +87,7 @@ def clean_report(body: dict) -> dict:
 
 DIAGNOSTIC_KEYS = frozenset({
     "app_version", "build", "server_version", "os_version", "device_model", "locale", "screen",
-    "request_id", "last_error", "network", "sentry_event_id",
+    "request_id", "last_error", "network",
     "field", "shown", "expected",   # wrong-data reports (kind "data")
 })
 LAST_REQUEST_KEYS = frozenset({"path", "status", "code", "request_id"})

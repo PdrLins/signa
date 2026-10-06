@@ -183,7 +183,8 @@ def validate(body: dict, partial: bool = False, current: dict | None = None) -> 
         if p is None or p <= 0:
             raise _422("invalid_principal", "principal must be the amount invested (positive).", "principal")
         out["principal"] = round(p, 2)
-    today = datetime.now(timezone.utc).date()
+    from app.services.dividends import today_et
+    today = today_et() + timedelta(days=1)   # New York's today, +1 day so "today" works in every time zone
     if "start_date" in body or not partial:
         s = _d(body.get("start_date"))
         if not s or s > today:
