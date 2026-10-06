@@ -201,3 +201,48 @@ def test_fund_yield_from_yield_field_not_zero_trailing():
     assert sg.dividend_yield_from_info({"dividendYield": 1.57}, 45.0) == pytest.approx(0.0157)
     assert sg.dividend_yield_from_info({"trailingAnnualDividendYield": 0.0}, 10.0) == 0.0
     assert sg.dividend_yield_from_info({}, 10.0) is None
+
+
+# ---------------------------------------------------------------- symbols missing from the cached pool
+
+def _user():
+    return {"user_id": U1, "access_level": "free"}
+
+
+def test_bare_ticker_resolves_like_the_stock_page(monkeypatch, db):
+    """ZWC (no suffix) is ZWC.TO, a curated covered-call fund: never empty."""
+    monkeypatch.setattr(queries, "get_symbol_profile", lambda s: None)
+    monkeypatch.setattr(sg, "_fetch_info", lambda s: None)
+    b = sg.stock_body("ZWC", _user())
+    assert b["symbol"] == "ZWC.TO" and b["similar"][0]["reason"] == "same_fund_group"
+    assert len(b["similar"]) == 3 and b["more_locked"] is True        # Free: 3 of 4
+
+
+def test_profile_in_the_table_but_not_in_the_cached_pool(monkeypatch, db):
+    row = _p("TRI.TO", sector="Energy", industry="Oil & Gas Midstream", country="Canada", cap=2e10, dy=0.05)
+    monkeypatch.setattr(queries, "get_symbol_profile", lambda s: dict(row) if s == "TRI.TO" else None)
+    b = sg.stock_body("TRI.TO", {**_user(), "access_level": "premium"})
+    assert [r["symbol"] for r in b["similar"]][:2] == ["TRP.TO", "PPL.TO"]
+
+
+def test_profile_built_from_yahoo_when_there_is_no_row(monkeypatch, db):
+    monkeypatch.setattr(queries, "get_symbol_profile", lambda s: None)
+    monkeypatch.setattr(sg, "_fetch_info", lambda s: {"longName": "New Pipeline", "quoteType": "EQUITY",
+                                                      "sector": "Energy", "industry": "Oil & Gas Midstream",
+                                                      "country": "Canada", "marketCap": 5e10} if s == "NEW.TO" else None)
+    stored = []
+    monkeypatch.setattr(sg, "record_from_info", lambda s, info: stored.append(s))
+    b = sg.stock_body("NEW.TO", _user())
+    assert stored == ["NEW.TO"] and b["similar"] and b["similar"][0]["reason"] == "same_industry"
+    assert "NEW.TO" in sg.load_pool()                                 # now everyone gets it
+
+
+def test_etf_category_peers_from_the_seeded_pool(monkeypatch, db):
+    pool = {**POOL, "QYLD": _p("QYLD", qt="ETF", category="Derivative Income"),
+            "XYLD": _p("XYLD", qt="ETF", category="Derivative Income"),
+            "SQQQ": _p("SQQQ", qt="ETF", category="Derivative Income")}
+    monkeypatch.setattr(queries, "get_symbol_profiles", lambda: list(pool.values()))
+    sg.clear_cache()
+    b = sg.stock_body("QYLD", {**_user(), "access_level": "premium"})
+    syms = [r["symbol"] for r in b["similar"]]
+    assert "XYLD" in syms and "SQQQ" not in syms                      # leveraged / inverse never

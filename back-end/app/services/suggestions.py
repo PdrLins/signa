@@ -490,13 +490,59 @@ def _country(uid: str) -> str | None:
         return None
 
 
+def _profile_now(sym: str, pool: dict[str, dict]) -> dict | None:
+    """The symbol's profile even when the cached pool doesn't have it yet:
+    the table (written moments ago by the stock page), else built from Yahoo
+    info and stored (then it's in the pool for everyone). Blocking."""
+    if sym in pool:
+        return pool[sym]
+    from app.db import queries
+    try:
+        row = queries.get_symbol_profile(sym)
+    except Exception:
+        row = None
+    if row is None:
+        info = _fetch_info(sym)
+        row = profile_from_info(sym, info) if info else None
+        if row:
+            record_from_info(sym, info)
+    if row:
+        with _pool_lock:   # copy, never change in place
+            cur = _pool.get("pool")
+            if cur is not None and sym not in cur:
+                _pool.set("pool", {**cur, sym: row})
+    return row
+
+
+def resolve_symbol(raw: str, pool: dict[str, dict]) -> str:
+    """A bare ticker as the stock page resolves it (ZWC -> ZWC.TO, PETR4 ->
+    PETR4.SA): the stock page's own answer when it has one, else the first
+    candidate Signa knows, else the input. Pure except for the caches."""
+    from app.market.symbols import candidate_symbols
+    from app.services import stock_page
+    sym = (raw or "").upper()
+    known = stock_page._resolve_cache.get(sym)
+    if known:
+        return known
+    if sym in pool:
+        return sym
+    from app.services.similar_funds import group_of
+    for cand in candidate_symbols(sym):
+        if cand in pool or group_of(cand):
+            return cand
+    return sym
+
+
 def stock_body(symbol: str, user: dict) -> dict:
     """GET /stocks/{symbol}/similar."""
     from app.db import queries
-    sym = symbol.upper()
     level = user.get("access_level") or "free"
     limit = _limit(level)
     pool = load_pool()
+    sym = resolve_symbol(symbol, pool)
+    me = _profile_now(sym, pool)
+    if me is not None and sym not in pool:
+        pool = {**pool, sym: me}
     followed = _followed(user)
     home_exch = home_exchange(_country(user["user_id"]))
     similar = similar_to(sym, pool, followed, home_exch, FULL_LIMIT)

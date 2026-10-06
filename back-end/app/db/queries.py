@@ -1323,6 +1323,12 @@ def get_symbol_profiles() -> list[dict]:
     return _select_all_pages(lambda: client.table("symbol_profiles").select(SYMBOL_PROFILE_COLUMNS).order("symbol"))
 
 
+def get_symbol_profile(symbol: str) -> dict | None:
+    rows = (get_client().table("symbol_profiles").select(SYMBOL_PROFILE_COLUMNS).eq("symbol", symbol)
+            .limit(1).execute().data or [])
+    return rows[0] if rows else None
+
+
 def get_cofollows(symbols: list[str]) -> list[dict]:
     """[{symbol, other, users}] for `symbols`."""
     client = get_client()
