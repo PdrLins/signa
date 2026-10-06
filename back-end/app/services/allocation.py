@@ -21,6 +21,9 @@ Symbols are compared without the exchange suffix (XEQT.TO -> XEQT).
 WARNINGS (code + params; pct of the scope's total = holdings value + cash)
   top3_concentration  the 3 largest holdings > 40%     {pct, limit: 40, symbols}
   single_holding      one holding > 20% (one per)      {symbol, pct, limit: 20}
+  Diversified funds (is_diversified_fund: BROAD_ETFS, the curated broad fund
+  groups, or a broad-index name) are left out of both: 99% in XEQT is not
+  concentration. top3 needs 3 holdings that aren't diversified funds.
   cash_like_high      cash_like class > 10%            {pct, limit: 10}
   option_income_high  option_income_etfs > 25%         {pct, limit: 25}
 
@@ -57,6 +60,33 @@ BROAD_ETFS = {"XEQT", "VEQT", "ZEQT", "HEQT", "XGRO", "VGRO", "ZGRO", "XBAL", "V
               "IVV", "SPLG", "VTI", "ITOT", "VT", "VXUS", "QQQ", "QQQM", "XIU", "XIC", "VCN", "ZCN", "ZSP",
               "XUS", "XUU", "VUN", "XAW", "VXC", "XEF", "IEFA", "VEA", "VWO", "IEMG", "XEC", "HXT", "HXS",
               "SCHB", "SCHX", "SCHD", "DIA", "IWM", "VIG", "VYM", "VDY", "XEI", "ZDV"}
+# Diversified funds: one holding that already spreads across hundreds of
+# companies, so it is never "concentration" (warnings here and the
+# suggestions' portfolio gaps use is_diversified_fund, the single rule).
+DIVERSIFIED_GROUPS = {"all_in_one_equity", "all_in_one_growth", "all_in_one_balanced", "sp500_cad", "sp500_us",
+                      "us_total", "canada_broad", "intl_developed", "emerging", "nasdaq100", "canada_dividend",
+                      "us_dividend"}
+_DIVERSIFIED_WORDS = ("total market", "total stock market", "all-world", "all world", "all-equity", "all equity",
+                      "asset allocation", "etf portfolio", "msci world", "msci acwi", "ftse all", "s&p 500",
+                      "s&p/tsx composite", "s&p/tsx 60", "total world", "broad market", "eafe", "emerging markets")
+
+
+def is_diversified_fund(symbol: str, name: str | None = None, asset_type: str | None = None) -> bool:
+    """A broad index / all-in-one fund (XEQT, VEQT, VFV, VT, VTI, XIC, XAW, VGRO …): Signa's
+    BROAD_ETFS list, a curated broad fund group, or a fund whose name says it tracks a broad
+    index. Never a leveraged / inverse, option-income, cash-like, sector or thematic fund. Pure."""
+    from app.market.universe import is_leveraged_or_inverse
+    from app.services.similar_funds import group_of
+    sym = str(symbol or "").upper()
+    cls = classify(sym, name, asset_type)
+    if cls not in ("broad_etfs",) or is_leveraged_or_inverse(sym, {"quote_type": "ETF", "company_name": name}):
+        return False
+    if base_symbol(sym) in BROAD_ETFS or group_of(sym) in DIVERSIFIED_GROUPS:
+        return True
+    nm = str(name or "").lower()
+    return str(asset_type or "").upper() == "ETF" and any(w in nm for w in _DIVERSIFIED_WORDS)
+
+
 OTHER_FUNDS = {"XBB", "ZAG", "VAB", "BND", "AGG", "TLT", "IEF", "ZFL", "XSB", "GLD", "IAU", "SLV", "CGL",
                "PHYS", "PSLV", "SVR", "XGD", "ZGD", "GDX", "DBC", "PDBC", "USO", "UNG"}
 
@@ -172,13 +202,16 @@ def build_allocation(positions: list[dict], cash_home: float = 0.0, fixed_items:
 
     warnings: list[dict] = []
     if total > 0:
-        top3 = tiles[:3]
+        # broad, diversified funds are never concentration (is_diversified_fund)
+        names = {p["symbol"]: (p.get("name"), p.get("asset_type")) for p in priced}
+        concentrated = [t for t in tiles if not is_diversified_fund(t["symbol"], *names.get(t["symbol"], (None, None)))]
+        top3 = concentrated[:3]
         top3_pct = sum(t["value_home"] for t in top3) / total * 100
-        if len(tiles) and top3_pct > TOP3_LIMIT:
+        if len(top3) == 3 and top3_pct > TOP3_LIMIT:
             warnings.append({"code": "top3_concentration",
                              "params": {"pct": _r(top3_pct), "limit": TOP3_LIMIT,
                                         "symbols": [t["symbol"] for t in top3]}})
-        for t in tiles:
+        for t in concentrated:
             if (t["weight_pct"] or 0) > SINGLE_LIMIT:
                 warnings.append({"code": "single_holding",
                                  "params": {"symbol": t["symbol"], "pct": t["weight_pct"], "limit": SINGLE_LIMIT}})

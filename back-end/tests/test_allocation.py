@@ -159,7 +159,9 @@ def test_get_allocation(monkeypatch, db):
     assert body["tiles"][0]["value_home"] == 840 and body["tiles"][0]["total_gain_pct"] == 100
     assert body["targets"] is None
     codes = {w["code"] for w in body["warnings"]}
-    assert {"top3_concentration", "single_holding", "cash_like_high"} <= codes
+    assert {"single_holding", "cash_like_high"} <= codes
+    assert "top3_concentration" not in codes   # one stock + XEQT: not 3 concentrated holdings
+    assert [w["params"]["symbol"] for w in body["warnings"] if w["code"] == "single_holding"] == ["NVDA"]
 
 
 def test_allocation_scope_filters(monkeypatch, db):
@@ -223,3 +225,57 @@ def test_allocation_plan_is_premium(monkeypatch, db):
         assert r.status_code == 403, path
         assert r.json()["detail"]["code"] == "upgrade_required", path
     assert c.get("/api/v1/portfolio/allocation").status_code == 200
+
+
+
+# ---------------------------------------------------------------- diversified funds aren't concentration
+
+def _codes(body, code=None):
+    ws = body["warnings"]
+    return [w for w in ws if w["code"] == code] if code else {w["code"] for w in ws}
+
+
+def test_all_in_one_fund_is_not_concentration():
+    body = alloc.build_allocation([_pos("XEQT.TO", 99), _pos("VFV.TO", 1)])
+    assert not _codes(body) & {"single_holding", "top3_concentration"}
+
+
+def test_stock_flagged_fund_not():
+    body = alloc.build_allocation([_pos("ENB.TO", 60, at="STOCK"), _pos("XEQT.TO", 40)])
+    assert [w["params"]["symbol"] for w in _codes(body, "single_holding")] == ["ENB.TO"]
+
+
+def test_three_stocks_still_flagged():
+    body = alloc.build_allocation([_pos("ENB.TO", 50, at="STOCK"), _pos("TD.TO", 30, at="STOCK"),
+                                   _pos("SHOP.TO", 20, at="STOCK")])
+    assert "top3_concentration" in _codes(body)
+    assert {w["params"]["symbol"] for w in _codes(body, "single_holding")} == {"ENB.TO", "TD.TO"}
+
+
+def test_option_income_and_sector_etfs_are_not_diversified():
+    body = alloc.build_allocation([_pos("ZWC.TO", 30), _pos("XEQT.TO", 70)])
+    assert [w["params"]["symbol"] for w in _codes(body, "single_holding")] == ["ZWC.TO"]
+    assert alloc.is_diversified_fund("XLK", "Technology Select Sector SPDR Fund", "ETF") is False
+    assert alloc.is_diversified_fund("TQQQ", "ProShares UltraPro QQQ", "ETF") is False
+    assert alloc.is_diversified_fund("VWCE.DE", "Vanguard FTSE All-World UCITS ETF", "ETF") is True
+    assert alloc.is_diversified_fund("XAW.TO", None, "ETF") is True
+
+
+def test_gaps_and_warnings_agree_on_diversified_funds():
+    from app.services import suggestions as sg
+    pool = {"XEQT.TO": {"symbol": "XEQT.TO", "name": "iShares Core Equity ETF Portfolio", "quote_type": "ETF",
+                        "exchange": "TSX"},
+            "ZWC.TO": {"symbol": "ZWC.TO", "name": "BMO Canadian High Dividend Covered Call ETF",
+                       "quote_type": "ETF", "exchange": "TSX", "dividend_yield": 0.07},
+            "ENB.TO": {"symbol": "ENB.TO", "name": "Enbridge", "quote_type": "EQUITY", "sector": "Energy",
+                       "exchange": "TSX", "dividend_yield": 0.06}}
+    pos = [{"symbol": "XEQT.TO", "value_home": 900}, {"symbol": "ENB.TO", "value_home": 50},
+           {"symbol": "ZWC.TO", "value_home": 50}]
+    gaps = {g["code"]: g for g in sg.find_gaps(pos, pool, "CAD", "CA")}
+    assert "single_position_heavy" not in gaps                       # 90% XEQT: diversified
+    pos2 = [{"symbol": "XEQT.TO", "value_home": 300}, {"symbol": "ENB.TO", "value_home": 100},
+            {"symbol": "ZWC.TO", "value_home": 600}]
+    gaps2 = {g["code"]: g for g in sg.find_gaps(pos2, pool, "CAD", "CA")}
+    assert gaps2["single_position_heavy"]["params"]["symbol"] == "ZWC.TO"   # option income: not diversified
+    body = alloc.build_allocation([_pos("XEQT.TO", 300), _pos("ENB.TO", 100, at="STOCK"), _pos("ZWC.TO", 600)])
+    assert [w["params"]["symbol"] for w in _codes(body, "single_holding")] == ["ZWC.TO"]   # ENB.TO is 10%

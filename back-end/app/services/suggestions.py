@@ -439,11 +439,16 @@ def find_gaps(positions: list[dict], pool: dict[str, dict], home: str, user_coun
     home_exch = home_exchange(user_country)
     gaps: list[dict] = []
 
-    big = max(valued, key=lambda p: p["value_home"])
-    pct = big["value_home"] / total * 100
-    from app.services.similar_funds import group_of
-    if pct > SINGLE_HEAVY_PCT and _kind((pool.get(big["symbol"]) or {}).get("quote_type")) != "fund" \
-            and not group_of(big["symbol"]):
+    from app.services.allocation import is_diversified_fund
+
+    def diversified(sym: str) -> bool:   # the same rule as the allocation warnings
+        prof = pool.get(sym) or {}
+        return is_diversified_fund(sym, prof.get("name"),
+                                   "ETF" if _kind(prof.get("quote_type")) == "fund" else prof.get("quote_type"))
+    heavy = [p for p in valued if not diversified(p["symbol"])]
+    big = max(heavy, key=lambda p: p["value_home"]) if heavy else None
+    pct = big["value_home"] / total * 100 if big else 0.0
+    if big and pct > SINGLE_HEAVY_PCT:
         gaps.append({"code": "single_position_heavy", "params": {"symbol": big["symbol"], "pct": round(pct, 1)},
                      "ideas": _ideas("broad_home", home, held, pool)})
 
