@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Signa back-end: a portfolio tracker (Free + Premium) for the web app and the iOS app (`~/Documents/projects/signa-ios`). No AI anywhere. The brain (scans, signals, AI checks, positions, learning, backtest) lives in **Signa Advisor** (`~/Documents/projects/signa-advisor`, a fork of this repo that merges `main` from here); don't add brain code back (`tests/test_signa_scope.py` guards it). Shared market helpers live in `app/market/` (known symbols, symbol resolution, technical checks in plain pandas, fund data, earnings dates).
+Signa back-end: a portfolio tracker (Free + Premium) for the iOS app (`~/Documents/projects/signa-ios`). The Next.js web app was removed (git tag `web-final` restores it); the marketing site, privacy, terms and support pages live in `~/Documents/projects/signa-marketing`. Web-only bits stay because they're cheap: `/auth/refresh`, CORS, `GET /public/stocks/{symbol}`. No AI anywhere. The brain (scans, signals, AI checks, positions, learning, backtest) lives in **Signa Advisor** (`~/Documents/projects/signa-advisor`, a fork of this repo that merges `main` from here); don't add brain code back (`tests/test_signa_scope.py` guards it). Shared market helpers live in `app/market/` (known symbols, symbol resolution, technical checks in plain pandas, fund data, earnings dates).
 
 ## Commands
 
@@ -44,7 +44,7 @@ Push notifications (APNs, migration 025, `services/push.py`; devices under `/not
 
 ## Growth (migration 029, measuring marketing)
 
-`app/services/growth.py`. Sign-up records where the person came from (`signup_sources`: utm tags, "How did you hear about Signa?" `heard_from`, invite friend/none, Apple Search Ads token resolved every 10 min with Apple's AdServices API); `POST /attribution` fills empty fields later (first touch wins). The auth middleware writes one `user_activity_days` row per user per day. `GET /admin/growth` (owner) = funnel by channel / campaign / heard_from / country / platform / week: signups → activated (holding within 7 days) → back in week 2 → Premium. `SIGNUP_INVITE_REQUIRED=false` opens sign-up (code optional) — needed before ads; `GET /auth/signup-config` tells the app. `GET /public/stocks/{symbol}` (no sign-in) serves the shared stock page for the web's search-engine pages.
+`app/services/growth.py`. Sign-up records where the person came from (`signup_sources`: utm tags, "How did you hear about Signa?" `heard_from`, invite friend/none, Apple Search Ads token resolved every 10 min with Apple's AdServices API); `POST /attribution` fills empty fields later (first touch wins). The auth middleware writes one `user_activity_days` row per user per day. `GET /admin/growth` (owner) = funnel by channel / campaign / heard_from / country / platform / week: signups → activated (holding within 7 days) → back in week 2 → Premium. `SIGNUP_INVITE_REQUIRED=false` opens sign-up (code optional) — needed before ads; `GET /auth/signup-config` tells the app. `GET /public/stocks/{symbol}` (no sign-in) serves the shared stock page for public search-engine pages (none yet).
 
 ## Accounts, privacy and operations (migration 030)
 

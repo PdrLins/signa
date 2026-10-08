@@ -16,7 +16,7 @@ Enforcement happens on the server:
   * `require_feature(key)` is a FastAPI dependency on the routes (or whole
     routers) that belong to a feature -> 403 {"code": "upgrade_required"}.
 
-The front-end gets the same keys from GET /auth/me and hides what the user
+The apps get the same keys from GET /auth/me and hides what the user
 cannot use; hiding is a convenience, the server is the gate.
 
 The level is read from the DB per request (cached 60s), so a change in the

@@ -58,11 +58,6 @@ Client IP: `X-Forwarded-For` is honoured only when the peer is in `TRUSTED_PROXI
 - Rejects ALL requests when `TELEGRAM_WEBHOOK_SECRET` not configured (empty = rejected)
 - Only responds to messages from `settings.telegram_chat_id`
 
-## WebSocket Security (logs/stream)
-- Requires both JWT (`?jwt=`) AND brain token (`?token=`) as query params
-- Validates both tokens, checks the JWT blacklist, verifies the brain JTI exists in `brain_sessions`, and verifies user match before accepting
-- Known gap: the front-end (`logs/page.tsx`) sends the brain token as a WebSocket subprotocol and no `jwt`, so the stream currently fails closed
-
 ## Audit Events (app/models/audit.py)
 LOGIN_ATTEMPT, OTP_SENT/VERIFIED/FAILED/EXPIRED, TOKEN_ISSUED/REFRESHED/REVOKED, UNAUTHORIZED_ACCESS, RATE_LIMIT_EXCEEDED, BRAIN_CHALLENGE_SENT, BRAIN_ACCESS_GRANTED/DENIED/LOCKED, BRAIN_RULE_UPDATED, BRAIN_KNOWLEDGE_UPDATED, BUDGET_UPDATED, CONFIG_UPDATED, LEARNING_ANALYSIS_RUN, LEARNING_SUGGESTION_APPROVED/REJECTED/APPLIED
 

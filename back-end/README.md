@@ -1,6 +1,6 @@
 # Signa Back-end
 
-Portfolio tracker API for the Signa iOS and web apps: holdings, accounts,
+Portfolio tracker API for the Signa iOS app: holdings, accounts,
 people, transactions, live prices, dividends, allocation, events, price
 alerts, goals, monthly recaps, stock suggestions, widgets, push and Telegram notifications, and
 problem reports, on Free and Premium plans. Works in any country and currency

@@ -1,10 +1,9 @@
 #!/bin/bash
-# Signa — Stop this project's servers (+ remove LAN-mode firewall exceptions)
+# Signa — Stop this project's servers (+ remove the LAN-mode firewall exception)
 # Usage: ./scripts/stop.sh           (SIGNA_LAN=1 ./scripts/stop.sh to also clean firewall)
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BACKEND="$ROOT/back-end"
-FRONTEND="$ROOT/front-end"
 
 if [ -x "$BACKEND/venv/bin/python" ]; then
   PYTHON="$BACKEND/venv/bin/python"
@@ -27,16 +26,13 @@ kill_project_procs() {
 
 echo "Stopping Signa..."
 [ "$(kill_project_procs "uvicorn main:app" "$BACKEND")" -gt 0 ] && echo "  Backend stopped" || echo "  Backend not running"
-[ "$(kill_project_procs "next-server|next start" "$FRONTEND")" -gt 0 ] && echo "  Frontend stopped" || echo "  Frontend not running"
 
 if [ "${SIGNA_LAN:-0}" = "1" ]; then
   echo "Removing firewall exceptions..."
   FW_PYTHON=$("$PYTHON" -c 'import os, sys
 app = os.path.join(sys.base_prefix, "Resources/Python.app/Contents/MacOS/Python")
 print(app if os.path.exists(app) else os.path.realpath(sys.executable))')
-  FW_NODE=$(command -v node)
   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --remove "$FW_PYTHON" > /dev/null 2>&1
-  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --remove "$FW_NODE" > /dev/null 2>&1
 fi
 
 echo "Done."

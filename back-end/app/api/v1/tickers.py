@@ -75,7 +75,7 @@ async def get_ticker_chart(
 ):
     """Get OHLCV price history for charting.
 
-    Returns data points formatted for frontend chart libraries.
+    Returns data points formatted for charts.
     Each point has: date, open, high, low, close, volume.
 
     Periods:

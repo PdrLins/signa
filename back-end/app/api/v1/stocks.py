@@ -3,8 +3,7 @@
   GET /api/v1/stocks/{symbol}
 
 No AI and no per-user cost: shared market data cached per symbol (see
-app/services/stock_page.py). Consumed by the web app and the iOS app;
-front-end types: front-end/src/types/stock.ts.
+app/services/stock_page.py). Consumed by the iOS app.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Path

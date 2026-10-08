@@ -4,8 +4,7 @@ Dual listings show the user's country first (profile country; Canada when unset)
   GET /api/v1/symbols/search?q=tesla&limit=8
     -> {"query": "tesla", "results": [{symbol, name, exchange, exchange_label, type, source}]}
 
-Logic lives in app/services/symbol_search.py. Response shape:
-front-end/src/types/symbols.ts.
+Logic lives in app/services/symbol_search.py.
 """
 
 from fastapi import APIRouter, Depends, Query

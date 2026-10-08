@@ -5,8 +5,11 @@ Signa is a portfolio tracker for self-directed investors. You add your holdings 
 they pay in dividends, what is coming up, and how the portfolio is built. It works in any country and
 currency; **Brazil, Canada and the United States** are the first markets.
 
-- **Clients:** the iOS app (separate repository, `signa-ios`, launching first) and the web app in `front-end/`.
-- **This repository:** the back-end API (`back-end/`) and the web app (`front-end/`).
+- **Client:** the iOS app (separate repository, `signa-ios`).
+- **This repository:** the back-end API (`back-end/`). The Next.js web app was removed to focus on iOS;
+  `git checkout web-final -- front-end` brings it back.
+- **Website:** the marketing page (and later privacy, terms and support) is a separate repository,
+  `signa-marketing`.
 - **Not here:** the AI signal engine ("the brain": scans, signals, AI checks, paper trading) is a separate,
   paused product called **Signa Advisor** (`signa-advisor`, a fork of this repository).
 
@@ -57,7 +60,6 @@ Premium.
 | Market data | yfinance; exchange calendars from `exchange_calendars` |
 | Notifications | Apple Push Notifications, Telegram Bot API, email (Resend / SMTP) |
 | iOS | SwiftUI (`signa-ios`) |
-| Web | Next.js 14, TypeScript, Tailwind CSS, React Query |
 
 There is no AI in Signa.
 
@@ -71,12 +73,10 @@ pip install -r requirements.txt
 cp .env.example .env          # Supabase, JWT secret, Telegram bot (see below)
 python -m uvicorn main:app --reload --port 8000
 pytest tests/ -q
-
-# Web
-cd front-end
-npm install
-npm run dev
 ```
+
+`./scripts/start.sh` runs the API on `localhost:8000`; `SIGNA_LAN=1 ./scripts/start.sh` makes it reachable
+from an iPhone on the same Wi-Fi (`http://<mac>.local:8000/api/v1`, plain HTTP).
 
 A new database is created by running `back-end/app/db/schema.sql` once in the Supabase SQL Editor.
 
@@ -92,11 +92,5 @@ See `back-end/.env.example`.
 
 ## Versions
 
-Every commit bumps the back-end (`back-end/VERSION`, shown by `GET /api/v1/version`) and web
-(`front-end/package.json`) versions through `.githooks/pre-commit`. A version changed by hand in the same
-commit is kept. In a new clone, run `git config core.hooksPath .githooks`.
-
-## Web app note
-
-The web app still contains the old Advisor pages. They are owner-only and hidden, because the back-end no
-longer serves them. The iOS app is the launch client.
+Every commit that changes `back-end/` bumps `back-end/VERSION` (shown by `GET /api/v1/version`) through
+`.githooks/pre-commit`. A version changed by hand in the same commit is kept. In a new clone, run `git config core.hooksPath .githooks`.
