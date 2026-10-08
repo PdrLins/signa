@@ -7,8 +7,10 @@
            | {"status": "deleted"}                                           ("now": true)
          Every session is ended either way. 403 wrong_password | owner_cannot_delete.
   GET    /api/v1/account/export area.profile
-         One JSON document with everything stored about the user (attachment
-         signa-export-YYYY-MM-DD.json).
+         One JSON document with everything the user entered or that describes them
+         (attachment signa-export-YYYY-MM-DD.json): one key per kind of data
+         (account.EXPORT_TABLES, incl. fixed_income, dismissed_auto_dividends, telegram,
+         invites_sent, active_days) and "left_out" {what: why} for what isn't included.
   GET    /api/v1/account/email  area.profile
          {"email" | null, "email_verified": bool, "has_telegram": bool, "signin_code": "telegram" | "email" | null}
   POST   /api/v1/account/email  {"email", "password"} -> {"session_token", "message"}: a code goes

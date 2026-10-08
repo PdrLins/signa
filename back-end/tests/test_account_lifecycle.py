@@ -178,3 +178,40 @@ def test_export_has_everything_and_no_user_ids(db, monkeypatch):
     assert out["format"] == "signa-export-1" and out["account"]["username"] == "ana"
     assert out["holdings"] == [{"id": "h1", "symbol": "ENB.TO", "shares": 10}]
     assert "password_hash" not in str(out)
+
+
+def test_export_includes_fixed_income_and_says_what_is_left_out(db, monkeypatch):
+    for t in ("user_settings", "notification_prefs", "signup_sources", "portfolio_people", "accounts",
+              "transactions", "watchlist", "price_alerts", "goals", "telegram_links"):
+        db.tables[t] = []
+    db.tables["fixed_income"] = [{"id": "f1", "user_id": UID, "name": "CDB Inter", "kind": "cdb", "rate": 110},
+                                 {"id": "f2", "user_id": "someone-else", "name": "LCI", "kind": "lci"}]
+    db.tables["auto_dividend_dismissed"] = [{"user_id": UID, "auto_ref": "auto:a1:ENB.TO:2026-09-20",
+                                             "created_at": "2026-10-01"}]
+    db.tables["referrals"] = [{"referrer_id": UID, "referred_id": "friend-uuid", "status": "rewarded",
+                               "created_at": "2026-09-01", "rewarded_at": "2026-09-10"}]
+    db.tables["user_activity_days"] = [{"user_id": UID, "day": "2026-10-06"}]
+    out = account.export(UID)
+    assert out["fixed_income"] == [{"id": "f1", "name": "CDB Inter", "kind": "cdb", "rate": 110}]
+    assert out["dismissed_auto_dividends"] == [{"auto_ref": "auto:a1:ENB.TO:2026-09-20", "created_at": "2026-10-01"}]
+    assert out["active_days"] == [{"day": "2026-10-06"}]
+    assert out["invites_sent"] and out["telegram"] == []
+    assert "IP addresses, browser/app user agents, audit logs" in out["left_out"]
+    assert all(name in out for name, *_ in account.EXPORT_TABLES)
+
+
+# Per-user tables that stay out of the export (see account.EXPORT_LEFT_OUT); a new one must be added here or
+# to account.EXPORT_TABLES.
+NOT_EXPORTED = {"users", "otp_codes", "token_blacklist", "audit_logs", "portfolio", "portfolio_snapshots",
+                "income_forecast_snapshots", "telegram_link_codes", "notification_deliveries", "two_factor_setup",
+                "push_devices"}
+
+
+def test_every_per_user_table_is_exported_or_listed():
+    import re
+    from pathlib import Path
+    schema = (Path(__file__).parent.parent / "app/db/schema.sql").read_text()
+    per_user = {m.group(1) for m in re.finditer(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", schema, re.S)
+                if re.search(r"\b(user_id|referrer_id)\b", m.group(2))}
+    exported = {table for _, table, *_ in account.EXPORT_TABLES}
+    assert per_user - exported - NOT_EXPORTED == set()

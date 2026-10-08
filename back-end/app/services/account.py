@@ -147,25 +147,42 @@ def username_reserved(username: str, now: datetime | None = None) -> bool:
 
 # ---------------------------------------------------------------- export
 
-EXPORT_TABLES = (   # (name in the export, table, columns, paged by id?)
-    ("settings", "user_settings", "*", False),
-    ("notification_prefs", "notification_prefs", "prefs, updated_at", False),
-    ("sign_up_source", "signup_sources", "heard_from, utm_source, utm_medium, utm_campaign, invite, created_at",
-     False),
-    ("people", "portfolio_people", "*", True),
-    ("accounts", "accounts", "*", True),
-    ("holdings", "holdings", "*", True),
-    ("transactions", "transactions", "*", True),
-    ("watchlist", "watchlist", "*", True),
-    ("price_alerts", "price_alerts", "*", True),
-    ("goals", "goals", "*", True),
-    ("problem_reports", "feedback_reports", "id, kind, message, symbol, status, created_at, resolved_at", True),
-    ("signed_in_devices", "auth_sessions", "client, device_name, created_at, last_used_at, revoked_at", True),
+EXPORT_TABLES = (   # (name in the export, table, columns, order for paging or None = one row, owner column)
+    ("settings", "user_settings", "*", None, "user_id"),
+    ("notification_prefs", "notification_prefs", "prefs, updated_at", None, "user_id"),
+    ("sign_up_source", "signup_sources", "platform, country, heard_from, utm_source, utm_medium, utm_campaign, "
+     "utm_content, utm_term, invite, created_at", None, "user_id"),
+    ("people", "portfolio_people", "*", "id", "user_id"),
+    ("accounts", "accounts", "*", "id", "user_id"),
+    ("holdings", "holdings", "*", "id", "user_id"),
+    ("transactions", "transactions", "*", "id", "user_id"),
+    ("fixed_income", "fixed_income", "*", "id", "user_id"),
+    ("dismissed_auto_dividends", "auto_dividend_dismissed", "auto_ref, created_at", "auto_ref", "user_id"),
+    ("watchlist", "watchlist", "*", "id", "user_id"),
+    ("price_alerts", "price_alerts", "*", "id", "user_id"),
+    ("goals", "goals", "*", "id", "user_id"),
+    ("problem_reports", "feedback_reports", "id, kind, message, symbol, status, platform, screen, app_version, "
+     "os_version, device_model, created_at, resolved_at", "id", "user_id"),
+    ("signed_in_devices", "auth_sessions", "client, device_name, created_at, last_used_at, revoked_at", "id",
+     "user_id"),
+    ("telegram", "telegram_links", "chat_id, username, linked_at", None, "user_id"),
+    ("invites_sent", "referrals", "status, created_at, rewarded_at", "created_at", "referrer_id"),   # no friend ids
+    ("active_days", "user_activity_days", "day", "day", "user_id"),
 )
+# What the export leaves out on purpose, and why (also written into the file as `left_out`).
+EXPORT_LEFT_OUT = {
+    "password, sign-in codes, refresh tokens": "security secrets; never shown, only checked",
+    "IP addresses, browser/app user agents, audit logs": "security records kept to protect the account; "
+                                                         "available on request through the privacy contact",
+    "push notification tokens": "Apple device identifiers with no meaning outside push delivery",
+    "portfolio and income snapshots": "computed from your holdings and transactions, which are included",
+    "notifications already sent": "an internal list that stops the same alert being sent twice",
+    "Apple Search Ads ids": "ad campaign ids from Apple, not entered by you; available on request",
+}
 
 
 def export(user_id: str) -> dict:
-    """Everything stored about the user. Blocking."""
+    """Everything the user entered or that describes them. Blocking."""
     from app.db.queries import _select_all_pages
     db = _db()
     cols = ("id", "username", "account_id", "email", "access_level", "created_at", "last_login",
@@ -173,19 +190,20 @@ def export(user_id: str) -> dict:
     row = (db.table("users").select(", ".join(cols)).eq("id", user_id).limit(1).execute().data or [{}])[0]
     u = {k: row.get(k) for k in cols}   # explicit: never a password hash or internal column
     out: dict = {"exported_at": _now().isoformat(), "format": "signa-export-1", "account": u}
-    for name, table, cols, paged in EXPORT_TABLES:
+    for name, table, cols, order, owner in EXPORT_TABLES:
         try:
-            if paged:
-                rows = _select_all_pages(lambda t=table, c=cols: db.table(t).select(c).eq("user_id", user_id)
-                                         .order("id"))
+            if order:
+                rows = _select_all_pages(lambda t=table, c=cols, o=order, w=owner:
+                                         db.table(t).select(c).eq(w, user_id).order(o))
             else:
-                rows = db.table(table).select(cols).eq("user_id", user_id).limit(5).execute().data or []
+                rows = db.table(table).select(cols).eq(owner, user_id).limit(5).execute().data or []
         except Exception as e:
             logger.debug(f"export: {table} unavailable ({type(e).__name__})")
             rows = []
         for r in rows:
             r.pop("user_id", None)
         out[name] = rows
+    out["left_out"] = EXPORT_LEFT_OUT
     return out
 
 
