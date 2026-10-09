@@ -407,3 +407,23 @@ def test_performance_all_trades_basis_cash_is_not_gain(monkeypatch, db):
     body = _client(monkeypatch).get("/api/v1/portfolio/performance?range=ALL").json()
     assert body["flows_basis"] == "trades"
     assert body["return_pct"] == pytest.approx(0.0, abs=0.01)
+
+
+# ---------------------------------------------------------------- per-holding changes
+
+def test_holding_changes_route(monkeypatch, db):
+    from app.api.v1 import holdings as holdings_route
+    a = _one_holding(db)
+    db.add_holding(U1, "NVDA", a, shares=1, avg_cost=100)   # no quote, no closes: nulls
+    c = make_client(monkeypatch, holdings_route.router, level="free")
+    body = c.get("/api/v1/holdings/changes?range=1M").json()
+    assert body["range"] == "1M" and body["currency"] == "CAD" and len(body["items"]) == 2
+    x = next(i for i in body["items"] if i["symbol"] == "XEQT.TO")
+    start = perf._start_price(db.closes["XEQT.TO"], perf.range_start("1M", TODAY))
+    assert x["pct"] == pytest.approx(round((40 / start - 1) * 100, 2)) and x["holding_id"]
+    assert x["abs_home"] == pytest.approx(round((40 - start) * 10, 2), abs=0.01)
+    n = next(i for i in body["items"] if i["symbol"] == "NVDA")
+    assert n["pct"] is None and n["abs_home"] is None
+    r = c.get("/api/v1/holdings/changes?range=ALL")
+    assert r.status_code == 403 and r.json()["detail"]["feature"] == "feature.full_history"
+    assert c.get("/api/v1/holdings/changes?range=2D").status_code == 422

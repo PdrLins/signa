@@ -1265,7 +1265,7 @@ ON CONFLICT (key) DO NOTHING;
 --                                               GET/PUT /portfolio/allocation/targets,
 --                                               GET /portfolio/allocation/plan)
 --   feature.income_quality    new, premium     (GET /portfolio/income-quality/{symbol})
---   feature.similar_funds     new, premium     (reserved: similar funds on the stock page)
+--   feature.similar_funds     new, premium     (reserved: similar funds on the stock page; free since 033)
 --   The allocation mix (GET /portfolio/allocation), ETF fund data, sectors,
 --   top holdings and the About card stay free.
 --
@@ -1710,6 +1710,24 @@ CREATE TABLE IF NOT EXISTS fixed_income (
 );
 CREATE INDEX IF NOT EXISTS idx_fixed_income_user ON fixed_income (user_id);
 ALTER TABLE public.fixed_income ENABLE ROW LEVEL SECURITY;
+
+-- ############################################################
+-- 033_similar_funds_free.sql
+-- ############################################################
+
+-- ============================================================================
+-- 033_similar_funds_free.sql — fund comparison for every plan
+-- ============================================================================
+-- feature.similar_funds   premium -> free   ("Similar funds" table on an ETF's
+--   stock page: fee, yield, return). Premium can't be bought yet, so free users
+--   shouldn't see it locked.
+-- Before it is applied: the code default is already free, but a stored row
+-- (from 022) keeps it Premium until this runs. Idempotent.
+-- ============================================================================
+
+INSERT INTO access_features (key, min_level, description) VALUES
+  ('feature.similar_funds', 'free', 'Similar funds compared (fee, yield, return)')
+ON CONFLICT (key) DO UPDATE SET min_level = EXCLUDED.min_level, description = EXCLUDED.description;
 
 -- ############################################################
 -- Signa only: drop the brain's feature keys (inserted by 011, they now

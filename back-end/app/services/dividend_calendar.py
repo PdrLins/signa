@@ -451,3 +451,29 @@ async def get_calendar(holdings: list[dict], watchlist: list[dict] | None = None
     symbols += [str(w.get("symbol") or "").upper() for w in wl or []]
     profiles = await fetch_profiles(symbols, fetch)
     return build_calendar(holdings, wl, profiles, today or dividends.today_et(), months, usdcad, home)
+
+
+# ============================================================
+# Per-holding dividend fields (GET /holdings items)
+# ============================================================
+
+def holding_dividend(profile: dict | None, held_since: date | None, today: date) -> dict | None:
+    """{"yield_pct": forward yield in PERCENT (the stock page's), "next_pay_date"}
+    or None when the symbol pays nothing known. next_pay_date = the earliest
+    payment on/after today; a payment whose ex-date passed counts only when the
+    holding existed before that ex-date. Pure."""
+    if not profile or not profile.get("pays_dividend"):
+        return None
+    y = _num(profile.get("yield"))
+    nxt = None
+    for ev in profile_events(profile, today):
+        pay, ex = _d(ev.get("pay_date")), _d(ev.get("ex_date"))
+        if pay is None or pay < today:
+            continue
+        if ev.get("ex_passed") and held_since and ex and held_since >= ex:
+            continue   # bought on/after the ex-date: this payment isn't theirs
+        nxt = pay if nxt is None or pay < nxt else nxt
+    if y is None and nxt is None:
+        return None
+    return {"yield_pct": round(y * 100, 2) if y is not None else None,
+            "next_pay_date": nxt.isoformat() if nxt else None}

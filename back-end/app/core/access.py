@@ -70,7 +70,7 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "feature.telegram_alerts": ("premium", "Notifications on Telegram (connect a chat, receive alerts)"),
     "feature.allocation_plan": ("premium", "Target allocation and deposit plan"),
     "feature.income_quality": ("premium", "Income quality of option-income / covered-call ETFs"),
-    "feature.similar_funds": ("premium", "Similar funds compared (fee, yield, return)"),
+    "feature.similar_funds": ("free", "Similar funds compared (fee, yield, return)"),
     "feature.all_widgets": ("premium", "Every home-screen and lock-screen widget (free: 1)"),
     "feature.unlimited_goals": ("premium", "Unlimited goals (free: 1)"),
     "feature.suggestions_all": ("premium", "Every suggestion (free: 3 similar stocks and 3 also-followed)"),

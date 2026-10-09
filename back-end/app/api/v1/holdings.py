@@ -2,6 +2,9 @@
 
   GET    /api/v1/holdings                   list + position math (CAD totals)
                                             ?account_id=<uuid> | ?person_id=<uuid> filter
+  GET    /api/v1/holdings/changes?range=1W  each holding's change over a chart range (same
+                                            ranges, plan checks and scope params as
+                                            /portfolio/performance)
   POST   /api/v1/holdings/resolve           {text} -> parsed lines + candidate listings
   POST   /api/v1/holdings                   {items:[...]} bulk upsert (confirmed rows)
   PATCH  /api/v1/holdings/{id}              shares / avg_cost / notes / account_id (move)
@@ -194,6 +197,30 @@ async def _live_quotes(rows: list[dict]) -> dict[str, dict]:
         return {}
 
 
+def _add_dividends(items: list[dict]) -> None:
+    """item["dividend"] = {"yield_pct", "next_pay_date"} | None from the CACHED
+    dividend profiles only (the list never waits on Yahoo); symbols not cached
+    yet are fetched in the background and show on the next load."""
+    from app.core.executors import spawn
+    from app.services import dividends
+    from app.services.dividend_calendar import _d, fetch_profiles, holding_dividend
+
+    today = dividends.today_et()
+    missing = []
+    for it in items:
+        sym = str(it.get("symbol") or "").upper()
+        prof = dividends.cached_profile(sym)
+        if prof is None and sym:
+            missing.append(sym)
+        it["dividend"] = holding_dividend(prof, _d(str(it.get("created_at") or "")[:10]), today)
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:   # no running loop (tests calling the helper directly)
+        return
+    if missing:
+        spawn(fetch_profiles(dict.fromkeys(missing)))
+
+
 # ============================================================
 # List / resolve / upsert / patch / delete
 # ============================================================
@@ -247,6 +274,7 @@ async def list_holdings(
     per, totals = await asyncio.to_thread(hs.portfolio_math, rows, usdcad, quotes=quotes, home=home)
     items = [_with_account(hs.public_holding(h, per.get(str(h.get("id"))), hs.holding_quote(h, quotes),
                                              with_quote=True), accounts) for h in rows]
+    _add_dividends(items)
     return {
         "items": items,
         "count": len(items),
@@ -263,6 +291,36 @@ async def list_holdings(
         "filter": {"account_id": str(account_id) if account_id else None,
                    "person_id": str(person_id) if person_id else None},
     }
+
+
+@router.get("/changes", dependencies=[Depends(require_feature("area.holdings"))])
+async def holding_changes(
+    range: str = Query("1W"),
+    account_id: Optional[UUID] = Query(None),
+    person_id: Optional[UUID] = Query(None),
+    user: dict = Depends(get_current_user),
+):
+    """Each holding's change over a chart range (math: portfolio_performance.holding_changes_body).
+    {
+      "range": "1W", "currency": "CAD" (home), "start": "2026-10-02" | null, "end": "2026-10-09",
+      "items": [{"holding_id", "symbol", "account_id" | null, "currency" (the holding's),
+                 "pct": 2.31 | null, "abs": 41.2 | null (holding currency), "abs_home": 41.2 | null,
+                 "basis": "range" | "purchase",       # purchase = first buy inside the range (ALL: avg cost)
+                 "since": "2026-10-02" | null}],      # the start date used
+      "as_of", "delayed_minutes"
+    }
+    pct / abs are null without a price or a start price. Range 1D..ALL; 5Y / ALL need
+    feature.full_history (403 upgrade_required). 422 invalid_range · 404 account_not_found |
+    person_not_found."""
+    from app.api.v1.portfolio_home import _check_range
+    from app.core.api_errors import run_db
+    from app.services import portfolio_context
+    from app.services import portfolio_performance as perf
+
+    rng = _check_range(user, range)
+    scope = await run_db(portfolio_context.load_scope, user, str(account_id) if account_id else None,
+                         str(person_id) if person_id else None)
+    return await run_db(perf.holding_changes_body, scope, rng)
 
 
 @router.post("/resolve", dependencies=[Depends(require_feature("action.holdings.edit"))])

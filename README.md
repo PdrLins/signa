@@ -26,7 +26,7 @@ Status: in development, not deployed yet. Hosting is still to be decided.
 | Portfolio value, history, performance, allocation | ✓ (history up to 1 year) | ✓ full history, target allocation and deposit plan |
 | Dividends: calendar, expected income, safety, estimated vs declared | ✓ | ✓ after-tax view (CA/US), income quality |
 | Coming up: dividends, earnings, economy events | ✓ | ✓ |
-| Stock and ETF pages, Signa checks, fund details | ✓ | ✓ similar funds |
+| Stock and ETF pages, Signa checks, fund details, similar funds compared | ✓ | ✓ |
 | Price alerts | 3 active | Unlimited |
 | Push notifications (iOS) | Price alerts, dividends, earnings | Every type (big moves, daily summary …) |
 | Telegram notifications | — | ✓ |

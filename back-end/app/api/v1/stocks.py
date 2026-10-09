@@ -80,9 +80,9 @@ async def get_stock(
       },                                                      # each field nullable; cached ~12 h
       "similar": null | [{"symbol", "name", "expense_ratio" (PERCENT), "yield" (null),
                           "return_1y_pct", "return_5y_pct" (total return, PERCENT), "current" (bool)}],
-                 # ETFs with curated peers (services/similar_funds.py), Premium (feature.similar_funds);
+                 # ETFs with curated peers (services/similar_funds.py), feature.similar_funds (free since 033);
                  # the page's own fund is the first row (current: true). Cached ~12 h.
-      "similar_locked": bool,   # Free: similar funds exist but need Premium (show the hint)
+      "similar_locked": bool,   # similar funds exist but the plan lacks feature.similar_funds (false for all since 033)
       "about": null | {"description" (longBusinessSummary, <= 3000 chars), "country", "city",
                        "state", "website", "employees" (int)},       # each nullable (Yahoo info)
       "generated_at": ISO datetime (the shared body is cached ~15 min),

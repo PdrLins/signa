@@ -53,8 +53,9 @@ def test_catalog_has_no_advisor_features():
 
 
 def test_db_override_moves_a_feature(monkeypatch):
-    monkeypatch.setattr(access, "get_feature_levels", lambda: {**DEFAULTS, "feature.similar_funds": "free"})
-    assert access.can("free", "feature.similar_funds")
+    assert not access.can("free", "feature.income_quality")
+    monkeypatch.setattr(access, "get_feature_levels", lambda: {**DEFAULTS, "feature.income_quality": "free"})
+    assert access.can("free", "feature.income_quality")
 
 
 def test_db_rows_for_unknown_keys_are_ignored(monkeypatch):

@@ -929,3 +929,8 @@ def ai_summary(profile: dict | None) -> str:
     if pr is not None:
         bits.append(f"payout ratio {pr * 100:.0f}%")
     return "Dividend: " + ", ".join(bits) + "."
+
+
+def cached_profile(symbol: str) -> dict | None:
+    """The cached profile, or None (never fetches). For screens that must not wait."""
+    return _cache.get(str(symbol or "").upper())

@@ -1,4 +1,4 @@
-"""Similar funds (Premium) — app/services/similar_funds.py."""
+"""Similar funds (free since migration 033) — app/services/similar_funds.py."""
 
 import pandas as pd
 

@@ -56,6 +56,13 @@ PERFORMANCE (`performance_body`)
       Top 5 positive and top 5 negative. With compare: the benchmark's
       return, the difference (points) and the drivers vs the benchmark
       ((holding return - benchmark return) x start weight).
+
+HOLDING CHANGES (`holding_changes_body`, GET /holdings/changes)
+  One row per holding (account + symbol), today's shares: start = the last
+  close on/before the range start, or the average buy price when the
+  holding's first recorded buy is inside the range ("purchase"); ALL = the
+  average cost (else the first close); 1D = the live quote's previous close.
+  Reuses the cached daily closes of history/performance.
 """
 
 from __future__ import annotations
@@ -944,3 +951,89 @@ def performance_body(scope: dict, rng: str, compare: str | None, today: date | N
         "as_of": live["meta"]["as_of"],
         "delayed_minutes": live["meta"]["delayed_minutes"],
     }
+
+
+# ============================================================
+# Per-holding change over a range (GET /holdings/changes)
+# ============================================================
+
+def purchase_in_range(txs: list[dict], account_id: Any, symbol: str, base: date) -> tuple[date, float, str] | None:
+    """(first buy date, average buy price, currency) when the holding's first
+    buy is after `base` (bought inside the range), else None. Pure."""
+    buys = [t for t in txs or [] if str(t.get("type") or "") == "buy"
+            and str(t.get("symbol") or "").upper() == symbol
+            and str(t.get("account_id") or "") == str(account_id or "") and _d(t.get("trade_date"))]
+    if not buys:
+        return None
+    first = min(_d(t["trade_date"]) for t in buys)
+    if first <= base:
+        return None
+    qty = sum(abs(_f(t.get("quantity")) or 0.0) for t in buys)
+    cost = sum(abs(_f(t.get("quantity")) or 0.0) * (_f(t.get("price")) or 0.0) for t in buys)
+    if qty <= 0 or cost <= 0:
+        return None
+    return first, cost / qty, str(buys[0].get("currency") or "").upper()
+
+
+def holding_change(p: dict, start_price: float | None, home: str, usdcad: float | None) -> dict:
+    """{pct, abs (holding currency), abs_home} from a start price on today's
+    shares; nulls when something is missing. Pure."""
+    price, shares = p.get("price"), p.get("shares")
+    if not (price and start_price and start_price > 0):
+        return {"pct": None, "abs": None, "abs_home": None}
+    pct = (price / start_price - 1) * 100
+    ab = (price - start_price) * shares if shares else None
+    fx = _fx(p.get("currency") or home, home, usdcad)
+    return {"pct": pc.r2(pct), "abs": pc.r2(ab), "abs_home": pc.r2(ab * fx) if ab is not None and fx else None}
+
+
+def holding_changes_body(scope: dict, rng: str, today: date | None = None) -> dict:
+    """Each holding's change over the range (one row per holding = account + symbol).
+    Start: the last close on/before the range start, or the average buy price
+    when the holding's first recorded buy is inside the range (basis "purchase");
+    ALL: the holding's average cost (its whole gain), else its first close.
+    1D: today's move from the live quote. Today's shares throughout."""
+    today = today or today_et()
+    home, usdcad = scope["home_currency"], scope["usdcad"]
+    live = _live(scope)
+    txs = scope.get("transactions") or []
+    closes, base = {}, None
+    # ALL with every average cost known needs no price history
+    if rng != "1D" and not (rng == "ALL" and all(p.get("avg_cost") for p in live["positions"])):
+        daily = _daily(scope, live, rng, today)
+        closes, base = daily["closes"], daily["base"]
+    items = []
+    for h, p in zip(scope["holdings"], live["positions"]):
+        sym = p["symbol"]
+        start_price, basis, since = None, "range", base
+        if rng == "1D":
+            start_price, since = p.get("prev_close"), today - timedelta(days=1)
+        elif rng == "ALL":
+            basis = "purchase"
+            start_price = p.get("avg_cost")
+            if not start_price:
+                pts = _closes_points(closes.get(sym), date.min, today)
+                start_price, since = (pts[0][1], pts[0][0]) if pts else (None, None)
+            else:
+                bought = [_d(t.get("trade_date")) for t in txs if str(t.get("type")) == "buy"
+                          and str(t.get("symbol") or "").upper() == sym
+                          and str(t.get("account_id") or "") == str(h.get("account_id") or "")]
+                since = min((d for d in bought if d), default=None)
+        else:
+            bought = purchase_in_range(txs, h.get("account_id"), sym, base)
+            if bought:
+                since, start_price, ccy = bought
+                basis = "purchase"
+                hc = p.get("currency") or home
+                if ccy and ccy != hc:   # the trade's currency differs from the quote's
+                    a, b = _fx(ccy, home, usdcad), _fx(hc, home, usdcad)
+                    start_price = start_price * a / b if a and b else None
+            else:
+                start_price = _start_price(closes.get(sym), base)
+        items.append({"holding_id": str(h.get("id")) if h.get("id") else None, "symbol": sym,
+                      "account_id": str(h["account_id"]) if h.get("account_id") else None,
+                      "currency": p.get("currency"), **holding_change(p, start_price, home, usdcad),
+                      "basis": basis, "since": since.isoformat() if since else None})
+    return {"range": rng, "currency": home, "start": base.isoformat() if base else None,
+            "end": today.isoformat(), "items": items,
+            "as_of": live["meta"]["as_of"], "delayed_minutes": live["meta"]["delayed_minutes"]}

@@ -1,4 +1,4 @@
-"""Similar funds (Premium, feature.similar_funds) for the stock page.
+"""Similar funds (feature.similar_funds, free since migration 033) for the stock page.
 
 Yahoo has no "similar funds" data, so peers come from curated groups of
 well-known ETFs that track the same thing (PEER_GROUPS). For the fund and up
