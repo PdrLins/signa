@@ -281,6 +281,9 @@ def test_template(monkeypatch, db):
     assert lines[0] == "date,type,symbol,quantity,price,amount,currency,fee,account,note" and len(lines) == 4
     j = c.get("/api/v1/transactions/template?format=json").json()
     assert j["columns"][0] == "date" and len(j["examples"]) == 3
+    # no real bank or broker names in what users see
+    assert all(row[8] == "Signa Bank" for row in j["examples"]) and "Wealthsimple" not in r.text
+    assert j["column_help"]["account"] == "Your account's name, e.g. Signa Bank"
     # the template itself imports cleanly
     b = _import(c, r.text, dry_run=True, create_missing_accounts=True).json()
     assert b["summary"]["valid"] == 3

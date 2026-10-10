@@ -71,9 +71,9 @@ MAX_ERRORS_RETURNED = 200
 TEMPLATE_COLUMNS: tuple[str, ...] = ("date", "type", "symbol", "quantity", "price", "amount", "currency",
                                      "fee", "account", "note")
 TEMPLATE_EXAMPLES: tuple[tuple[str, ...], ...] = (
-    ("2026-01-15", "deposit", "", "", "", "5000", "CAD", "0", "Wealthsimple", "First deposit"),
-    ("2026-01-16", "buy", "XEQT.TO", "100", "31.25", "3125", "CAD", "0", "Wealthsimple", ""),
-    ("2026-03-31", "dividend", "XEQT.TO", "100", "", "18.40", "CAD", "0", "Wealthsimple", "Quarterly distribution"),
+    ("2026-01-15", "deposit", "", "", "", "5000", "CAD", "0", "Signa Bank", "First deposit"),
+    ("2026-01-16", "buy", "XEQT.TO", "100", "31.25", "3125", "CAD", "0", "Signa Bank", ""),
+    ("2026-03-31", "dividend", "XEQT.TO", "100", "", "18.40", "CAD", "0", "Signa Bank", "Quarterly distribution"),
 )
 COLUMN_HELP: dict[str, str] = {
     "date": "Trade date: 2026-09-30 (also 30/09/2026, 09/30/2026, Sep 30 2026)",
@@ -84,7 +84,7 @@ COLUMN_HELP: dict[str, str] = {
     "amount": "Cash amount, always positive (gross for buy/sell)",
     "currency": "CAD, USD ... (default: the account's currency)",
     "fee": "Commission, >= 0",
-    "account": "Your account's name, e.g. Wealthsimple",
+    "account": "Your account's name, e.g. Signa Bank",
     "note": "Optional note",
 }
 
