@@ -8,7 +8,7 @@
 # new one; bluegreen/canary would run two at once).
 
 app = "signa-api"
-primary_region = "yyz"   # Toronto; pick the region closest to the Supabase project
+primary_region = "iad"   # Ashburn, Virginia: next to the Supabase project (us-east-1)
 
 [build]
   dockerfile = "Dockerfile"
