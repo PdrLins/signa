@@ -1,0 +1,53 @@
+# Back-end: on every push to main that changes back-end/, run the tests and,
+# if they pass, deploy to Fly.io (back-end/fly.toml). Needs the repository
+# secret FLY_API_TOKEN (`fly tokens create deploy`). Run by hand: Actions tab →
+# "Back-end: test and deploy" → Run workflow.
+name: "Back-end: test and deploy"
+
+on:
+  push:
+    branches: [main]
+    paths: ["back-end/**", ".github/workflows/deploy-backend.yml"]
+  workflow_dispatch:
+
+# one deploy at a time; a newer push waits for the running one
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: back-end
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            back-end/requirements.txt
+            back-end/requirements-dev.txt
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: python -m pytest tests/ -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    defaults:
+      run:
+        working-directory: back-end
+    steps:
+      # no secret yet: tests still run, the deploy is skipped (not failed)
+      - if: env.FLY_API_TOKEN == ''
+        run: echo "FLY_API_TOKEN isn't set; skipping the deploy."
+      - if: env.FLY_API_TOKEN != ''
+        uses: actions/checkout@v4
+      - if: env.FLY_API_TOKEN != ''
+        uses: superfly/flyctl-actions/setup-flyctl@master
+      - if: env.FLY_API_TOKEN != ''
+        run: flyctl deploy --remote-only

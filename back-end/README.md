@@ -94,6 +94,11 @@ fly logs                                    # watch it start
 curl https://<app>.fly.dev/api/v1/health
 ```
 
+**Automatic deploys:** `.github/workflows/deploy-backend.yml` runs the tests on every push to `main` that
+changes `back-end/` and, if they pass, deploys. It needs the repository secret `FLY_API_TOKEN`
+(`fly tokens create deploy` → GitHub → Settings → Secrets and variables → Actions). A failed test
+blocks the deploy; the Actions tab shows why. Tests locally: `pip install -r requirements-dev.txt`.
+
 Then:
 - Telegram (off until wanted): `fly secrets set TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=$(openssl rand -hex 24)`,
   `TELEGRAM_ENABLED = "true"` in `fly.toml`, deploy, then register the webhook once:

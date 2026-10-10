@@ -15,10 +15,12 @@ os.environ.setdefault("SUPABASE_KEY", "test-key")
 @pytest.fixture(autouse=True)
 def _telegram_switch_on(monkeypatch):
     """Telegram is off by default (TELEGRAM_ENABLED=false); the Telegram tests
-    were written with it on. Whether it works still depends on the bot token
-    each test sets. tests/test_telegram_switch.py covers "off"."""
+    were written with it on, with a fake bot token (never the real one from
+    .env; CI has no .env). Tests that need "no token" set it to "" themselves.
+    tests/test_telegram_switch.py covers "off"."""
     from app.core.config import settings
     monkeypatch.setattr(settings, "telegram_enabled", True)
+    monkeypatch.setattr(settings, "telegram_bot_token", "123456:test-token")
 
 
 @pytest.fixture(autouse=True)
