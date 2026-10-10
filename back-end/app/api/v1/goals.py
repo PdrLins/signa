@@ -2,15 +2,20 @@
 
   GET    /api/v1/goals          area.home  {"items": [Goal], "count", "limit": 1 | null, "currency"}
   POST   /api/v1/goals          area.home  {"kind": "portfolio_value" | "monthly_income", "target": 500000,
-                                            "title"?: str (<= 60), "target_date"?: "YYYY-MM-DD"} -> 201 Goal
-  PATCH  /api/v1/goals/{id}     area.home  any of kind, target, title, target_date -> Goal
+                                            "title"?: str (<= 60), "target_date"?: "YYYY-MM-DD",
+                                            "monthly_contribution"?: >= 0 | null,
+                                            "expected_return_pct"?: -20..30 | null} -> 201 Goal
+  PATCH  /api/v1/goals/{id}     area.home  any of kind, target, title, target_date, monthly_contribution,
+                                            expected_return_pct -> Goal
   DELETE /api/v1/goals/{id}     area.home  -> {"deleted": true, "id"}
 
 Goal: see app/services/goals.py. Targets are in the user's home currency
 (stored with the goal). Free: 1 goal; Premium: unlimited (feature.unlimited_goals).
 Errors: 403 goal_limit {"limit", "upgrade": {"feature", "plan"}} · 404 goal_not_found ·
-422 invalid_kind | invalid_target | invalid_title | invalid_target_date ·
-400 nothing_to_update · 503 migration_required {"migration": "026_goals.sql"}.
+422 invalid_kind | invalid_target | invalid_title | invalid_target_date | invalid_input
+(monthly_contribution / expected_return_pct, with "field") · 400 nothing_to_update ·
+503 migration_required {"migration": "026_goals.sql" | "034_goal_projections.sql" (only
+projection fields sent before 034)}.
 """
 
 from __future__ import annotations
@@ -33,33 +38,37 @@ router = APIRouter(prefix="/goals", tags=["Goals"])
 INCOME_TIMEOUT_S = 6.0
 
 
-async def _currents(user: dict, kinds: set[str]) -> tuple[str, dict[str, tuple[float | None, bool]]]:
-    """(home currency, {kind: (current, estimated)}) for the kinds in use."""
-    scope = await run_db(portfolio_context.load_scope, user, None, None, False)
-    home = scope["home_currency"]
-    out: dict[str, tuple[float | None, bool]] = {}
-    if "portfolio_value" in kinds:
-        s = await asyncio.to_thread(perf.summary_body, scope)
-        out["portfolio_value"] = (s.get("total"), bool(s.get("estimated")))
-    if "monthly_income" in kinds:
-        from app.services import dividend_calendar
-        from app.services.income_forecast import compute_forecast
-        held = sorted({str(h.get("symbol") or "").upper() for h in scope["holdings"] if h.get("symbol")})
-        try:
-            profiles = await asyncio.wait_for(dividend_calendar.fetch_profiles(held), INCOME_TIMEOUT_S)
-            fc = await asyncio.to_thread(compute_forecast, scope["holdings"], profiles, home, scope.get("usdcad"))
-            out["monthly_income"] = (fc["total_home"] / 12, bool(fc.get("unconverted")))
-        except Exception as e:
-            logger.debug(f"goals: income unavailable ({e!r})")
-            out["monthly_income"] = (None, True)
-    return home, out
+async def _currents(user: dict) -> tuple[str, dict[str, tuple[float | None, bool]], dict]:
+    """(home currency, {kind: (current, estimated)}, projection inputs
+    {"yield_pct", "avg_monthly_deposit"}). One scope load for every goal."""
+    scope = await run_db(portfolio_context.load_scope, user, None, None, True)
+    home, usdcad = scope["home_currency"], scope.get("usdcad")
+    s = await asyncio.to_thread(perf.summary_body, scope)
+    out: dict[str, tuple[float | None, bool]] = {"portfolio_value": (s.get("total"), bool(s.get("estimated")))}
+    from app.services import dividend_calendar
+    from app.services.income_forecast import compute_forecast
+    held = sorted({str(h.get("symbol") or "").upper() for h in scope["holdings"] if h.get("symbol")})
+    annual = None
+    try:
+        profiles = await asyncio.wait_for(dividend_calendar.fetch_profiles(held), INCOME_TIMEOUT_S)
+        fc = await asyncio.to_thread(compute_forecast, scope["holdings"], profiles, home, usdcad)
+        annual = fc["total_home"]
+        out["monthly_income"] = (annual / 12, bool(fc.get("unconverted")))
+    except Exception as e:
+        logger.debug(f"goals: income unavailable ({e!r})")
+        out["monthly_income"] = (None, True)
+    mv = s.get("market_value") or 0
+    inputs = {"yield_pct": round(annual / mv * 100, 2) if annual is not None and mv > 0 else None,
+              "avg_monthly_deposit": svc.avg_monthly_deposit(scope.get("transactions") or [], home, usdcad,
+                                                             perf.today_et())}
+    return home, out, inputs
 
 
 @router.get("", dependencies=[Depends(require_feature("area.home"))])
 async def list_goals(user: dict = Depends(get_current_user)):
     rows = await run_db_for(svc.MIGRATION, svc.list_goals, user["user_id"])
-    home, cur = await _currents(user, {r["kind"] for r in rows}) if rows else (None, {})
-    items = [{**r, "progress": svc.progress(r, *cur.get(r["kind"], (None, True)))} for r in rows]
+    home, cur, inputs = await _currents(user) if rows else (None, {}, {})
+    items = [{**r, "progress": svc.progress(r, *cur.get(r["kind"], (None, True)), inputs)} for r in rows]
     if home is None:
         scope_home = await run_db(portfolio_context.load_scope, user, None, None, False, False)
         home = scope_home["home_currency"]
@@ -71,15 +80,15 @@ async def list_goals(user: dict = Depends(get_current_user)):
 async def create_goal(body: dict = Body(...), user: dict = Depends(get_current_user)):
     scope = await run_db(portfolio_context.load_scope, user, None, None, False, False)
     row = await run_db_write(svc.MIGRATION, svc.create, user, body, scope["home_currency"])
-    _home, cur = await _currents(user, {row["kind"]})
-    return {**row, "progress": svc.progress(row, *cur[row["kind"]])}
+    _home, cur, inputs = await _currents(user)
+    return {**row, "progress": svc.progress(row, *cur[row["kind"]], inputs)}
 
 
 @router.patch("/{goal_id}", dependencies=[Depends(require_feature("area.home"))])
 async def update_goal(goal_id: UUID, body: dict = Body(...), user: dict = Depends(get_current_user)):
     row = await run_db_for(svc.MIGRATION, svc.update, user["user_id"], str(goal_id), body)
-    _home, cur = await _currents(user, {row["kind"]})
-    return {**row, "progress": svc.progress(row, *cur[row["kind"]])}
+    _home, cur, inputs = await _currents(user)
+    return {**row, "progress": svc.progress(row, *cur[row["kind"]], inputs)}
 
 
 @router.delete("/{goal_id}", dependencies=[Depends(require_feature("area.home"))])

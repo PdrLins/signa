@@ -53,7 +53,7 @@ def env(monkeypatch):
 def test_progress_math():
     g = {"target": 1000}
     assert svc.progress(g, 250, False) == {"current": 250, "pct": 25.0, "remaining": 750, "reached": False,
-                                           "estimated": False}
+                                           "estimated": False, "yield_pct": None, "avg_monthly_deposit": None}
     assert svc.progress(g, 1500, False)["pct"] == 100.0 and svc.progress(g, 1500, False)["reached"] is True
     assert svc.progress(g, None, True)["pct"] is None
 
@@ -95,3 +95,70 @@ def test_premium_income_goal(monkeypatch, env):
     p = c.patch(f"/api/v1/goals/{gid}", json={"target": 2})
     assert p.json()["progress"]["reached"] is False and p.json()["target"] == 2
     assert c.get("/api/v1/goals").json()["limit"] is None
+
+
+# ---------------------------------------------------------------- projections (migration 034)
+
+@pytest.mark.parametrize("field,value", [
+    ("monthly_contribution", -1), ("monthly_contribution", "x"), ("monthly_contribution", True),
+    ("expected_return_pct", 31), ("expected_return_pct", -20.5), ("expected_return_pct", "high"),
+])
+def test_projection_fields_are_validated(field, value):
+    with pytest.raises(Exception) as e:
+        svc.clean({"kind": "portfolio_value", "target": 5, field: value})
+    assert e.value.detail["code"] == "invalid_input" and e.value.detail["field"] == field
+
+
+def test_projection_fields_saved_and_cleared():
+    row = svc.clean({"kind": "portfolio_value", "target": 5, "monthly_contribution": "500",
+                     "expected_return_pct": -20})
+    assert row["monthly_contribution"] == 500 and row["expected_return_pct"] == -20
+    assert svc.clean({"monthly_contribution": None}, partial=True) == {"monthly_contribution": None}
+    assert svc.clean({"expected_return_pct": 0}, partial=True) == {"expected_return_pct": 0}
+
+
+def test_average_monthly_deposit():
+    from datetime import date
+    today = date(2026, 10, 10)
+    txs = [{"type": "buy", "trade_date": "2025-06-01", "amount": 100, "currency": "CAD"},   # history > 12 months
+           {"type": "deposit", "trade_date": "2025-12-01", "amount": 6000, "currency": "CAD"},
+           {"type": "deposit", "trade_date": "2026-05-01", "amount": 100, "currency": "USD"},   # 140 CAD at 1.4
+           {"type": "withdrawal", "trade_date": "2026-09-01", "amount": 1340, "currency": "CAD"},
+           {"type": "deposit", "trade_date": "2025-01-01", "amount": 99999, "currency": "CAD"}]  # too old
+    assert svc.avg_monthly_deposit(txs, "CAD", 1.4, today) == 400.0   # (6000 + 140 - 1340) / 12
+    recent = [{"type": "deposit", "trade_date": "2026-09-20", "amount": 500, "currency": "CAD"}]
+    assert svc.avg_monthly_deposit(recent, "CAD", 1.4, today) is None   # under 2 months of history
+    assert svc.avg_monthly_deposit([], "CAD", 1.4, today) is None
+    buys_only = [{"type": "buy", "trade_date": "2026-01-01", "amount": 100, "currency": "CAD"}]
+    assert svc.avg_monthly_deposit(buys_only, "CAD", 1.4, today) is None
+
+
+def test_goal_progress_has_projection_inputs(monkeypatch, env):
+    c = make_client(monkeypatch, api.router, level="free")
+    g = c.post("/api/v1/goals", json={"kind": "portfolio_value", "target": 2260, "monthly_contribution": 500,
+                                       "expected_return_pct": 6}).json()
+    assert g["monthly_contribution"] == 500 and g["expected_return_pct"] == 6
+    # 10 XEQT.TO x C$1.20 a year over the holdings' market value (C$960: the C$1,130 total minus cash)
+    assert g["progress"]["yield_pct"] == pytest.approx(12 / 960 * 100, abs=0.01)
+    assert g["progress"]["avg_monthly_deposit"] is None   # no transactions
+    p = c.patch(f"/api/v1/goals/{g['id']}", json={"monthly_contribution": None})
+    assert p.status_code == 200 and p.json()["monthly_contribution"] is None
+    assert c.patch(f"/api/v1/goals/{g['id']}", json={"expected_return_pct": 99}).status_code == 422
+
+
+def test_before_migration_034_writes_drop_the_projection_fields(monkeypatch):
+    from app.core.api_errors import MigrationRequired
+    from app.db import queries
+    monkeypatch.setattr(queries, "_missing_optional", set())
+    calls = []
+
+    def run(row):
+        calls.append(dict(row))
+        if "monthly_contribution" in row:
+            raise MigrationRequired("column goals.monthly_contribution does not exist")
+        return "ok"
+    monkeypatch.setattr(queries, "_missing_schema", lambda e: isinstance(e, MigrationRequired))
+    assert svc._write(run, {"target": 5, "monthly_contribution": 1}) == "ok" and calls[-1] == {"target": 5}
+    with pytest.raises(Exception) as e:
+        svc._write(run, {"monthly_contribution": 1})
+    assert e.value.detail["code"] == "migration_required"

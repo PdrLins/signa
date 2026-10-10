@@ -82,3 +82,97 @@ def test_deposits_in_the_month_are_not_gains():
     fl = perf.external_flows(txs, date(2026, 8, 31), date(2026, 9, 30), "BRL", None)
     md = perf.modified_dietz(20000, 30500, fl["flows"], date(2026, 8, 31), date(2026, 9, 30))
     assert round(md["gain"], 2) == 500 and md["net_flows"] == 10000   # +R$10k deposited, R$500 earned
+
+
+# ---------------------------------------------------------------- the real return (return_pct) and Year in review
+
+def _series(points: dict) -> pd.Series:
+    return pd.Series(list(points.values()), index=pd.to_datetime(list(points.keys())))
+
+
+def _scope(holdings=(), transactions=(), home="CAD"):
+    return {"home_currency": home, "usdcad": 1.4, "holdings": list(holdings), "transactions": list(transactions),
+            "quotes": {}, "accounts": [], "account_ids": None, "fixed_income": [], "user_id": None}
+
+
+def _live(*positions):
+    return {"merged": [{"symbol": s, "shares": sh, "currency": "CAD", "value_home": v} for s, sh, v in positions]}
+
+
+def test_without_transactions_the_return_is_price_only():
+    # the value doubled because holdings were added: none of that is return
+    closes = {"A.TO": _series({"2026-08-31": 10.0, "2026-09-30": 11.0}),
+              "B.TO": _series({"2026-08-31": 20.0, "2026-09-30": 19.0})}
+    points = [(date(2026, 8, 31), 1000.0), (date(2026, 9, 30), 2000.0)]
+    live = _live(("A.TO", 100, 1100.0), ("B.TO", 50, 950.0))
+    r = recap.period_return(_scope(), live, points, closes, date(2026, 9, 1), date(2026, 9, 30))
+    assert r == pytest.approx(round((100 * 11 + 50 * 19) / (100 * 10 + 50 * 20) * 100 - 100, 2))   # 2.5
+
+
+def test_without_transactions_too_few_prices_gives_null():
+    closes = {"A.TO": _series({"2026-08-31": 10.0, "2026-09-30": 11.0})}
+    live = _live(("A.TO", 1, 11.0), ("B.TO", 100, 5000.0))   # B (most of the value) has no closes
+    assert recap.period_return(_scope(), live, [], closes, date(2026, 9, 1), date(2026, 9, 30)) is None
+
+
+def test_with_transactions_a_deposit_is_not_return():
+    txs = [{"type": "deposit", "trade_date": "2026-09-15", "amount": 5000, "currency": "CAD"}]
+    points = [(date(2026, 8, 31), 20000.0), (date(2026, 9, 30), 25500.0)]
+    r = recap.period_return(_scope(transactions=txs), _live(), points, {}, date(2026, 9, 1), date(2026, 9, 30))
+    # Modified Dietz: gain 500 over 20000 + 5000 x 15/30
+    assert r == pytest.approx(round(500 / (20000 + 5000 * 15 / 30) * 100, 2))
+    # no value before the month (started mid-month): null
+    assert recap.period_return(_scope(transactions=txs), _live(), points[1:], {}, date(2026, 9, 1),
+                               date(2026, 9, 30)) is None
+
+
+def test_benchmark_return_and_name():
+    closes = {"SPY": _series({"2026-08-29": 500.0, "2026-09-30": 510.5})}
+    assert recap.benchmark_return(closes, "SPY", date(2026, 9, 1), date(2026, 9, 30)) == 2.1
+    assert recap.benchmark_return(closes, None, date(2026, 9, 1), date(2026, 9, 30)) is None
+    assert recap.benchmark_name("SPY")
+
+
+def test_year_bounds():
+    today = date(2026, 10, 10)
+    assert recap.year_bounds(None, today) == (date(2026, 1, 1), today)
+    assert recap.year_bounds(2025, today) == (date(2025, 1, 1), date(2025, 12, 31))
+    with pytest.raises(Exception) as e:
+        recap.year_bounds(2027, today)
+    assert e.value.detail["code"] == "invalid_year"
+
+
+def test_year_symbols_deposits_and_new_holdings():
+    first, last = date(2026, 1, 1), date(2026, 10, 10)
+    closes = {"OLD.TO": _series({"2025-12-31": 10.0, "2026-10-09": 12.0}),
+              "NEW.TO": _series({"2025-12-31": 50.0, "2026-10-09": 44.0})}
+    txs = [{"type": "buy", "symbol": "OLD.TO", "trade_date": "2024-05-01", "quantity": 10, "price": 8},
+           {"type": "buy", "symbol": "NEW.TO", "trade_date": "2026-06-01", "quantity": 10, "price": 40},
+           {"type": "buy", "symbol": "NEW.TO", "trade_date": "2026-07-01", "quantity": 10, "price": 60},
+           {"type": "deposit", "trade_date": "2026-02-01", "amount": 1000, "currency": "CAD"},
+           {"type": "withdrawal", "trade_date": "2026-03-01", "amount": 100, "currency": "USD"},
+           {"type": "deposit", "trade_date": "2025-02-01", "amount": 9999, "currency": "CAD"}]
+    holdings = [{"symbol": "OLD.TO", "created_at": "2024-05-01"}, {"symbol": "NEW.TO", "created_at": "2026-06-01"},
+                {"symbol": "HAND.TO", "created_at": "2026-08-01T10:00:00+00:00"}]   # added by hand this year
+    scope = _scope(holdings, txs)
+    rets = dict(recap.year_symbol_returns(scope, closes, {"OLD.TO", "NEW.TO"}, first, last))
+    assert rets == {"OLD.TO": 20.0, "NEW.TO": -12.0}   # NEW: from its average buy price (50), not Jan 1
+    assert recap._net_deposits(txs, first, last, "CAD", 1.4) == 860.0   # 1000 - 100 USD x 1.4
+    assert recap._net_deposits([], first, last, "CAD", 1.4) is None
+    acquired = recap._first_acquired(scope)
+    assert sum(1 for d in acquired.values() if first <= d <= last) == 2   # NEW.TO and HAND.TO
+
+
+def test_year_endpoint(monkeypatch):
+    db = FakePortfolioDB(monkeypatch)
+    db.settings[U1] = {"user_id": U1, "home_currency": "CAD"}
+    _setup(db)
+    monkeypatch.setattr(price_cache, "fetch_daily_closes", lambda syms, period="1y": {})
+    c = make_client(monkeypatch, portfolio_home.router, level="free")
+    body = c.get("/api/v1/portfolio/recap/year").json()
+    today = perf.today_et()
+    assert body["year"] == today.year and body["currency"] == "CAD" and body["holdings_count"] == 2
+    for k in ("return_pct", "benchmark_return_pct", "best_month", "worst_month", "net_deposits",
+              "dividends_received", "best", "worst", "new_holdings", "estimated", "months"):
+        assert k in body
+    assert c.get(f"/api/v1/portfolio/recap/year?year={today.year + 1}").json()["detail"]["code"] == "invalid_year"

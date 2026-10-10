@@ -427,3 +427,42 @@ def test_holding_changes_route(monkeypatch, db):
     r = c.get("/api/v1/holdings/changes?range=ALL")
     assert r.status_code == 403 and r.json()["detail"]["feature"] == "feature.full_history"
     assert c.get("/api/v1/holdings/changes?range=2D").status_code == 422
+
+
+# ---------------------------------------------------------------- movers ("why it moved today")
+
+def _pos(sym, change, pct=1.0, name=None):
+    return {"symbol": sym, "name": name or sym, "day_change_home": change, "change_pct": pct}
+
+
+def test_movers_merge_accounts_sort_and_add_up():
+    from datetime import datetime, timezone
+    sunday = datetime(2026, 10, 11, 15, 0, tzinfo=timezone.utc)   # every exchange closed
+    today = [_pos("A.TO", 300.0), _pos("A.TO", 112.3), _pos("B", -96.1, -2.1), _pos("C", 50.0),
+             _pos("D", 40.0), _pos("E", 30.0), _pos("F", 20.004), _pos("G", 0.001)]   # G: flat
+    total = round(sum(p["day_change_home"] for p in today), 2)
+    m = perf.day_movers(today, total, sunday)
+    assert [i["symbol"] for i in m["items"]] == ["A.TO", "B", "C", "D", "E"]   # top 5 by |change|
+    assert m["items"][0]["change_home"] == 412.3 and m["items"][1]["change_home"] == -96.1
+    assert m["items"][1]["share_pct"] == pytest.approx(round(-96.1 / total * 100, 2))
+    assert round(sum(i["change_home"] for i in m["items"]) + m["others_change_home"], 2) == total
+    assert m["live"] is False and m["items"][0]["live"] is False
+    assert perf.day_movers([], None) is None
+
+
+def test_movers_live_while_the_exchange_trades():
+    from datetime import datetime, timezone
+    tuesday_noon_ny = datetime(2026, 10, 13, 16, 0, tzinfo=timezone.utc)
+    m = perf.day_movers([_pos("AAPL", 10.0), _pos("PETR4.SA", -5.0)], 5.0, tuesday_noon_ny)
+    assert m["live"] is True and all(i["live"] for i in m["items"])
+    assert perf.day_movers([_pos("AAPL", 10.0)], 0.0, tuesday_noon_ny)["items"][0]["share_pct"] is None
+
+
+def test_summary_has_movers_matching_day_change(monkeypatch, db):
+    _setup(db)
+    body = _client(monkeypatch).get("/api/v1/portfolio/summary").json()
+    m, day = body["movers"], body["day_change"]["abs"]
+    assert {i["symbol"] for i in m["items"]} == {"XEQT.TO", "NVDA"}   # NVDA's two accounts merged
+    assert round(sum(i["change_home"] for i in m["items"]) + m["others_change_home"], 2) == day
+    nvda = next(i for i in m["items"] if i["symbol"] == "NVDA")
+    assert nvda["pct"] == pytest.approx(7.14, abs=0.01)   # 150 vs 140

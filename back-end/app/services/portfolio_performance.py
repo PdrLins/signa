@@ -210,6 +210,39 @@ def ledger_totals(transactions: list[dict], home: str, usdcad: float | None) -> 
     return {"realized": realized, "dividends": dividends, "unconverted": unconverted}
 
 
+MAX_MOVERS = 5
+
+
+def day_movers(today_positions: list[dict], day_abs_rounded: float | None,
+               now: datetime | None = None) -> dict | None:
+    """"Why it moved today": the holdings behind day_change, one row per symbol
+    (lots in several accounts added), largest |change| first, at most
+    MAX_MOVERS; others_change_home = the rest, so items + others == the rounded
+    day_change.abs. live = some mover's exchange is open now (else the move is
+    the last session's). None without a day change. Pure apart from the clock."""
+    if day_abs_rounded is None or not today_positions:
+        return None
+    from app.market import sessions
+
+    by: dict[str, dict] = {}
+    for p in today_positions:
+        m = by.setdefault(p["symbol"], {"symbol": p["symbol"], "name": p.get("name"), "change": 0.0,
+                                        "pct": p.get("change_pct")})
+        m["change"] += p["day_change_home"]
+    rows = sorted((m for m in by.values() if round(m["change"], 2) != 0), key=lambda m: -abs(m["change"]))
+    items = []
+    for m in rows[:MAX_MOVERS]:
+        ch = pc.r2(m["change"])
+        live = sessions.is_open(sessions.label_for_symbol(m["symbol"]), now)
+        items.append({"symbol": m["symbol"], "name": m["name"], "change_home": ch,
+                      "pct": pc.r2(m["pct"]) if m["pct"] is not None else None,
+                      "share_pct": pc.r2(ch / day_abs_rounded * 100) if day_abs_rounded else None,
+                      "live": live})
+    return {"items": items,
+            "others_change_home": pc.r2(day_abs_rounded - sum(i["change_home"] for i in items)),
+            "live": any(i["live"] for i in items)}
+
+
 def summary_body(scope: dict) -> dict:
     """GET /portfolio/summary body from a loaded scope. Pure."""
     home, usdcad = scope["home_currency"], scope["usdcad"]
@@ -257,6 +290,8 @@ def summary_body(scope: dict) -> dict:
                          "count": fixed["count"], "estimated": fixed["estimated"]},
         "day_change": {"abs": pc.r2(day_abs) if day_base else None,
                        "pct": pc.r2(day_abs / day_base * 100) if day_base else None},
+        # "why it moved today": the holdings behind day_change.abs (null without one)
+        "movers": day_movers(today, pc.r2(day_abs)) if day_base else None,
         "total_gain": {
             "abs": pc.r2(gain) if (cost or txs) else None,
             "pct": pc.r2(gain / cost * 100) if cost else None,

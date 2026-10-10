@@ -75,6 +75,7 @@ FEATURE_CATALOG: dict[str, tuple[str, str]] = {
     "feature.unlimited_goals": ("premium", "Unlimited goals (free: 1)"),
     "feature.suggestions_all": ("premium", "Every suggestion (free: 3 similar stocks and 3 also-followed)"),
     "feature.portfolio_gaps": ("premium", "Gaps in your portfolio, with ideas to look at"),
+    "feature.exposure": ("premium", "What you really own: funds opened into companies, sectors and regions"),
     "feature.push_all": ("premium", "Every push notification type (free: price alerts, dividends, earnings, report updates)"),
     # --- System capabilities ---
     "system.unlimited_slots": ("premium", "No limit on followed stocks"),

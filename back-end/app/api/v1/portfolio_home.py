@@ -12,6 +12,12 @@ GET /api/v1/portfolio/summary?account_id=&person_id=            area.home
   "market_value": 12345.67, "cash": 500.0, "total": 12845.67,
   "day_change": {"abs": 120.5 | null, "pct": 0.95 | null},   # live quotes only: positions priced
                                            # from the last close (prices_from_last_close) are left out
+  "movers": null | {                       # "why it moved today": the holdings behind day_change.abs
+      "items": [{"symbol", "name", "change_home": 412.3, "pct": 1.84 (the quote's change_pct),
+                 "share_pct": 52.3 | null (change_home / day_change.abs x 100, signed),
+                 "live": bool (its exchange is open now)}],   # one per symbol, |change| desc, <= 5
+      "others_change_home": 120.4,         # the rest: sum(items) + others == day_change.abs
+      "live": bool},                       # some mover trades now; false = the last session's move
   "total_gain": {"abs": 2100.0 | null, "pct": 19.6 | null,
                  "unrealized": 1800.0 | null, "realized": 150.0 | null,
                  "dividends": 150.0 | null, "dividends_included": true},   # realized/dividends need transactions
@@ -55,11 +61,18 @@ GET /api/v1/portfolio/performance?range=&account_id=&person_id=&compare=    area
 }
 Driver = {"symbol", "weight_pct", "return_pct", "contribution_pts", "vs_benchmark_pts"?}
 
-GET /api/v1/portfolio/recap?month=YYYY-MM          area.home   (default: last month)
+GET /api/v1/portfolio/recap?month=YYYY-MM&account_id=&person_id=   area.home   (default: last month)
 {
   "month": "2026-09", "currency": "CAD",
   "start_value": 12000.0 | null, "end_value": 12400.0 | null,
-  "change": {"abs": 400.0 | null, "pct": 3.33 | null},      # value moved (includes deposits)
+  "change": {"abs": 400.0 | null, "pct": 3.33 | null},      # with transactions: gain / Modified Dietz
+                                                            # (net of deposits); without: value moved
+  "return_pct": 3.42 | null,      # the month's return without deposits/withdrawals (shareable):
+                                  # Modified Dietz with transactions (like /performance), else the
+                                  # holdings' price return; null without enough history
+  "benchmark": "SPDR S&P 500 ETF" | null, "benchmark_symbol": "SPY" | null,   # profile compare_index
+  "benchmark_return_pct": 2.1 | null,
+  "net_deposits": 500.0 | null, "unconverted": 0,
   "dividends_received": 45.0 | null, "dividend_payments": 3,  # null when no transactions are recorded
   "best": [{"symbol", "return_pct"}], "worst": [{"symbol", "return_pct"}],   # up to 3 each
   "next_month": {"month": "2026-10", "expected": 52.3 | null, "payments": 4},
@@ -68,8 +81,42 @@ GET /api/v1/portfolio/recap?month=YYYY-MM          area.home   (default: last mo
   A push with the recap goes out on the 1st of each month (09:05 ET) to users with the app.
   422 invalid_month (bad format or a future month).
 
+GET /api/v1/portfolio/recap/year?year=2026&account_id=&person_id=   area.home   (default: this year)
+{
+  "year": 2026, "currency": "CAD", "start": "2026-01-01", "end": "2026-10-10" (to date this year),
+  "return_pct": 11.8 | null,                # same method as the month's return_pct
+  "benchmark": str | null, "benchmark_symbol": str | null, "benchmark_return_pct": 14.2 | null,
+  "start_value": 52000.0 | null, "end_value": 71500.0 | null,
+  "net_deposits": 9000.0 | null,            # deposits - withdrawals; null when none are recorded
+  "dividends_received": 640.0 | null, "dividend_payments": 38,   # null without transactions
+  "best_month": {"month": "2026-05", "return_pct": 4.9} | null, "worst_month": {...} | null,
+  "months": [{"month": "2026-01", "return_pct": 1.2}],             # months with a return
+  "best": [{"symbol", "return_pct"}], "worst": [...],   # up to 3; price return over the year,
+                                                        # or since the average buy price if bought in it
+  "holdings_count": 14,                     # symbols held now
+  "new_holdings": 3,                        # first bought (or added) during the year
+  "estimated": bool
+}
+  Cached 5 minutes per user, scope and year. 422 invalid_year (future year).
+
+GET /api/v1/portfolio/exposure?account_id=&person_id=   feature.exposure (Premium)
+  "What you really own": funds opened into companies, sectors, regions and asset
+  classes, combined with direct stocks (rules: app/services/exposure.py). PERCENT of the total.
+{
+  "currency": "CAD", "as_of": "...", "total": 71523.06,
+  "coverage_pct": 86.4 | null,           # opened down to companies: direct stocks + funds x known holdings
+  "companies": [{"symbol", "name", "pct", "value_home", "direct_pct",
+                 "via": [{"fund", "pct"}]}],               # top 25; via biggest first
+  "sectors": [{"key", "pct"}], "regions": [{"key", "pct"}], "asset_classes": [{"key", "pct"}],
+                                         # each adds to 100 over the known part, largest first
+  "funds": [{"symbol", "name", "pct", "holdings_known_pct" | null, "fund_of_funds"}],
+  "overlaps": [{"a", "b", "overlap_pct", "common": [{"symbol", "weight_a", "weight_b"}]}],   # >= 10%, top 10 common
+  "estimated": bool
+}
+  Cached 5 minutes per user and scope.
+
 Errors ({"detail": {"code", "message", ...}}):
-  403 upgrade_required (feature: area.home | area.insights | feature.full_history) ·
+  403 upgrade_required (feature: area.home | area.insights | feature.full_history | feature.exposure) ·
   404 account_not_found | person_not_found · 422 invalid_scope | invalid_range | invalid_compare ·
   503 migration_required | storage_unavailable
 """
@@ -142,12 +189,44 @@ async def performance(
     return await run_db(perf.performance_body, scope, rng, bench)
 
 
+@router.get("/exposure", dependencies=[Depends(require_feature("feature.exposure"))])
+async def exposure(
+    account_id: Optional[UUID] = Query(None),
+    person_id: Optional[UUID] = Query(None),
+    user: dict = Depends(get_current_user),
+):
+    from app.services import exposure as exposure_svc
+
+    scope = await run_db(portfolio_context.load_scope, user, _s(account_id), _s(person_id), False)
+    return await run_db(exposure_svc.body, scope)
+
+
 @router.get("/recap", dependencies=[Depends(require_feature("area.home"))])
-async def recap(month: Optional[str] = Query(None), user: dict = Depends(get_current_user)):
+async def recap(
+    month: Optional[str] = Query(None),
+    account_id: Optional[UUID] = Query(None),
+    person_id: Optional[UUID] = Query(None),
+    user: dict = Depends(get_current_user),
+):
     from app.services import recap as recap_svc
 
     today = perf.today_et()
     first, last = recap_svc.month_bounds(month, today)
-    scope = await run_db(portfolio_context.load_scope, user, None, None, True)
+    scope = await run_db(portfolio_context.load_scope, user, _s(account_id), _s(person_id), True)
     events = await recap_svc.next_month_events(scope)
     return await run_db(recap_svc.build, scope, first, last, today, events)
+
+
+@router.get("/recap/year", dependencies=[Depends(require_feature("area.home"))])
+async def recap_year(
+    year: Optional[int] = Query(None),
+    account_id: Optional[UUID] = Query(None),
+    person_id: Optional[UUID] = Query(None),
+    user: dict = Depends(get_current_user),
+):
+    from app.services import recap as recap_svc
+
+    today = perf.today_et()
+    first, last = recap_svc.year_bounds(year, today)
+    scope = await run_db(portfolio_context.load_scope, user, _s(account_id), _s(person_id), True)
+    return await run_db(recap_svc.year_cached, scope, first, last, today)
