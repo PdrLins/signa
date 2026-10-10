@@ -211,4 +211,6 @@ async def me(user: dict = Depends(get_current_user)):
         "slots": slot_info,
         # false until In-App Purchase exists: clients hide upgrade buttons (PREMIUM_ON_SALE)
         "premium_on_sale": settings.premium_on_sale,
+        # false = hide every Telegram option (two-step via Telegram, notifications, connect)
+        "telegram_enabled": settings.telegram_active,
     }

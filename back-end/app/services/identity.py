@@ -252,7 +252,7 @@ def start_reset(identifier: str) -> tuple[dict, Optional[tuple[str, str, str]]]:
     if sent >= RESETS_PER_HOUR:   # no flood of codes to someone's inbox / Telegram
         return decoy, None
     email_ok = bool(user.get("email") and user.get("email_verified_at"))
-    chat = user.get("telegram_chat_id")
+    chat = user.get("telegram_chat_id") if settings.telegram_active else None
     if not email_ok and not chat:
         return decoy, None   # no way to reach the owner: support has to help
     _resets.set(uid, sent + 1)
@@ -333,6 +333,7 @@ def account_status(user_id: str) -> dict:
     """{"email", "email_verified", "has_telegram", "signin_code": "telegram" | "email" | null}"""
     u = _full_user(user_id)
     verified = bool(u.get("email") and u.get("email_verified_at"))
-    via = "telegram" if (u.get("telegram_chat_id") and settings.login_otp_enabled) else "email" if verified else None
+    via = "telegram" if (u.get("telegram_chat_id") and settings.login_otp_enabled
+                         and settings.telegram_active) else "email" if verified else None
     return {"email": u.get("email"), "email_verified": verified,
-            "has_telegram": bool(u.get("telegram_chat_id")), "signin_code": via}
+            "has_telegram": bool(u.get("telegram_chat_id") and settings.telegram_active), "signin_code": via}

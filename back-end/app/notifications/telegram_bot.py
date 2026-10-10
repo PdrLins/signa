@@ -115,6 +115,8 @@ def enqueue(chat_id: str, text: str, parse_mode: str = "HTML", urgent: bool = Fa
     worker is stuck), the message is dropped with a warning. This prevents
     a broken Telegram connection from backpressuring the scan pipeline.
     """
+    if not settings.telegram_active:
+        return   # Telegram is off (TELEGRAM_ENABLED)
     item = (chat_id, text, parse_mode, urgent)
     try:
         try:
@@ -153,6 +155,8 @@ async def send_message(chat_id: str, text: str, parse_mode: str = "HTML", urgent
     ping endpoint which needs to verify the send actually succeeded.
     """
     from app.notifications.messages import is_quiet_hours
+    if not settings.telegram_active:
+        return False   # Telegram is off (TELEGRAM_ENABLED)
     if not urgent and is_quiet_hours():
         logger.debug("Telegram message suppressed (quiet hours)")
         return False
@@ -184,5 +188,7 @@ async def send_otp_message(chat_id: str, otp_code: str) -> bool:
     there's no behavioral change from switching to the queue path.
     """
     from app.notifications.messages import msg
+    if not settings.telegram_active:
+        return False
     enqueue(chat_id, msg("otp", otp_code=escape(otp_code)), urgent=True)
     return True

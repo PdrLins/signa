@@ -181,6 +181,9 @@ def test_me_reports_level_features_and_slots(monkeypatch):
     assert {"key": "area.admin", "min_level": "owner"}.items() <= next(
         c for c in body["catalog"] if c["key"] == "area.admin").items()
     assert body["slots"] == {"used": 2, "limit": 15, "remaining": 13}
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "telegram_enabled", False)   # TELEGRAM_ENABLED=false: apps hide Telegram
+    assert _client(monkeypatch, auth.router).get("/api/v1/auth/me").json()["telegram_enabled"] is False
 
 
 def test_slot_limit_blocks_only_new_symbols(monkeypatch):

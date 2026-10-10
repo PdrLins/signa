@@ -18,6 +18,12 @@ def get_client_ip(request: Request) -> str:
     proxy is returned — the leftmost entries are client-controlled and can be
     spoofed to dodge per-IP rate limits.
     """
+    if settings.client_ip_header:   # behind the host's edge proxy (Fly.io: Fly-Client-IP)
+        try:
+            return str(ipaddress.ip_address((request.headers.get(settings.client_ip_header) or "").strip()))
+        except ValueError:
+            pass   # missing or garbage: fall back to the direct peer
+
     client_host = request.client.host if request.client else "unknown"
 
     if client_host in settings.trusted_proxies:

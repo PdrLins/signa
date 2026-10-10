@@ -224,7 +224,7 @@ async def telegram_notifications(mode: str = "events"):
     weekdays; "live" (price alerts, big moves) every 5 min in the session."""
     from app.core.config import settings
 
-    if not settings.telegram_notifications_enabled:
+    if not settings.telegram_notifications_enabled or not settings.telegram_active:
         return
     try:
         from app.services.telegram_notify import run_delivery

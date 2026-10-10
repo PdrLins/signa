@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_key: str = ""   # service_role key
     telegram_bot_token: str = ""
+    # Master switch for everything Telegram: two-step codes, notifications,
+    # password reset codes, the bot (webhook / polling). False (default) =
+    # users can't connect or use it and nothing is sent; data stays, so turning
+    # it back on restores it. Needs TELEGRAM_BOT_TOKEN too (settings.telegram_active).
+    telegram_enabled: bool = False
 
     # --- Auth ---
     # Auth is always enforced (AuthMiddleware). There is no AUTH_ENABLED switch.
@@ -112,6 +117,10 @@ class Settings(BaseSettings):
 
     # --- Trusted Proxies ---
     trusted_proxies: list[str] = ["127.0.0.1", "::1"]
+    # Header the host's edge proxy sets to the visitor's IP, overwriting any
+    # value the client sent (Fly.io: "Fly-Client-IP"). Empty = not behind one.
+    # Never set it where clients can reach the app directly: they could fake it.
+    client_ip_header: str = ""
 
     # --- Scheduler ---
     timezone: str = "America/New_York"
@@ -197,6 +206,11 @@ class Settings(BaseSettings):
 
     # extra="ignore": tolerate retired keys (e.g. the brain's AI keys) left in old .env files
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+
+    @property
+    def telegram_active(self) -> bool:
+        """Telegram is on (TELEGRAM_ENABLED) and has a bot token."""
+        return bool(self.telegram_enabled and self.telegram_bot_token)
 
     @model_validator(mode="after")
     def validate_security(self):

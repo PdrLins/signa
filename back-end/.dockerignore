@@ -1,0 +1,14 @@
+# Never in the image: secrets (set with `fly secrets`), local state, dev files
+.env
+.env.*
+!.env.example
+venv/
+logs/
+tests/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.claude/
+*.log
+*.p8
+fly.toml

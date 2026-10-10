@@ -71,8 +71,8 @@ def _check_supabase_key_role() -> None:
 def _warn_if_login_otp_disabled() -> None:
     if not settings.login_otp_enabled:
         logger.warning(
-            "LOGIN_OTP_ENABLED=false — login is password-only (no Telegram code). "
-            "Keep the app bound to 127.0.0.1; do not expose it on a network."
+            "LOGIN_OTP_ENABLED=false — two-step sign-in is off: users who turned it on get in "
+            "with the password only. Local testing only; production needs true."
         )
 
 
@@ -105,9 +105,12 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     from app.core.executors import spawn
     spawn(_catch_up_missed_jobs())
-    start_telegram_worker()
     from app.notifications import telegram_updates
-    telegram_updates.start_polling()   # local: bot messages without a public webhook
+    if settings.telegram_active:
+        start_telegram_worker()
+        telegram_updates.start_polling()   # local: bot messages without a public webhook
+    else:
+        logger.info("Telegram is off (TELEGRAM_ENABLED=false or no bot token)")
 
     yield
 
@@ -200,6 +203,8 @@ async def telegram_webhook(request: Request):
 
     Validates the secret token header set via setWebhook.
     """
+    if not settings.telegram_active:
+        return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": "Not Found"})
     # Verify webhook secret — reject if secret is not configured or doesn't match
     secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     if not settings.telegram_webhook_secret or not secret or not hmac.compare_digest(secret, settings.telegram_webhook_secret):

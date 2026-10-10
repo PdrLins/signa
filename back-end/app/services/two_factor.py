@@ -46,7 +46,10 @@ def hash_start_code(code: str) -> str:
 
 def is_enabled(user_row: dict) -> bool:
     """Two-step on for this user row. Before 020 (no two_factor_method
-    column) a sign-in chat alone means on, as it always did. Pure."""
+    column) a sign-in chat alone means on, as it always did. Off while
+    Telegram is off (TELEGRAM_ENABLED=false): no code could be sent."""
+    if not settings.telegram_active:
+        return False
     if "two_factor_method" in user_row:
         return user_row.get("two_factor_method") == "telegram" and bool(user_row.get("telegram_chat_id"))
     return bool(user_row.get("telegram_chat_id"))
@@ -106,7 +109,7 @@ def status_payload(user_id: str, bot: Optional[str]) -> dict:
         "method": "telegram" if on else None,
         "can_disable": on and level != "owner",
         "telegram": {
-            "available": bool(settings.telegram_bot_token and bot),
+            "available": bool(settings.telegram_active and bot),
             "bot_username": bot,
             "connected_chat": (connected.get("username") or "Telegram") if connected else None,
         },
@@ -154,7 +157,7 @@ def start_telegram(user_id: str, bot: Optional[str], use_connected_chat: bool,
     """Begin (or restart) setup. Returns (setup view, (chat_id, code) to send
     now or None). The route does the Telegram send. The password is required:
     a stolen session must not be able to tie the account to the thief's Telegram."""
-    if not settings.telegram_bot_token or not bot:
+    if not settings.telegram_active or not bot:
         raise api_error("telegram_not_configured", "Telegram isn't set up on this server yet.",
                         status.HTTP_503_SERVICE_UNAVAILABLE)
     u = _user(user_id)

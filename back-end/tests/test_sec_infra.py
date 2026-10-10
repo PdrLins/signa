@@ -76,6 +76,17 @@ class TestClientIp:
         from app.core.utils import get_client_ip
         assert get_client_ip(_req("127.0.0.1", "not-an-ip")) == "127.0.0.1"
 
+    def test_edge_proxy_header(self, monkeypatch):
+        """Fly.io: the proxy's Fly-Client-IP wins; without the setting it's ignored."""
+        from app.core import utils
+        req = SimpleNamespace(client=SimpleNamespace(host="172.16.3.4"),
+                              headers={"Fly-Client-IP": "198.51.100.7", "X-Forwarded-For": "6.6.6.6"})
+        assert utils.get_client_ip(req) == "172.16.3.4"
+        monkeypatch.setattr(utils.settings, "client_ip_header", "Fly-Client-IP")
+        assert utils.get_client_ip(req) == "198.51.100.7"
+        req.headers = {"Fly-Client-IP": "garbage"}
+        assert utils.get_client_ip(req) == "172.16.3.4"
+
 
 # ── 8. Middleware order + CORS on 401 ────────────────────────────────
 

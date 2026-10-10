@@ -148,6 +148,8 @@ async def bot_username() -> str | None:
     """settings.telegram_bot_username, else read once via getMe (a failure is
     retried after BOT_LOOKUP_RETRY_S)."""
     global _bot_username, _bot_lookup_retry_at
+    if not settings.telegram_active:
+        return None   # Telegram is off (TELEGRAM_ENABLED)
     if settings.telegram_bot_username:
         return settings.telegram_bot_username.lstrip("@")
     if _bot_username:
@@ -185,7 +187,7 @@ def status_payload(user: dict, bot: str | None) -> dict:
     link = queries.get_telegram_link(user["user_id"])
     pending = None if link else queries.get_pending_telegram_link_code(user["user_id"], _now().isoformat())
     return {
-        "available": access.can(level, FEATURE),
+        "available": settings.telegram_active and access.can(level, FEATURE),
         "linked": link is not None,
         "username": (link or {}).get("username"),
         "linked_at": (link or {}).get("linked_at"),
@@ -197,7 +199,7 @@ def status_payload(user: dict, bot: str | None) -> dict:
 def create_link(user: dict, bot: str | None) -> dict:
     """POST /notifications/telegram/link."""
     from app.db import queries
-    if not settings.telegram_bot_token or not bot:
+    if not settings.telegram_active or not bot:
         raise api_error("telegram_not_configured", "Telegram isn't set up on this server yet.",
                         status.HTTP_503_SERVICE_UNAVAILABLE)
     code = secrets.token_urlsafe(18)  # 24 URL-safe chars (Telegram start param allows A-Z a-z 0-9 _ -)
@@ -221,6 +223,8 @@ def unlink(user: dict) -> dict:
 async def send_test(user: dict) -> dict:
     """POST /notifications/telegram/test (chat looked up by the route)."""
     from app.core.api_errors import run_db_for
+    if not settings.telegram_active:
+        raise api_error("telegram_not_configured", "Telegram isn't available.", status.HTTP_503_SERVICE_UNAVAILABLE)
     chat = await run_db_for(MIGRATION, linked_chat, user["user_id"])
     if not chat:
         raise api_error("not_linked", "Connect Telegram first.", status.HTTP_409_CONFLICT)

@@ -70,10 +70,39 @@ back-end/
 ## Environment Variables
 
 See `.env.example`. Required: `JWT_SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.
-Optional: `TELEGRAM_BOT_TOKEN`, email (`EMAIL_PROVIDER`, `RESEND_API_KEY` or `SMTP_*`),
+Optional: Telegram (`TELEGRAM_ENABLED=true` + `TELEGRAM_BOT_TOKEN`; off by default: users can't
+connect or use it and nothing is sent), email (`EMAIL_PROVIDER`, `RESEND_API_KEY` or `SMTP_*`),
 iOS push (`APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_PRIVATE_KEY`, `APNS_BUNDLE_ID`).
 Sign-up: `SIGNUP_INVITE_REQUIRED` (default true = invite-only; false = open sign-up, needed before ads).
 Premium sales: `PREMIUM_ON_SALE` (default false: the apps hide upgrade buttons until In-App Purchase exists).
+
+## Deploy (Fly.io)
+
+`Dockerfile` + `fly.toml` in this folder. Fly builds the image on its own servers (no Docker needed
+locally) and runs **exactly one machine, always on**: the scheduler runs inside the app, so two copies
+would run every job twice. Non-secret production settings are in `fly.toml` `[env]`; secrets are set
+with `fly secrets set` (never `fly secrets import < .env`: the local `.env` has dev values such as
+`LOGIN_OTP_ENABLED=false` and `DEV_TOOLS_ENABLED=true` that would override `[env]`).
+
+```bash
+brew install flyctl && fly auth login
+cd back-end
+fly launch --no-deploy --copy-config        # creates the app from fly.toml (rename it if taken)
+fly secrets set SUPABASE_URL=... SUPABASE_KEY=... JWT_SECRET_KEY=$(openssl rand -hex 32)
+fly deploy --ha=false                       # --ha=false: one machine, not two
+fly logs                                    # watch it start
+curl https://<app>.fly.dev/api/v1/health
+```
+
+Then:
+- Telegram (off until wanted): `fly secrets set TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=$(openssl rand -hex 24)`,
+  `TELEGRAM_ENABLED = "true"` in `fly.toml`, deploy, then register the webhook once:
+  `https://api.telegram.org/bot<TOKEN>/setWebhook` with
+  `url=https://<app>.fly.dev/api/v1/telegram/webhook` and `secret_token=<TELEGRAM_WEBHOOK_SECRET>`.
+- Custom domain: `fly certs add api.mysigna.app`, then the DNS records it prints.
+- Later: `APNS_*` secrets (push), `RESEND_API_KEY` + `EMAIL_PROVIDER=resend` (email codes),
+  `SIGNUP_INVITE_REQUIRED=false` before ads (`fly secrets set ...` restarts the machine).
+- Admin scripts on the server: `fly ssh console -C "python create_user.py ..."`.
 
 ## Database
 

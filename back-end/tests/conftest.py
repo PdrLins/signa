@@ -13,6 +13,15 @@ os.environ.setdefault("SUPABASE_KEY", "test-key")
 
 
 @pytest.fixture(autouse=True)
+def _telegram_switch_on(monkeypatch):
+    """Telegram is off by default (TELEGRAM_ENABLED=false); the Telegram tests
+    were written with it on. Whether it works still depends on the bot token
+    each test sets. tests/test_telegram_switch.py covers "off"."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "telegram_enabled", True)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_dividends(monkeypatch):
     """The stock page fetches a dividend profile: never let a test reach
     yfinance for it (empty data -> "no dividend"). Tests that need data
