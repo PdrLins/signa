@@ -503,10 +503,7 @@ def parse_csv(text: str, *, accounts: list[dict], create_missing_accounts: bool 
                             422)
         order = inferred or ("mdy" if (country or "").upper() == "US" else "dmy")
 
-    by_name = {str(a["name"]).casefold(): a for a in accounts}
-    by_id = {str(a["id"]): a for a in accounts}
-    to_create: dict[str, dict] = {}   # casefold -> {"name", "currency"}
-    rows_out: list[dict] = []
+    records = []
     for n, row in enumerate(body, start=2):   # line 1 = header
         errors: list[dict] = []
         raw: dict[str, Any] = {}
@@ -526,8 +523,26 @@ def parse_csv(text: str, *, accounts: list[dict], create_missing_accounts: bool 
                 errors.append(_err(f, "invalid_number", f"'{cell(row, f)}' is not a number."))
         raw["currency"] = cell(row, "currency") or None
         raw["note"] = cell(row, "note") or None
+        records.append({"line": n, "raw": raw, "errors": errors, "account_name": cell(row, "account")})
+    return finish_rows(records, accounts=accounts, create_missing_accounts=create_missing_accounts,
+                       home_currency=home_currency, today=today,
+                       extra={"date_format": order, "delimiter": delim, "ignored_columns": ignored})
 
-        acct_name = " ".join(cell(row, "account").split())
+
+def finish_rows(records: list[dict], *, accounts: list[dict], create_missing_accounts: bool = False,
+                home_currency: str = "CAD", today: date | None = None, extra: dict | None = None) -> dict:
+    """Accounts + validation + summary for parsed rows (shared by the template
+    import and mapped imports). records: [{"line", "raw" (typed fields), "errors",
+    "account_name"? (name to look up), "account_id"? (already resolved)}]. Pure."""
+    by_name = {str(a["name"]).casefold(): a for a in accounts}
+    by_id = {str(a["id"]): a for a in accounts}
+    to_create: dict[str, dict] = {}   # casefold -> {"name", "currency"}
+    rows_out: list[dict] = []
+    for rec in records:
+        n, raw, errors = rec["line"], rec["raw"], list(rec["errors"])
+        if rec.get("account_id"):
+            raw["account_id"] = str(rec["account_id"])
+        acct_name = " ".join(str(rec.get("account_name") or "").split()) if not rec.get("account_id") else ""
         new_account = None
         if acct_name:
             acct = by_name.get(acct_name.casefold())
@@ -558,6 +573,7 @@ def parse_csv(text: str, *, accounts: list[dict], create_missing_accounts: bool 
 
     valid = [r for r in rows_out if r["status"] == "ok"]
     dates = sorted(r["data"]["trade_date"] for r in valid)
+    extra = extra or {}
     by_type: dict[str, int] = {}
     for r in valid:
         by_type[r["data"]["type"]] = by_type.get(r["data"]["type"], 0) + 1
@@ -567,7 +583,7 @@ def parse_csv(text: str, *, accounts: list[dict], create_missing_accounts: bool 
         "rows": len(rows_out), "valid": len(valid), "invalid": len(rows_out) - len(valid),
         "by_type": by_type, "symbols": len({r["data"]["symbol"] for r in valid if r["data"]["symbol"]}),
         "date_range": {"from": dates[0], "to": dates[-1]} if dates else None,
-        "date_format": order, "delimiter": delim, "ignored_columns": ignored,
+        **extra,
         "accounts_to_create": [c["name"] for c in creates],
     }
     return {"rows": rows_out, "summary": summary, "accounts_to_create": creates}
@@ -584,6 +600,39 @@ def import_csv(user_id: str, content: bytes, *, dry_run: bool, create_missing_ac
     country, home = profile_service.get_country_and_currency(user_id)
     parsed = parse_csv(text, accounts=accounts, create_missing_accounts=create_missing_accounts,
                        date_format=date_format, country=country, home_currency=home)
+    return import_parsed(user_id, parsed, dry_run=dry_run, skip_errors=skip_errors)
+
+
+def _dup_key(t: dict) -> tuple:
+    r = lambda v, nd: round(float(v), nd) if v not in (None, "") else None  # noqa: E731
+    return (str(t.get("account_id") or ""), str(t.get("trade_date") or "")[:10], str(t.get("type") or ""),
+            str(t.get("symbol") or "").upper(), r(t.get("quantity"), 6), r(t.get("amount"), 2))
+
+
+def mark_duplicates(parsed: dict, existing: list[dict]) -> int:
+    """Valid rows identical to a transaction already stored (same account, date,
+    type, symbol, quantity and amount) become status "duplicate" and are not
+    imported (an overlapping statement imported twice). Returns how many."""
+    seen = {_dup_key(t) for t in existing or []}
+    n = 0
+    for r in parsed["rows"]:
+        if r["status"] == "ok" and not str(r["data"].get("account_id") or "").startswith("new:") \
+                and _dup_key(r["data"]) in seen:
+            r["status"] = "duplicate"
+            n += 1
+    s = parsed["summary"]
+    s["duplicates"] = n
+    s["valid"] = s["valid"] - n
+    return n
+
+
+def import_parsed(user_id: str, parsed: dict, *, dry_run: bool, skip_errors: bool = False) -> dict:
+    """Duplicates, then the dry run or the all-or-nothing insert (with Undo by batch)."""
+    try:
+        existing = queries.get_all_transactions(user_id)
+    except Exception:
+        existing = []
+    mark_duplicates(parsed, existing)
     summary = parsed["summary"]
     errors = [{"line": r["line"], "errors": r["errors"]} for r in parsed["rows"] if r["errors"]]
     if dry_run:
@@ -595,8 +644,11 @@ def import_csv(user_id: str, content: bytes, *, dry_run: bool, create_missing_ac
                         422, summary=summary, errors=errors[:MAX_ERRORS_RETURNED])
     valid = [r["data"] for r in parsed["rows"] if r["status"] == "ok"]
     if not valid:
-        raise api_error("nothing_to_import", "No valid rows to import.", 422,
-                        summary=summary)
+        raise api_error("nothing_to_import", "No new valid rows to import." if summary.get("duplicates")
+                        else "No valid rows to import.", 422, summary=summary)
+    used_new = {d["account_id"] for d in valid if str(d.get("account_id") or "").startswith("new:")}
+    parsed["accounts_to_create"] = [c for c in parsed["accounts_to_create"]
+                                    if f"new:{c['name'].casefold()}" in used_new]
     _check_room(user_id, len(valid))
 
     created: list[dict] = []

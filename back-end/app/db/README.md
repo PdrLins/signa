@@ -1,10 +1,10 @@
 # Signa Database
 
-37 tables on Supabase (PostgreSQL). A new project is created by running
+38 tables on Supabase (PostgreSQL). A new project is created by running
 `schema.sql` once in the SQL Editor (idempotent). Every table has Row Level
 Security on with no policies: only the back-end's service_role key can read
 or write. Database changes: add `migrations/0NN_name.sql` (next free number),
-run it, and fold it into `schema.sql`. `migrations/010`–`034` are history and
+run it, and fold it into `schema.sql`. `migrations/010`–`035` are history and
 already included in `schema.sql`.
 
 Access goes through `queries.py` and the services (supabase-py / PostgREST).
@@ -31,6 +31,7 @@ Access goes through `queries.py` and the services (supabase-py / PostgREST).
 | **portfolio_people** / **accounts** | People and their accounts (optional tax type). |
 | **holdings** | One row per (account, symbol): shares, average cost, `holding_status` (daily price snapshot). |
 | **transactions** | Buys, sells, dividends, deposits… (CSV import batches). |
+| **import_mappings** | Saved column matching for importing a bank's or broker's CSV (one per header signature, 20 per user). |
 | **watchlist** | Followed symbols that aren't held. |
 | **price_alerts** | Above / below price alerts. |
 | **portfolio_snapshots** | Daily value per user and account. |

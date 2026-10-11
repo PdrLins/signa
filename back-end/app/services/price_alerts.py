@@ -420,6 +420,13 @@ def update_alert(user: dict, alert_id: str, body: dict) -> dict:
                     partial=True, kind=kind)
     if not data:
         raise api_error("nothing_to_update", "Send at least one field to change.", 422)
+    limit = alert_limit(user.get("access_level") or "free")
+    if limit is not None and data != {"active": False}:
+        # above the plan's limit (Premium -> Free): alerts are kept and can be deleted or
+        # turned off, but not edited until the user is back within the limit
+        active = queries.count_active_price_alerts(user["user_id"])
+        if active > limit:
+            raise alert_limit_error(limit, active)
     merged = {**cur, **data}
     reactivating = data.get("active") is True and not cur.get("active")
     if reactivating:

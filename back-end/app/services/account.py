@@ -156,6 +156,8 @@ EXPORT_TABLES = (   # (name in the export, table, columns, order for paging or N
     ("accounts", "accounts", "*", "id", "user_id"),
     ("holdings", "holdings", "*", "id", "user_id"),
     ("transactions", "transactions", "*", "id", "user_id"),
+    ("saved_imports", "import_mappings", "name, signature, headers, mapping, created_at, updated_at", "id",
+     "user_id"),
     ("fixed_income", "fixed_income", "*", "id", "user_id"),
     ("dismissed_auto_dividends", "auto_dividend_dismissed", "auto_ref, created_at", "auto_ref", "user_id"),
     ("watchlist", "watchlist", "*", "id", "user_id"),

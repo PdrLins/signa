@@ -11,7 +11,9 @@
 
 Goal: see app/services/goals.py. Targets are in the user's home currency
 (stored with the goal). Free: 1 goal; Premium: unlimited (feature.unlimited_goals).
-Errors: 403 goal_limit {"limit", "upgrade": {"feature", "plan"}} · 404 goal_not_found ·
+Over the limit (Premium -> Free with several goals): GET lists them all (count > limit),
+DELETE works, PATCH answers 403 goal_limit until the user is back within the limit.
+Errors: 403 goal_limit {"limit", "count", "upgrade": {"feature", "plan"}} · 404 goal_not_found ·
 422 invalid_kind | invalid_target | invalid_title | invalid_target_date | invalid_input
 (monthly_contribution / expected_return_pct, with "field") · 400 nothing_to_update ·
 503 migration_required {"migration": "026_goals.sql" | "034_goal_projections.sql" (only
@@ -86,6 +88,7 @@ async def create_goal(body: dict = Body(...), user: dict = Depends(get_current_u
 
 @router.patch("/{goal_id}", dependencies=[Depends(require_feature("area.home"))])
 async def update_goal(goal_id: UUID, body: dict = Body(...), user: dict = Depends(get_current_user)):
+    await run_db_for(svc.MIGRATION, svc.check_can_edit, user)
     row = await run_db_for(svc.MIGRATION, svc.update, user["user_id"], str(goal_id), body)
     _home, cur, inputs = await _currents(user)
     return {**row, "progress": svc.progress(row, *cur[row["kind"]], inputs)}

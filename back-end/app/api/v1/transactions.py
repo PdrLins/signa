@@ -22,6 +22,22 @@ amount; the direction comes from `type`.
          &create_missing_accounts=true  create accounts named in the file that don't exist
          &skip_errors=true              import the valid rows even if some rows have errors
          &date_format=auto|dmy|mdy
+         Any file's rows are skipped when identical to a stored transaction (account, date, type,
+         symbol, quantity, amount): status "duplicate", summary.duplicates.
+  POST   /api/v1/transactions/import/inspect     action.import.csv   (any bank's / broker's CSV)
+         multipart "file" -> {"file_id" (kept 30 min), "delimiter", "encoding", "decimal",
+         "header_row", "rows", "columns": [{"index", "header", "samples"}], "signature",
+         "saved_mapping": Mapping | null, "suggested": {"fields", "date_format", "amount_sign",
+         "type_values": [{"value", "count", "suggested"}], "extract_from_description"},
+         "account_names", "warnings": [no_date_column | no_amount_column | no_symbol_column |
+         ambiguous_dates | mixed_currencies_no_column | too_many_rows]}
+  POST   /api/v1/transactions/import  application/json  {"file_id", "mapping": Mapping, "dry_run": true,
+         "skip_errors", "create_missing_accounts", "save_mapping"?: {"name"}} -> the same answers as
+         the file upload, + summary.skipped_by_mapping. Mapping: app/services/import_mapping.py.
+         404 import_file_expired · 422 invalid_mapping {"field"}
+  GET    /api/v1/transactions/import/mappings          -> {"items": [{"id", "name", "signature", "headers",
+                                                           "updated_at"}]}   (migration 035)
+  PATCH  /api/v1/transactions/import/mappings/{id}     {"name"} · DELETE same path
   DELETE /api/v1/transactions/import/{batch_id}  action.import.csv -> {"deleted": n, "import_batch_id"}
 
 Tx: {"id", "account_id", "account_name", "symbol", "type", "trade_date", "quantity",
@@ -44,12 +60,13 @@ from datetime import date
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict
 
 from app.core.access import require_feature
-from app.core.api_errors import api_error, run_db, run_db_write, PORTFOLIO_MIGRATION
+from app.core.api_errors import api_error, run_db, run_db_for, run_db_write, PORTFOLIO_MIGRATION
 from app.core.dependencies import get_current_user
+from app.services import import_mapping
 from app.services import transactions_service as svc
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
@@ -114,23 +131,63 @@ async def template(format: Literal["csv", "json"] = Query("csv"), user: dict = D
                     headers={"Content-Disposition": 'attachment; filename="signa-transactions-template.csv"'})
 
 
+async def _upload(file: UploadFile) -> bytes:
+    content = await file.read(svc.MAX_IMPORT_BYTES + 1)
+    if len(content) > svc.MAX_IMPORT_BYTES:
+        raise api_error("file_too_large", "The file is larger than 2 MB.",
+                        413, max_bytes=svc.MAX_IMPORT_BYTES)
+    return content
+
+
+@router.post("/import/inspect", dependencies=[Depends(require_feature("action.import.csv"))])
+async def inspect_import(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    content = await _upload(file)
+    return await run_db(import_mapping.inspect_upload, user["user_id"], content)
+
+
 @router.post("/import", dependencies=[Depends(require_feature("action.import.csv"))])
 async def import_transactions(
-    file: UploadFile = File(...),
+    request: Request,
     dry_run: bool = Query(True),
     create_missing_accounts: bool = Query(False),
     skip_errors: bool = Query(False),
     date_format: Literal["auto", "dmy", "mdy"] = Query("auto"),
     user: dict = Depends(get_current_user),
 ):
-    content = await file.read(svc.MAX_IMPORT_BYTES + 1)
-    if len(content) > svc.MAX_IMPORT_BYTES:
-        raise api_error("file_too_large", "The file is larger than 2 MB.",
-                        413, max_bytes=svc.MAX_IMPORT_BYTES)
+    ctype = request.headers.get("content-type", "")
+    if ctype.startswith("application/json"):   # {file_id, mapping, ...} after /import/inspect
+        try:
+            body = await request.json()
+        except ValueError:
+            raise api_error("invalid_body", "The body must be JSON.", 422)
+        if not isinstance(body, dict) or not body.get("file_id"):
+            raise api_error("invalid_body", "Send file_id and mapping (from /transactions/import/inspect).", 422)
+        return await run_db_write(PORTFOLIO_MIGRATION, import_mapping.import_with_mapping, user["user_id"], body)
+    form = await request.form()
+    file = form.get("file")
+    if file is None or not hasattr(file, "read"):
+        raise api_error("invalid_file", "Send the CSV as the multipart field \"file\".", 422)
+    content = await _upload(file)
     result = await run_db_write(PORTFOLIO_MIGRATION, svc.import_csv, user["user_id"], content, dry_run=dry_run,
                           create_missing_accounts=create_missing_accounts, skip_errors=skip_errors,
                           date_format=date_format)
     return result
+
+
+@router.get("/import/mappings", dependencies=[Depends(require_feature("action.import.csv"))])
+async def list_import_mappings(user: dict = Depends(get_current_user)):
+    return await run_db_for(import_mapping.MIGRATION, import_mapping.list_mappings, user["user_id"])
+
+
+@router.patch("/import/mappings/{mapping_id}", dependencies=[Depends(require_feature("action.import.csv"))])
+async def rename_import_mapping(mapping_id: UUID, body: dict = Body(...), user: dict = Depends(get_current_user)):
+    return await run_db_for(import_mapping.MIGRATION, import_mapping.rename, user["user_id"], str(mapping_id),
+                            body.get("name"))
+
+
+@router.delete("/import/mappings/{mapping_id}", dependencies=[Depends(require_feature("action.import.csv"))])
+async def delete_import_mapping(mapping_id: UUID, user: dict = Depends(get_current_user)):
+    return await run_db_for(import_mapping.MIGRATION, import_mapping.delete, user["user_id"], str(mapping_id))
 
 
 @router.delete("/import/{batch_id}", dependencies=[Depends(require_feature("action.import.csv"))])

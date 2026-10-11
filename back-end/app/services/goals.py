@@ -178,12 +178,28 @@ def _write(run, row: dict):
 def create(user: dict, body: dict, home: str) -> dict:
     row = clean(body)
     limit = limit_for(user.get("access_level") or "free")
-    if limit is not None and len(list_goals(user["user_id"])) >= limit:
-        raise api_error("goal_limit", f"Your plan allows {limit} goal. Upgrade to set more.", 403,
-                        limit=limit, upgrade={"feature": FEATURE, "plan": "premium"})
+    count = len(list_goals(user["user_id"])) if limit is not None else 0
+    if limit is not None and count >= limit:
+        raise _limit_error(limit, count, f"Your plan allows {limit} goal. Upgrade to set more.")
     res = _write(lambda r: get_client().table("goals").insert(
         {**r, "user_id": user["user_id"], "currency": home}).execute(), row)
     return (res.data or [{}])[0]
+
+
+def _limit_error(limit: int, count: int, message: str):
+    return api_error("goal_limit", message, 403, limit=limit, count=count,
+                     upgrade={"feature": FEATURE, "plan": "premium"})
+
+
+def check_can_edit(user: dict) -> None:
+    """Above the plan's limit (Premium -> Free with several goals), goals are kept
+    and can be deleted, but none can be edited: 403 goal_limit."""
+    limit = limit_for(user.get("access_level") or "free")
+    if limit is None:
+        return
+    count = len(list_goals(user["user_id"]))
+    if count > limit:
+        raise _limit_error(limit, count, f"Your plan allows {limit} goal. Delete goals to edit, or upgrade.")
 
 
 def update(user_id: str, goal_id: str, body: dict) -> dict:

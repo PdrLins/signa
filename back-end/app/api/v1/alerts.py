@@ -53,6 +53,8 @@ the limit; changing direction/target of an active alert re-arms it too.
 
 Errors ({"detail": {"code", "message", ...}}):
   403 alert_limit {"limit", "active", "upgrade": {"feature": "feature.unlimited_alerts", "plan": "premium"}}
+      (also on PATCH while the active count is ABOVE the limit, e.g. after Premium -> Free:
+      alerts are kept and can be deleted or turned off ({"active": false}), not edited)
       (free: 3 active alerts) · 403 upgrade_required (plan)
   404 alert_not_found
   422 invalid_symbol | invalid_kind | invalid_direction | invalid_price | invalid_percent
